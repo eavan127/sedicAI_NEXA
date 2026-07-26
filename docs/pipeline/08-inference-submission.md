@@ -76,8 +76,7 @@ Per Section 4 of the rules:
 ### Technical brief must cover
 
 - **Datasets**: RadioML 2018.01A and RadChar, both **CC BY-NC-SA 4.0**, cited
-  with attribution (see [`../TOOLS.md`](../TOOLS.md) — and resolve the
-  NonCommercial question early)
+  with attribution — exact wording in [`../TOOLS.md`](../TOOLS.md)
 - **Synthetic generation**: how FHSS and jamming were produced, with parameter
   ranges and the literature they came from
 - **Validation methodology**: the `tests/` suite — and honestly, that it verifies

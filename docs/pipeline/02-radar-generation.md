@@ -27,8 +27,8 @@ own synthesis removes the "nobody qualified validated this" risk for it.
 
 ## Secondary: our generator
 
-`src/generators/radar.py` — kept for augmentation, for topping up SNR bins
-RadChar covers thinly, and as the fallback if the licence question goes badly.
+`src/generators/radar.py` — kept for augmentation and for topping up SNR bins
+RadChar covers thinly.
 
 | Function | Does |
 |---|---|

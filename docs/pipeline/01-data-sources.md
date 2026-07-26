@@ -49,26 +49,22 @@ published labelled radar data, which removes the "we synthesised it and nobody
 qualified checked it" problem for one of the three judged classes. Take the
 **Tiny or Small** variant — we need thousands of examples, not two million.
 
-Keep `src/generators/radar.py` regardless: it is tested, it is useful for
-augmentation, and it is the fallback if the licence question below goes badly.
+Keep `src/generators/radar.py` regardless: it is tested, and it is useful for
+augmentation and for topping up SNR bins RadChar covers thinly.
 
 ### FHSS and jamming — synthesised
 
 No usable public raw-IQ dataset exists for either. Covered in
 [03](03-fhss-generation.md) and [04](04-jamming-generation.md).
 
-## ⚠️ Licence question — resolve on Day 1
+## Licence & attribution
 
-Both datasets are **CC BY-NC-SA 4.0 (NonCommercial)**. SEDIC is a
-defence-industry competition with sponsors and prizes; whether that is
-"commercial" is genuinely unclear.
+Both datasets are **CC BY-NC-SA 4.0**. Using them is endorsed by the rules —
+Section 3 directs participants to *"open-source datasets (e.g., RadioML,
+DeepSig)"* by name. No permission question to chase.
 
-**Action:** email the organisers, ask plainly, keep the reply. Cite both
-datasets and their licences in the technical brief either way.
-
-Fallback if NonCommercial is refused: [TorchSig](https://github.com/TorchDSP/torchsig)
-(MIT) for civilian classes, our own generator for radar. Slower and riskier —
-which is exactly why this gets asked on Day 1, not Day 4.
+**One obligation:** CC BY requires attribution. Cite both datasets and their
+licence in the technical brief (wording in [`../TOOLS.md`](../TOOLS.md)).
 
 ## Layout
 
@@ -87,7 +83,7 @@ All gitignored. Share via Google Drive, never Git.
 - [ ] Both loaders return `(iq_complex, class_name, snr_db)` tuples
 - [ ] `load_radioml_civilian()` in `src/data/build_dataset.py` no longer a stub
 - [ ] Sample-rate mismatch documented and a target rate agreed (see [05](05-preprocessing.md))
-- [ ] Licence question sent to organisers
+- [ ] Dataset attribution lines drafted for the technical brief
 
 ## Open questions
 
