@@ -1,6 +1,8 @@
 """
-1D-CNN model for Automatic Modulation Classification (AMC), trained from
-scratch (no pretrained backbone exists for this domain — see docs section 7).
+1D-CNN for Automatic Modulation Classification, trained from scratch.
+
+There is no pretrained backbone for raw IQ the way ImageNet exists for
+images — so "fine-tuning" here means training from random initialization.
 """
 import torch
 import torch.nn as nn
@@ -17,11 +19,10 @@ class AMC_CNN(nn.Module):
         self.relu = nn.ReLU()
         self.dropout = nn.Dropout(0.5)
 
-        # Infer the flattened size with a dummy forward pass instead of
-        # hand-computing it (safer against off-by-one padding/pooling math).
+        # Infer the flattened width from a dummy pass rather than hand-computing
+        # it — padding/pooling arithmetic is easy to get subtly wrong.
         with torch.no_grad():
-            dummy = torch.zeros(1, 2, input_len)
-            flat_len = self._features(dummy).flatten(1).shape[1]
+            flat_len = self._features(torch.zeros(1, 2, input_len)).flatten(1).shape[1]
 
         self.fc1 = nn.Linear(flat_len, 256)
         self.fc2 = nn.Linear(256, num_classes)
@@ -32,7 +33,6 @@ class AMC_CNN(nn.Module):
         return x
 
     def forward(self, x):
-        x = self._features(x)
-        x = x.flatten(1)
+        x = self._features(x).flatten(1)
         x = self.dropout(self.relu(self.fc1(x)))
         return self.fc2(x)
