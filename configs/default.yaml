@@ -1,0 +1,68 @@
+# Central config for the SEDIC 2026 Track 1 pipeline.
+# Every tunable number lives here, not scattered across scripts — so the
+# technical brief can cite exactly what was used, and so re-running an
+# experiment only means editing one file.
+#
+# NOTE: written as plain decimals, not 1.0e6 — YAML 1.1 parses an unsigned
+# exponent as a string, which fails silently until it hits numpy.
+
+signal:
+  # fs must exceed twice the highest instantaneous frequency any generator
+  # produces, or signals alias and fold back as the wrong frequency. See
+  # tests/test_config.py — the Nyquist checks there are load-bearing.
+  fs: 2000000            # sample rate (Hz) -> Nyquist +/-1 MHz
+  window_len: 1024       # IQ samples per training example
+  total_duration: 0.002  # seconds per generated example
+
+# SNR sweep applied to every class, so the accuracy-vs-SNR curve covers
+# the "clean to faded/noisy" range the rules require.
+snr_bins_db: [-10, -5, 0, 5, 10, 15]
+
+classes:
+  - BPSK
+  - QPSK
+  - 16QAM
+  - 64QAM
+  - LFM_RADAR
+  - FHSS
+  - JAMMING
+
+# Which classes the >90% recall benchmark is judged on.
+judged_classes: [LFM_RADAR, FHSS, JAMMING]
+
+dataset:
+  examples_per_class_per_snr: 400
+  val_frac: 0.15
+  test_frac: 0.15
+  seed: 42
+
+# Literature-informed ranges — see docs appendix. Randomized per example so
+# the model learns the general signal concept, not one fixed signature.
+radar:
+  pulse_width_s: [0.00001, 0.0001]     # 10-100 us
+  bandwidth_hz: [50000, 1000000]       # 50 kHz - 1 MHz
+  pri_s: [0.001, 0.01]                 # 1-10 ms
+
+fhss:
+  hop_rate_hz: [100, 1000]
+  n_channels: [8, 64]
+  # Channel comb spans +/-(n_channels * spacing / 2), so max spacing is capped
+  # to keep the outermost hops inside Nyquist: 64 * 25000 / 2 = 800 kHz < 1 MHz.
+  channel_spacing_hz: [10000, 25000]
+
+jamming:
+  jsr_db: [0, 20]
+  max_tones: 3
+  sweep_bandwidth_hz: [100000, 500000]
+
+training:
+  epochs: 30
+  batch_size: 64
+  learning_rate: 0.001
+  scheduler_patience: 3
+
+paths:
+  raw_data: data/raw
+  processed_data: data/processed
+  checkpoints: results
+  evals: evals

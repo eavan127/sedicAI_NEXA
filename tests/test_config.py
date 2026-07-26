@@ -1,0 +1,79 @@
+"""
+Config sanity tests.
+
+Motivated by a real bug: YAML 1.1 parses `50.0e3` as the *string* "50.0e3",
+not a float. Nothing complains until numpy raises deep inside generation — so
+these assert the config is numerically usable before any of it reaches the GPU.
+"""
+import numbers
+
+import pytest
+
+from src.config import CFG, CLASSES, CLASS_TO_IDX
+
+NUMERIC_RANGES = [
+    ("radar", "pulse_width_s"), ("radar", "bandwidth_hz"), ("radar", "pri_s"),
+    ("fhss", "hop_rate_hz"), ("fhss", "n_channels"), ("fhss", "channel_spacing_hz"),
+    ("jamming", "jsr_db"), ("jamming", "sweep_bandwidth_hz"),
+]
+
+
+@pytest.mark.parametrize("section,key", NUMERIC_RANGES)
+def test_ranges_are_numeric_and_ordered(section, key):
+    lo, hi = CFG[section][key]
+    assert isinstance(lo, numbers.Number), f"{section}.{key}[0] parsed as {type(lo)}"
+    assert isinstance(hi, numbers.Number), f"{section}.{key}[1] parsed as {type(hi)}"
+    assert lo < hi, f"{section}.{key} range is inverted"
+
+
+@pytest.mark.parametrize("key", ["fs", "window_len", "total_duration"])
+def test_signal_params_are_positive_numbers(key):
+    val = CFG["signal"][key]
+    assert isinstance(val, numbers.Number) and val > 0
+
+
+def test_judged_classes_exist_in_class_list():
+    """The benchmark is computed by name — a typo here means the scorecard
+    silently reports on nothing."""
+    for cls in CFG["judged_classes"]:
+        assert cls in CLASS_TO_IDX, f"judged class {cls!r} is not in classes"
+
+
+def test_class_list_has_no_duplicates():
+    assert len(CLASSES) == len(set(CLASSES))
+
+
+def test_splits_leave_room_for_training():
+    d = CFG["dataset"]
+    assert 0 < d["val_frac"] + d["test_frac"] < 1
+
+
+def test_radar_pulse_fits_inside_generated_window():
+    """A pulse longer than the example duration would be silently truncated."""
+    assert max(CFG["radar"]["pulse_width_s"]) < CFG["signal"]["total_duration"]
+
+
+def test_chirp_frequencies_respect_nyquist():
+    """A chirp of bandwidth B sweeps -B/2..+B/2, so B/2 must stay under Nyquist.
+
+    This caught a real bug: fs was 1 MHz while radar bandwidth reached 1 MHz,
+    putting the sweep endpoints exactly on the Nyquist limit.
+    """
+    nyquist = CFG["signal"]["fs"] / 2
+    assert max(CFG["radar"]["bandwidth_hz"]) / 2 < nyquist
+    assert max(CFG["jamming"]["sweep_bandwidth_hz"]) / 2 < nyquist
+
+
+def test_fhss_channel_comb_respects_nyquist():
+    """Hop channels are laid out as (arange(n) - n/2) * spacing, so the comb
+    spans about +/-(n * spacing / 2). If that exceeds Nyquist the outer hops
+    alias and land on the wrong frequency entirely — training data that is
+    labelled FHSS but is not the FHSS we think it is.
+
+    This caught a real bug: 64 channels at 50 kHz spacing spanned +/-1.6 MHz
+    against a 500 kHz Nyquist.
+    """
+    nyquist = CFG["signal"]["fs"] / 2
+    max_n = max(CFG["fhss"]["n_channels"])
+    max_spacing = max(CFG["fhss"]["channel_spacing_hz"])
+    assert (max_n / 2) * max_spacing < nyquist

@@ -1,0 +1,57 @@
+# Tiny config for verifying the pipeline runs end-to-end in seconds.
+# Same shape as default.yaml, just far fewer examples and epochs.
+# Results are meaningless — this only proves the wiring works.
+#
+#   SEDIC_CONFIG=configs/smoke.yaml python -m src.data.build_dataset
+#   SEDIC_CONFIG=configs/smoke.yaml python -m src.train
+
+signal:
+  fs: 2000000
+  window_len: 256
+  total_duration: 0.002
+
+snr_bins_db: [0, 10]
+
+classes:
+  - BPSK
+  - QPSK
+  - 16QAM
+  - 64QAM
+  - LFM_RADAR
+  - FHSS
+  - JAMMING
+
+judged_classes: [LFM_RADAR, FHSS, JAMMING]
+
+dataset:
+  examples_per_class_per_snr: 30
+  val_frac: 0.2
+  test_frac: 0.2
+  seed: 42
+
+radar:
+  pulse_width_s: [0.00001, 0.0001]
+  bandwidth_hz: [50000, 1000000]
+  pri_s: [0.001, 0.01]
+
+fhss:
+  hop_rate_hz: [100, 1000]
+  n_channels: [8, 64]
+  channel_spacing_hz: [10000, 25000]
+
+jamming:
+  jsr_db: [0, 20]
+  max_tones: 3
+  sweep_bandwidth_hz: [100000, 500000]
+
+training:
+  epochs: 2
+  batch_size: 16
+  learning_rate: 0.001
+  scheduler_patience: 3
+
+paths:
+  raw_data: data/raw
+  processed_data: data/processed
+  checkpoints: results
+  evals: evals
