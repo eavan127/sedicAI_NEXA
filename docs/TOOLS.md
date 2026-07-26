@@ -49,21 +49,23 @@ a form we can use, so those two classes stay synthetic. That is where the
 residual risk now concentrates — see [`pipeline/03-fhss-generation.md`](pipeline/03-fhss-generation.md)
 and [`pipeline/04-jamming-generation.md`](pipeline/04-jamming-generation.md).
 
-### ⚠️ Licence caveat — read before submitting
+### Licence & attribution
 
-RadioML and RadChar are both **CC BY-NC-SA 4.0**: *NonCommercial* and
-*ShareAlike*. Two things follow:
+RadioML and RadChar are both **CC BY-NC-SA 4.0** (Attribution–NonCommercial–ShareAlike).
 
-1. **NonCommercial.** A student hackathon is normally fine, but SEDIC is a
-   defence-industry competition with sponsors and prizes. Whether that counts as
-   commercial is genuinely ambiguous — **ask the organisers in writing** and keep
-   the reply. Do not assume.
-2. **ShareAlike + Attribution.** Cite both datasets explicitly in the technical
-   brief, with licence named.
+**Using them is endorsed by the rules.** Section 3 directs participants to source
+training data *"using open-source datasets (e.g., RadioML, DeepSig)"* — the
+organisers name RadioML and DeepSig explicitly. RadChar sits under the identical
+licence, and "e.g." marks that list as examples rather than exhaustive, so it
+falls under the same endorsement.
 
-If NonCommercial turns out to be a problem, the fallback is TorchSig (MIT) for
-civilian classes and fully synthetic radar — slower and riskier, so resolve this
-question early, not on Day 4.
+**What we still owe: attribution.** CC BY requires citing the source and naming
+the licence. In the technical brief:
+
+> Training data sourced from RadioML 2018.01A (DeepSig Inc.) and RadChar
+> (Huang et al., ICASSP 2023), both licensed CC BY-NC-SA 4.0.
+
+Two lines. Do it and it is handled.
 
 ---
 
@@ -75,13 +77,16 @@ question early, not on Day 4.
 | [rfml](https://github.com/brysef/rfml) | Reference AMC training notebooks in PyTorch — useful as a sanity check on our architecture | BSD-3-Clause | ⚠️ reference only |
 | [scikit-commpy](https://github.com/veeresht/CommPy) | Rayleigh/Rician fading channels, PSK/QAM modulation, AWGN | BSD-3-Clause | ⚠️ if we add fading |
 
-**TorchSig — the honest assessment.** MIT-licensed (no NonCommercial problem),
-generates civilian modulations on demand, and would remove the 21 GB RadioML
-download. But its documented signal families are **communications modulations
-only — no radar, no FHSS, no jamming**, which are exactly our judged classes. So
-it can replace RadioML, not our generators. Given four days, adopting it is a
-Day-1 decision or not at all; the 21 GB download is the cheaper path if bandwidth
-allows.
+**TorchSig — the honest assessment.** Generates civilian modulations on demand
+and would remove the 21 GB RadioML download. But its documented signal families
+are **communications modulations only — no radar, no FHSS, no jamming**, which
+are exactly our judged classes. So it could only replace RadioML, which the rules
+already endorse, and it recommends Ubuntu, 1 TB storage, and a 16 GB GPU.
+
+**Verdict: skip it.** It cannot replace our generators, and swapping out the
+four classes nobody benchmarks us on is not worth the setup cost in four days.
+Docker is likewise optional for TorchSig (`pip install -e .` is the primary
+route) and irrelevant to us.
 
 ---
 
