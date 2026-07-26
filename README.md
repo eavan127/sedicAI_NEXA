@@ -6,7 +6,14 @@ AI model that detects and classifies radio signals from raw IQ data: civilian
 modulations (BPSK/QPSK/16QAM/64QAM), military/tactical signals (LFM radar,
 FHSS), and hostile jamming — across clean and noisy (low-SNR) conditions.
 
-Full technical plan: [`docs/SEDIC2026_Track1_Documentation.md`](docs/SEDIC2026_Track1_Documentation.md)
+## Documentation
+
+| Doc | What it covers |
+|---|---|
+| [`docs/SEDIC2026_Track1_Documentation.md`](docs/SEDIC2026_Track1_Documentation.md) | Full technical plan, team roles, 4-day timeline |
+| [`docs/TOOLS.md`](docs/TOOLS.md) | **Every tool, library, and dataset — with licences** |
+| [`docs/pipeline/`](docs/pipeline/) | One doc per stage: data → generators → preprocessing → training → evaluation → submission |
+| [`docs/WORKTREES.md`](docs/WORKTREES.md) | Parallel branch workflow (optional, not needed yet) |
 
 ---
 
