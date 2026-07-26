@@ -1,0 +1,30 @@
+# Data & generated artifacts
+data/*
+!data/.gitkeep
+*.npy
+*.npz
+*.h5
+*.hdf5
+
+# Model checkpoints
+*.pt
+*.pth
+*.onnx
+
+# Training run outputs
+runs/
+wandb/
+results/*.png
+results/*.csv
+!results/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+venv/
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db
