@@ -94,10 +94,19 @@ specific emitter. If the organisers' FHSS uses markedly different timing, our
 model may generalise poorly. Nothing in our control fixes that in four days
 without a signal-processing expert. Two mitigations:
 
-- **Widen the randomisation** rather than narrow it — broader parameter coverage
-  generalises better than a tight guess (as long as Nyquist still holds)
-- **Say so in the technical brief.** Judges in a technical field respect a team
-  that names its own limitation over one that hides it
+**1. Widen the randomisation rather than narrow it.** The instinct is to tune
+these ranges until the spectrograms look convincing. Do the opposite — a broad
+training distribution is more likely to contain the organisers' actual signal
+than a tight guess. Real tactical radios span far wider hop rates than our
+current 100–1000 Hz. Widen until Nyquist binds; `tests/test_config.py` tells you
+where that ceiling is.
+
+Then **prove it generalised**: train on one hop-rate subset, evaluate on a
+disjoint one. If accuracy holds, the model learned "frequency hopping" rather
+than "our hop rates". See [`07-evaluation.md`](07-evaluation.md).
+
+**2. Say so in the technical brief.** Judges in a technical field respect a team
+that names its own limitation over one that hides it.
 
 ## Definition of done
 

@@ -1,5 +1,47 @@
 # Team Roles — 4 People, 4 Days
 
+## The standard we build to
+
+The rules require **>90% recall on Military/CEMA and Jamming**. Treat that as the
+**minimum to qualify**, not the target.
+
+Here is why the distinction matters for us specifically: **none of our judged
+classes came from the organisers.** Radar is RadChar, FHSS and jamming are our own
+synthesis. So a high score on our own test split proves very little — it only
+shows the model learned *our* data. The number that counts is measured on the
+Qualifier IQ Stream, which none of us has seen.
+
+Everything we do is therefore aimed at one question: **does this hold up on
+signals we did not generate?**
+
+### Targets
+
+| Metric | Minimum | Our target |
+|---|---|---|
+| Recall on LFM_RADAR, FHSS, JAMMING | 90% | **95%, with margin across SNR** |
+| Coarse-tier accuracy (Civilian / Military / Hostile) | — | **95%+** |
+| Comms vs hostile CEMA discrimination | — | reported as its own number |
+| Civilian classes | mandatory to classify | **90%+ at high SNR**, degradation documented |
+| Held-out parameter generalisation | — | **accuracy holds on unseen parameters** |
+
+### The four standards
+
+1. **Randomise widely.** Every generated signal draws its parameters from a broad
+   range, not a narrow "realistic-looking" one. A wider training distribution is
+   more likely to contain the organisers' actual signal. Nyquist is the only
+   limit, and `tests/test_config.py` enforces it.
+2. **Prove generalisation, do not claim it.** Train on one parameter subset,
+   evaluate on a disjoint one. If accuracy holds, the model learned the concept
+   rather than our specific instance of it.
+3. **Measure design choices, do not guess them.** Every component (class
+   weighting, augmentation, SNR sweep) gets an ablation row showing what happens
+   without it.
+4. **State limitations before anyone else finds them.** A claimed 99% with no
+   explanation invites a technical panel to go looking. Naming our own limits is
+   more credible and takes one paragraph.
+
+---
+
 ## The principle: own a signal category end-to-end
 
 Each person owns **one signal category completely** — the science behind it, its
@@ -199,6 +241,29 @@ final assembly of everyone's sections.
 | GUI | Not built — Phase 2 only |
 | Docker / TorchSig | Not used |
 | Classes | 7, fixed |
+
+### Effort that looks productive but is not
+
+| Tempting | Why not |
+|---|---|
+| Transformer instead of CNN | Our bottleneck is data quality, not model capacity. Costs a day, changes little |
+| Building a GUI now | Phase 2 only, explicitly not part of Phase 1 scoring |
+| Chasing 90% on 64QAM at −10 dB | Physically impossible — the constellation sits inside the noise floor. Document the limit instead |
+| Switching to spectrograms | Destroys phase, kills the civilian classes |
+| TorchSig / Docker / GNU Radio setup | Does not cover our judged classes |
+| Multi-label output | Correct in principle, needs full relabelling. Phase 2 |
+
+## Order of work
+
+Only start each once the previous is solid.
+
+1. **Clear the gate** — >90% on all three judged classes
+2. **Widen parameter randomisation** and retrain *(largest robustness gain)*
+3. **Held-out parameter generalisation test** *(largest credibility gain)*
+4. **Ablation table** *(brief quality)*
+5. **Overlapping windows, test-time augmentation, seed ensemble** *(polish)*
+
+Step 1 qualifies us. Steps 2 and 3 are what make the result defensible.
 
 ---
 

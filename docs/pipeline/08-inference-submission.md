@@ -73,6 +73,27 @@ Per Section 4 of the rules:
 | **Technical brief** (PDF) | Dataset, architecture, DSP logic, limitations | B |
 | **Video demo** (≤5 min, YouTube) | Screen recording | D |
 
+### The brief is scored — write it accordingly
+
+Phase 1 has five deliverables and only one is code. The brief is where the panel
+forms its opinion.
+
+**What reads as expertise**
+- An **ablation table** — every design choice measured, not asserted
+- A **held-out generalisation test** — proof the model transfers, not a claim
+- **Comms-vs-hostile-CEMA reported as its own headline number**, in the rules'
+  own vocabulary
+- **Limitations named before the panel finds them**
+- **Where the system stops and why** — we do detection and classification, not
+  friend-or-foe, because that needs an ELINT library and IFF correlation
+
+**What reads as inexperience**
+- Uniform ~99% with no accuracy-vs-SNR curve (implies leakage or a shortcut)
+- No limitations section
+- Architecture diagram with no justification
+- Claiming friend-or-foe capability
+- Overall accuracy quoted where the rules ask for per-class recall
+
 ### Technical brief must cover
 
 - **Datasets**: RadioML 2018.01A and RadChar, both **CC BY-NC-SA 4.0**, cited
