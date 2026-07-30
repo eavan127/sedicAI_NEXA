@@ -78,6 +78,32 @@ def test_chirp_frequencies_respect_nyquist():
     assert max(CFG["jamming"]["sweep_bandwidth_hz"]) / 2 < nyquist
 
 
+def test_fhss_hops_are_visible_inside_one_window():
+    """The model only ever sees one window. If the dwell time exceeds the window,
+    every FHSS example is a single constant tone — indistinguishable from tone
+    jamming, and teaching nothing about hopping.
+
+    This caught a real bug: hop rates of 100-1000 Hz gave dwell times of 1-10 ms
+    against a 512 us window, so no training example contained a single hop.
+    """
+    window_s = CFG["signal"]["window_len"] / CFG["signal"]["fs"]
+    slowest_hop_rate = min(CFG["fhss"]["hop_rate_hz"])
+    hops_in_window = window_s * slowest_hop_rate
+    assert hops_in_window >= 3, (
+        f"slowest hop rate {slowest_hop_rate} Hz gives only {hops_in_window:.2f} "
+        f"hops per {window_s*1e6:.0f} us window — the class would be a constant tone"
+    )
+
+
+def test_radar_pulse_leaves_a_gap_inside_the_window():
+    """A pulse filling the whole window hides the listening gap, which is the
+    feature separating radar from a continuously-sweeping jammer."""
+    window_s = CFG["signal"]["window_len"] / CFG["signal"]["fs"]
+    assert max(CFG["radar"]["pulse_width_s"]) < window_s, (
+        "longest radar pulse fills the entire window — no visible gap"
+    )
+
+
 def test_fhss_channel_comb_respects_nyquist():
     """Hop channels are laid out as (arange(n) - n/2) * spacing, so the comb
     spans about +/-(n * spacing / 2). If that exceeds Nyquist the outer hops

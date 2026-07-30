@@ -47,9 +47,35 @@ No specialist library — a hop is a tone, and the signal is tones concatenated.
 
 | Parameter | Range | Note |
 |---|---|---|
-| `hop_rate_hz` | 100–1000 hops/s | literature-informed; real tactical radios span far wider |
+| `hop_rate_hz` | 25–150 kHz | **set by window length — see below** |
 | `n_channels` | 8–64 | |
-| `channel_spacing_hz` | 10–25 kHz | **capped by Nyquist — see below** |
+| `channel_spacing_hz` | 10–40 kHz | **capped by Nyquist — see below** |
+
+## The dwell-time bug — read this before touching hop rate
+
+The model only ever sees **one window** (512 samples at 3.2 MHz = 160 µs). If the
+dwell time is longer than that window, the window captures a single hop — and the
+example is a **constant tone**, indistinguishable from tone jamming.
+
+This was a real bug. Hop rates of 100–1000 Hz give dwell times of 1–10 ms against
+a 512 µs window, so **not one training example contained a single hop**. The
+generator was correct and its tests passed (hopping does occur across the full
+2 ms signal), but windowing discarded all of it. Measured directly:
+
+```
+before:  every FHSS window contained 1 distinct frequency
+after:   6-8 distinct frequencies per window
+```
+
+On identical smoke data, FHSS recall went from **0.17 to 0.92**.
+
+`tests/test_config.py::test_fhss_hops_are_visible_inside_one_window` now blocks
+any hop rate too slow for the window, and
+`tests/test_format_contract.py` verifies multiple frequencies actually appear.
+
+**Scoping note for the brief:** 25–150 kHz is *fast* frequency hopping. That is
+the regime observable at a 160 µs window, which RadChar's format fixes. State
+this as a deliberate scoping decision rather than leaving it unexplained.
 
 ## The aliasing bug this class already had
 

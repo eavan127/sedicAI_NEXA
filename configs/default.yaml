@@ -7,11 +7,16 @@
 # exponent as a string, which fails silently until it hits numpy.
 
 signal:
-  # fs must exceed twice the highest instantaneous frequency any generator
+  # Anchored to RadChar, the only source with BOTH a fixed length and a fixed
+  # absolute sample rate. Everything else is flexible, so everything else
+  # conforms to it. Padding RadChar up to a longer window would leave half of
+  # every radar example flat, and the model would learn "flat tail => radar".
+  #
+  # fs must also exceed twice the highest instantaneous frequency any generator
   # produces, or signals alias and fold back as the wrong frequency. See
   # tests/test_config.py — the Nyquist checks there are load-bearing.
-  fs: 2000000            # sample rate (Hz) -> Nyquist +/-1 MHz
-  window_len: 1024       # IQ samples per training example
+  fs: 3200000            # RadChar native -> Nyquist +/-1.6 MHz
+  window_len: 512        # RadChar native -> 160 us of signal per window
   total_duration: 0.002  # seconds per generated example
 
 # SNR sweep applied to every class, so the accuracy-vs-SNR curve covers
@@ -45,16 +50,28 @@ dataset:
 # Literature-informed ranges — see docs appendix. Randomized per example so
 # the model learns the general signal concept, not one fixed signature.
 radar:
+  # Pulse width must stay below the window duration (160 us) so each window
+  # shows pulse-then-silence. That listening gap is what separates radar from a
+  # sweep jammer, which runs continuously.
   pulse_width_s: [0.00001, 0.0001]     # 10-100 us
-  bandwidth_hz: [50000, 1000000]       # 50 kHz - 1 MHz
+  bandwidth_hz: [50000, 1500000]       # widened: Nyquist now allows 1.5 MHz
   pri_s: [0.001, 0.01]                 # 1-10 ms
 
 fhss:
-  hop_rate_hz: [100, 1000]
+  # CRITICAL: the dwell time (1 / hop_rate) must be much SHORTER than the
+  # window, or a window captures a single hop and the class is just a constant
+  # tone — indistinguishable from tone jamming, and teaching the model nothing
+  # about hopping. The old range of 100-1000 Hz gave dwell times of 1-10 ms
+  # against a 512 us window: every FHSS example was one frequency.
+  #
+  # At a 160 us window, 25-150 kHz gives 4-24 hops per window. This models
+  # FAST frequency hopping, which is the regime observable at this window
+  # length. State that scoping decision in the technical brief.
+  hop_rate_hz: [25000, 150000]
   n_channels: [8, 64]
-  # Channel comb spans +/-(n_channels * spacing / 2), so max spacing is capped
-  # to keep the outermost hops inside Nyquist: 64 * 25000 / 2 = 800 kHz < 1 MHz.
-  channel_spacing_hz: [10000, 25000]
+  # Channel comb spans +/-(n_channels * spacing / 2), capped to keep the
+  # outermost hops inside Nyquist: 64 * 40000 / 2 = 1.28 MHz < 1.6 MHz.
+  channel_spacing_hz: [10000, 40000]
 
 jamming:
   jsr_db: [0, 20]
