@@ -62,6 +62,20 @@ Randomised **per example**. A fixed parameter set teaches the model one specific
 emitter instead of the general concept of a chirp — and the organisers' stream
 will not use our numbers.
 
+### Randomise wider than feels realistic
+
+The instinct is to narrow these ranges until the spectrograms look "right". Do
+the opposite.
+
+If our training data spans PRIs of 1–10 ms and the organisers' radar uses 4 ms,
+we are covered. If we tuned narrowly to 2–3 ms because that looked most
+convincing, we fail on their stream and never find out why. **A wider training
+distribution is more likely to contain their actual signal.**
+
+Widen until Nyquist binds — `tests/test_config.py` blocks anything that would
+alias, so the tests tell you where the ceiling is. This is one config edit and
+one retrain, and it is the highest-value robustness change available.
+
 ## Verification
 
 `pytest tests/test_generators.py::TestRadar -v`

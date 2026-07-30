@@ -82,6 +82,72 @@ That second point matters for us specifically: our synthetic classes come from
 different pipelines than RadioML/RadChar, so an artefact leak is plausible. See
 [05](05-preprocessing.md).
 
+## Two headline metrics beyond the benchmark
+
+`evaluate.py` reports both automatically.
+
+### Comms vs hostile CEMA
+
+The rules single this out for higher technical scores:
+
+> *"Models that can successfully distinguish between standard communication
+> signals and hostile CEMA interference (e.g., RF Jamming)"*
+
+That is a **binary** task, so it is reported as its own number rather than left
+buried in a 7×7 confusion matrix — discrimination accuracy, jamming recall, and
+false alarm rate (civilian wrongly flagged as jamming). Put it in the brief using
+the rules' own vocabulary; a panel should not have to extract it.
+
+### Coarse tier — Civilian / Military / Hostile
+
+Not all confusion is equal:
+
+| Confusion | Verdict |
+|---|---|
+| 16QAM ↔ 64QAM | Harmless — the operational call ("ordinary traffic") is still right |
+| Civilian ↔ Jamming | **Serious** — a false alarm |
+| Radar ↔ Sweep jamming | **Serious** — different threat types |
+
+Coarse-tier accuracy captures that distinction, and it is the false-alarm story
+that matters operationally. Expect it to be higher than the 7-class number.
+
+## Prove generalisation — the test that matters most
+
+Our judged classes are synthetic or third-party. A good score on our own split
+only shows we learned our own data.
+
+**Train on one parameter subset, evaluate on a disjoint one.** For example, train
+on radar PRIs of 1–5 ms and test on 6–10 ms. If accuracy holds, the model learned
+*"chirp"*; if it collapses, we have found the fatal flaw ourselves rather than
+having the organisers find it.
+
+Report this as a **held-out parameter generalisation test**. It costs one extra
+training run and directly answers the question a technical panel is silently
+asking about synthetic training data.
+
+## Ablation table — measure the design, don't assert it
+
+Retrain with one component removed at a time:
+
+| Configuration | Radar recall | FHSS recall | Jamming recall |
+|---|---|---|---|
+| Full pipeline | | | |
+| − class weighting | | | |
+| − augmentation | | | |
+| − SNR sweep (high-SNR only) | | | |
+
+A handful of short training runs, and it demonstrates every choice was measured.
+
+## Cheap accuracy, once the model is final
+
+Only after the gate is cleared — these are polish, not fixes:
+
+| Technique | Cost | Notes |
+|---|---|---|
+| **Overlapping inference windows** | compute only | `infer.py --stride 512`; catches bursts split across a boundary |
+| **Test-time augmentation** | a few lines | Average predictions over random phase rotations — label-preserving, so mathematically free |
+| **Seed ensemble** | 2–3 short runs | Average 3 models trained with different seeds |
+
 ## What to report in the brief
 
 - Per-class precision/recall/F1 table

@@ -6,8 +6,9 @@
 #   SEDIC_CONFIG=configs/smoke.yaml python -m src.train
 
 signal:
-  fs: 2000000
-  window_len: 256
+  # Mirrors default.yaml so the smoke run exercises the real shapes.
+  fs: 3200000
+  window_len: 512
   total_duration: 0.002
 
 snr_bins_db: [0, 10]
@@ -31,13 +32,13 @@ dataset:
 
 radar:
   pulse_width_s: [0.00001, 0.0001]
-  bandwidth_hz: [50000, 1000000]
+  bandwidth_hz: [50000, 1500000]
   pri_s: [0.001, 0.01]
 
 fhss:
-  hop_rate_hz: [100, 1000]
+  hop_rate_hz: [25000, 150000]
   n_channels: [8, 64]
-  channel_spacing_hz: [10000, 25000]
+  channel_spacing_hz: [10000, 40000]
 
 jamming:
   jsr_db: [0, 20]

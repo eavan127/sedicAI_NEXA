@@ -139,24 +139,39 @@ GNU Radio used only for verification. That is an honest, defensible position.
 
 ---
 
-## 7. Sample-rate reconciliation — a real integration problem
+## 7. The format contract — RadChar is the anchor
 
-The three data sources do not agree on sampling:
+Every example, whatever its class or origin, must be identical in shape and
+statistics. If any property correlates with class, the model learns that property
+instead of the signal — *"512 samples ⇒ radar"* scores beautifully on our data
+and collapses on the organisers' stream.
 
-| Source | Samples/example | Sample rate |
-|---|---|---|
-| RadioML 2018.01A | 1024 | unspecified (normalised) |
-| RadChar | 512 | 3.2 MHz |
-| Our generators | configurable | 2 MHz (`configs/default.yaml`) |
+The three sources disagree, so one has to win:
 
-Mixing these naively means the model can learn *"512-long ⇒ radar"* — it would
-score beautifully on our data and collapse on the organisers' stream, which is
-the exact failure mode we are trying to avoid.
+| Source | Length | Rate | Flexibility |
+|---|---|---|---|
+| RadChar | 512 | **3.2 MHz (fixed)** | none — most constrained |
+| RadioML 2018.01A | 1024 | normalised, no absolute rate | can truncate |
+| Our generators | any | any | fully flexible |
 
-**Resolve by resampling everything to one rate and one window length before
-training** (`scipy.signal.resample_poly`), and confirm class balance is not
-correlated with any preprocessing artefact. Owner: Person A + Person D jointly,
-Day 2. Tracked in [`pipeline/05-preprocessing.md`](pipeline/05-preprocessing.md).
+**RadChar anchors it**, because it is the only source with both a fixed length
+and a fixed absolute rate. Hence `configs/default.yaml`:
+
+```yaml
+fs: 3200000        # RadChar native -> Nyquist +/-1.6 MHz
+window_len: 512    # RadChar native -> 160 us per window
+```
+
+Everything then conforms with **no padding anywhere**: RadChar is native,
+RadioML truncates 1024 → 512 (or splits into two examples, doubling the civilian
+set for free), and our generators produce at 3.2 MHz.
+
+> **Why not pad RadChar up to 1024?** It would leave half of every radar window
+> flat, and the model would learn *"flat tail ⇒ radar"*. That is the artefact we
+> are trying to avoid, manufactured deliberately.
+
+`tests/test_format_contract.py` enforces all of this — uniform shape and dtype,
+identical normalisation, no zero-padding, and no long flat runs in any class.
 
 ---
 

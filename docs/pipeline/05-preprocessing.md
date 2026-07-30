@@ -19,23 +19,38 @@ for the accuracy-vs-SNR curve.
 
 ## Steps
 
-### 1. Rate reconciliation — do this first
+### 1. The format contract — RadChar anchors it
 
-The three sources disagree:
+Every example must be identical in shape and statistics, whatever its class or
+origin. **If any property correlates with class, the model learns that property
+instead of the signal** — "512 samples ⇒ radar" scores brilliantly on our data
+and collapses on the organisers' stream.
 
-| Source | Samples/example | Rate |
-|---|---|---|
-| RadioML 2018.01A | 1024 | normalised |
-| RadChar | 512 | 3.2 MHz |
-| Our generators | configurable | 2 MHz |
+| Property | Value |
+|---|---|
+| Type | complex IQ, single channel |
+| Window length | **512** (every class) |
+| Sample rate | **3.2 MHz** (every class) |
+| Normalisation | zero-mean, unit-std |
+| Final shape | `(2, 512)` float32 |
+| Labels | class index + SNR (dB) |
 
-**If different classes arrive at different lengths or rates, the model can learn
-the artefact instead of the signal** — "512 samples ⇒ radar" scores brilliantly
-on our data and collapses on the organisers' stream. This is the same class of
-silent failure as the FHSS aliasing bug.
+RadChar sets these because it is the only source with both a fixed length and a
+fixed absolute rate — the others are flexible, so they conform to it.
 
-Pick one target rate and one window length, resample everything to it with
-`scipy.signal.resample_poly`, and record the choice in the brief.
+| Source | Action |
+|---|---|
+| RadChar | native, untouched |
+| RadioML (1024) | truncate to 512, or split into two examples (doubles the civilian set for free) |
+| Our generators | produce at 3.2 MHz, take the first 512 samples |
+
+> **Never pad up to a longer window.** Padding RadChar to 1024 would leave half
+> of every radar example flat, and the model would learn *"flat tail ⇒ radar"* —
+> manufacturing the exact artefact we are trying to avoid.
+
+`tests/test_format_contract.py` enforces the whole contract: uniform shape and
+dtype, identical normalisation, no zero-padding, and no long flat runs in any
+class. Use `scipy.signal.resample_poly` if any source ever needs rate conversion.
 
 ### 2. Windowing & normalisation
 
@@ -75,12 +90,35 @@ python -m src.data.build_dataset
 
 ## Optional: spectrogram representation
 
-`to_spectrogram()` gives a 2D time-frequency image for a 2D-CNN instead of a
-1D-CNN on raw IQ. Radar chirps and FHSS hops are visually distinctive there, so
-it can help the judged classes.
+**This is an alternative path, not an extra step.** Either raw IQ → 1D-CNN
+(what we do), or spectrogram → 2D-CNN. You pick one; they need different input
+shapes and different architectures.
 
-**Cost:** a second model architecture and a second training run. Only worth it
-if the 1D-CNN misses the 90% bar and time remains. Do not start here.
+```
+Path A (ours):  IQ → window + normalise → (2, 1024)        → 1D-CNN
+Path B:         IQ → window + STFT      → magnitude image  → 2D-CNN
+```
+
+### ⚠️ The magnitude spectrogram destroys phase
+
+`to_spectrogram()` returns `np.abs(Zxx)` — magnitude only. The STFT itself is
+invertible, but taking the magnitude **discards phase permanently**.
+
+Our four civilian classes are *defined* by phase: BPSK and QPSK are Phase Shift
+Keying; 16/64QAM are amplitude *and* phase constellations. Remove phase and they
+become very hard to separate.
+
+So Path B would help radar/FHSS (distinctive time-frequency shapes) while
+badly hurting the civilian classes. Raw IQ keeps phase — it is encoded in the
+relationship between the I and Q channels — which is why published AMC work uses
+it and why it is our default.
+
+### When to reconsider
+
+Only if the 1D-CNN misses 90% **and** the confusion matrix shows radar/FHSS
+confused with each other. Even then the sane version is a two-branch model (raw
+IQ for civilian, spectrogram for military), not switching everything over. That
+is a Phase-2 idea, not a four-day one. Do not start here.
 
 ## Class balance
 
