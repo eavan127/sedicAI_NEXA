@@ -75,12 +75,35 @@ python -m src.data.build_dataset
 
 ## Optional: spectrogram representation
 
-`to_spectrogram()` gives a 2D time-frequency image for a 2D-CNN instead of a
-1D-CNN on raw IQ. Radar chirps and FHSS hops are visually distinctive there, so
-it can help the judged classes.
+**This is an alternative path, not an extra step.** Either raw IQ → 1D-CNN
+(what we do), or spectrogram → 2D-CNN. You pick one; they need different input
+shapes and different architectures.
 
-**Cost:** a second model architecture and a second training run. Only worth it
-if the 1D-CNN misses the 90% bar and time remains. Do not start here.
+```
+Path A (ours):  IQ → window + normalise → (2, 1024)        → 1D-CNN
+Path B:         IQ → window + STFT      → magnitude image  → 2D-CNN
+```
+
+### ⚠️ The magnitude spectrogram destroys phase
+
+`to_spectrogram()` returns `np.abs(Zxx)` — magnitude only. The STFT itself is
+invertible, but taking the magnitude **discards phase permanently**.
+
+Our four civilian classes are *defined* by phase: BPSK and QPSK are Phase Shift
+Keying; 16/64QAM are amplitude *and* phase constellations. Remove phase and they
+become very hard to separate.
+
+So Path B would help radar/FHSS (distinctive time-frequency shapes) while
+badly hurting the civilian classes. Raw IQ keeps phase — it is encoded in the
+relationship between the I and Q channels — which is why published AMC work uses
+it and why it is our default.
+
+### When to reconsider
+
+Only if the 1D-CNN misses 90% **and** the confusion matrix shows radar/FHSS
+confused with each other. Even then the sane version is a two-branch model (raw
+IQ for civilian, spectrogram for military), not switching everything over. That
+is a Phase-2 idea, not a four-day one. Do not start here.
 
 ## Class balance
 

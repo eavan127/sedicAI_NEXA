@@ -48,6 +48,20 @@ def test_splits_leave_room_for_training():
     assert 0 < d["val_frac"] + d["test_frac"] < 1
 
 
+def test_snr_bins_are_even_and_within_radioml_range():
+    """RadioML 2018.01A samples SNR from -20 to +30 dB in 2 dB steps, so every
+    available level is an even number.
+
+    An odd bin returns zero civilian examples, leaving that bin populated only
+    by radar/FHSS/jamming — which lets the model learn "odd SNR => threat class"
+    instead of learning the signals. It would score well on our data and mean
+    nothing on the organisers' stream.
+    """
+    for snr in CFG["snr_bins_db"]:
+        assert snr % 2 == 0, f"SNR bin {snr} is odd — RadioML has no such level"
+        assert -20 <= snr <= 30, f"SNR bin {snr} is outside RadioML's range"
+
+
 def test_radar_pulse_fits_inside_generated_window():
     """A pulse longer than the example duration would be silently truncated."""
     assert max(CFG["radar"]["pulse_width_s"]) < CFG["signal"]["total_duration"]

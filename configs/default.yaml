@@ -16,7 +16,13 @@ signal:
 
 # SNR sweep applied to every class, so the accuracy-vs-SNR curve covers
 # the "clean to faded/noisy" range the rules require.
-snr_bins_db: [-10, -5, 0, 5, 10, 15]
+#
+# MUST be even numbers. RadioML 2018.01A samples SNR from -20 to +30 dB in 2 dB
+# steps, so odd values return zero civilian examples — leaving those bins with
+# only radar/FHSS/jamming, which lets the model learn "odd SNR => threat class"
+# instead of learning the signals. Our own generators accept any value, so
+# RadioML is the binding constraint.
+snr_bins_db: [-10, -6, -2, 2, 6, 10]
 
 classes:
   - BPSK

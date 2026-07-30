@@ -32,8 +32,14 @@ def preprocess_window(iq_complex, window_len=None):
 
 
 def to_spectrogram(iq_complex, fs=None, nperseg=128):
-    """Optional 2D representation — radar chirps and FHSS hops are visually
-    obvious in time-frequency, which a 2D-CNN can exploit."""
+    """Optional 2D representation for a 2D-CNN — an ALTERNATIVE to raw IQ, not
+    an extra step. Nothing in the training pipeline calls this.
+
+    WARNING: returns magnitude only, so phase is discarded. Radar chirps and
+    FHSS hops stay clearly visible, but BPSK/QPSK/QAM are *defined* by their
+    phase constellations and become very hard to separate without it. See
+    docs/pipeline/05-preprocessing.md before reaching for this.
+    """
     fs = fs or CFG["signal"]["fs"]
     _, _, Zxx = stft(iq_complex, fs=fs, nperseg=nperseg, return_onesided=False)
     return np.abs(Zxx).astype(np.float32)

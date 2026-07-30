@@ -12,6 +12,7 @@ FHSS), and hostile jamming — across clean and noisy (low-SNR) conditions.
 |---|---|
 | [`docs/SEDIC2026_Track1_Documentation.md`](docs/SEDIC2026_Track1_Documentation.md) | Full technical plan, team roles, 4-day timeline |
 | [`docs/TOOLS.md`](docs/TOOLS.md) | **Every tool, library, and dataset — with licences** |
+| [`docs/TEAM_ROLES.md`](docs/TEAM_ROLES.md) | **Who owns what** — one signal category per person, end to end |
 | [`docs/pipeline/`](docs/pipeline/) | One doc per stage: data → generators → preprocessing → training → evaluation → submission |
 | [`docs/WORKTREES.md`](docs/WORKTREES.md) | Parallel branch workflow (optional, not needed yet) |
 
