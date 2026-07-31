@@ -62,6 +62,89 @@ class TestRadar:
         sig = generate_lfm_chirp_iq(FS, 100e-6, 200e3)
         assert np.allclose(np.abs(sig), 1.0, atol=1e-9)
 
+    def test_duty_cycle_never_exceeds_one_hundred_percent(self):
+        """A pulse wider than its PRI means the next pulse starts before the
+        previous one ends — impossible, and it produces overlapping garbage.
+
+        This caught a real bug: after widening the PRI floor to match RadChar
+        (17 us) while pulse width still reached 100 us, sampling the two
+        independently allowed duty cycles up to 588%.
+        """
+        from src.config import CFG
+
+        cfg = CFG["radar"]
+        max_duty = cfg["max_duty_cycle"]
+        assert 0 < max_duty <= 1.0
+
+        # Worst case: widest pulse against the PRI it would be paired with
+        widest = cfg["pulse_width_s"][1]
+        pri_floor = max(cfg["pri_s"][0], widest / max_duty)
+        assert widest / pri_floor <= max_duty + 1e-9
+
+    def _count_pulses(self, sig):
+        active = np.abs(sig) > 1e-9
+        return int(np.sum(np.diff(active.astype(int)) == 1) + (1 if active[0] else 0))
+
+    def test_n_pulses_caps_the_burst(self):
+        """RadChar fires 2-6 pulses then falls silent; a scanning radar keeps
+        transmitting. The cap is what lets us generate the first shape.
+
+        Tested directly rather than statistically: with a long PRI a continuous
+        train also yields one pulse per window, so counting silent tails cannot
+        tell the two apart.
+        """
+        pulse = generate_lfm_chirp_iq(FS, 10e-6, 200e3)
+        pri, total = 20e-6, 500e-6          # short PRI -> many pulses would fit
+
+        uncapped = embed_pulse_train(pulse, pri, FS, total)
+        assert self._count_pulses(uncapped) > 6, "expected a long continuous train"
+
+        for n in (2, 4, 6):
+            capped = embed_pulse_train(pulse, pri, FS, total, n_pulses=n)
+            assert self._count_pulses(capped) == n
+
+    def test_both_emission_patterns_are_generated(self):
+        """Both code paths must actually be exercised by the sampler, or the
+        training set only ever contains one shape."""
+        from src.generators.radar import random_radar_example
+        from src.config import CFG
+
+        rng = np.random.default_rng(21)
+        counts = set()
+        for _ in range(200):
+            sig = random_radar_example(rng=rng)
+            counts.add(self._count_pulses(sig))
+
+        # A capped burst yields at most 6; an uncapped short-PRI train yields far more
+        assert any(c <= 6 for c in counts), "no burst-limited examples generated"
+        assert any(c > 6 for c in counts), "no continuous-train examples generated"
+
+    def test_generated_pulses_never_overlap(self):
+        """Empirical check on the above: no sample should receive energy from
+        two pulses at once, which would show up as amplitude above unity."""
+        from src.generators.radar import random_radar_example
+
+        rng = np.random.default_rng(12)
+        for _ in range(20):
+            sig = random_radar_example(rng=rng)
+            assert np.abs(sig).max() < 1.5, "pulses are overlapping"
+
+    def test_pulses_do_not_always_start_at_sample_zero(self):
+        """RadChar randomises its pulse start (time_delay 1-10 us). If ours
+        always begins at sample 0, the model gets a positional fingerprint
+        separating synthetic from real instead of a signal feature."""
+        from src.generators.radar import random_radar_example
+
+        rng = np.random.default_rng(11)
+        first_active = set()
+        for _ in range(12):
+            sig = random_radar_example(rng=rng)
+            onset = int(np.argmax(np.abs(sig) > 1e-9))
+            first_active.add(onset)
+
+        assert first_active != {0}, "every radar example starts at sample 0"
+        assert len(first_active) > 1, "pulse onset is not being randomised"
+
     def test_pulse_train_repeats_at_requested_pri(self):
         pulse = generate_lfm_chirp_iq(FS, 20e-6, 100e3)
         pri, total = 1e-3, 5e-3
@@ -170,6 +253,44 @@ class TestPreprocess:
             np.mean(np.abs(clean) ** 2) / np.mean(np.abs(noisy - clean) ** 2)
         )
         assert measured == pytest.approx(snr_db, abs=0.3)
+
+    @pytest.mark.parametrize("duty", [0.05, 0.2, 0.5, 0.9])
+    def test_pulsed_signals_get_the_snr_they_asked_for(self, duty):
+        """SNR must be measured against the pulse, not diluted by silent gaps.
+
+        This caught a real bug: averaging power across a window that is 95%
+        silence added far too little noise, so a radar labelled -10 dB was
+        really at +3 dB during its pulse — while continuous classes (FHSS,
+        jamming) were labelled correctly. The model could then key on
+        "clean at low labelled SNR => radar" instead of on the signal.
+        """
+        rng = np.random.default_rng(7)
+        n = 20000
+        k = int(n * duty)
+        sig = np.zeros(n, dtype=complex)
+        sig[:k] = np.exp(2j * np.pi * 30e3 * np.arange(k) / FS)
+
+        noisy = add_awgn(sig, -10, rng=rng)
+        during_pulse = 10 * np.log10(
+            np.mean(np.abs(sig[:k]) ** 2) / np.mean(np.abs(noisy - sig) ** 2)
+        )
+        assert during_pulse == pytest.approx(-10, abs=0.5), (
+            f"duty {duty:.0%}: asked for -10 dB, pulse actually sees {during_pulse:.1f} dB"
+        )
+
+    def test_snr_is_independent_of_duty_cycle(self):
+        """Otherwise SNR-label error correlates with pulse width, and the
+        accuracy-vs-SNR curve becomes meaningless for pulsed classes."""
+        rng = np.random.default_rng(8)
+        measured = []
+        for duty in (0.05, 0.9):
+            n, k = 20000, int(20000 * duty)
+            sig = np.zeros(n, dtype=complex)
+            sig[:k] = np.exp(2j * np.pi * 30e3 * np.arange(k) / FS)
+            noisy = add_awgn(sig, 0, rng=rng)
+            measured.append(10 * np.log10(
+                np.mean(np.abs(sig[:k]) ** 2) / np.mean(np.abs(noisy - sig) ** 2)))
+        assert abs(measured[0] - measured[1]) < 1.0
 
     def test_window_shape_and_normalisation(self):
         arr = preprocess_window(np.random.randn(5000) + 1j * np.random.randn(5000), 1024)

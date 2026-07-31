@@ -5,14 +5,33 @@ from scipy.signal import stft
 from src.config import CFG
 
 
-def add_awgn(signal, snr_db, rng=None):
+def add_awgn(signal, snr_db, rng=None, reference="active"):
     """Add complex AWGN to hit a target SNR (dB).
 
-    Verified by tests/test_preprocess.py — the measured SNR of the output
-    must match the requested value, or every SNR label in the dataset is a lie.
+    reference="active" measures signal power over the samples that actually
+    carry signal, ignoring silent gaps. This matters for pulsed emitters:
+    averaging across a window that is 95% silence understates the power and so
+    adds far too little noise. Measured before the fix, a radar labelled -10 dB
+    was really sitting at +3 dB during its pulse, while FHSS and jamming (which
+    are continuous) were labelled correctly. The model could then learn
+    "clean signal at low labelled SNR => radar" — a shortcut, not a signal
+    feature — and the accuracy-vs-SNR curve would be wrong for that class.
+
+    reference="mean" restores the naive whole-array behaviour. For continuous
+    signals the two are identical.
     """
     rng = rng or np.random.default_rng()
-    sig_power = np.mean(np.abs(signal) ** 2)
+    mag_sq = np.abs(signal) ** 2
+
+    if reference == "active":
+        peak = mag_sq.max()
+        active = mag_sq > 0.01 * peak       # -20 dB below peak counts as "on"
+        sig_power = mag_sq[active].mean() if active.any() else mag_sq.mean()
+    elif reference == "mean":
+        sig_power = mag_sq.mean()
+    else:
+        raise ValueError(f"unknown reference {reference!r}")
+
     noise_power = sig_power / (10 ** (snr_db / 10))
     noise = np.sqrt(noise_power / 2) * (
         rng.standard_normal(signal.shape) + 1j * rng.standard_normal(signal.shape)

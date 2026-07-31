@@ -1,3 +1,4 @@
+# Runtime dependencies — everyone installs these.
 numpy
 scipy
 torch
@@ -6,3 +7,8 @@ scikit-learn
 tensorboard
 pyyaml
 pytest
+h5py          # reading RadChar and RadioML (.h5) — P1 and P2 both need this
+
+# Tools, not dependencies — install only if you need them:
+#   pip install kaggle       (P1/P2, for downloading the datasets)
+#   pip install jupyterlab   (exploring datasets in a notebook)
