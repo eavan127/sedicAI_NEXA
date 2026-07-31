@@ -46,6 +46,10 @@ dataset:
   val_frac: 0.15
   test_frac: 0.15
   seed: 42
+  # Fraction of LFM_RADAR examples taken from RadChar (real) rather than our
+  # generator. The remainder is synthetic, so the class total still matches the
+  # other classes instead of doubling. 0 = fully synthetic.
+  radchar_fraction: 0.5
 
 # Literature-informed ranges — see docs appendix. Randomized per example so
 # the model learns the general signal concept, not one fixed signature.
