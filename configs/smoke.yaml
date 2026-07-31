@@ -35,7 +35,12 @@ radar:
   bandwidth_hz: [50000, 1500000]
   pri_s: [0.000017, 0.01]
   time_delay_s: [0.000001, 0.00001]
-  max_duty_cycle: 0.94
+  max_duty_cycle: 0.94                 # RadChar's measured ceiling
+  # RadChar fires a burst of 2-6 pulses then falls silent for the rest of the
+  # frame; a continuously-scanning radar keeps transmitting. Both are real, so
+  # burst_fraction of examples use a capped burst and the rest run continuous.
+  n_pulses: [2, 7]                     # upper bound exclusive -> 2..6
+  burst_fraction: 0.5
 
 fhss:
   hop_rate_hz: [25000, 150000]

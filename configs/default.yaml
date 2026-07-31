@@ -73,6 +73,11 @@ radar:
   # previous one ended — physically impossible, and it produced overlapping
   # garbage when the PRI floor was first widened to match RadChar.
   max_duty_cycle: 0.94                 # RadChar's measured ceiling
+  # RadChar fires a burst of 2-6 pulses then falls silent for the rest of the
+  # frame; a continuously-scanning radar keeps transmitting. Both are real, so
+  # burst_fraction of examples use a capped burst and the rest run continuous.
+  n_pulses: [2, 7]                     # upper bound exclusive -> 2..6
+  burst_fraction: 0.5                  # half burst, half continuous
 
 fhss:
   # CRITICAL: the dwell time (1 / hop_rate) must be much SHORTER than the

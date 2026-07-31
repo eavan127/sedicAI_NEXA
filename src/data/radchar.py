@@ -185,6 +185,47 @@ def _qa_plot(path=None):
     print("Look at the TOP row: count the pulses and the gaps between them.")
 
 
+def plot_lfm_gallery(path=None, snr_db=20, n=4):
+    """Several real LFM waveforms at high SNR, so the pulse train is unmistakable.
+
+    Use a clean SNR first: at 10 dB and below the chirp is genuinely hard to see
+    by eye, and you cannot tell "loaded wrong" from "buried in noise".
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from scipy.signal import stft
+
+    examples = load_radchar_lfm(path, per_snr=n, snr_bins=[snr_db])
+    if not examples:
+        raise RuntimeError(f"no LFM examples at SNR {snr_db} dB")
+
+    fig, axes = plt.subplots(2, len(examples), figsize=(4 * len(examples), 6))
+    for col, (iq, _, snr) in enumerate(examples):
+        t = np.arange(len(iq)) / RADCHAR_FS * 1e6
+
+        axes[0, col].plot(t, np.abs(iq), lw=0.9, color="tab:red")
+        axes[0, col].set_title(f"RadChar LFM #{col+1}  (SNR {snr:.0f} dB)", fontsize=9)
+        axes[0, col].set_xlabel("time (us)")
+        axes[0, col].set_ylabel("|amplitude|" if col == 0 else "")
+
+        f_, t_, Z = stft(iq, fs=RADCHAR_FS, nperseg=32, return_onesided=False)
+        axes[1, col].pcolormesh(t_ * 1e6, np.fft.fftshift(f_) / 1e6,
+                                 np.fft.fftshift(np.abs(Z), axes=0), shading="gouraud")
+        axes[1, col].set_xlabel("time (us)")
+        axes[1, col].set_ylabel("freq (MHz)" if col == 0 else "")
+
+    plt.tight_layout()
+    out = REPO_ROOT / "results" / "radchar_lfm_gallery.png"
+    out.parent.mkdir(exist_ok=True)
+    plt.savefig(out, dpi=140)
+    print(f"Saved {out}")
+    print("TOP row  = amplitude: look for the bursts and the gaps between them.")
+    print("BOTTOM   = spectrogram: each burst should be a short diagonal streak.")
+
+
 if __name__ == "__main__":
     describe()
+    print()
+    plot_lfm_gallery()
     _qa_plot()

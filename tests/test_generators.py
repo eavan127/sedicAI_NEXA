@@ -81,6 +81,44 @@ class TestRadar:
         pri_floor = max(cfg["pri_s"][0], widest / max_duty)
         assert widest / pri_floor <= max_duty + 1e-9
 
+    def _count_pulses(self, sig):
+        active = np.abs(sig) > 1e-9
+        return int(np.sum(np.diff(active.astype(int)) == 1) + (1 if active[0] else 0))
+
+    def test_n_pulses_caps_the_burst(self):
+        """RadChar fires 2-6 pulses then falls silent; a scanning radar keeps
+        transmitting. The cap is what lets us generate the first shape.
+
+        Tested directly rather than statistically: with a long PRI a continuous
+        train also yields one pulse per window, so counting silent tails cannot
+        tell the two apart.
+        """
+        pulse = generate_lfm_chirp_iq(FS, 10e-6, 200e3)
+        pri, total = 20e-6, 500e-6          # short PRI -> many pulses would fit
+
+        uncapped = embed_pulse_train(pulse, pri, FS, total)
+        assert self._count_pulses(uncapped) > 6, "expected a long continuous train"
+
+        for n in (2, 4, 6):
+            capped = embed_pulse_train(pulse, pri, FS, total, n_pulses=n)
+            assert self._count_pulses(capped) == n
+
+    def test_both_emission_patterns_are_generated(self):
+        """Both code paths must actually be exercised by the sampler, or the
+        training set only ever contains one shape."""
+        from src.generators.radar import random_radar_example
+        from src.config import CFG
+
+        rng = np.random.default_rng(21)
+        counts = set()
+        for _ in range(200):
+            sig = random_radar_example(rng=rng)
+            counts.add(self._count_pulses(sig))
+
+        # A capped burst yields at most 6; an uncapped short-PRI train yields far more
+        assert any(c <= 6 for c in counts), "no burst-limited examples generated"
+        assert any(c > 6 for c in counts), "no continuous-train examples generated"
+
     def test_generated_pulses_never_overlap(self):
         """Empirical check on the above: no sample should receive energy from
         two pulses at once, which would show up as amplitude above unity."""
