@@ -50,12 +50,29 @@ dataset:
 # Literature-informed ranges — see docs appendix. Randomized per example so
 # the model learns the general signal concept, not one fixed signature.
 radar:
-  # Pulse width must stay below the window duration (160 us) so each window
-  # shows pulse-then-silence. That listening gap is what separates radar from a
+  # Ranges deliberately SPAN two regimes, because we do not know which the
+  # organisers' Qualifier stream uses:
+  #
+  #   RadChar (measured):  pulse 10-16 us,  PRI 17-23 us   -> duty 44-94%
+  #   Physically typical:  pulse 10-100 us, PRI 1-10 ms    -> duty 0.1-10%
+  #
+  # RadChar's high duty cycle is a dataset-design choice (it packs 2-6 pulses
+  # into a 512-sample frame), not how real radar behaves. Covering both means
+  # whatever they used is more likely inside our training distribution.
+  #
+  # Pulse width must stay below the window duration (160 us) so each window can
+  # show pulse-then-silence. That listening gap is what separates radar from a
   # sweep jammer, which runs continuously.
   pulse_width_s: [0.00001, 0.0001]     # 10-100 us
-  bandwidth_hz: [50000, 1500000]       # widened: Nyquist now allows 1.5 MHz
-  pri_s: [0.001, 0.01]                 # 1-10 ms
+  bandwidth_hz: [50000, 1500000]       # Nyquist allows up to 1.5 MHz
+  pri_s: [0.000017, 0.01]              # 17 us - 10 ms: RadChar through realistic
+  time_delay_s: [0.000001, 0.00001]    # 1-10 us, matching RadChar — pulses must
+                                        # not always start at sample 0
+  # PRI is drawn conditional on pulse width so that pulse_width < PRI always.
+  # A duty cycle above 100% would mean the next pulse starting before the
+  # previous one ended — physically impossible, and it produced overlapping
+  # garbage when the PRI floor was first widened to match RadChar.
+  max_duty_cycle: 0.94                 # RadChar's measured ceiling
 
 fhss:
   # CRITICAL: the dwell time (1 / hop_rate) must be much SHORTER than the
