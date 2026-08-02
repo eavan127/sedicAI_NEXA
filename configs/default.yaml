@@ -131,6 +131,11 @@ jamming:
   # signal, since the mean gap is smaller than the old noise floor.
   max_tones: 1
   sweep_bandwidth_hz: [100000, 500000]
+  # Barrage floods a TARGETED band, not the whole spectrum. Pure white noise
+  # was indistinguishable from low-duty radar buried in AWGN (barrage 75.0%,
+  # with 35/200 predicted as LFM_RADAR). A band-limited jammer has a defined
+  # spectral shape; white noise has none.
+  barrage_bandwidth_hz: [200000, 1200000]
 
 training:
   epochs: 30
