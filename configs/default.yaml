@@ -42,13 +42,23 @@ classes:
 judged_classes: [LFM_RADAR, FHSS, JAMMING]
 
 dataset:
-  examples_per_class_per_snr: 400
+  # Raised from 400. The model overfits at 400: last run ended with
+  # train_loss 0.068 against val_loss 0.317, a 4.7x gap, meaning ~2M parameters
+  # are partly memorising 2,400 examples per class rather than generalising.
+  # More data attacks that directly, and is worth more than further model
+  # tinkering with FHSS 2.5 points short and jamming 1.1 short.
+  examples_per_class_per_snr: 1000
   val_frac: 0.15
   test_frac: 0.15
   seed: 42
   # Fraction of LFM_RADAR examples taken from RadChar (real) rather than our
   # generator. The remainder is synthetic, so the class total still matches the
   # other classes instead of doubling. 0 = fully synthetic.
+  #
+  # NOTE: RadChar-Tiny holds only ~245 LFM waveforms per SNR bin, so at 1000
+  # examples/bin this asks for 500 and receives ~245. The real/synthetic mix
+  # therefore lands nearer 24/76 than 50/50. build_dataset adapts and keeps the
+  # class balanced. Download RadChar-Small (4 GB) if more real data is wanted.
   radchar_fraction: 0.5
 
 # Literature-informed ranges — see docs appendix. Randomized per example so
