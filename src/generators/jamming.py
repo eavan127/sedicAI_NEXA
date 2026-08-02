@@ -17,10 +17,18 @@ def generate_barrage_jamming(n_samples, rng=None):
     return rng.standard_normal(n_samples) + 1j * rng.standard_normal(n_samples)
 
 
-def generate_tone_jamming(fs, n_samples, freqs):
-    """Single or multi-tone continuous-wave jammer."""
+def generate_tone_jamming(fs, n_samples, freqs, rng=None):
+    """Single or multi-tone continuous-wave jammer, with randomized
+    per-tone phase and amplitude so the model learns tone structure,
+    not a sterile artefact."""
+    rng = rng or np.random.default_rng()
     t = np.arange(n_samples) / fs
-    return sum(np.exp(2j * np.pi * f * t) for f in freqs)
+    sig = np.zeros(n_samples, dtype=complex)
+    for f in freqs:
+        phase = rng.uniform(0, 2 * np.pi)
+        amp = rng.uniform(0.5, 1.0)
+        sig += amp * np.exp(2j * np.pi * f * t + 1j * phase)
+    return sig
 
 
 def generate_sweep_jamming(fs, duration, bandwidth):
@@ -50,6 +58,6 @@ def random_jamming_example(fs=None, total_duration=None, rng=None):
     if kind == "tone":
         n_tones = rng.integers(1, CFG["jamming"]["max_tones"] + 1)
         freqs = rng.uniform(-fs / 4, fs / 4, n_tones)
-        return generate_tone_jamming(fs, n_samples, freqs)
+        return generate_tone_jamming(fs, n_samples, freqs, rng=rng)
     bandwidth = rng.uniform(*CFG["jamming"]["sweep_bandwidth_hz"])
     return generate_sweep_jamming(fs, total_duration, bandwidth)
