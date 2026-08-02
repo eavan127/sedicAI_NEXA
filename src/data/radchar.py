@@ -51,7 +51,6 @@ def load_radchar_lfm(path=None, per_snr=None, snr_bins=None, seed=42):
         )
 
     rng = np.random.default_rng(seed)
-    out = []
 
     with h5py.File(path, "r") as f:
         labels = f["labels"][...]
@@ -60,17 +59,31 @@ def load_radchar_lfm(path=None, per_snr=None, snr_bins=None, seed=42):
 
         wanted = set(snr_bins) if snr_bins is not None else set(np.unique(snrs[is_lfm]).tolist())
 
+        # Collect every wanted row index FIRST, then read once. Reading row by
+        # row costs an HDF5 round-trip each time — at a few thousand examples
+        # that took minutes; a single bulk read takes under a second.
+        picked, picked_snr = [], []
         for snr in sorted(wanted):
             rows = np.flatnonzero(is_lfm & (snrs == snr))
             if rows.size == 0:
                 continue
             if per_snr is not None and rows.size > per_snr:
                 rows = rng.choice(rows, per_snr, replace=False)
-            # h5py fancy indexing needs sorted, unique indices
-            for i in np.sort(rows):
-                out.append((np.asarray(f["iq"][i]), "LFM_RADAR", float(snr)))
+            picked.append(rows)
+            picked_snr.append(np.full(rows.size, float(snr)))
 
-    return out
+        if not picked:
+            return []
+
+        idx = np.concatenate(picked)
+        snr_of = np.concatenate(picked_snr)
+
+        # h5py fancy indexing requires strictly increasing indices
+        order = np.argsort(idx)
+        iq = f["iq"][idx[order]]
+        snr_of = snr_of[order]
+
+    return [(iq[i], "LFM_RADAR", float(snr_of[i])) for i in range(len(iq))]
 
 
 def describe(path=None):
