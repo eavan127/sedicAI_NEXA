@@ -28,13 +28,18 @@ class TestBalance:
         n_bins = len(CFG["snr_bins_db"])
 
         for n_real in (0, n_per // 4, n_per // 2):
-            synth = bd.build_synthetic_examples(n_real_radar=n_real,
-                                                 rng=np.random.default_rng(0))
-            radar = [e for e in synth if e[1] == "LFM_RADAR"]
-            fhss = [e for e in synth if e[1] == "FHSS"]
+            # build_synthetic_examples is a GENERATOR — single pass. Collect
+            # only the class labels, not the signals: iterating twice would
+            # find the second pass empty, and keeping the raw arrays is what
+            # exhausted memory in the first place.
+            labels = [cls for _, cls, _ in bd.build_synthetic_examples(
+                n_real_radar=n_real, rng=np.random.default_rng(0))]
 
-            assert len(radar) == (n_per - n_real) * n_bins
-            assert len(radar) + n_real * n_bins == len(fhss)
+            radar = labels.count("LFM_RADAR")
+            fhss = labels.count("FHSS")
+
+            assert radar == (n_per - n_real) * n_bins
+            assert radar + n_real * n_bins == fhss
 
     def test_synthetic_count_never_goes_negative(self):
         """A radchar_fraction above 1 would otherwise request negative examples."""

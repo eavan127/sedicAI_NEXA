@@ -62,25 +62,28 @@ def load_real_radar():
 
 
 def build_synthetic_examples(n_real_radar=0, rng=None):
-    """Generate labeled synthetic examples across every configured SNR bin.
+    """Yield labeled synthetic examples across every configured SNR bin.
 
     n_real_radar is how many real RadChar examples were loaded per SNR bin; the
     synthetic radar count is reduced by that much so LFM_RADAR ends up the same
     size as the other classes rather than double.
+
+    A GENERATOR, deliberately. Each raw signal is total_duration * fs samples
+    (~6,400 complex values, ~100 KB) while the windowed result is only 4 KB.
+    Materialising every raw signal first needed ~1.7 GB at 1000 examples per bin
+    and ran the machine out of memory; yielding lets the caller window each one
+    and discard it immediately.
     """
     rng = rng or np.random.default_rng(CFG["dataset"]["seed"])
     n_per = CFG["dataset"]["examples_per_class_per_snr"]
 
-    examples = []
     for class_name, gen_fn in SYNTHETIC_GENERATORS.items():
         n = n_per - n_real_radar if class_name == "LFM_RADAR" else n_per
         for snr_db in CFG["snr_bins_db"]:
             for _ in range(max(n, 0)):
                 # Synthetic signals are generated clean, so they need noise
                 # added. Real RadChar waveforms already carry theirs.
-                sig = add_awgn(gen_fn(rng=rng), snr_db, rng=rng)
-                examples.append((sig, class_name, snr_db))
-    return examples
+                yield add_awgn(gen_fn(rng=rng), snr_db, rng=rng), class_name, snr_db
 
 
 def build_full_dataset():

@@ -11,10 +11,44 @@ from src.config import CFG
 from src.generators.radar import generate_lfm_chirp_iq
 
 
-def generate_barrage_jamming(n_samples, rng=None):
-    """Wideband noise jammer."""
+def generate_barrage_jamming(n_samples, rng=None, fs=None, bandwidth=None, center=None):
+    """Band-limited noise jammer.
+
+    Previously this returned pure white noise across the entire band. The
+    problem: radar at low duty cycle, buried in AWGN, is ALSO mostly white
+    noise — so the two converged. Probing the trained model showed barrage at
+    75.0% with 35 of 200 examples predicted as LFM_RADAR, and radar returning
+    the favour with 20 of 200 predicted as JAMMING.
+
+    Real barrage jammers flood a targeted band rather than the whole spectrum —
+    you jam the frequencies the adversary uses. Band-limited noise has a defined
+    spectral shape; white noise has none, which is what made it indistinguishable
+    from a weak signal in noise.
+    """
     rng = rng or np.random.default_rng()
-    return rng.standard_normal(n_samples) + 1j * rng.standard_normal(n_samples)
+    fs = fs or CFG["signal"]["fs"]
+
+    white = rng.standard_normal(n_samples) + 1j * rng.standard_normal(n_samples)
+
+    cfg = CFG["jamming"]
+    if bandwidth is None:
+        bandwidth = rng.uniform(*cfg["barrage_bandwidth_hz"])
+    nyquist = fs / 2
+    if center is None:
+        margin = max(nyquist - bandwidth / 2, 0.0)
+        center = rng.uniform(-margin, margin)
+
+    # Zero every frequency bin outside the target band.
+    freqs = np.fft.fftfreq(n_samples, d=1 / fs)
+    mask = np.abs(freqs - center) <= bandwidth / 2
+    if not mask.any():                      # degenerate band, fall back to white
+        return white
+
+    filtered = np.fft.ifft(np.fft.fft(white) * mask)
+    # Renormalise: filtering removed energy, and downstream SNR scaling assumes
+    # unit-ish power.
+    rms = np.sqrt(np.mean(np.abs(filtered) ** 2))
+    return filtered / rms if rms > 0 else white
 
 
 def generate_tone_jamming(fs, n_samples, freqs, rng=None):

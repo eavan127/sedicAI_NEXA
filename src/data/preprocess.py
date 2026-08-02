@@ -64,6 +64,20 @@ def to_spectrogram(iq_complex, fs=None, nperseg=128):
     return np.abs(Zxx).astype(np.float32)
 
 
+def phase_rotate_batch(batch, theta):
+    """Rotate a batch of (N, 2, L) IQ arrays by a fixed phase angle.
+
+    A receiver's absolute phase is arbitrary, so rotating one carries no class
+    information — the label is unchanged. That makes it usable at INFERENCE
+    time: predict several rotations of the same window and average, and the
+    per-rotation noise cancels while the signal does not. Free accuracy for
+    compute only, since no new information is required.
+    """
+    c, s = np.cos(theta), np.sin(theta)
+    i, q = batch[:, 0], batch[:, 1]
+    return np.stack([c * i - s * q, s * i + c * q], axis=1)
+
+
 def augment_iq(arr, rng=None):
     """Random phase rotation + time shift, applied per training batch.
 

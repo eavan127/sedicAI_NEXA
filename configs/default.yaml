@@ -42,13 +42,28 @@ classes:
 judged_classes: [LFM_RADAR, FHSS, JAMMING]
 
 dataset:
-  examples_per_class_per_snr: 400
+  # 400 -> 1000 helped substantially: all three judged classes moved at once,
+  # more than any generator tweak, because the model was overfitting badly at
+  # 400 (train_loss 0.068 vs val_loss 0.317).
+  #
+  # 1000 -> 2000 did NOT. Measured across both scripts:
+  #     ensemble jamming     0.9189 -> 0.8944   (went down)
+  #     single-model mean    0.8978 -> 0.9002   (up 0.2 points)
+  # Both movements sit well inside a 6.2-point noise floor, so doubling the data
+  # bought nothing measurable while doubling training time and pushing the
+  # upload from 74 MB to 147 MB. Reverted.
+  examples_per_class_per_snr: 1000
   val_frac: 0.15
   test_frac: 0.15
   seed: 42
   # Fraction of LFM_RADAR examples taken from RadChar (real) rather than our
   # generator. The remainder is synthetic, so the class total still matches the
   # other classes instead of doubling. 0 = fully synthetic.
+  #
+  # NOTE: RadChar-Tiny holds only ~245 LFM waveforms per SNR bin, so at 1000
+  # examples/bin this asks for 500 and receives ~245. The real/synthetic mix
+  # therefore lands nearer 24/76 than 50/50. build_dataset adapts and keeps the
+  # class balanced. Download RadChar-Small (4 GB) if more real data is wanted.
   radchar_fraction: 0.5
 
 # Literature-informed ranges — see docs appendix. Randomized per example so
@@ -116,8 +131,26 @@ fhss:
 
 jamming:
   jsr_db: [0, 20]
-  max_tones: 3
+  # Reduced from 3 to 1. Probing the trained model by sub-type gave:
+  #     barrage 79.5%   tone 56.5%   sweep 96.5%
+  # and 85 of 200 tone examples were predicted as FHSS.
+  #
+  # Up to three simultaneous carriers produces a multi-peaked spectrum across
+  # the window, which is also what FHSS produces as it visits several channels.
+  # A single carrier is unmistakably not frequency-hopping.
+  #
+  # Corroborated by the seed-variance run: jamming recall spread 10.8 points
+  # across five identical runs (0.728-0.836) while FHSS spread only 1.1. That
+  # instability is what an undefined class boundary looks like. Watch for the
+  # SPREAD collapsing as well as the mean rising — the spread is the stronger
+  # signal, since the mean gap is smaller than the old noise floor.
+  max_tones: 1
   sweep_bandwidth_hz: [100000, 500000]
+  # Barrage floods a TARGETED band, not the whole spectrum. Pure white noise
+  # was indistinguishable from low-duty radar buried in AWGN (barrage 75.0%,
+  # with 35/200 predicted as LFM_RADAR). A band-limited jammer has a defined
+  # spectral shape; white noise has none.
+  barrage_bandwidth_hz: [200000, 1200000]
 
 training:
   epochs: 30

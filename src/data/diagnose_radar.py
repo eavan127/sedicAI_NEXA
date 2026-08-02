@@ -102,5 +102,63 @@ def sweep(n_per=150, seed=0):
     print("— lower max_duty_cycle.")
 
 
+def real_vs_synthetic(n=400, seed=1):
+    """Does the model handle REAL RadChar radar as well as our synthetic kind?
+
+    This is the open question left by capping duty at 15%. RadChar runs at
+    44-94% duty — exactly the band we stopped generating — so half the radar
+    training data still lives in the region a synthetic-only sweep says is
+    unlearnable. If real high-duty examples score well while synthetic ones do
+    not, the cap was right and RadChar carries that regime. If both fail, the
+    class boundary is broken there regardless of source.
+    """
+    from src.data.radchar import load_radchar_lfm
+
+    model = _load_model()
+    rng = np.random.default_rng(seed)
+
+    print("Radar accuracy: REAL (RadChar) vs SYNTHETIC (ours)")
+    print(f"{'source':<28}{'correct':>9}   most common mistake")
+    print("-" * 62)
+
+    # --- real: already carries its own noise at its labelled SNR
+    try:
+        real = load_radchar_lfm(per_snr=n // len(CFG["snr_bins_db"]),
+                                 snr_bins=CFG["snr_bins_db"])
+    except FileNotFoundError:
+        print("  RadChar not found — skipping the real half.")
+        real = []
+
+    if real:
+        batch = np.stack([preprocess_window(iq) for iq, _, _ in real])
+        with torch.no_grad():
+            preds = model(torch.tensor(batch).to(DEVICE)).argmax(1).cpu().numpy()
+        acc = float((preds == RADAR_IDX).mean())
+        wrong = preds[preds != RADAR_IDX]
+        worst = "-"
+        if wrong.size:
+            idx, cnt = np.unique(wrong, return_counts=True)
+            worst = f"{CLASSES[idx[cnt.argmax()]]} ({cnt.max()}/{len(real)})"
+        print(f"{'RadChar (real, 44-94% duty)':<28}{acc:>8.1%}   {worst}")
+
+    # --- synthetic: our generator, whatever the config currently allows
+    from src.generators.radar import random_radar_example
+    acc, worst = _accuracy(model, lambda: random_radar_example(rng=rng), n, rng)
+    duty_hi = CFG["radar"]["max_duty_cycle"]
+    print(f"{f'ours (synthetic, <={duty_hi:.0%} duty)':<28}{acc:>8.1%}   {worst}")
+
+    print()
+    print("If real scores well and synthetic does not, RadChar is carrying the")
+    print("high-duty regime and the cap was the right call. If real also fails,")
+    print("high-duty radar is ambiguous with FHSS no matter where it comes from.")
+
+
 if __name__ == "__main__":
-    sweep()
+    import sys
+
+    if "--sources" in sys.argv:
+        real_vs_synthetic()
+    else:
+        sweep()
+        print()
+        real_vs_synthetic()

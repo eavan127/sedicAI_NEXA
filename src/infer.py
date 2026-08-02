@@ -32,19 +32,43 @@ def load_iq_file(path, dtype=np.float32):
     return raw[0::2] + 1j * raw[1::2]
 
 
-def run_inference(input_path, output_path, model_path=None, stride=None):
+def _load_models(model_path=None, ensemble=False):
+    """One checkpoint, or every ensemble member if --ensemble is given.
+
+    Averaging members cancels initialisation noise. Seed variance measured 2.2
+    points on radar and 8.9 on jamming, so a single checkpoint lands at a random
+    point in that range — not what you want for the submitted run.
+    """
+    ckpt_dir = REPO_ROOT / CFG["paths"]["checkpoints"]
+    if ensemble:
+        paths = sorted(ckpt_dir.glob("ensemble_*.pt"))
+        if not paths:
+            raise FileNotFoundError(
+                f"No ensemble members in {ckpt_dir}. "
+                "Run: python scripts/train_ensemble.py --models 5")
+    else:
+        paths = [Path(model_path) if model_path else ckpt_dir / "best_model.pt"]
+
+    models = []
+    for p in paths:
+        m = AMC_CNN(num_classes=len(CLASSES), input_len=CFG["signal"]["window_len"]).to(DEVICE)
+        m.load_state_dict(torch.load(p, map_location=DEVICE))
+        m.eval()
+        models.append(m)
+    return models, paths
+
+
+def run_inference(input_path, output_path, model_path=None, stride=None, ensemble=False):
     cfg_sig = CFG["signal"]
     window_len = cfg_sig["window_len"]
     stride = stride or window_len
-    model_path = model_path or REPO_ROOT / CFG["paths"]["checkpoints"] / "best_model.pt"
 
     iq = load_iq_file(input_path)
     if len(iq) < window_len:
         raise ValueError(f"Input has {len(iq)} samples, need at least {window_len}")
 
-    model = AMC_CNN(num_classes=len(CLASSES), input_len=window_len).to(DEVICE)
-    model.load_state_dict(torch.load(model_path, map_location=DEVICE))
-    model.eval()
+    models, paths = _load_models(model_path, ensemble)
+    print(f"Using {len(models)} model(s): {', '.join(p.name for p in paths)}")
 
     starts = range(0, len(iq) - window_len + 1, stride)
     batch = torch.tensor(
@@ -52,7 +76,8 @@ def run_inference(input_path, output_path, model_path=None, stride=None):
     ).to(DEVICE)
 
     with torch.no_grad():
-        probs = torch.softmax(model(batch), dim=1).cpu().numpy()
+        probs = np.mean(
+            [torch.softmax(m(batch), dim=1).cpu().numpy() for m in models], axis=0)
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -82,5 +107,9 @@ if __name__ == "__main__":
     parser.add_argument("--input", required=True, help="Qualifier IQ Data Stream file")
     parser.add_argument("--output", default="evals/classification_log.csv")
     parser.add_argument("--model", default=None)
+    parser.add_argument("--stride", type=int, default=None,
+                        help="overlap windows; smaller catches bursts on a boundary")
+    parser.add_argument("--ensemble", action="store_true",
+                        help="average every results/ensemble_*.pt instead of one checkpoint")
     args = parser.parse_args()
-    run_inference(args.input, args.output, args.model)
+    run_inference(args.input, args.output, args.model, args.stride, args.ensemble)

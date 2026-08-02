@@ -108,6 +108,73 @@ class TestSignalContentIsDistinguishable:
             "hop rate is too slow for this window length"
         )
 
+    def test_tone_jamming_is_spectrally_distinct_from_fhss(self):
+        """Tone jamming must occupy far fewer frequencies than FHSS.
+
+        This caught a real problem: with max_tones=3, tone jamming produced a
+        multi-peaked spectrum across the window — the same thing FHSS produces
+        as it visits several channels. Probing the trained model showed tone
+        jamming at 56.5%, with 85 of 200 examples predicted as FHSS, while
+        sweep sat at 96.5%.
+
+        The seed-variance run corroborated it from another angle: jamming recall
+        spread 10.8 points across five identical runs while FHSS spread 1.1 —
+        the signature of a class boundary the model cannot pin down.
+        """
+        from src.config import CFG
+        from src.generators.jamming import generate_tone_jamming
+
+        rng = np.random.default_rng(9)
+        seg = WINDOW // 8
+        axis = np.fft.fftfreq(seg, d=1 / FS)
+
+        def distinct_freqs(sig):
+            return len({
+                round(float(axis[np.argmax(np.abs(np.fft.fft(sig[i*seg:(i+1)*seg])))]) / 1e4)
+                for i in range(8)
+            })
+
+        tone = np.mean([
+            distinct_freqs(generate_tone_jamming(
+                FS, WINDOW, rng.uniform(-FS / 4, FS / 4, CFG["jamming"]["max_tones"])))
+            for _ in range(30)])
+        fhss = np.mean([
+            distinct_freqs(random_fhss_example(rng=rng)[:WINDOW]) for _ in range(30)])
+
+        assert fhss > 3 * tone, (
+            f"tone jamming shows {tone:.1f} distinct frequencies vs FHSS {fhss:.1f} — "
+            "too similar; the model will confuse them (check max_tones)"
+        )
+
+    def test_barrage_is_band_limited_not_white(self):
+        """Barrage must occupy a defined band, not the whole spectrum.
+
+        Pure white noise was indistinguishable from low-duty radar buried in
+        AWGN — both are "energy everywhere". Probing the model gave barrage
+        75.0%, with 35 of 200 predicted as LFM_RADAR and radar returning 20 of
+        200 as JAMMING. A targeted band is also what real barrage jammers emit.
+        """
+        from src.generators.jamming import generate_barrage_jamming
+
+        rng = np.random.default_rng(13)
+
+        def occupancy(sig):
+            S = np.abs(np.fft.fft(sig)) ** 2
+            return float((S > 0.1 * S.max()).mean())
+
+        barrage = np.mean([occupancy(generate_barrage_jamming(WINDOW, rng=rng))
+                           for _ in range(20)])
+        radar = np.mean([occupancy(add_awgn(random_radar_example(rng=rng)[:WINDOW],
+                                             -6, rng=rng)) for _ in range(20)])
+
+        assert barrage < 0.35, (
+            f"barrage occupies {barrage:.1%} of the spectrum — too close to white "
+            "noise; check barrage_bandwidth_hz"
+        )
+        assert abs(barrage - radar) > 0.15, (
+            f"barrage {barrage:.1%} vs noisy radar {radar:.1%} — too similar"
+        )
+
     def test_radar_window_contains_a_silent_gap(self):
         """Radar transmits then listens. That gap is what separates it from a
         continuously-sweeping jammer, so it must survive into the window."""
