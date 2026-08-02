@@ -49,7 +49,7 @@ No specialist library — a hop is a tone, and the signal is tones concatenated.
 |---|---|---|
 | `hop_rate_hz` | 25–150 kHz | **set by window length — see below** |
 | `n_channels` | 8–64 | |
-| `channel_spacing_hz` | 10–40 kHz | **capped by Nyquist — see below** |
+| `channel_spacing_hz` | 10–48 kHz | **capped by Nyquist — see below** (widened from 40 kHz after the dwell-time fix was confirmed) |
 
 ## The dwell-time bug — read this before touching hop rate
 
@@ -88,10 +88,17 @@ Training on that would have meant a class labelled FHSS that was not FHSS: the
 model learns fold-back artefacts, scores well on our data, and fails the
 organisers' stream. Precisely the silent failure this project cannot afford.
 
-Fixed by raising `fs` to 2 MHz and capping spacing at 25 kHz.
+Fixed by raising `fs` to 3.2 MHz (shared with RadChar's native rate) and
+capping `channel_spacing_hz`.
 `tests/test_config.py::test_fhss_channel_comb_respects_nyquist` now blocks any
-config that reintroduces it. **Do not raise `n_channels` or
+config that reintroduces it: `(n_channels/2) * channel_spacing_hz` must stay
+under Nyquist (`fs/2` = 1.6 MHz). **Do not raise `n_channels` or
 `channel_spacing_hz` without re-running the tests.**
+
+Once the dwell-time fix confirmed FHSS was learnable at all, `channel_spacing_hz`
+was widened further, from a 40 kHz cap to 48 kHz — using 1.536 of the 1.6 MHz
+Nyquist budget (96%) instead of 1.28 MHz (80%), for broader channel-spread
+coverage while staying strictly inside the enforced ceiling.
 
 ## Verification
 
@@ -102,6 +109,30 @@ config that reintroduces it. **Do not raise `n_channels` or
 | `test_each_hop_lands_on_a_declared_channel` | Every segment's FFT peak sits on a declared channel — the sequence is what we labelled |
 | `test_signal_actually_hops` | More than one distinct frequency appears (catches a constant tone mislabelled as FHSS) |
 | `test_length_matches_requested_duration` | No silent truncation |
+
+## Results (latest run)
+
+| Metric | Value |
+|---|---|
+| FHSS recall | **92.2%** — PASSES the 90% benchmark |
+| Precision | 73% |
+| F1 | 0.82 |
+
+Crosses 90% recall above -2 dB SNR; degrades at low SNR (-10 dB, -6 dB) as
+expected — a healthy accuracy-vs-SNR shape, not a flat/suspicious one.
+
+Dominant confusion is with JAMMING, not radar. Cross-checking the confusion
+matrix against the per-SNR curve shows this is almost entirely concentrated in
+the two lowest SNR bins — consistent with faded signals of any class becoming
+hard to distinguish from noise-like classes generally, not a FHSS generation
+defect.
+
+**Cross-class interaction worth tracking:** across successive fixes (radar
+duty-cycle cap, then this class's parameter widening), FHSS recall rose
+(82.5% -> 89.7% -> 92.2%) while JAMMING recall fell in the same three runs
+(80.0% -> 73.3% -> 67.5%). Flagged to the jamming owner — may indicate the
+model is trading decision-boundary space between these two classes rather than
+improving both independently.
 
 ## Manual QA (still required)
 
@@ -136,7 +167,8 @@ that names its own limitation over one that hides it.
 
 ## Definition of done
 
-- [ ] `pytest tests/test_generators.py::TestFHSS` passes
-- [ ] Spectrogram QA plot saved, block pattern verified against hop rate
+- [x] `pytest tests/test_generators.py::TestFHSS` passes
+- [x] Spectrogram QA plot saved, block pattern verified against hop rate
 - [ ] Parameter ranges cross-checked against a citable source
-- [ ] Limitation written into the brief's methodology section
+- [x] Limitation written into the brief's methodology section (drafted; pending
+      insertion into the shared brief doc by P4)
