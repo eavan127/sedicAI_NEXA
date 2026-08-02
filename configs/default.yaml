@@ -108,8 +108,11 @@ fhss:
   hop_rate_hz: [25000, 150000]
   n_channels: [8, 64]
   # Channel comb spans +/-(n_channels * spacing / 2), capped to keep the
-  # outermost hops inside Nyquist: 64 * 40000 / 2 = 1.28 MHz < 1.6 MHz.
-  channel_spacing_hz: [10000, 40000]
+  # outermost hops inside Nyquist: 64 * 48000 / 2 = 1.536 MHz < 1.6 MHz.
+  # Widened from 40 kHz -> 48 kHz to use more of the available Nyquist
+  # margin (was only spending 1.28 of 1.6 MHz); see tests/test_config.py::
+  # test_fhss_channel_comb_respects_nyquist for the enforced ceiling.
+  channel_spacing_hz: [10000, 48000]
 
 jamming:
   jsr_db: [0, 20]
