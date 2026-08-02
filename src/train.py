@@ -53,10 +53,26 @@ def load_data():
     return X, y, snr_labels
 
 
-def train():
+def set_seed(seed):
+    """Make a training run reproducible.
+
+    Without this, weight initialisation and batch shuffling differ every run, so
+    two runs of the SAME config give different numbers — and a config change
+    cannot be told apart from random variation. Measure the spread with
+    scripts/measure_variance.py before attributing any result to a change.
+    """
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
+def train(seed=None):
     X, y, snr_labels = load_data()
     d = CFG["dataset"]
     t = CFG["training"]
+
+    set_seed(d["seed"] if seed is None else seed)
 
     train_idx, val_idx, _ = stratified_split(
         y, snr_labels, d["val_frac"], d["test_frac"], d["seed"]
