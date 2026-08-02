@@ -39,3 +39,6 @@ env/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Ensemble members
+results/ensemble_*.pt
