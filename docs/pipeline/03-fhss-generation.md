@@ -151,12 +151,45 @@ specific emitter. If the organisers' FHSS uses markedly different timing, our
 model may generalise poorly. Nothing in our control fixes that in four days
 without a signal-processing expert. Two mitigations:
 
-**1. Widen the randomisation rather than narrow it.** The instinct is to tune
-these ranges until the spectrograms look convincing. Do the opposite — a broad
-training distribution is more likely to contain the organisers' actual signal
-than a tight guess. Real tactical radios span far wider hop rates than our
-current 100–1000 Hz. Widen until Nyquist binds; `tests/test_config.py` tells you
-where that ceiling is.
+### Cross-check against published FHSS systems
+
+| System | Hop rate | Channel spacing | # channels |
+|---|---|---|---|
+| SINCGARS (US military VHF) | up to 100 hops/sec | 25 kHz | 2,320 |
+| Have Quick / Have Quick II (US military UHF) | not published in sources checked | 25 kHz | — |
+| Bluetooth Classic | 1,600 hops/sec | 1 MHz | 79 |
+| **Our config** | **25,000–150,000 hops/sec** | **10–48 kHz** | **8–64** |
+
+- **`channel_spacing_hz` (10–48 kHz) is realistic** — squarely inside the 25 kHz
+  used by both cited military systems.
+- **`n_channels` (8–64) is comparable to commercial FHSS** (Bluetooth's 79), far
+  below tactical military systems (SINCGARS' 2,320) — plausible for a
+  constrained scenario, not representative of a full tactical hop set.
+- **`hop_rate_hz` (25,000–150,000 hops/sec) has no real-world equivalent found**
+  — 15×–1,500× faster than every cited system. This is not a tuning oversight,
+  it is a mathematical requirement of our fixed 160 µs analysis window: passing
+  `test_fhss_hops_are_visible_inside_one_window` (≥3 hops per window) requires
+  `hop_rate ≥ 3 / 160µs = 18,750 Hz` — already ~19× faster than SINCGARS and
+  ~12× faster than Bluetooth. No hop rate from any real system we found can
+  produce more than a fraction of one hop inside our window; using one would
+  reintroduce the dwell-time bug documented above. Properly fixing this would
+  require lengthening the analysis window, which is anchored to RadChar's
+  format for the radar class and is not a change we can make unilaterally
+  this late.
+
+**1. Widen the randomisation where it's actually possible.** The instinct is to
+tune these ranges until the spectrograms look convincing. Do the opposite — a
+broad training distribution is more likely to contain the organisers' actual
+signal than a tight guess. This applies cleanly to `channel_spacing_hz`, which
+we widened from a 40 kHz cap to 48 kHz — using 96% of the available Nyquist
+margin instead of 80% (`tests/test_config.py::test_fhss_channel_comb_respects_nyquist`
+enforces the ceiling).
+
+It does **not** apply the same way to `hop_rate_hz`: as shown above, real
+tactical systems hop far *slower* than our range, not faster, and our window
+length makes their actual rates infeasible to represent at all. There is no
+config change that reconciles this — it is a stated scoping limitation, not an
+open tuning question.
 
 Then **prove it generalised**: train on one hop-rate subset, evaluate on a
 disjoint one. If accuracy holds, the model learned "frequency hopping" rather
@@ -169,6 +202,7 @@ that names its own limitation over one that hides it.
 
 - [x] `pytest tests/test_generators.py::TestFHSS` passes
 - [x] Spectrogram QA plot saved, block pattern verified against hop rate
-- [ ] Parameter ranges cross-checked against a citable source
+- [x] Parameter ranges cross-checked against a citable source (SINCGARS, Have
+      Quick, Bluetooth — see "Cross-check against published FHSS systems" above)
 - [x] Limitation written into the brief's methodology section (drafted; pending
       insertion into the shared brief doc by P4)
