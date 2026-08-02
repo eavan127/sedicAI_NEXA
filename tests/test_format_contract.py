@@ -108,6 +108,44 @@ class TestSignalContentIsDistinguishable:
             "hop rate is too slow for this window length"
         )
 
+    def test_tone_jamming_is_spectrally_distinct_from_fhss(self):
+        """Tone jamming must occupy far fewer frequencies than FHSS.
+
+        This caught a real problem: with max_tones=3, tone jamming produced a
+        multi-peaked spectrum across the window — the same thing FHSS produces
+        as it visits several channels. Probing the trained model showed tone
+        jamming at 56.5%, with 85 of 200 examples predicted as FHSS, while
+        sweep sat at 96.5%.
+
+        The seed-variance run corroborated it from another angle: jamming recall
+        spread 10.8 points across five identical runs while FHSS spread 1.1 —
+        the signature of a class boundary the model cannot pin down.
+        """
+        from src.config import CFG
+        from src.generators.jamming import generate_tone_jamming
+
+        rng = np.random.default_rng(9)
+        seg = WINDOW // 8
+        axis = np.fft.fftfreq(seg, d=1 / FS)
+
+        def distinct_freqs(sig):
+            return len({
+                round(float(axis[np.argmax(np.abs(np.fft.fft(sig[i*seg:(i+1)*seg])))]) / 1e4)
+                for i in range(8)
+            })
+
+        tone = np.mean([
+            distinct_freqs(generate_tone_jamming(
+                FS, WINDOW, rng.uniform(-FS / 4, FS / 4, CFG["jamming"]["max_tones"])))
+            for _ in range(30)])
+        fhss = np.mean([
+            distinct_freqs(random_fhss_example(rng=rng)[:WINDOW]) for _ in range(30)])
+
+        assert fhss > 3 * tone, (
+            f"tone jamming shows {tone:.1f} distinct frequencies vs FHSS {fhss:.1f} — "
+            "too similar; the model will confuse them (check max_tones)"
+        )
+
     def test_radar_window_contains_a_silent_gap(self):
         """Radar transmits then listens. That gap is what separates it from a
         continuously-sweeping jammer, so it must survive into the window."""

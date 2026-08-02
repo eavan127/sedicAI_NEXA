@@ -116,7 +116,20 @@ fhss:
 
 jamming:
   jsr_db: [0, 20]
-  max_tones: 3
+  # Reduced from 3 to 1. Probing the trained model by sub-type gave:
+  #     barrage 79.5%   tone 56.5%   sweep 96.5%
+  # and 85 of 200 tone examples were predicted as FHSS.
+  #
+  # Up to three simultaneous carriers produces a multi-peaked spectrum across
+  # the window, which is also what FHSS produces as it visits several channels.
+  # A single carrier is unmistakably not frequency-hopping.
+  #
+  # Corroborated by the seed-variance run: jamming recall spread 10.8 points
+  # across five identical runs (0.728-0.836) while FHSS spread only 1.1. That
+  # instability is what an undefined class boundary looks like. Watch for the
+  # SPREAD collapsing as well as the mean rising — the spread is the stronger
+  # signal, since the mean gap is smaller than the old noise floor.
+  max_tones: 1
   sweep_bandwidth_hz: [100000, 500000]
 
 training:

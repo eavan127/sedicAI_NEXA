@@ -53,7 +53,7 @@ fhss:
 
 jamming:
   jsr_db: [0, 20]
-  max_tones: 3
+  max_tones: 1
   sweep_bandwidth_hz: [100000, 500000]
 
 training:
