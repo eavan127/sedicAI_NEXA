@@ -70,7 +70,12 @@ def random_radar_example(fs=None, total_duration=None, rng=None):
     # produces overlapping garbage.
     pri_lo = max(cfg["pri_s"][0], pulse_width / cfg["max_duty_cycle"])
     pri_hi = max(pri_lo, cfg["pri_s"][1])
-    pri = rng.uniform(pri_lo, pri_hi)
+    # LOG-uniform, not uniform. PRI spans two orders of magnitude (67 us to
+    # 10 ms), and drawing uniformly puts ~95% of examples above 1 ms — so the
+    # window almost never contains more than one pulse and the pulse-train
+    # structure disappears from the training data. Log-uniform gives each
+    # decade equal representation.
+    pri = float(np.exp(rng.uniform(np.log(pri_lo), np.log(pri_hi))))
     # Randomize sweep direction (up-chirp vs down-chirp)
     f_start = -bandwidth / 2 if rng.random() > 0.5 else bandwidth / 2
     bandwidth = bandwidth if f_start < 0 else -bandwidth
