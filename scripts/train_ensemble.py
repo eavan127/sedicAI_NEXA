@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.config import CFG, CLASSES, CLASS_TO_IDX, REPO_ROOT  # noqa: E402
 from src.models.amc_cnn import AMC_CNN  # noqa: E402
+from src.data.preprocess import phase_rotate_batch  # noqa: E402
 from src.train import (compute_class_weights, load_data, set_seed,  # noqa: E402
                         stratified_split)
 
@@ -82,17 +83,36 @@ def _recalls(preds, y_true):
             for c in CFG["judged_classes"] if (y_true == CLASS_TO_IDX[c]).any()}
 
 
-def main(n_models):
+def _predict(model, X_np, tta=0):
+    """Softmax probabilities, optionally averaged over TTA phase rotations.
+
+    Phase is arbitrary at the receiver, so a rotated copy is the same signal
+    with the same label. Averaging over rotations cancels per-view noise.
+    """
+    views = [X_np] + [phase_rotate_batch(X_np, t)
+                      for t in np.linspace(0, 2 * np.pi, tta, endpoint=False)[1:]]
+    out = None
+    with torch.no_grad():
+        for v in views:
+            p = torch.softmax(model(torch.tensor(v).to(DEVICE)), dim=1).cpu().numpy()
+            out = p if out is None else out + p
+    return out / len(views)
+
+
+def main(n_models, tta=0):
     X, y, snr_labels = load_data()
     d = CFG["dataset"]
     tr, va, te = stratified_split(y, snr_labels, d["val_frac"], d["test_frac"], d["seed"])
-    X_test = torch.tensor(X[te]).to(DEVICE)
+    X_test = X[te]
     y_test = y[te]
 
     ckpt_dir = REPO_ROOT / CFG["paths"]["checkpoints"]
     ckpt_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"Training {n_models} members on identical data, different seeds.\n")
+    print(f"Training {n_models} members on identical data, different seeds.")
+    if tta:
+        print(f"Averaging {tta} phase rotations per prediction (TTA).")
+    print()
 
     summed_probs = None
     members = []
@@ -101,8 +121,7 @@ def main(n_models):
         model = train_one(X, y, tr, va, seed=2000 + i)
         torch.save(model.state_dict(), ckpt_dir / f"ensemble_{i}.pt")
 
-        with torch.no_grad():
-            probs = torch.softmax(model(X_test), dim=1).cpu().numpy()
+        probs = _predict(model, X_test, tta)
         summed_probs = probs if summed_probs is None else summed_probs + probs
 
         r = _recalls(probs.argmax(1), y_test)
@@ -113,7 +132,8 @@ def main(n_models):
 
     print(f"\n{'class':<14}{'single mean':>13}{'single best':>13}{'ENSEMBLE':>11}{'':>3}")
     print("-" * 56)
-    scorecard = {"n_models": n_models, "members": members, "ensemble": ens, "passed": True}
+    scorecard = {"n_models": n_models, "tta": tta, "members": members,
+                  "ensemble": ens, "passed": True}
 
     for c in ens:
         vals = [m[c] for m in members]
@@ -138,4 +158,7 @@ def main(n_models):
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--models", type=int, default=5)
-    main(p.parse_args().models)
+    p.add_argument("--tta", type=int, default=0,
+                   help="average N phase rotations per prediction (0 = off, 4 is a good start)")
+    a = p.parse_args()
+    main(a.models, a.tta)
