@@ -1,0 +1,83 @@
+# Held-out parameter generalisation test — EVALUATION half.
+#
+# The disjoint upper half of configs/heldout_lo.yaml. The model NEVER trains on
+# data built from this config; it is only ever evaluated against it.
+#
+# Every parameter not named as a split matches heldout_lo.yaml exactly, so any
+# accuracy difference is attributable to the split parameters alone.
+#
+# dataset.seed differs deliberately (see below).
+
+signal:
+  fs: 3200000
+  window_len: 512
+  total_duration: 0.002
+
+snr_bins_db: [-10, -6, -2, 2, 6, 10]
+
+classes:
+  - BPSK
+  - QPSK
+  - 16QAM
+  - 64QAM
+  - LFM_RADAR
+  - FHSS
+  - JAMMING
+
+judged_classes: [LFM_RADAR, FHSS, JAMMING]
+
+dataset:
+  examples_per_class_per_snr: 1000
+  val_frac: 0.15
+  test_frac: 0.15
+  # DIFFERENT SEED from heldout_lo.yaml, on purpose.
+  #
+  # The civilian classes come from RadioML — real captures whose parameters we
+  # cannot split, so "held-out parameters" is not a meaningful notion for them.
+  # A different seed at least draws different ROWS from the 4096 available per
+  # bin, so the model is not simply re-scored on windows it memorised.
+  #
+  # Overlap is reduced, NOT eliminated (1000 drawn from 4096 twice overlaps
+  # ~24% by chance). Civilian numbers from this config are therefore NOT a
+  # generalisation measurement and are reported separately from the judged
+  # classes for exactly that reason.
+  seed: 4242
+  radchar_fraction: 0
+
+radar:
+  # Upper half of [50000, 1500000] — disjoint from heldout_lo.yaml.
+  bandwidth_hz: [775000, 1500000]
+
+  pulse_width_s: [0.00001, 0.0001]
+  pri_s: [0.000017, 0.01]
+  time_delay_s: [0.000001, 0.00001]
+  max_duty_cycle: 0.15
+  n_pulses: [2, 7]
+  burst_fraction: 0.5
+
+fhss:
+  # Upper half of [25000, 150000] — ~14-24 hops per 160 us window.
+  hop_rate_hz: [87500, 150000]
+
+  n_channels: [8, 64]
+  channel_spacing_hz: [10000, 48000]
+
+jamming:
+  # Upper halves. Tone jamming is unsplittable — see heldout_lo.yaml.
+  sweep_bandwidth_hz: [300000, 500000]
+  barrage_bandwidth_hz: [700000, 1200000]
+
+  jsr_db: [0, 20]
+  max_tones: 1
+
+training:
+  epochs: 30
+  batch_size: 64
+  learning_rate: 0.001
+  scheduler_patience: 3
+
+paths:
+  raw_data: data/raw
+  processed_data: data/processed_heldout_hi
+  checkpoints: results/heldout
+  evals: evals/heldout

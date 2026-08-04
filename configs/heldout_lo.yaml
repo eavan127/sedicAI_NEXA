@@ -1,0 +1,100 @@
+# Held-out parameter generalisation test — TRAINING half.
+#
+# Identical to default.yaml except each judged class draws its defining
+# parameter from the LOWER half of the normal range. configs/heldout_hi.yaml
+# holds the disjoint UPPER half and is never trained on.
+#
+# The question this answers: did the model learn "chirp", "frequency hopping"
+# and "denial" as concepts, or did it memorise the specific parameter values we
+# happened to generate? A panel is silently asking this about any synthetic
+# training data, so we answer it ourselves.
+#
+#   python scripts/heldout_generalisation.py
+#
+# NOTE: radchar_fraction is pinned to 0 here, unlike default.yaml. RadChar's
+# real waveforms carry fixed parameters we cannot split, so including them would
+# put identical examples in both halves and dilute the measurement. This test
+# isolates OUR generator's parameter generalisation, which is the part we
+# actually control and the part nobody else has validated.
+
+signal:
+  fs: 3200000
+  window_len: 512
+  total_duration: 0.002
+
+snr_bins_db: [-10, -6, -2, 2, 6, 10]
+
+classes:
+  - BPSK
+  - QPSK
+  - 16QAM
+  - 64QAM
+  - LFM_RADAR
+  - FHSS
+  - JAMMING
+
+judged_classes: [LFM_RADAR, FHSS, JAMMING]
+
+dataset:
+  examples_per_class_per_snr: 1000
+  val_frac: 0.15
+  test_frac: 0.15
+  seed: 42
+  radchar_fraction: 0        # see header — synthetic only, so the split is clean
+
+radar:
+  # SPLIT PARAMETER: bandwidth_hz, lower half of [50000, 1500000].
+  #
+  # Bandwidth is the chirp's defining quantity — how far the frequency sweeps.
+  # "Trained on narrow chirps, does it recognise wide ones?" is exactly the
+  # concept-vs-instance question.
+  #
+  # Why not PRI, which docs/pipeline/07-evaluation.md suggests as the example?
+  # PRI is drawn CONDITIONAL on pulse width (pri_lo is clamped up to
+  # pulse_width / max_duty_cycle to keep duty under 100%). With a lowered
+  # ceiling that clamp pushes PRI back above the ceiling for wide pulses, so the
+  # two halves would silently OVERLAP and the test would prove nothing.
+  # Bandwidth has no such coupling.
+  bandwidth_hz: [50000, 775000]
+
+  # Everything below matches default.yaml exactly.
+  pulse_width_s: [0.00001, 0.0001]
+  pri_s: [0.000017, 0.01]
+  time_delay_s: [0.000001, 0.00001]
+  max_duty_cycle: 0.15
+  n_pulses: [2, 7]
+  burst_fraction: 0.5
+
+fhss:
+  # SPLIT PARAMETER: hop_rate_hz, lower half of [25000, 150000].
+  # At a 160 us window this is ~4-14 hops per window, against ~14-24 in the
+  # held-out half. Hop rate is what makes FHSS look like FHSS.
+  hop_rate_hz: [25000, 87500]
+
+  n_channels: [8, 64]
+  channel_spacing_hz: [10000, 48000]
+
+jamming:
+  # SPLIT PARAMETERS: both bandwidth ranges, lower halves.
+  #
+  # Caveat, stated plainly: tone jamming has no bandwidth parameter, so roughly
+  # a third of JAMMING examples are drawn identically in both halves. The
+  # jamming result is therefore a DILUTED measure of generalisation — treat it
+  # as a lower bound on the true effect, not a clean reading.
+  sweep_bandwidth_hz: [100000, 300000]
+  barrage_bandwidth_hz: [200000, 700000]
+
+  jsr_db: [0, 20]
+  max_tones: 1
+
+training:
+  epochs: 30
+  batch_size: 64
+  learning_rate: 0.001
+  scheduler_patience: 3
+
+paths:
+  raw_data: data/raw
+  processed_data: data/processed_heldout_lo
+  checkpoints: results/heldout
+  evals: evals/heldout
