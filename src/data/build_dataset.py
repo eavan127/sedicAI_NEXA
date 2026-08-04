@@ -22,18 +22,93 @@ SYNTHETIC_GENERATORS = {
     "JAMMING": random_jamming_example,
 }
 
+RADIOML_PATH = REPO_ROOT / CFG["paths"]["raw_data"] / "GOLD_XYZ_OSC.0001_1024.hdf5"
 
-def load_radioml_civilian():
+# RadioML2018.01A stores /X, /Y, /Z with /Y a one-hot over 24 classes, laid out
+# class-major then SNR-major: 4096 examples per (class, SNR), 26 SNRs per class
+# (-20..+30 dB, 2 dB steps), so class c starts at row c*26*4096.
+#
+# The class-index <-> name mapping is NOT given inside the hdf5 file itself,
+# and the classes.txt shipped alongside the archive is WRONG for this file --
+# independently confirmed both by our own signal analysis (idx 17/18 sit at
+# ~10x the amplitude scale of every other class -- clearly analog, not QAM as
+# classes.txt claims; idx 21 is a near-perfectly constant-envelope signal,
+# i.e. FM, not AM-DSB-WC) and by a published third-party analysis
+# (cyclostationary.blog, "DeepSig's 2018 Dataset", Sept 2020) that reaches the
+# same conclusion via cyclostationary signal processing.
+#
+# The order below instead comes from the ORIGINAL PAPER'S own class listing
+# (O'Shea, Roy, Clancy, "Over the Air Deep Learning Based Radio Signal
+# Classification", arXiv:1712.04578, Section III "Difficult Classes", same
+# order used in Fig. 12/13's legend) rather than the separately-distributed
+# classes.txt. It matches every structural check we ran: index 0 = OOK,
+# indices 17-21 = the five analog classes (matching the amplitude-scale
+# anomaly we measured), index 21 = FM (matching its near-constant envelope),
+# indices 22-23 = GMSK, OQPSK as the final two constant-modulus classes.
+#
+# Residual risk: the exact BPSK/QPSK split within the digital block (indices
+# 3-4) wasn't independently nailed down bit-for-bit (would need real carrier
+# recovery, not just magnitude/differential-phase heuristics). If these
+# labels are wrong, it will show up as a nonsensical confusion matrix for the
+# civilian classes once P2 trains -- watch for that on Day 2.
+RADIOML_CLASS_ORDER = [
+    "OOK", "4ASK", "8ASK", "BPSK", "QPSK", "8PSK", "16PSK", "32PSK",
+    "16APSK", "32APSK", "64APSK", "128APSK", "16QAM", "32QAM", "64QAM",
+    "128QAM", "256QAM", "AM-SSB-WC", "AM-SSB-SC", "AM-DSB-WC", "AM-DSB-SC",
+    "FM", "GMSK", "OQPSK",
+]
+RADIOML_TARGET_CLASSES = {"BPSK": 3, "QPSK": 4, "16QAM": 12, "64QAM": 14}
+RADIOML_EXAMPLES_PER_SNR_BLOCK = 4096
+RADIOML_N_SNR_BINS = 26
+RADIOML_MIN_SNR_DB = -20
+
+
+def load_radioml_civilian(path=None, seed=None):
+    """Load BPSK/QPSK/16QAM/64QAM from RadioML2018.01A.
+
+    Returns list of (iq_complex_array, class_name, snr_db) tuples, subsampled
+    to CFG['dataset']['examples_per_class_per_snr'] per (class, SNR) bin.
+
+    Missing file returns [] (with a warning) so the rest of the pipeline
+    stays runnable as a dry run -- same contract as load_real_radar().
     """
-    TODO (Person A): load RadioML2018.01a and filter to BPSK/QPSK/16QAM/64QAM.
+    import h5py
 
-    The exact parsing depends on which RadioML release you download, so this
-    is left explicit rather than guessed. Expected return:
-        list of (iq_complex_array, class_name, snr_db) tuples
+    path = path or RADIOML_PATH
+    if not path.exists():
+        print(f"  ! RadioML not found at {path} -- civilian classes will be empty.")
+        print("    See docs/pipeline/01-data-sources.md to download it.")
+        return []
 
-    Returning empty keeps the rest of the pipeline runnable as a dry run.
-    """
-    return []
+    rng = np.random.default_rng(seed if seed is not None else CFG["dataset"]["seed"])
+    n_per = CFG["dataset"]["examples_per_class_per_snr"]
+    out = []
+
+    with h5py.File(path, "r") as f:
+        X = f["X"]
+        for class_name, class_idx in RADIOML_TARGET_CLASSES.items():
+            for snr_db in CFG["snr_bins_db"]:
+                snr_idx = (snr_db - RADIOML_MIN_SNR_DB) // 2
+                if not (0 <= snr_idx < RADIOML_N_SNR_BINS) or snr_db % 2 != 0:
+                    raise ValueError(
+                        f"snr_bins_db must be even and within "
+                        f"[{RADIOML_MIN_SNR_DB}, {RADIOML_MIN_SNR_DB + 2*(RADIOML_N_SNR_BINS-1)}], "
+                        f"got {snr_db}"
+                    )
+                block_start = (
+                    class_idx * RADIOML_N_SNR_BINS * RADIOML_EXAMPLES_PER_SNR_BLOCK
+                    + snr_idx * RADIOML_EXAMPLES_PER_SNR_BLOCK
+                )
+                block = X[block_start:block_start + RADIOML_EXAMPLES_PER_SNR_BLOCK]
+
+                n = min(n_per, len(block))
+                rows = rng.choice(len(block), n, replace=False)
+                rows.sort()  # contiguous-ish access is friendlier to h5py than arbitrary order
+                iq = block[rows, :, 0] + 1j * block[rows, :, 1]
+
+                out.extend((iq[i], class_name, float(snr_db)) for i in range(n))
+
+    return out
 
 
 def load_real_radar():
