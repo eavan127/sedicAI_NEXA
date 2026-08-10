@@ -1,0 +1,88 @@
+# Civilian symbol-rate augmentation experiment.
+#
+# Identical to default.yaml except civilian frames are resampled by a random
+# factor before windowing, and outputs go to their own paths so this cannot
+# disturb the main run.
+#
+# WHY: RadioML 2018.01A contains exactly ONE symbol rate (~8 samples/symbol).
+# Measured against CSPB.ML.2018R2 -- real third-party civilian data with symbol
+# rates spanning 2-22.5 sps -- our model's accuracy peaked at 8-10 sps, exactly
+# RadioML's value, and collapsed to 0.041 below 4 sps. The civilian-mistaken-
+# for-JAMMING rate was 0.0029 at matched symbol rates but 0.0490 overall, i.e.
+# our reported 1.4% false-alarm figure is optimistic on unfamiliar rates.
+# Full measurement: docs/CSPB_EXTERNAL_VALIDATION.md
+#
+#   SEDIC_CONFIG=configs/civ_jitter.yaml python -m src.data.build_dataset
+#   SEDIC_CONFIG=configs/civ_jitter.yaml python -m src.train
+#
+# Everything below matches default.yaml unless marked.
+
+signal:
+  fs: 3200000
+  window_len: 512
+  total_duration: 0.002
+
+snr_bins_db: [-10, -6, -2, 2, 6, 10]
+
+classes:
+  - BPSK
+  - QPSK
+  - 16QAM
+  - 64QAM
+  - LFM_RADAR
+  - FHSS
+  - JAMMING
+
+judged_classes: [LFM_RADAR, FHSS, JAMMING]
+
+# ---- THE ONLY BEHAVIOURAL CHANGE ----
+civilian:
+  # Resample factor range, drawn LOG-uniformly per frame. Multiplies
+  # samples-per-symbol, so 0.55-1.9x turns RadioML's fixed ~8 sps into roughly
+  # 4.4-15 sps of coverage.
+  #
+  # The lower bound is set by the format contract, not by preference: a
+  # 1024-sample frame resampled by r yields ~1024r samples, and dropping under
+  # the 512-sample window would force zero-padding -- manufacturing the exact
+  # flat-tail artefact the contract exists to prevent. So r >= ~0.5 is a hard
+  # floor, and CSPB's 2-4 sps region stays out of reach from RadioML alone.
+  symbol_rate_jitter: [0.55, 1.9]
+
+dataset:
+  examples_per_class_per_snr: 1000
+  val_frac: 0.15
+  test_frac: 0.15
+  seed: 42
+  radchar_fraction: 0.5
+
+radar:
+  pulse_width_s: [0.00001, 0.0001]
+  bandwidth_hz: [50000, 1500000]
+  pri_s: [0.000017, 0.01]
+  time_delay_s: [0.000001, 0.00001]
+  max_duty_cycle: 0.15
+  n_pulses: [2, 7]
+  burst_fraction: 0.5
+
+fhss:
+  hop_rate_hz: [25000, 150000]
+  n_channels: [8, 64]
+  channel_spacing_hz: [10000, 48000]
+
+jamming:
+  jsr_db: [0, 20]
+  max_tones: 1
+  sweep_bandwidth_hz: [100000, 500000]
+  barrage_bandwidth_hz: [200000, 1200000]
+
+training:
+  epochs: 30
+  batch_size: 64
+  learning_rate: 0.001
+  scheduler_patience: 3
+
+paths:
+  raw_data: data/raw
+  processed_data: data/processed_civjitter
+  checkpoints: results/civjitter
+  evals: evals/civjitter

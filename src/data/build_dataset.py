@@ -63,11 +63,46 @@ RADIOML_N_SNR_BINS = 26
 RADIOML_MIN_SNR_DB = -20
 
 
+def _jitter_symbol_rate(iq, rng, lo, hi, min_len):
+    """Resample one frame to move its symbol rate, keeping >= min_len samples.
+
+    RadioML contains exactly ONE symbol rate (~8 samples/symbol), so a model
+    trained on it keys on that rate. Measured against CSPB.ML.2018R2 (real
+    third-party civilian data, symbol rates 2-22.5 sps), accuracy peaked at
+    8-10 sps -- exactly RadioML's value -- and fell to 0.041 below 4 sps, while
+    the civilian-mistaken-for-JAMMING rate rose from 0.003 at matched rates to
+    0.049 overall. See docs/CSPB_EXTERNAL_VALIDATION.md.
+
+    Resampling by r multiplies samples-per-symbol by r, so this synthesises the
+    rate diversity RadioML lacks. Draw is LOG-uniform because rate ratios are
+    multiplicative -- uniform would over-represent upsampling.
+
+    Range is bounded below by the format contract: a 1024-sample frame
+    resampled by r yields ~1024r samples, and we must not fall under the
+    512-sample window, because padding back up would manufacture the flat-tail
+    artefact the contract exists to prevent.
+    """
+    from fractions import Fraction
+
+    from scipy.signal import resample_poly
+
+    r = float(np.exp(rng.uniform(np.log(lo), np.log(hi))))
+    frac = Fraction(r).limit_denominator(50)
+    up, down = max(frac.numerator, 1), max(frac.denominator, 1)
+    out = resample_poly(iq, up, down)
+    return out if len(out) >= min_len else iq   # guard, never pad
+
+
 def load_radioml_civilian(path=None, seed=None):
     """Load BPSK/QPSK/16QAM/64QAM from RadioML2018.01A.
 
     Returns list of (iq_complex_array, class_name, snr_db) tuples, subsampled
     to CFG['dataset']['examples_per_class_per_snr'] per (class, SNR) bin.
+
+    If CFG['civilian']['symbol_rate_jitter'] is set to [lo, hi], each frame is
+    resampled by a random factor in that range to synthesise symbol-rate
+    diversity (see _jitter_symbol_rate). Absent or null -> unchanged behaviour,
+    so this is inert for anyone using configs/default.yaml.
 
     Missing file returns [] (with a warning) so the rest of the pipeline
     stays runnable as a dry run -- same contract as load_real_radar().
@@ -82,6 +117,10 @@ def load_radioml_civilian(path=None, seed=None):
 
     rng = np.random.default_rng(seed if seed is not None else CFG["dataset"]["seed"])
     n_per = CFG["dataset"]["examples_per_class_per_snr"]
+    jitter = (CFG.get("civilian") or {}).get("symbol_rate_jitter")
+    window_len = CFG["signal"]["window_len"]
+    if jitter:
+        print(f"  civilian symbol-rate jitter ON: resample factor {jitter[0]}-{jitter[1]}x")
     out = []
 
     with h5py.File(path, "r") as f:
@@ -106,7 +145,14 @@ def load_radioml_civilian(path=None, seed=None):
                 rows.sort()  # contiguous-ish access is friendlier to h5py than arbitrary order
                 iq = block[rows, :, 0] + 1j * block[rows, :, 1]
 
-                out.extend((iq[i], class_name, float(snr_db)) for i in range(n))
+                if jitter:
+                    out.extend(
+                        (_jitter_symbol_rate(iq[i], rng, jitter[0], jitter[1], window_len),
+                         class_name, float(snr_db))
+                        for i in range(n)
+                    )
+                else:
+                    out.extend((iq[i], class_name, float(snr_db)) for i in range(n))
 
     return out
 
