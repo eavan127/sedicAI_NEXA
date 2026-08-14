@@ -1,6 +1,7 @@
 """
 Evaluation: per-class recall, confusion matrix, accuracy-vs-SNR curve, and a
-scorecard that states plainly whether the >90% benchmark is met.
+scorecard that states plainly whether the organiser's benchmark
+(`configs/default.yaml: benchmark_recall`) is met.
 
 Usage:
     python -m src.evaluate
@@ -19,7 +20,7 @@ from src.models.amc_cnn import AMC_CNN
 from src.train import load_data, stratified_split
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-BENCHMARK_RECALL = 0.90
+BENCHMARK_RECALL = CFG["benchmark_recall"]
 
 # Coarse tiers. The 7-class number is what the gate is scored on, but the tier
 # call is what matters operationally: mistaking a distant phone for an attack
@@ -122,7 +123,7 @@ def evaluate():
         json.dump({"per_class": report, "benchmark": scorecard,
                     "coarse_tier": coarse, "comms_vs_jamming": cvj}, f, indent=2)
 
-    print("\n--- Benchmark (>90% recall on judged classes) ---")
+    print(f"\n--- Benchmark (>{BENCHMARK_RECALL:.0%} recall on judged classes) ---")
     for cls, r in scorecard["judged_classes"].items():
         print(f"  {cls:<12} recall={r['recall']:.4f}  {'PASS' if r['passed'] else 'FAIL'}")
     print(f"  OVERALL: {'PASS' if scorecard['passed'] else 'FAIL'}")
@@ -162,7 +163,8 @@ def evaluate():
             m = (snr_test == s) & (y_test == idx)
             accs.append((preds[m] == y_test[m]).mean() if m.any() else np.nan)
         plt.plot(unique_snrs, accs, marker=".", linestyle="--", label=cls)
-    plt.axhline(BENCHMARK_RECALL, color="red", linestyle=":", label="90% benchmark")
+    plt.axhline(BENCHMARK_RECALL, color="red", linestyle=":",
+                label=f"{BENCHMARK_RECALL:.0%} benchmark")
     plt.xlabel("SNR (dB)")
     plt.ylabel("Accuracy")
     plt.title("Accuracy vs. SNR")

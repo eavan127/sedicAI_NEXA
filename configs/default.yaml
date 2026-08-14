@@ -38,8 +38,14 @@ classes:
   - FHSS
   - JAMMING
 
-# Which classes the >90% recall benchmark is judged on.
+# Which classes the benchmark is judged on.
 judged_classes: [LFM_RADAR, FHSS, JAMMING]
+
+# Organiser's minimum recall/accuracy to pass, on the classes above.
+# Confirmed 80% (2026-08-14), down from the original 90% announcement.
+# Kept here, not hardcoded in evaluate.py, so the next threshold change is a
+# one-line edit instead of a source hunt.
+benchmark_recall: 0.80
 
 dataset:
   # 400 -> 1000 helped substantially: all three judged classes moved at once,
