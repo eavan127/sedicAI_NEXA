@@ -12,6 +12,12 @@ examples and asks the existing checkpoint what it thinks.
 Usage:
     python -m src.data.diagnose_jamming
 """
+import csv
+import json
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
@@ -71,6 +77,7 @@ def diagnose(n_per=200, model_path=None, seed=0):
     print(f"{'sub-type':<20}{'correct':>9}   most common mistake")
     print("-" * 62)
 
+    results = {}
     for name, gen_fn in gens.items():
         batch = []
         for _ in range(n_per):
@@ -88,15 +95,58 @@ def diagnose(n_per=200, model_path=None, seed=0):
             idx, cnt = np.unique(wrong, return_counts=True)
             worst = CLASSES[idx[cnt.argmax()]]
             detail = f"{worst}  ({cnt.max()}/{n_per})"
+            worst_confusion = {"class": worst, "count": int(cnt.max()), "n": n_per}
         else:
             detail = "-"
+            worst_confusion = None
 
         flag = "  <-- WEAK" if acc < 0.9 and name.startswith("JAM") else ""
         print(f"{name:<20}{acc:>8.1%}   {detail}{flag}")
+        results[name] = {"accuracy": acc, "n": n_per, "worst_confusion": worst_confusion}
 
     print()
     print("Any jamming sub-type below 90% is what is dragging the class down.")
     print("Hand the failing sub-type to P4 — that is the generator to fix.")
+
+    # Persist as a report-ready artifact — this probe is otherwise console-only
+    # and would have to be re-run and screenshotted for every brief revision.
+    evals_dir = REPO_ROOT / CFG["paths"]["evals"]
+    evals_dir.mkdir(parents=True, exist_ok=True)
+
+    with open(evals_dir / "jamming_subtypes.json", "w") as f:
+        json.dump(results, f, indent=2)
+
+    csv_dir = evals_dir / "csv"
+    csv_dir.mkdir(parents=True, exist_ok=True)
+    with open(csv_dir / "jamming_subtypes.csv", "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["sub_type", "true_class", "accuracy", "n", "worst_confusion_class",
+                    "worst_confusion_count"])
+        for name, r in results.items():
+            wc = r["worst_confusion"] or {}
+            w.writerow([name, TRUTH[name], r["accuracy"], r["n"],
+                        wc.get("class", ""), wc.get("count", "")])
+
+    names = list(results)
+    accs = [results[n]["accuracy"] for n in names]
+    colors = ["tab:red" if n.startswith("JAM") else "tab:blue" for n in names]
+    plt.figure(figsize=(7, 4))
+    bars = plt.bar(names, accs, color=colors)
+    plt.axhline(0.9, color="black", linestyle=":", linewidth=1, label="90% (weak-signal flag)")
+    plt.ylabel("Accuracy (probe, not the held-out test set)")
+    plt.title("Jamming sub-type breakdown (barrage / tone / sweep) + references")
+    plt.xticks(rotation=20, ha="right")
+    plt.ylim(0, 1.05)
+    for bar, acc in zip(bars, accs):
+        plt.text(bar.get_x() + bar.get_width() / 2, acc + 0.02, f"{acc:.0%}",
+                  ha="center", fontsize=9)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(evals_dir / "jamming_subtypes.png", dpi=150)
+    plt.close()
+
+    print(f"\nArtifacts written to {evals_dir / 'jamming_subtypes.json'} "
+          f"and {evals_dir / 'jamming_subtypes.png'}")
 
 
 if __name__ == "__main__":
