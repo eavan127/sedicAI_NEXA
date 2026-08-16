@@ -1,6 +1,7 @@
 """
 Evaluation: per-class recall, confusion matrix, accuracy-vs-SNR curve, and a
-scorecard that states plainly whether the >90% benchmark is met.
+scorecard that states plainly whether the organiser's benchmark
+(`configs/default.yaml: benchmark_recall`) is met.
 
 Usage:
     python -m src.evaluate
