@@ -32,7 +32,9 @@ from src.train import (compute_class_weights, load_data, set_seed,  # noqa: E402
                         stratified_split)
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-BENCHMARK = 0.90
+# Official rules (SEDIC 2026 RF track, 11 Aug public release) require >80%
+# recall on Military/CEMA + Jamming, not 90% — match evaluate.py's benchmark.
+BENCHMARK = 0.80
 
 
 def train_one(X, y, tr, va, seed):
