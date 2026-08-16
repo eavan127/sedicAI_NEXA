@@ -5,6 +5,7 @@ scorecard that states plainly whether the >90% benchmark is met.
 Usage:
     python -m src.evaluate
 """
+import csv
 import json
 
 import matplotlib
@@ -19,7 +20,12 @@ from src.models.amc_cnn import AMC_CNN
 from src.train import load_data, stratified_split
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-BENCHMARK_RECALL = 0.90
+# The official rules (SEDIC 2026 RF track, 11 Aug public release) require
+# >80% accuracy on the High Priority (Military/CEMA) and Jamming classes.
+# Earlier drafts of our docs targeted 90% as a stricter internal bar; keep
+# reporting against the actual published number so the brief states the real
+# margin, not a self-imposed one.
+BENCHMARK_RECALL = 0.80
 
 # Coarse tiers. The 7-class number is what the gate is scored on, but the tier
 # call is what matters operationally: mistaking a distant phone for an attack
@@ -122,7 +128,20 @@ def evaluate():
         json.dump({"per_class": report, "benchmark": scorecard,
                     "coarse_tier": coarse, "comms_vs_jamming": cvj}, f, indent=2)
 
-    print("\n--- Benchmark (>90% recall on judged classes) ---")
+    # Flat CSVs alongside the JSON/PNG artifacts — Power BI (and Excel) read
+    # CSV directly via Get Data > Text/CSV, no JSON connector needed. Same
+    # numbers as scorecard.json, just reshaped for a BI tool instead of code.
+    csv_dir = evals_dir / "csv"
+    csv_dir.mkdir(parents=True, exist_ok=True)
+    with open(csv_dir / "per_class_report.csv", "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["class", "precision", "recall", "f1_score", "support", "is_judged_class"])
+        for cls in CLASSES:
+            r = report[cls]
+            w.writerow([cls, r["precision"], r["recall"], r["f1-score"], r["support"],
+                        cls in CFG["judged_classes"]])
+
+    print(f"\n--- Benchmark (>{BENCHMARK_RECALL:.0%} recall on judged classes) ---")
     for cls, r in scorecard["judged_classes"].items():
         print(f"  {cls:<12} recall={r['recall']:.4f}  {'PASS' if r['passed'] else 'FAIL'}")
     print(f"  OVERALL: {'PASS' if scorecard['passed'] else 'FAIL'}")
@@ -150,29 +169,52 @@ def evaluate():
     plt.savefig(evals_dir / "confusion_matrix.png", dpi=150)
     plt.close()
 
-    # Accuracy vs SNR, overall and for each judged class
+    # Accuracy vs SNR: overall, every judged class (bold dashed — these are
+    # the ones the >80% line applies to), and every civilian class (thin
+    # solid — reported for completeness/mandatory-classification, not judged
+    # against the benchmark line).
     unique_snrs = sorted(np.unique(snr_test))
-    plt.figure()
-    plt.plot(unique_snrs, [(preds[snr_test == s] == y_test[snr_test == s]).mean()
-                            for s in unique_snrs], marker="o", label="overall", linewidth=2)
-    for cls in CFG["judged_classes"]:
-        idx = CLASS_TO_IDX[cls]
+
+    def _class_accs(idx):
         accs = []
         for s in unique_snrs:
             m = (snr_test == s) & (y_test == idx)
             accs.append((preds[m] == y_test[m]).mean() if m.any() else np.nan)
-        plt.plot(unique_snrs, accs, marker=".", linestyle="--", label=cls)
-    plt.axhline(BENCHMARK_RECALL, color="red", linestyle=":", label="90% benchmark")
+        return accs
+
+    # Same grid feeds the plot below and the CSV — compute once.
+    accs_by_class = {cls: _class_accs(CLASS_TO_IDX[cls]) for cls in CLASSES}
+    with open(csv_dir / "accuracy_by_class_snr.csv", "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["class", "snr_db", "accuracy", "is_judged_class"])
+        for cls in CLASSES:
+            for s, acc in zip(unique_snrs, accs_by_class[cls]):
+                w.writerow([cls, s, acc, cls in CFG["judged_classes"]])
+
+    plt.figure()
+    plt.plot(unique_snrs, [(preds[snr_test == s] == y_test[snr_test == s]).mean()
+                            for s in unique_snrs],
+              marker="o", color="black", label="overall (all 7 classes)", linewidth=2)
+    for cls in CFG["judged_classes"]:
+        plt.plot(unique_snrs, accs_by_class[cls],
+                  marker=".", linestyle="--", linewidth=2, label=f"{cls} (judged)")
+    for cls in CLASSES:
+        if cls in CFG["judged_classes"]:
+            continue
+        plt.plot(unique_snrs, accs_by_class[cls],
+                  marker="", linestyle="-", linewidth=1, alpha=0.6, label=cls)
+    plt.axhline(BENCHMARK_RECALL, color="red", linestyle=":",
+                label=f"{BENCHMARK_RECALL:.0%} benchmark (judged classes only)")
     plt.xlabel("SNR (dB)")
     plt.ylabel("Accuracy")
-    plt.title("Accuracy vs. SNR")
-    plt.legend()
+    plt.title("Accuracy vs. SNR — all classes")
+    plt.legend(fontsize=8)
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
     plt.savefig(evals_dir / "accuracy_vs_snr.png", dpi=150)
     plt.close()
 
-    print(f"\nArtifacts written to {evals_dir}")
+    print(f"\nArtifacts written to {evals_dir} (JSON/PNG) and {csv_dir} (CSV, for Power BI/Excel)")
 
 
 if __name__ == "__main__":
