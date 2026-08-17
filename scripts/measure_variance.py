@@ -23,9 +23,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.config import CFG, CLASSES, CLASS_TO_IDX  # noqa: E402
 from src.models.amc_cnn import AMC_CNN  # noqa: E402
-from src.train import (compute_class_weights, load_data, set_seed,  # noqa: E402
-                        stratified_split)
-from torch.utils.data import DataLoader, TensorDataset  # noqa: E402
+from src.train import (compute_class_weights, compute_snr_weights, load_data,  # noqa: E402
+                        set_seed, stratified_split)
+from torch.utils.data import DataLoader, TensorDataset, WeightedRandomSampler  # noqa: E402
 import torch.nn as nn  # noqa: E402
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -39,8 +39,10 @@ def one_run(X, y, snr_labels, seed):
 
     X_t = torch.tensor(X)
     y_t = torch.tensor(y, dtype=torch.long)
+    train_sampler = WeightedRandomSampler(
+        compute_snr_weights(snr_labels[tr]), num_samples=len(tr), replacement=True)
     train_loader = DataLoader(TensorDataset(X_t[tr], y_t[tr]),
-                              batch_size=t["batch_size"], shuffle=True)
+                              batch_size=t["batch_size"], sampler=train_sampler)
     val_loader = DataLoader(TensorDataset(X_t[va], y_t[va]), batch_size=t["batch_size"])
 
     model = AMC_CNN(num_classes=len(CLASSES), input_len=X.shape[-1]).to(DEVICE)

@@ -21,15 +21,15 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, TensorDataset, WeightedRandomSampler
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.config import CFG, CLASSES, CLASS_TO_IDX, REPO_ROOT  # noqa: E402
 from src.models.amc_cnn import AMC_CNN  # noqa: E402
 from src.data.preprocess import phase_rotate_batch  # noqa: E402
-from src.train import (compute_class_weights, load_data, set_seed,  # noqa: E402
-                        stratified_split)
+from src.train import (compute_class_weights, compute_snr_weights, load_data,  # noqa: E402
+                        set_seed, stratified_split)
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # Official rules (SEDIC 2026 RF track, 11 Aug public release) require >80%
@@ -37,15 +37,17 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 BENCHMARK = 0.80
 
 
-def train_one(X, y, tr, va, seed):
+def train_one(X, y, snr_labels, tr, va, seed):
     """Train a single member and return it at its best-validation state."""
     set_seed(seed)
     t = CFG["training"]
 
     X_t = torch.tensor(X)
     y_t = torch.tensor(y, dtype=torch.long)
+    train_sampler = WeightedRandomSampler(
+        compute_snr_weights(snr_labels[tr]), num_samples=len(tr), replacement=True)
     train_loader = DataLoader(TensorDataset(X_t[tr], y_t[tr]),
-                              batch_size=t["batch_size"], shuffle=True)
+                              batch_size=t["batch_size"], sampler=train_sampler)
     val_loader = DataLoader(TensorDataset(X_t[va], y_t[va]), batch_size=t["batch_size"])
 
     model = AMC_CNN(num_classes=len(CLASSES), input_len=X.shape[-1]).to(DEVICE)
@@ -120,7 +122,7 @@ def main(n_models, tta=0):
     members = []
 
     for i in range(n_models):
-        model = train_one(X, y, tr, va, seed=2000 + i)
+        model = train_one(X, y, snr_labels, tr, va, seed=2000 + i)
         torch.save(model.state_dict(), ckpt_dir / f"ensemble_{i}.pt")
 
         probs = _predict(model, X_test, tta)

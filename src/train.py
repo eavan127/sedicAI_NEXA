@@ -7,7 +7,7 @@ Usage:
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, TensorDataset, WeightedRandomSampler
 
 from src.config import CFG, CLASSES, REPO_ROOT
 from src.models.amc_cnn import AMC_CNN
@@ -45,6 +45,26 @@ def compute_class_weights(y, num_classes):
     return torch.tensor(counts.sum() / (num_classes * counts), dtype=torch.float32)
 
 
+def compute_snr_weights(snr_labels):
+    """Per-example sampling weight favouring low-SNR (harder) examples.
+
+    Every SNR bin has equal example counts, but errors do not distribute
+    equally across them -- on the judged classes, nearly all misclassification
+    is concentrated in the two lowest bins (-10dB, -6dB), where a faded signal
+    of any class starts to resemble noise-like classes. Equal sampling gives
+    the model equal exposure to bins it already solves well and bins it
+    doesn't, wasting gradient steps on the easy majority.
+
+    Weighted by sqrt(linear noise-to-signal ratio) = 10^(-SNR_db/20), so the
+    lowest bin (-10dB) gets roughly 10x the sampling weight of the highest
+    (+10dB) -- steep enough to shift real attention toward the hard bins,
+    without the ~100x an undamped linear-power weighting would give, which
+    risked starving the easy bins the model already handles well.
+    """
+    ratio = 10 ** (-np.asarray(snr_labels, dtype=np.float64) / 20)
+    return torch.tensor(ratio / ratio.mean(), dtype=torch.float32)
+
+
 def load_data():
     data_dir = REPO_ROOT / CFG["paths"]["processed_data"]
     X = np.load(data_dir / "X.npy")
@@ -80,9 +100,13 @@ def train(seed=None):
 
     X_t = torch.tensor(X)
     y_t = torch.tensor(y, dtype=torch.long)
+    train_sampler = WeightedRandomSampler(
+        compute_snr_weights(snr_labels[train_idx]),
+        num_samples=len(train_idx), replacement=True,
+    )
     train_loader = DataLoader(
         TensorDataset(X_t[train_idx], y_t[train_idx]),
-        batch_size=t["batch_size"], shuffle=True,
+        batch_size=t["batch_size"], sampler=train_sampler,
     )
     val_loader = DataLoader(
         TensorDataset(X_t[val_idx], y_t[val_idx]), batch_size=t["batch_size"]
