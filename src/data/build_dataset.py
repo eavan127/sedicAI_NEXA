@@ -117,10 +117,17 @@ def load_radioml_civilian(path=None, seed=None):
 
     rng = np.random.default_rng(seed if seed is not None else CFG["dataset"]["seed"])
     n_per = CFG["dataset"]["examples_per_class_per_snr"]
-    jitter = (CFG.get("civilian") or {}).get("symbol_rate_jitter")
+    civ_cfg = CFG.get("civilian") or {}
+    jitter = civ_cfg.get("symbol_rate_jitter")
+    # What fraction of frames get resampled. 1.0 replaces the native rate
+    # entirely, which measurably costs accuracy AT that rate -- the model stops
+    # seeing it. Mixing keeps RadioML's native ~8 sps in the training set while
+    # adding coverage either side.
+    jitter_fraction = float(civ_cfg.get("jitter_fraction", 1.0))
     window_len = CFG["signal"]["window_len"]
     if jitter:
-        print(f"  civilian symbol-rate jitter ON: resample factor {jitter[0]}-{jitter[1]}x")
+        print(f"  civilian symbol-rate jitter ON: resample {jitter[0]}-{jitter[1]}x "
+              f"on {jitter_fraction:.0%} of frames")
     out = []
 
     with h5py.File(path, "r") as f:
@@ -147,7 +154,8 @@ def load_radioml_civilian(path=None, seed=None):
 
                 if jitter:
                     out.extend(
-                        (_jitter_symbol_rate(iq[i], rng, jitter[0], jitter[1], window_len),
+                        (_jitter_symbol_rate(iq[i], rng, jitter[0], jitter[1], window_len)
+                         if rng.random() < jitter_fraction else iq[i],
                          class_name, float(snr_db))
                         for i in range(n)
                     )

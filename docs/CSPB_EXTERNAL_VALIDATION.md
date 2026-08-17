@@ -67,6 +67,54 @@ model leaned on it.
 
 ---
 
+## 16QAM and 64QAM are not separately identifiable at a 512-sample window
+
+**This is the most consequential result here, and it changes what the brief may
+claim.** It surfaced by accident, from comparing three training configurations.
+
+| config | 16QAM | 64QAM | **sum** |
+|---|---|---|---|
+| baseline | 0.252 | 0.287 | **0.539** |
+| full jitter (100% resampled) | 0.284 | 0.047 | 0.331 |
+| mixed jitter (50%) | 0.066 | 0.476 | **0.542** |
+
+Baseline and mixed jitter have **identical combined QAM performance** (0.539 vs
+0.542) while their individual columns are almost exactly swapped. In the mixed
+model, 16QAM is classified as 64QAM 42% of the time.
+
+The mass is conserved. The model reliably detects *"dense QAM constellation"* —
+that total is stable — but which of the two labels it assigns is close to
+arbitrary and flips with configuration.
+
+The same behaviour appeared in isolated 4-class civilian experiments during this
+work, where runs collapsed to "BPSK plus one arbitrary QAM class" depending on
+the random seed. That was initially read as a broken experiment; at n = 14,000
+per class on third-party data it is clearly a property of the task.
+
+**Why:** at ~8 samples/symbol a 512-sample window spans roughly 51-64 symbols.
+16QAM has 16 constellation points, 64QAM has 64. At about one observation per
+point, a 64-point constellation is not statistically distinguishable from a
+sparser one. This also explains the otherwise puzzling fact that **64QAM recall
+is flat across SNR** — 0.087 at -10 dB and 0.273 at +10 dB on our own data.
+More SNR does not buy more symbols.
+
+### Consequences
+
+- **Do not quote 16QAM and 64QAM recalls as separate meaningful numbers.** Any
+  single value is close to a coin flip. Report the combined high-order-QAM
+  detection rate (~0.54), or report both with this caveat attached.
+- `TEAM_ROLES.md` attributes 64QAM's weakness to *"the constellation sits inside
+  the noise floor"* at -10 dB. That rationale is wrong — the limit holds at
+  +10 dB too. The advice not to chase it stands; the stated reason does not.
+- This is a **window-length** limit, not a data-volume or model-capacity limit.
+  More civilian examples cannot fix it, which is consistent with the recorded
+  1000 -> 2000 experiment producing nothing measurable.
+- The clean way to confirm it is CSPB's 32,768-sample records: score the same
+  signals at 512 / 1024 / 2048 / 4096 windows. Our own format contract fixes
+  the window at 512, so this cannot be tested on RadioML.
+
+---
+
 ## The fix, and what it costs
 
 `configs/civ_jitter.yaml` resamples civilian frames by a log-uniform factor
@@ -78,24 +126,43 @@ The lower bound is set by the format contract, not preference: a 1024-sample
 frame resampled below ~0.5× falls under the 512-sample window, and padding back
 up would manufacture the flat-tail artefact the contract exists to prevent.
 
-| Metric (CSPB, 56k) | Baseline | + jitter | |
+Two variants were measured, differing only in `civilian.jitter_fraction` — what
+share of civilian frames get resampled.
+
+| Metric (CSPB, 56k) | Baseline | full jitter (1.0) | **mixed (0.5)** |
 |---|---|---|---|
-| jamming FA @ 0–4 sps | 0.328 | **0.026** | **12.8× better** |
-| jamming FA @ 4–6 sps | 0.129 | **0.011** | 11× better |
-| **jamming FA overall** | **0.0615** | **0.0155** | **4× better** |
-| accuracy @ 0–4 sps | 0.052 | **0.268** | 5× better |
-| accuracy @ 8–10 sps | 0.642 | 0.550 | worse |
-| overall accuracy | 0.474 | 0.450 | worse |
-| BPSK | 0.842 | **0.921** | better |
-| **64QAM** | 0.287 | **0.047** | **collapses** |
-| any-threat FA | 0.206 | 0.246 | worse |
+| jamming FA @ 0–4 sps | 0.328 | **0.026** | 0.129 |
+| **jamming FA overall** | 0.0615 | **0.0155** | 0.0261 |
+| **any-threat FA** | 0.206 | 0.246 | **0.129** |
+| accuracy @ 0–4 sps | 0.052 | **0.268** | 0.134 |
+| accuracy @ 6–8 sps | 0.561 | 0.535 | **0.632** |
+| accuracy @ 8–10 sps | 0.642 | 0.550 | **0.645** |
+| accuracy @ 14+ sps | 0.540 | 0.431 | **0.575** |
+| **overall accuracy** | 0.474 | 0.450 | **0.524** |
+| BPSK | 0.842 | **0.921** | 0.857 |
+| QPSK | 0.516 | 0.550 | **0.696** |
+| high-order QAM (sum) | 0.539 | 0.331 | **0.542** |
 
-**It is a real trade, not a free win.** It buys a 4× reduction in the
-false-alarm metric the rules reward, and pays with peak accuracy and a 64QAM
-collapse that is certain at n = 14,000, not noise.
+**Resampling 100% of frames is the wrong setting.** It removes RadioML's native
+rate from training entirely, and accuracy at 8–10 sps — where the model was
+strongest — falls 0.642 → 0.550. Mixing keeps that regime represented and
+recovers it fully (0.645), while still improving the slow-rate bands.
 
-The jamming leakage does not vanish so much as **move to FHSS** (QPSK→FHSS 0.38,
-16QAM→FHSS 0.25, 64QAM→FHSS 0.25), which is why any-threat false alarms rise.
+**Mixed is the better configuration overall**: best accuracy, best any-threat
+false-alarm rate (down 37% from baseline), native-rate performance intact, and
+2.4× better jamming false alarms than baseline. Full jitter still wins on the
+jamming-FA metric alone (0.0155 vs 0.0261) by sacrificing everything else.
+
+Under every variant the jamming leakage partly **moves to FHSS** rather than
+disappearing (full jitter: QPSK→FHSS 0.38, 16QAM→FHSS 0.25, 64QAM→FHSS 0.25) —
+the same FHSS-attractor behaviour found by the held-out parameter test.
+
+### On our own RadioML split, mixed looks worse — unresolved
+
+JAMMING 0.7522 against baseline 0.8344 (−8.2 points, right at the 7.2-point
+noise floor) and FHSS 0.8244. These are single runs. Whether that is real
+degradation or seed noise is **not established** and needs `measure_variance.py`
+on each config before anyone acts on it.
 
 ---
 
@@ -134,12 +201,16 @@ should move FHSS by 9 points — treat it as unexplained until measured.
 
 ## Recommendations
 
-1. **Do not enable the jitter silently.** It changes the dataset everyone trains
-   on and trades 64QAM for false-alarm robustness. That is the team's call, with
-   the numbers above in front of them.
+1. **If the jitter is adopted, use `configs/civ_mix.yaml` (fraction 0.5), not
+   the full-replacement variant.** It is better on every measure except the
+   jamming-FA number in isolation. Either way it changes the dataset everyone
+   trains on, so it is the team's call, not P1's — and the own-split regression
+   above should be resolved first.
 2. **Stop quoting 0.0142 as the false-alarm rate.** It is measured only where
    the symbol rate matches training. Quote the CSPB figure, or state the
    condition explicitly.
+3. **Report high-order QAM as one number, or caveat the split.** 16QAM and
+   64QAM individually are not identifiable at this window length — see above.
 3. **The FHSS attractor is now confirmed three ways** — held-out jamming
    bandwidth, held-out radar duty cycle, and now real third-party civilian
    traffic. It is a class-boundary problem, not a jamming-generator problem.
