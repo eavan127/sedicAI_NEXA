@@ -72,10 +72,24 @@ def phase_rotate_batch(batch, theta):
     time: predict several rotations of the same window and average, and the
     per-rotation noise cancels while the signal does not. Free accuracy for
     compute only, since no new information is required.
+
+    `batch` arrives already normalised by preprocess_window (zero mean, unit
+    std over the combined I/Q array). Rotating a mean-subtracted signal is
+    only equivalent to rotating-then-centering when that mean was exactly
+    zero -- otherwise each rotation angle bakes in a different residual bias
+    the model never trained on. Renormalising per-example after rotation
+    removes that bias instead of leaving it in. This measurably matters for
+    FHSS: at -tta 4 without this fix, FHSS recall dropped from ~0.83 to
+    ~0.75-0.79 across seeds (an 11-point spread) while radar/jamming were
+    unaffected -- FHSS's short per-hop segments give it a less stable
+    per-window mean than radar's smoother chirp, so it was most exposed.
     """
     c, s = np.cos(theta), np.sin(theta)
     i, q = batch[:, 0], batch[:, 1]
     out = np.stack([c * i - s * q, s * i + c * q], axis=1)
+    mean = out.mean(axis=(1, 2), keepdims=True)
+    std = out.std(axis=(1, 2), keepdims=True)
+    out = (out - mean) / (std + 1e-8)
     return out.astype(batch.dtype)
 
 
