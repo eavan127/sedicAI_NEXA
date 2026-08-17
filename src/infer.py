@@ -58,6 +58,23 @@ def _load_models(model_path=None, ensemble=False):
     return models, paths
 
 
+# Below this softmax confidence, treat the call as unreliable rather than
+# trusting a forced guess — mirrors the organizers' own example output
+# (briefing slides: "TYPE-C UNKNOWN | AMBIGUOUS | 45.1% | INVESTIGATE").
+# This never changes predicted_class or is_threat — the graded classification
+# log still forces one of the 7 labels every time. It only adds a display/
+# reporting column, since abstaining on the graded output would just count as
+# a miss against recall.
+LOW_CONFIDENCE = 0.5
+
+
+def _status(predicted_class, confidence):
+    """Operational status label, not a scoring input — see LOW_CONFIDENCE above."""
+    if confidence < LOW_CONFIDENCE:
+        return "INVESTIGATE"
+    return "TRACKED" if predicted_class in CFG["judged_classes"] else "MONITOR"
+
+
 def run_inference(input_path, output_path, model_path=None, stride=None, ensemble=False):
     cfg_sig = CFG["signal"]
     window_len = cfg_sig["window_len"]
@@ -84,7 +101,7 @@ def run_inference(input_path, output_path, model_path=None, stride=None, ensembl
     with open(output_path, "w", newline="") as f:
         writer = csv.DictWriter(
             f, fieldnames=["window_index", "sample_start", "predicted_class",
-                            "confidence", "is_threat"]
+                            "confidence", "is_threat", "status"]
         )
         writer.writeheader()
         for i, (start, p) in enumerate(zip(starts, probs)):
@@ -95,6 +112,7 @@ def run_inference(input_path, output_path, model_path=None, stride=None, ensembl
                 "predicted_class": cls,
                 "confidence": round(float(p.max()), 4),
                 "is_threat": cls in CFG["judged_classes"],
+                "status": _status(cls, float(p.max())),
             })
 
     n_threat = sum(CLASSES[p.argmax()] in CFG["judged_classes"] for p in probs)
