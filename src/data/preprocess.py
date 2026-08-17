@@ -75,7 +75,8 @@ def phase_rotate_batch(batch, theta):
     """
     c, s = np.cos(theta), np.sin(theta)
     i, q = batch[:, 0], batch[:, 1]
-    return np.stack([c * i - s * q, s * i + c * q], axis=1)
+    out = np.stack([c * i - s * q, s * i + c * q], axis=1)
+    return out.astype(batch.dtype)
 
 
 def augment_iq(arr, rng=None):
