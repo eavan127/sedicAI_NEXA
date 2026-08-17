@@ -6,14 +6,18 @@ images — so "fine-tuning" here means training from random initialization.
 """
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class AttentionPool1d(nn.Module):
-    """Learned weighted pooling over time, instead of a plain average/max.
+    """Energy-gated attention pooling: learned weighted pooling over time,
+    where the scorer sees both the learned conv features AND the raw signal's
+    instantaneous power at each timestep -- instead of a plain average/max.
 
-    A 1x1 conv scores every timestep, softmax turns the scores into an
-    attention distribution over time, and the output is the weighted sum of
-    the features under that distribution.
+    A 1x1 conv scores every timestep from (conv features + local energy),
+    softmax turns the scores into an attention distribution over time, and
+    the output is the weighted sum of the conv features under that
+    distribution.
 
     Why this over flatten()+Linear: flatten hands the final Linear layer one
     independent weight per absolute time position, learned once, globally,
@@ -25,6 +29,17 @@ class AttentionPool1d(nn.Module):
     to weight up wherever the pulse (or hop, or jammer) actually sits and
     weight down the noise-only stretches, rather than a fixed position.
 
+    Why energy-gated specifically: the conv features alone give the scorer
+    only what it has learned to extract, which may or may not include
+    anything resembling "is there signal energy here." Concatenating raw
+    instantaneous power (I^2 + Q^2) as an extra channel hands it that cue
+    directly -- the same principle real radar systems use for energy
+    detection (deciding signal-present by thresholding received power). This
+    is power, not literally SNR -- true SNR needs a noise-floor estimate too,
+    which no single timestep can supply -- but it is the closest thing
+    actually computable per timestep, and it is a real, standard technique,
+    not an invented one.
+
     Same mechanism also removes the fixed-input-length requirement: softmax
     + weighted sum works over any number of timesteps and always produces
     one vector of size `channels`, so this model has no input_len dependency
@@ -34,12 +49,18 @@ class AttentionPool1d(nn.Module):
 
     def __init__(self, channels):
         super().__init__()
-        self.score = nn.Conv1d(channels, 1, kernel_size=1)
+        self.score = nn.Conv1d(channels + 1, 1, kernel_size=1)
 
-    def forward(self, x):
-        # x: (batch, channels, time)
-        weights = torch.softmax(self.score(x), dim=2)   # (batch, 1, time)
-        return (x * weights).sum(dim=2)                  # (batch, channels)
+    def forward(self, x, raw_power):
+        # x: (batch, channels, time_reduced)   raw_power: (batch, 1, time_raw)
+        # Conv/pooling upstream changed the time axis length from the raw
+        # input; adaptive pooling re-aligns the energy signal to whatever
+        # length the conv features currently are, without hand-computing the
+        # exact conv/pooling arithmetic.
+        energy = F.adaptive_avg_pool1d(raw_power, x.shape[-1])
+        combined = torch.cat([x, energy], dim=1)          # (batch, channels+1, time)
+        weights = torch.softmax(self.score(combined), dim=2)  # (batch, 1, time)
+        return (x * weights).sum(dim=2)                    # (batch, channels)
 
 
 class AMC_CNN(nn.Module):
@@ -69,6 +90,11 @@ class AMC_CNN(nn.Module):
         return x
 
     def forward(self, x):
-        x = self.attn_pool(self._features(x))
+        # Instantaneous power at each raw sample -- I^2 + Q^2 -- the energy
+        # cue AttentionPool1d gates on, computed once here from the original
+        # input before any conv layer touches it.
+        raw_power = x[:, 0:1, :] ** 2 + x[:, 1:2, :] ** 2   # (batch, 1, window_len)
+        feats = self._features(x)
+        x = self.attn_pool(feats, raw_power)
         x = self.dropout(self.relu(self.fc1(x)))
         return self.fc2(x)
