@@ -10,6 +10,25 @@ import numpy as np
 from src.config import CFG
 
 
+def safe_freq_offset(rng, half_span, fs, safety=0.7):
+    """Random centre-frequency offset that keeps a signal spanning
+    +/-half_span safely inside the Nyquist limit (+/-fs/2).
+
+    Represents realistic receiver/transmitter oscillator mismatch (or
+    Doppler shift) -- every judged-class generator previously assumed
+    perfect centring at 0 Hz, which a real captured signal essentially
+    never has.
+
+    `safety` (< 1) keeps the offset within a FRACTION of the true remaining
+    margin rather than the full margin, so a shifted signal doesn't sit
+    exactly at the Nyquist edge -- leaves headroom for FFT bin rounding and
+    downstream windowing, same spirit as the existing bandwidth/hop-comb
+    margins already in configs/default.yaml.
+    """
+    margin = max(fs / 2 - half_span, 0.0)
+    return rng.uniform(-margin, margin) * safety
+
+
 def generate_lfm_chirp_iq(fs, duration, bandwidth, f_start=None):
     """Generate a single complex-baseband LFM radar pulse.
 
@@ -63,6 +82,10 @@ def random_radar_example(fs=None, total_duration=None, rng=None):
     pulse_width = rng.uniform(*cfg["pulse_width_s"])
     bandwidth = rng.uniform(*cfg["bandwidth_hz"])
     time_delay = rng.uniform(*cfg["time_delay_s"])
+    # Carrier frequency offset -- simulates oscillator mismatch/Doppler.
+    # Computed from the chirp's own half-span so it can never push the
+    # sweep's edge past Nyquist, however wide this particular draw is.
+    center_offset = safe_freq_offset(rng, bandwidth / 2, fs)
 
     # PRI is drawn CONDITIONAL on pulse width, so pulse_width < PRI always.
     # Sampling them independently allows duty > 100%, i.e. a pulse starting
@@ -79,6 +102,7 @@ def random_radar_example(fs=None, total_duration=None, rng=None):
     # Randomize sweep direction (up-chirp vs down-chirp)
     f_start = -bandwidth / 2 if rng.random() > 0.5 else bandwidth / 2
     bandwidth = bandwidth if f_start < 0 else -bandwidth
+    f_start += center_offset
 
     # Two emission patterns, both real. RadChar sends a short burst (2-6 pulses)
     # then falls silent; a continuously-scanning radar keeps transmitting. We

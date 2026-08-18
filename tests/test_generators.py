@@ -16,10 +16,11 @@ Run:  pytest tests/ -v
 import numpy as np
 import pytest
 
+from src.config import CFG
 from src.data.preprocess import add_awgn, augment_iq, preprocess_window
 from src.generators.fhss import generate_fhss
 from src.generators.jamming import apply_jamming, generate_barrage_jamming, generate_tone_jamming
-from src.generators.radar import embed_pulse_train, generate_lfm_chirp_iq
+from src.generators.radar import embed_pulse_train, generate_lfm_chirp_iq, safe_freq_offset
 
 FS = 1e6
 
@@ -238,6 +239,61 @@ class TestJamming:
         rng = np.random.default_rng(3)
         spectrum = np.abs(np.fft.fft(generate_barrage_jamming(4096, rng=rng)))
         assert spectrum.max() < 20 * spectrum.mean()
+
+
+class TestFrequencyOffset:
+    """safe_freq_offset() adds a random centre-frequency shift (simulating
+    oscillator mismatch/Doppler) to radar, FHSS, and jamming-sweep. The one
+    thing that must never happen: a shifted signal's edge crossing Nyquist,
+    which would silently alias -- training data labelled correctly but
+    carrying the wrong frequency content. See safe_freq_offset's docstring.
+    """
+
+    def test_offset_never_exceeds_the_true_margin(self):
+        rng = np.random.default_rng(5)
+        fs = 3.2e6
+        for half_span in np.linspace(0, fs / 2, 50):
+            margin = fs / 2 - half_span
+            for _ in range(50):
+                offset = safe_freq_offset(rng, half_span, fs, safety=1.0)
+                assert abs(offset) <= margin + 1e-6
+
+    def test_safety_factor_scales_the_offset(self):
+        """safety=0.5 must stay within half the margin a safety=1.0 draw could reach."""
+        rng = np.random.default_rng(6)
+        fs, half_span = 3.2e6, 1e6
+        margin = fs / 2 - half_span
+        offsets = [safe_freq_offset(rng, half_span, fs, safety=0.5) for _ in range(200)]
+        assert max(abs(o) for o in offsets) <= 0.5 * margin + 1e-6
+
+    def test_zero_margin_gives_zero_offset(self):
+        """A signal already spanning the full Nyquist range has no room to
+        shift at all -- the offset must degrade to exactly 0, not error out
+        or (worse) push it over."""
+        rng = np.random.default_rng(7)
+        fs = 3.2e6
+        assert safe_freq_offset(rng, fs / 2, fs) == 0.0
+        assert safe_freq_offset(rng, fs, fs) == 0.0   # half_span > Nyquist entirely
+
+    @pytest.mark.parametrize("half_span,label", [
+        (max(CFG["radar"]["bandwidth_hz"]) / 2, "radar"),
+        ((max(CFG["fhss"]["n_channels"]) / 2) * max(CFG["fhss"]["channel_spacing_hz"]), "FHSS comb"),
+        (max(CFG["jamming"]["sweep_bandwidth_hz"]) / 2, "jamming sweep"),
+    ])
+    def test_worst_case_config_values_stay_inside_nyquist_after_offset(self, half_span, label):
+        """The actual config ranges, at their widest, plus the largest offset
+        safe_freq_offset could draw for them -- must still clear Nyquist.
+        This is the same worst-case check as test_config.py's Nyquist tests,
+        extended to prove the offset doesn't reopen the gap those tests close.
+        """
+        rng = np.random.default_rng(8)
+        fs = CFG["signal"]["fs"]
+        nyquist = fs / 2
+        worst_offset = max(abs(safe_freq_offset(rng, half_span, fs)) for _ in range(500))
+        assert half_span + worst_offset < nyquist, (
+            f"{label}: half_span={half_span:.0f} Hz + worst offset={worst_offset:.0f} Hz "
+            f"reaches or exceeds Nyquist ({nyquist:.0f} Hz)"
+        )
 
 
 class TestPreprocess:
