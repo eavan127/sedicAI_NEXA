@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset, WeightedRandomSampler
 
-from src.config import CFG, CLASSES, REPO_ROOT
+from src.config import CFG, CLASSES, CLASS_TO_IDX, REPO_ROOT
 from src.models.amc_cnn import AMC_CNN
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -39,13 +39,29 @@ def stratified_split(y, snr_labels, val_frac, test_frac, seed):
     return (np.concatenate(train_idx), np.concatenate(val_idx), np.concatenate(test_idx))
 
 
-def compute_class_weights(y, num_classes):
-    """Inverse-frequency weights, so the rarer judged classes aren't drowned out."""
+def compute_class_weights(y, num_classes, dampen=None):
+    """Inverse-frequency weights, so the rarer judged classes aren't drowned out.
+
+    `dampen`: optional {class_idx: multiplier} applied after the
+    inverse-frequency calculation. NOISE_FLOOR is the current use case: with
+    equal class counts it would get the same weight (~1.0) as every other
+    class, but predicting it is disproportionately cheap for the loss --
+    it's a structureless class, so "say NOISE_FLOOR" is a low-risk guess
+    whenever a real class looks ambiguous. Measured effect: it became the
+    single largest source of errors for BPSK/QPSK/16QAM/64QAM (see
+    evals/confusion_matrix.png), not just the low-SNR judged classes it was
+    added to protect. Halving its weight makes that guess less rewarding
+    without touching the other seven classes' balance.
+    """
     counts = np.maximum(np.bincount(y, minlength=num_classes), 1)
-    return torch.tensor(counts.sum() / (num_classes * counts), dtype=torch.float32)
+    weights = counts.sum() / (num_classes * counts)
+    if dampen:
+        for idx, mult in dampen.items():
+            weights[idx] *= mult
+    return torch.tensor(weights, dtype=torch.float32)
 
 
-def compute_snr_weights(snr_labels):
+def compute_snr_weights(snr_labels, y=None, neutral_classes=()):
     """Per-example sampling weight favouring low-SNR (harder) examples.
 
     Every SNR bin has equal example counts, but errors do not distribute
@@ -60,9 +76,21 @@ def compute_snr_weights(snr_labels):
     (+10dB) -- steep enough to shift real attention toward the hard bins,
     without the ~100x an undamped linear-power weighting would give, which
     risked starving the easy bins the model already handles well.
+
+    `neutral_classes` (class indices, e.g. NOISE_FLOOR) are exempted and
+    always get weight 1.0 regardless of their labelled SNR bin. Their SNR
+    label is a balancing bookkeeping value, not a measure of real difficulty
+    -- there is no signal fading, so there is nothing that gets harder at low
+    SNR. Weighting those examples the same as a genuinely fading signal at
+    that bin meant the model saw far more undifferentiated noise during
+    training than intended, on top of already having a "say NOISE_FLOOR when
+    unsure" option newly available -- measurably reinforcing that shortcut.
     """
     ratio = 10 ** (-np.asarray(snr_labels, dtype=np.float64) / 20)
-    return torch.tensor(ratio / ratio.mean(), dtype=torch.float32)
+    weights = ratio / ratio.mean()
+    if y is not None and len(neutral_classes):
+        weights = np.where(np.isin(y, list(neutral_classes)), 1.0, weights)
+    return torch.tensor(weights, dtype=torch.float32)
 
 
 def load_data():
@@ -98,10 +126,16 @@ def train(seed=None):
         y, snr_labels, d["val_frac"], d["test_frac"], d["seed"]
     )
 
+    # NOISE_FLOOR needs different treatment from every other class in both
+    # the sampler and the loss -- see compute_snr_weights/compute_class_weights.
+    noise_floor_idx = CLASS_TO_IDX.get("NOISE_FLOOR")
+    neutral_classes = [noise_floor_idx] if noise_floor_idx is not None else []
+    dampen = {noise_floor_idx: 0.5} if noise_floor_idx is not None else None
+
     X_t = torch.tensor(X)
     y_t = torch.tensor(y, dtype=torch.long)
     train_sampler = WeightedRandomSampler(
-        compute_snr_weights(snr_labels[train_idx]),
+        compute_snr_weights(snr_labels[train_idx], y[train_idx], neutral_classes),
         num_samples=len(train_idx), replacement=True,
     )
     train_loader = DataLoader(
@@ -114,7 +148,7 @@ def train(seed=None):
 
     model = AMC_CNN(num_classes=len(CLASSES), input_len=X.shape[-1]).to(DEVICE)
     criterion = nn.CrossEntropyLoss(
-        weight=compute_class_weights(y, len(CLASSES)).to(DEVICE)
+        weight=compute_class_weights(y, len(CLASSES), dampen=dampen).to(DEVICE)
     )
     optimizer = torch.optim.Adam(model.parameters(), lr=t["learning_rate"])
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
