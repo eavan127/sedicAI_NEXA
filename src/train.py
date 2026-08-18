@@ -47,11 +47,11 @@ def compute_class_weights(y, num_classes, dampen=None):
     equal class counts it would get the same weight (~1.0) as every other
     class, but predicting it is disproportionately cheap for the loss --
     it's a structureless class, so "say NOISE_FLOOR" is a low-risk guess
-    whenever a real class looks ambiguous. Measured effect: it became the
-    single largest source of errors for BPSK/QPSK/16QAM/64QAM (see
-    evals/confusion_matrix.png), not just the low-SNR judged classes it was
-    added to protect. Halving its weight makes that guess less rewarding
-    without touching the other seven classes' balance.
+whenever a real class looks ambiguous. Measured effect: it became the
+single largest source of errors for BPSK/QPSK/16QAM/64QAM/LFM_RADAR (see
+evals/confusion_matrix.png), not just the low-SNR judged classes it was
+added to protect. Halving its weight makes that guess less rewarding
+without touching the other seven classes' balance.
     """
     counts = np.maximum(np.bincount(y, minlength=num_classes), 1)
     weights = counts.sum() / (num_classes * counts)

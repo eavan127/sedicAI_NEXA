@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "inference-ui",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["scripts/inference_ui.py"],
+      "port": 7860
+    }
+  ]
+}

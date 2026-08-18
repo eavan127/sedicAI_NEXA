@@ -42,17 +42,25 @@ def train_one(X, y, snr_labels, tr, va, seed):
     set_seed(seed)
     t = CFG["training"]
 
+    # NOISE_FLOOR needs different treatment from every other class in both
+    # the sampler and the loss -- see compute_snr_weights/compute_class_weights
+    # in src/train.py.
+    noise_floor_idx = CLASS_TO_IDX.get("NOISE_FLOOR")
+    neutral_classes = [noise_floor_idx] if noise_floor_idx is not None else []
+    dampen = {noise_floor_idx: 0.5} if noise_floor_idx is not None else None
+
     X_t = torch.tensor(X)
     y_t = torch.tensor(y, dtype=torch.long)
     train_sampler = WeightedRandomSampler(
-        compute_snr_weights(snr_labels[tr]), num_samples=len(tr), replacement=True)
+        compute_snr_weights(snr_labels[tr], y[tr], neutral_classes),
+        num_samples=len(tr), replacement=True)
     train_loader = DataLoader(TensorDataset(X_t[tr], y_t[tr]),
                               batch_size=t["batch_size"], sampler=train_sampler)
     val_loader = DataLoader(TensorDataset(X_t[va], y_t[va]), batch_size=t["batch_size"])
 
     model = AMC_CNN(num_classes=len(CLASSES), input_len=X.shape[-1]).to(DEVICE)
     criterion = nn.CrossEntropyLoss(
-        weight=compute_class_weights(y, len(CLASSES)).to(DEVICE))
+        weight=compute_class_weights(y, len(CLASSES), dampen=dampen).to(DEVICE))
     opt = torch.optim.Adam(model.parameters(), lr=t["learning_rate"])
     sched = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, patience=t["scheduler_patience"])
 
