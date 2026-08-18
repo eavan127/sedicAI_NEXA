@@ -21,6 +21,7 @@ classes:
   - LFM_RADAR
   - FHSS
   - JAMMING
+  - NOISE_FLOOR
 
 judged_classes: [LFM_RADAR, FHSS, JAMMING]
 

@@ -37,6 +37,12 @@ classes:
   - LFM_RADAR
   - FHSS
   - JAMMING
+  # Empty channel -- nobody transmitting. Not a signal type, but softmax must
+  # output SOMETHING, and without this option a blank window is forced into the
+  # class it least-poorly resembles: barrage jamming, which is also noise-like.
+  # That reports a hostile emitter on empty spectrum -- the costliest false
+  # alarm available. Not judged; exists to protect the judged classes.
+  - NOISE_FLOOR
 
 # Which classes the benchmark is judged on.
 judged_classes: [LFM_RADAR, FHSS, JAMMING]

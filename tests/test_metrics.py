@@ -14,6 +14,7 @@ CIV = [CLASS_TO_IDX[c] for c in ("BPSK", "QPSK", "16QAM", "64QAM")]
 RADAR = CLASS_TO_IDX["LFM_RADAR"]
 FHSS = CLASS_TO_IDX["FHSS"]
 JAM = CLASS_TO_IDX["JAMMING"]
+NOISE = CLASS_TO_IDX["NOISE_FLOOR"]
 
 
 class TestTiers:
@@ -30,7 +31,7 @@ class TestTiers:
 
 class TestCoarseTier:
     def test_perfect_predictions(self):
-        y = np.array(CIV + [RADAR, FHSS, JAM])
+        y = np.array(CIV + [RADAR, FHSS, JAM, NOISE])
         m = coarse_tier_metrics(y, y.copy())
         assert m["accuracy"] == 1.0
         assert all(v == 1.0 for v in m["per_tier_recall"].values())

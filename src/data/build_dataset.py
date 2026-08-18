@@ -14,6 +14,7 @@ from src.config import CFG, CLASS_TO_IDX, REPO_ROOT
 from src.data.preprocess import add_awgn, preprocess_window
 from src.generators.fhss import random_fhss_example
 from src.generators.jamming import random_jamming_example
+from src.generators.noise import random_noise_example
 from src.generators.radar import random_radar_example
 
 SYNTHETIC_GENERATORS = {
@@ -159,6 +160,16 @@ def build_synthetic_examples(n_real_radar=0, rng=None):
                 # Synthetic signals are generated clean, so they need noise
                 # added. Real RadChar waveforms already carry theirs.
                 yield add_awgn(gen_fn(rng=rng), snr_db, rng=rng), class_name, snr_db
+
+    # NOISE_FLOOR is the one class add_awgn must NOT touch: it is already pure
+    # noise, and "signal-to-noise ratio" is undefined when there is no signal.
+    # It is still labelled across every SNR bin so the class stays balanced with
+    # the others and appears in every bin of the accuracy-vs-SNR curve -- the
+    # label there means "this bin's slot", not a property of the waveform.
+    if "NOISE_FLOOR" in CLASS_TO_IDX:
+        for snr_db in CFG["snr_bins_db"]:
+            for _ in range(n_per):
+                yield random_noise_example(rng=rng), "NOISE_FLOOR", snr_db
 
 
 def build_full_dataset():

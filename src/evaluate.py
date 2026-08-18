@@ -34,7 +34,11 @@ BENCHMARK_RECALL = 0.80
 # low SNR still yields the correct decision, "this is ordinary traffic".
 TIERS = {"Civilian": ["BPSK", "QPSK", "16QAM", "64QAM"],
          "Military": ["LFM_RADAR", "FHSS"],
-         "Hostile": ["JAMMING"]}
+         "Hostile": ["JAMMING"],
+         # Its own tier, not folded into Civilian: an empty channel is not
+         # "ordinary traffic", it is the absence of any emitter. Merging the
+         # two would hide the false alarm this class exists to prevent.
+         "Empty": ["NOISE_FLOOR"]}
 
 
 def _tier_of(class_name):
