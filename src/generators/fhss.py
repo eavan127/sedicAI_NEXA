@@ -8,6 +8,7 @@ on one of the declared channel frequencies.
 import numpy as np
 
 from src.config import CFG, REPO_ROOT
+from src.generators.radar import safe_freq_offset
 
 
 def generate_fhss(fs, total_duration, hop_duration, hop_freqs, rng=None):
@@ -34,7 +35,13 @@ def random_fhss_example(fs=None, total_duration=None, rng=None):
     hop_duration = 1 / hop_rate
     n_channels = rng.integers(*CFG["fhss"]["n_channels"])
     spacing = rng.uniform(*CFG["fhss"]["channel_spacing_hz"])
-    hop_freqs = (np.arange(n_channels) - n_channels / 2) * spacing
+    # Carrier frequency offset -- simulates oscillator mismatch/Doppler.
+    # Computed from the comb's own half-span so the outermost hop can never
+    # be pushed past Nyquist, however wide this particular draw is. FHSS has
+    # the least room of the three judged classes (comb can reach +/-1.536 MHz
+    # against a 1.6 MHz Nyquist), so this offset is naturally the smallest.
+    center_offset = safe_freq_offset(rng, (n_channels / 2) * spacing, fs)
+    hop_freqs = (np.arange(n_channels) - n_channels / 2) * spacing + center_offset
 
     return generate_fhss(fs, total_duration, hop_duration, hop_freqs, rng=rng)
 

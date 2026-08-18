@@ -8,7 +8,7 @@ Ratio matches what was requested.
 import numpy as np
 
 from src.config import CFG
-from src.generators.radar import generate_lfm_chirp_iq
+from src.generators.radar import generate_lfm_chirp_iq, safe_freq_offset
 
 
 def generate_barrage_jamming(n_samples, rng=None, fs=None, bandwidth=None, center=None):
@@ -65,10 +65,16 @@ def generate_tone_jamming(fs, n_samples, freqs, rng=None):
     return sig
 
 
-def generate_sweep_jamming(fs, duration, bandwidth):
+def generate_sweep_jamming(fs, duration, bandwidth, center_offset=0.0):
     """Fast repeating sweep jammer — same chirp math as radar, but tuned to
-    jamming-typical sweep rates rather than pulsed radar timing."""
-    return generate_lfm_chirp_iq(fs, duration, bandwidth)
+    jamming-typical sweep rates rather than pulsed radar timing.
+
+    center_offset simulates oscillator mismatch/Doppler, same as radar's --
+    barrage and tone jamming already randomize their placement (barrage via
+    `center` in generate_barrage_jamming, tone via its per-example freqs),
+    so sweep was the one jamming sub-type still assuming perfect centring.
+    """
+    return generate_lfm_chirp_iq(fs, duration, bandwidth, f_start=-bandwidth / 2 + center_offset)
 
 
 def apply_jamming(signal, jammer, jsr_db):
@@ -94,4 +100,5 @@ def random_jamming_example(fs=None, total_duration=None, rng=None):
         freqs = rng.uniform(-fs / 4, fs / 4, n_tones)
         return generate_tone_jamming(fs, n_samples, freqs, rng=rng)
     bandwidth = rng.uniform(*CFG["jamming"]["sweep_bandwidth_hz"])
-    return generate_sweep_jamming(fs, total_duration, bandwidth)
+    center_offset = safe_freq_offset(rng, bandwidth / 2, fs)
+    return generate_sweep_jamming(fs, total_duration, bandwidth, center_offset)
