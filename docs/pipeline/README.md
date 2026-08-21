@@ -13,6 +13,7 @@ why, how to run it, and what is still undecided.
 | 06 | Model & training | D | [06-model-training.md](06-model-training.md) |
 | 07 | Evaluation & benchmark | D | [07-evaluation.md](07-evaluation.md) |
 | 08 | Inference & submission | C + A | [08-inference-submission.md](08-inference-submission.md) |
+| 09 | RadioML & composite dataset (multi-label branch) | — | [09-multilabel-composite-guide.md](09-multilabel-composite-guide.md) |
 
 Master tool/licence list: [`../TOOLS.md`](../TOOLS.md)
 
