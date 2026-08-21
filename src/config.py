@@ -26,3 +26,18 @@ def load_config(path=None):
 CFG = load_config()
 CLASSES = CFG["classes"]
 CLASS_TO_IDX = {c: i for i, c in enumerate(CLASSES)}
+
+
+def multi_hot(class_names):
+    """Turn a set/iterable of class names into a (len(CLASSES),) 0/1 vector.
+
+    Used for both standalone examples (one bit set) and composite/overlay
+    examples (two or more bits set) -- the label representation is the same
+    either way, just with more bits on for a composite example.
+    """
+    import numpy as np
+
+    vec = np.zeros(len(CLASSES), dtype=np.float32)
+    for name in class_names:
+        vec[CLASS_TO_IDX[name]] = 1.0
+    return vec

@@ -8,9 +8,12 @@ has been eyeballed against reference literature (docs section 5.6).
 Usage:
     python -m src.data.build_dataset
 """
+from collections import defaultdict
+
 import numpy as np
 
-from src.config import CFG, CLASS_TO_IDX, REPO_ROOT
+from src.config import CFG, CLASS_TO_IDX, REPO_ROOT, multi_hot
+from src.data.composite import overlay_jamming
 from src.data.preprocess import add_awgn, preprocess_window
 from src.generators.fhss import random_fhss_example
 from src.generators.jamming import random_jamming_example
@@ -172,24 +175,69 @@ def build_synthetic_examples(n_real_radar=0, rng=None):
                 yield random_noise_example(rng=rng), "NOISE_FLOOR", snr_db
 
 
-def build_full_dataset():
-    """Combine three sources into windowed (X, y, snr) arrays:
+def build_composite_examples(radioml_overlay_pool, rng=None):
+    """Yield jammer-overlaid-on-victim examples, ADDITIVE to the standalone
+    dataset built by build_synthetic_examples/load_radioml_civilian.
 
-        civilian     RadioML          (P1's loader)
-        LFM_RADAR    RadChar + ours   (real in its regime, synthetic across a
-                                       wider parameter range)
+    `radioml_overlay_pool` must come from a SEPARATE load_radioml_civilian()
+    call (different seed) than the one used for standalone civilian
+    examples, so composite victims aren't the literal same rows already
+    used standalone.
+
+    civilian victims (RadioML) already carry their own SNR-labelled noise,
+    same as standalone civilian examples -- see load_radioml_civilian's
+    docstring -- so no add_awgn here. radar/FHSS victims are generated
+    clean and get exactly one add_awgn pass AFTER the jammer is mixed in,
+    matching how every other synthetic example gets noised once, at the end.
+    """
+    rng = rng or np.random.default_rng(CFG["dataset"]["seed"])
+    n_per = CFG["dataset"]["examples_per_class_per_snr"]
+    n_overlay = max(int(round(n_per * CFG["dataset"]["overlay_fraction"])), 0)
+    if n_overlay == 0:
+        return
+
+    pool = defaultdict(list)
+    for iq, class_name, snr_db in radioml_overlay_pool:
+        pool[(class_name, snr_db)].append(iq)
+
+    for class_name in ("BPSK", "QPSK", "16QAM", "64QAM"):
+        for snr_db in CFG["snr_bins_db"]:
+            for iq in pool.get((class_name, snr_db), [])[:n_overlay]:
+                jammed, class_set = overlay_jamming(iq, class_name, rng=rng)
+                yield jammed, class_set, snr_db
+
+    for class_name, gen_fn in (("LFM_RADAR", random_radar_example), ("FHSS", random_fhss_example)):
+        for snr_db in CFG["snr_bins_db"]:
+            for _ in range(n_overlay):
+                jammed, class_set = overlay_jamming(gen_fn(rng=rng), class_name, rng=rng)
+                yield add_awgn(jammed, snr_db, rng=rng), class_set, snr_db
+
+
+def build_full_dataset():
+    """Combine four sources into windowed (X, y, snr) arrays:
+
+        civilian     RadioML                (P1's loader)
+        LFM_RADAR    RadChar + ours         (real in its regime, synthetic
+                                             across a wider parameter range)
         FHSS/JAM     ours
+        composite    jammer overlaid on a victim drawn from the above, via
+                     build_composite_examples -- additive, not a replacement
+                     for any standalone example
 
     Mixing real and synthetic radar is deliberate: RadChar's parameters are a
     dataset-design choice (2-6 pulses packed into a 512-sample frame, 44-94%
     duty), whereas real radar runs at 0.1-10% duty. We do not know which the
     organisers' stream resembles, so we cover both.
+
+    `y` is multi-hot, shape (N, len(CLASSES)): one bit for a standalone
+    example, two (victim + JAMMING) for a composite one.
     """
     X, y, snr_labels = [], [], []
 
-    def add(iq, class_name, snr_db):
+    def add(iq, class_names, snr_db):
+        names = {class_names} if isinstance(class_names, str) else set(class_names)
         X.append(preprocess_window(iq))
-        y.append(CLASS_TO_IDX[class_name])
+        y.append(multi_hot(names))
         snr_labels.append(snr_db)
 
     real_radar = load_real_radar()
@@ -204,13 +252,22 @@ def build_full_dataset():
     for iq, class_name, snr_db in build_synthetic_examples(n_real_per_bin):
         add(iq, class_name, snr_db)
 
+    n_before_composite = len(X)
+    # Independent draw (seed+1), NOT the same rows used for standalone civilian
+    # examples above -- see build_composite_examples' docstring.
+    radioml_overlay_pool = load_radioml_civilian(seed=CFG["dataset"]["seed"] + 1)
+    for iq, class_set, snr_db in build_composite_examples(radioml_overlay_pool):
+        add(iq, class_set, snr_db)
+    n_composite = len(X) - n_before_composite
+
     if not X:
         raise RuntimeError("No examples generated — check generators and RadioML loader.")
 
     print(f"  sources: {len(real_radar)} real RadChar, "
-          f"{len(X) - len(real_radar)} synthetic/RadioML")
+          f"{n_before_composite - len(real_radar)} synthetic/RadioML, "
+          f"{n_composite} composite (jammer-overlaid)")
 
-    return np.stack(X), np.array(y), np.array(snr_labels, dtype=float)
+    return np.stack(X), np.stack(y), np.array(snr_labels, dtype=float)
 
 
 def main():
@@ -222,9 +279,12 @@ def main():
     np.save(out_dir / "y.npy", y)
     np.save(out_dir / "snr_labels.npy", snr_labels)
 
-    print(f"Built {X.shape[0]} examples, shape per example {X.shape[1:]}")
+    print(f"Built {X.shape[0]} examples, shape per example {X.shape[1:]}, "
+          f"labels shape {y.shape}")
+    n_multi = int((y.sum(axis=1) > 1).sum())
     for name, idx in CLASS_TO_IDX.items():
-        print(f"  {name:<12} {(y == idx).sum():>6}")
+        print(f"  {name:<12} {int(y[:, idx].sum()):>6}  (present in this many windows)")
+    print(f"  {'composite windows (>1 class present)':<38} {n_multi:>6}")
     print(f"Saved to {out_dir} (gitignored)")
 
 

@@ -16,6 +16,8 @@ Run:  pytest tests/ -v
 import numpy as np
 import pytest
 
+from src.config import CFG
+from src.data.composite import overlay_jamming
 from src.data.preprocess import add_awgn, augment_iq, preprocess_window
 from src.generators.fhss import generate_fhss
 from src.generators.jamming import apply_jamming, generate_barrage_jamming, generate_tone_jamming
@@ -238,6 +240,51 @@ class TestJamming:
         rng = np.random.default_rng(3)
         spectrum = np.abs(np.fft.fft(generate_barrage_jamming(4096, rng=rng)))
         assert spectrum.max() < 20 * spectrum.mean()
+
+
+class TestCompositeOverlay:
+    """src/data/composite.py -- jammer overlaid on a real victim signal, the
+    building block for the multi-label composite training examples."""
+
+    def test_label_set_is_victim_plus_jamming(self):
+        rng = np.random.default_rng(5)
+        victim = np.exp(2j * np.pi * 50e3 * np.arange(2048) / FS)
+        _, class_set = overlay_jamming(victim, "QPSK", rng=rng, fs=FS)
+        assert class_set == {"QPSK", "JAMMING"}
+
+    def test_output_length_matches_victim(self):
+        rng = np.random.default_rng(6)
+        victim = np.exp(2j * np.pi * 50e3 * np.arange(4096) / FS)
+        jammed, _ = overlay_jamming(victim, "BPSK", rng=rng, fs=FS)
+        assert len(jammed) == len(victim)
+
+    def test_invalid_victim_class_rejected(self):
+        """NOISE_FLOOR (nothing to jam) and JAMMING (already jamming, not a
+        victim) must both be refused, not silently accepted -- a silent
+        accept here would mean a composite example either jams silence or
+        double-counts jamming as its own victim."""
+        rng = np.random.default_rng(7)
+        victim = np.zeros(1024, dtype=complex)
+        with pytest.raises(ValueError):
+            overlay_jamming(victim, "NOISE_FLOOR", rng=rng, fs=FS)
+        with pytest.raises(ValueError):
+            overlay_jamming(victim, "JAMMING", rng=rng, fs=FS)
+
+    def test_achieved_jsr_stays_within_configured_range(self):
+        """Same guarantee test_applied_jsr_matches_request makes for
+        apply_jamming() directly. overlay_jamming draws jsr_db randomly from
+        jamming.jsr_db instead of taking it as a parameter, so this checks
+        the ACHIEVED ratio lands in the configured range across repeated
+        draws, rather than requesting one exact value."""
+        rng = np.random.default_rng(8)
+        lo, hi = CFG["jamming"]["jsr_db"]
+        victim = np.exp(2j * np.pi * 50e3 * np.arange(4096) / FS)
+        for _ in range(10):
+            jammed, _ = overlay_jamming(victim, "BPSK", rng=rng, fs=FS)
+            measured = 10 * np.log10(
+                np.mean(np.abs(jammed - victim) ** 2) / np.mean(np.abs(victim) ** 2)
+            )
+            assert lo - 0.5 <= measured <= hi + 0.5
 
 
 class TestPreprocess:

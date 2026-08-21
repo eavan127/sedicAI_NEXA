@@ -14,7 +14,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from sklearn.metrics import ConfusionMatrixDisplay, classification_report, confusion_matrix
+from sklearn.metrics import ConfusionMatrixDisplay, classification_report, multilabel_confusion_matrix
 
 from src.config import CFG, CLASSES, CLASS_TO_IDX, REPO_ROOT
 from src.models.amc_cnn import AMC_CNN
@@ -48,17 +48,32 @@ def _tier_of(class_name):
     raise KeyError(f"{class_name} is in no tier — update TIERS")
 
 
-def coarse_tier_metrics(y_true, y_pred):
-    """Accuracy and per-tier recall over Civilian / Military / Hostile."""
-    tier_names = list(TIERS)
-    tier_idx = {t: i for i, t in enumerate(tier_names)}
-    lut = np.array([tier_idx[_tier_of(c)] for c in CLASSES])
+TIER_CLASS_IDX = {t: np.array([CLASS_TO_IDX[c] for c in members]) for t, members in TIERS.items()}
 
-    t_true, t_pred = lut[y_true], lut[y_pred]
-    out = {"accuracy": float((t_true == t_pred).mean()), "per_tier_recall": {}}
-    for t, i in tier_idx.items():
-        m = t_true == i
-        out["per_tier_recall"][t] = float((t_pred[m] == i).mean()) if m.any() else None
+
+def coarse_tier_metrics(y_true, y_pred):
+    """Presence-based recall per tier, over multi-hot (N, num_classes) arrays.
+
+    A tier counts as "present" in a window when ANY of its member class bits
+    is 1 -- independently per tier, so a JAMMING-overlaid-on-LFM_RADAR window
+    correctly reads as BOTH Military and Hostile present, not forced into
+    picking one. This replaces the old single "predicted tier" lookup, which
+    assumed exactly one class (and therefore exactly one tier) per window --
+    an assumption composite examples break.
+
+    "accuracy" here is tier-bit (Hamming) accuracy across all four tiers and
+    all examples, analogous to train.py's val_bit_acc -- not "did every tier
+    call in this window match", which would be a much harsher subset-exact
+    metric.
+    """
+    tier_names = list(TIERS)
+    presence_true = np.stack([y_true[:, TIER_CLASS_IDX[t]].any(axis=1) for t in tier_names], axis=1)
+    presence_pred = np.stack([y_pred[:, TIER_CLASS_IDX[t]].any(axis=1) for t in tier_names], axis=1)
+
+    out = {"accuracy": float((presence_true == presence_pred).mean()), "per_tier_recall": {}}
+    for i, t in enumerate(tier_names):
+        m = presence_true[:, i]
+        out["per_tier_recall"][t] = float(presence_pred[m, i].mean()) if m.any() else None
     return out
 
 
@@ -69,26 +84,34 @@ def comms_vs_jamming(y_true, y_pred):
          signals and hostile CEMA interference (e.g., RF Jamming)"
 
     Reported as its own headline number so the panel does not have to dig it out
-    of a 7x7 confusion matrix.
+    of the per-class table.
+
+    Presence-based: "is jamming present" is now an independent yes/no bit, not
+    "which single class was picked" -- a civilian window that is ALSO jammed
+    (a composite example) correctly counts as a civilian example that IS
+    jammed, evaluated on whether the JAMMING bit was caught, rather than
+    forcing an either/or choice that composite data no longer represents.
     """
     civ = np.array([CLASS_TO_IDX[c] for c in TIERS["Civilian"]])
     jam = CLASS_TO_IDX["JAMMING"]
 
-    mask = np.isin(y_true, civ) | (y_true == jam)
+    is_civilian = y_true[:, civ].any(axis=1)
+    true_is_jam = y_true[:, jam] == 1
+    mask = is_civilian | true_is_jam
     if not mask.any():
         return None
 
-    true_is_jam = y_true[mask] == jam
-    pred_is_jam = y_pred[mask] == jam
+    true_is_jam_m = true_is_jam[mask]
+    pred_is_jam_m = y_pred[mask, jam] == 1
 
-    tp = int((true_is_jam & pred_is_jam).sum())
-    fn = int((true_is_jam & ~pred_is_jam).sum())
-    fp = int((~true_is_jam & pred_is_jam).sum())
+    tp = int((true_is_jam_m & pred_is_jam_m).sum())
+    fn = int((true_is_jam_m & ~pred_is_jam_m).sum())
+    fp = int((~true_is_jam_m & pred_is_jam_m).sum())
 
     return {
-        "accuracy": float((true_is_jam == pred_is_jam).mean()),
+        "accuracy": float((true_is_jam_m == pred_is_jam_m).mean()),
         "jamming_recall": tp / (tp + fn) if tp + fn else None,
-        "false_alarm_rate": fp / int((~true_is_jam).sum()) if (~true_is_jam).any() else None,
+        "false_alarm_rate": fp / int((~true_is_jam_m).sum()) if (~true_is_jam_m).any() else None,
         "n_evaluated": int(mask.sum()),
     }
 
@@ -105,8 +128,11 @@ def evaluate():
     model.load_state_dict(torch.load(ckpt, map_location=DEVICE))
     model.eval()
 
+    threshold = CFG.get("multilabel_threshold", 0.5)
     with torch.no_grad():
-        preds = model(torch.tensor(X_test).to(DEVICE)).argmax(1).cpu().numpy()
+        probs = torch.sigmoid(model(torch.tensor(X_test).to(DEVICE))).cpu().numpy()
+    preds = (probs > threshold).astype(int)
+    y_test = y_test.astype(int)
 
     evals_dir = REPO_ROOT / CFG["paths"]["evals"]
     evals_dir.mkdir(parents=True, exist_ok=True)
@@ -167,9 +193,21 @@ def evaluate():
         print(f"    {tier:<10} recall={rec:.4f}" if rec is not None
               else f"    {tier:<10} recall=n/a")
 
-    # Confusion matrix
-    cm = confusion_matrix(y_test, preds, labels=range(len(CLASSES)))
-    ConfusionMatrixDisplay(cm, display_labels=CLASSES).plot(xticks_rotation=45)
+    # Confusion matrix — a single 8x8 no longer makes sense once more than one
+    # class can be true in the same window (which of the 2 true classes would
+    # a mismatched cell even mean?). One small present/absent 2x2 per class
+    # instead, via sklearn's multilabel_confusion_matrix.
+    mcm = multilabel_confusion_matrix(y_test, preds, labels=range(len(CLASSES)))
+    ncols = 4
+    nrows = int(np.ceil(len(CLASSES) / ncols))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(3.2 * ncols, 3.2 * nrows))
+    for i, cls in enumerate(CLASSES):
+        ax = np.atleast_1d(axes).flat[i]
+        ConfusionMatrixDisplay(mcm[i], display_labels=["absent", "present"]).plot(
+            ax=ax, colorbar=False)
+        ax.set_title(cls, fontsize=10)
+    for j in range(len(CLASSES), nrows * ncols):
+        np.atleast_1d(axes).flat[j].axis("off")
     plt.tight_layout()
     plt.savefig(evals_dir / "confusion_matrix.png", dpi=150)
     plt.close()
@@ -180,18 +218,21 @@ def evaluate():
     # against the benchmark line).
     unique_snrs = sorted(np.unique(snr_test))
 
-    def _class_accs(idx):
+    def _class_recall_by_snr(idx):
+        """Recall of one class's bit at each SNR bin -- of windows at that
+        SNR where this class is truly present (standalone or composite),
+        what fraction did we correctly flag as present."""
         accs = []
         for s in unique_snrs:
-            m = (snr_test == s) & (y_test == idx)
-            accs.append((preds[m] == y_test[m]).mean() if m.any() else np.nan)
+            m = (snr_test == s) & (y_test[:, idx] == 1)
+            accs.append(preds[m, idx].mean() if m.any() else np.nan)
         return accs
 
     # Same grid feeds the plot below and the CSV — compute once.
-    accs_by_class = {cls: _class_accs(CLASS_TO_IDX[cls]) for cls in CLASSES}
+    accs_by_class = {cls: _class_recall_by_snr(CLASS_TO_IDX[cls]) for cls in CLASSES}
     with open(csv_dir / "accuracy_by_class_snr.csv", "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["class", "snr_db", "accuracy", "is_judged_class"])
+        w.writerow(["class", "snr_db", "recall", "is_judged_class"])
         for cls in CLASSES:
             for s, acc in zip(unique_snrs, accs_by_class[cls]):
                 w.writerow([cls, s, acc, cls in CFG["judged_classes"]])
@@ -199,7 +240,8 @@ def evaluate():
     plt.figure()
     plt.plot(unique_snrs, [(preds[snr_test == s] == y_test[snr_test == s]).mean()
                             for s in unique_snrs],
-              marker="o", color="black", label="overall (all 7 classes)", linewidth=2)
+              marker="o", color="black",
+              label=f"overall (per-class bit accuracy, all {len(CLASSES)} classes)", linewidth=2)
     for cls in CFG["judged_classes"]:
         plt.plot(unique_snrs, accs_by_class[cls],
                   marker=".", linestyle="--", linewidth=2, label=f"{cls} (judged)")
@@ -211,7 +253,11 @@ def evaluate():
     plt.axhline(BENCHMARK_RECALL, color="red", linestyle=":",
                 label=f"{BENCHMARK_RECALL:.0%} benchmark (judged classes only)")
     plt.xlabel("SNR (dB)")
-    plt.ylabel("Accuracy")
+    # Per-class lines are RECALL (of windows where that class is truly
+    # present, standalone or composite, how many were correctly flagged) --
+    # the black "overall" line is per-class-bit ACCURACY (includes true
+    # negatives too). Different quantities, same 0-1 axis; see legend.
+    plt.ylabel("Accuracy / Recall")
     plt.title("Accuracy vs. SNR — all classes")
     plt.legend(fontsize=8)
     plt.grid(True, alpha=0.3)

@@ -42,7 +42,7 @@ def one_run(X, y, snr_labels, seed):
     dampen = {noise_floor_idx: 0.5} if noise_floor_idx is not None else None
 
     X_t = torch.tensor(X)
-    y_t = torch.tensor(y, dtype=torch.long)
+    y_t = torch.tensor(y, dtype=torch.float32)  # multi-hot -> BCEWithLogitsLoss wants float targets
     train_sampler = WeightedRandomSampler(
         compute_snr_weights(snr_labels[tr], y[tr], neutral_classes),
         num_samples=len(tr), replacement=True)
@@ -51,8 +51,9 @@ def one_run(X, y, snr_labels, seed):
     val_loader = DataLoader(TensorDataset(X_t[va], y_t[va]), batch_size=t["batch_size"])
 
     model = AMC_CNN(num_classes=len(CLASSES), input_len=X.shape[-1]).to(DEVICE)
-    criterion = nn.CrossEntropyLoss(
-        weight=compute_class_weights(y, len(CLASSES), dampen=dampen).to(DEVICE))
+    # Multi-label: each class is an independent yes/no -- see src/train.py.
+    criterion = nn.BCEWithLogitsLoss(
+        pos_weight=compute_class_weights(y, len(CLASSES), dampen=dampen).to(DEVICE))
     opt = torch.optim.Adam(model.parameters(), lr=t["learning_rate"])
     sched = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, patience=t["scheduler_patience"])
 
@@ -80,12 +81,18 @@ def one_run(X, y, snr_labels, seed):
 
     model.load_state_dict(best_state)
     model.eval()
+    threshold = CFG.get("multilabel_threshold", 0.5)
     with torch.no_grad():
-        preds = model(torch.tensor(X[te]).to(DEVICE)).argmax(1).cpu().numpy()
+        present = (torch.sigmoid(model(torch.tensor(X[te]).to(DEVICE))) > threshold).cpu().numpy()
 
-    return {c: float((preds[y[te] == CLASS_TO_IDX[c]] == CLASS_TO_IDX[c]).mean())
-            for c in CFG["judged_classes"]
-            if (y[te] == CLASS_TO_IDX[c]).any()}
+    y_te = y[te]
+    out = {}
+    for c in CFG["judged_classes"]:
+        idx = CLASS_TO_IDX[c]
+        mask = y_te[:, idx] == 1
+        if mask.any():
+            out[c] = float(present[mask, idx].mean())
+    return out
 
 
 def main(runs):

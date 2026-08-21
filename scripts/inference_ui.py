@@ -81,18 +81,41 @@ def _style_light_axes(fig, axes):
                 txt.set_color(_TEXT_DIM)
 
 
-def _verdict_html(pred, tier, extra=""):
-    color = _TIER_COLOR.get(tier, _TEXT_DIM)
-    extra_html = (f'<div style="font-size:12px;color:{_TEXT_DIM};margin-top:6px;">{extra}</div>'
+def _verdict_html(detected, probs, extra=""):
+    """detected: list of class names that crossed multilabel_threshold, in
+    descending confidence order. probs: {class_name: probability} for all
+    classes. Renders one badge PER detected class -- a window with both a
+    real signal and a jammer overlaid on top shows both badges at once,
+    instead of forcing a single winner the way argmax/softmax used to."""
+    extra_html = (f'<div style="font-size:12px;color:{_TEXT_DIM};margin-top:8px;">{extra}</div>'
                   if extra else "")
+    if not detected:
+        return f"""
+        <div style="background:{_PANEL};border:1px solid {_GRID};border-radius:6px;
+                    padding:14px 16px;">
+          <div style="font-size:18px;font-weight:600;color:{_TEXT_DIM};">NO SIGNAL DETECTED</div>
+          <div style="font-size:12px;color:{_TEXT_DIM};margin-top:4px;">
+            nothing cleared the {CFG.get('multilabel_threshold', 0.5):.0%} threshold</div>
+          {extra_html}
+        </div>
+        """
+
+    badges = "".join(
+        f'<div style="display:inline-block;margin:0 8px 8px 0;">'
+        f'<span style="display:inline-block;font-size:10px;letter-spacing:0.1em;'
+        f'text-transform:uppercase;padding:3px 10px;border-radius:9px;'
+        f'background:{_TIER_COLOR.get(TIER_OF.get(c, "?"), _TEXT_DIM)}1a;'
+        f'color:{_TIER_COLOR.get(TIER_OF.get(c, "?"), _TEXT_DIM)};font-weight:600;">'
+        f'{TIER_OF.get(c, "?")}</span>'
+        f'<div style="font-size:20px;font-weight:600;color:{_TEXT};margin-top:4px;">'
+        f'{c} <span style="font-size:13px;font-weight:400;color:{_TEXT_DIM};">'
+        f'{probs[c] * 100:.0f}%</span></div></div>'
+        for c in detected
+    )
     return f"""
     <div style="background:{_PANEL};border:1px solid {_GRID};border-radius:6px;
                 padding:14px 16px;">
-      <span style="display:inline-block;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;
-                   padding:2px 9px;border-radius:9px;background:{color}1a;color:{color};
-                   font-weight:600;">{tier}</span>
-      <div style="font-size:24px;font-weight:600;color:{_TEXT};margin-top:8px;
-                  font-family:inherit;">{pred}</div>
+      {badges}
       {extra_html}
     </div>
     """
@@ -154,17 +177,22 @@ def make_spectrogram_figure(iq, title):
 
 
 def classify_iq(iq, model):
+    """Multi-label: sigmoid gives an independent probability per class, so
+    more than one can cross threshold for the same window -- e.g. a real
+    signal AND a jammer overlaid on top of it, reported together instead of
+    forcing one winner."""
     if len(iq) < WINDOW_LEN:
         raise gr.Error(f"Input has {len(iq)} samples, need at least {WINDOW_LEN}.")
     iq = iq[:WINDOW_LEN]
     arr = preprocess_window(iq, WINDOW_LEN)
     x = torch.tensor(arr).unsqueeze(0).to(DEVICE)
     with torch.no_grad():
-        probs = torch.softmax(model(x), dim=1).cpu().numpy()[0]
-    pred = CLASSES[int(probs.argmax())]
+        probs = torch.sigmoid(model(x)).cpu().numpy()[0]
     label_dict = {CLASSES[i]: float(probs[i]) for i in range(len(CLASSES))}
-    tier = TIER_OF.get(pred, "?")
-    return iq, label_dict, _verdict_html(pred, tier)
+    threshold = CFG.get("multilabel_threshold", 0.5)
+    detected = sorted((c for c in CLASSES if label_dict[c] > threshold),
+                       key=lambda c: -label_dict[c])
+    return iq, label_dict, _verdict_html(detected, label_dict)
 
 
 def run_on_upload(file):
@@ -184,21 +212,24 @@ def run_on_random_test_example():
     _, _, test_idx = stratified_split(y, snr_labels, d["val_frac"], d["test_frac"], d["seed"])
     idx = int(np.random.choice(test_idx))
     arr = X[idx]  # already preprocessed (2, window_len)
-    true_class = CLASSES[int(y[idx])]
+    true_classes = [CLASSES[i] for i in range(len(CLASSES)) if y[idx, i] == 1]
+    true_label = " + ".join(true_classes) if true_classes else "NONE"
     snr = snr_labels[idx]
 
     x = torch.tensor(arr).unsqueeze(0).to(DEVICE)
     with torch.no_grad():
-        probs = torch.softmax(model(x), dim=1).cpu().numpy()[0]
-    pred = CLASSES[int(probs.argmax())]
+        probs = torch.sigmoid(model(x)).cpu().numpy()[0]
     label_dict = {CLASSES[i]: float(probs[i]) for i in range(len(CLASSES))}
+    threshold = CFG.get("multilabel_threshold", 0.5)
+    detected = sorted((c for c in CLASSES if label_dict[c] > threshold),
+                       key=lambda c: -label_dict[c])
 
     iq_like = arr[0] + 1j * arr[1]
     fig = make_spectrogram_figure(
-        iq_like, f"Real test example — true label: {true_class} @ {snr:.0f} dB")
-    correct = "✓ correct" if pred == true_class else "✗ wrong"
-    extra = f"{correct} — true label was {true_class} @ {snr:.0f} dB"
-    verdict = _verdict_html(pred, TIER_OF.get(pred, "?"), extra)
+        iq_like, f"Real test example — true label: {true_label} @ {snr:.0f} dB")
+    correct = "✓ correct" if set(detected) == set(true_classes) else "✗ wrong"
+    extra = f"{correct} — true label was {true_label} @ {snr:.0f} dB"
+    verdict = _verdict_html(detected, label_dict, extra)
     return fig, label_dict, verdict
 
 

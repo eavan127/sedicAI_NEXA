@@ -53,6 +53,12 @@ judged_classes: [LFM_RADAR, FHSS, JAMMING]
 # one-line edit instead of a source hunt.
 benchmark_recall: 0.80
 
+# Per-class sigmoid decision threshold for the multi-label head: a class
+# counts as "present" in a window when sigmoid(logit) > this value. Classes
+# are judged independently, so more than one can be flagged in the same
+# window (e.g. BPSK AND JAMMING together).
+multilabel_threshold: 0.5
+
 dataset:
   # 400 -> 1000 helped substantially: all three judged classes moved at once,
   # more than any generator tweak, because the model was overfitting badly at
@@ -77,6 +83,14 @@ dataset:
   # therefore lands nearer 24/76 than 50/50. build_dataset adapts and keeps the
   # class balanced. Download RadChar-Small (4 GB) if more real data is wanted.
   radchar_fraction: 0.5
+  # Composite ("jammer overlaid on a real signal") examples, ADDITIVE on top
+  # of the standalone per-class counts above -- standalone data is untouched.
+  # Expressed as a fraction of examples_per_class_per_snr, generated per
+  # (victim class, SNR bin) for the 6 non-NOISE_FLOOR, non-JAMMING classes.
+  # Real jamming targets something (see docs/pipeline/04-jamming-generation.md),
+  # so this teaches the model that shape instead of only sterile,
+  # jamming-in-isolation examples.
+  overlay_fraction: 0.3
 
 # Literature-informed ranges — see docs appendix. Randomized per example so
 # the model learns the general signal concept, not one fixed signature.

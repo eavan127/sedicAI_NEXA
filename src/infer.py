@@ -12,8 +12,9 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from src.config import CFG, CLASSES, REPO_ROOT
+from src.config import CFG, CLASS_TO_IDX, CLASSES, REPO_ROOT
 from src.data.preprocess import preprocess_window
+from src.evaluate import TIERS
 from src.models.amc_cnn import AMC_CNN
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -58,21 +59,20 @@ def _load_models(model_path=None, ensemble=False):
     return models, paths
 
 
-# Below this softmax confidence, treat the call as unreliable rather than
-# trusting a forced guess — mirrors the organizers' own example output
-# (briefing slides: "TYPE-C UNKNOWN | AMBIGUOUS | 45.1% | INVESTIGATE").
-# This never changes predicted_class or is_threat — the graded classification
-# log still forces one of the 7 labels every time. It only adds a display/
-# reporting column, since abstaining on the graded output would just count as
-# a miss against recall.
-LOW_CONFIDENCE = 0.5
+def _status(detected_classes):
+    """Operational status label, not a scoring input.
 
-
-def _status(predicted_class, confidence):
-    """Operational status label, not a scoring input — see LOW_CONFIDENCE above."""
-    if confidence < LOW_CONFIDENCE:
+    Empty detected_classes means nothing cleared multilabel_threshold for
+    this window -- the multi-label equivalent of the old "confidence below
+    LOW_CONFIDENCE" case (mirrors the organizers' own example output,
+    briefing slides: "TYPE-C UNKNOWN | AMBIGUOUS | 45.1% | INVESTIGATE").
+    This never changes detected_classes or is_threat — the graded
+    classification log still reports exactly which classes crossed
+    threshold. It only adds a display/reporting column.
+    """
+    if not detected_classes:
         return "INVESTIGATE"
-    return "TRACKED" if predicted_class in CFG["judged_classes"] else "MONITOR"
+    return "TRACKED" if any(c in CFG["judged_classes"] for c in detected_classes) else "MONITOR"
 
 
 def run_inference(input_path, output_path, model_path=None, stride=None, ensemble=False):
@@ -92,30 +92,42 @@ def run_inference(input_path, output_path, model_path=None, stride=None, ensembl
         np.stack([preprocess_window(iq[s:s + window_len], window_len) for s in starts])
     ).to(DEVICE)
 
+    threshold = CFG.get("multilabel_threshold", 0.5)
     with torch.no_grad():
+        # Multi-label: each class judged independently (sigmoid), not one
+        # winner (softmax) -- a window can flag several classes at once,
+        # e.g. a real signal AND jamming overlaid on top of it.
         probs = np.mean(
-            [torch.softmax(m(batch), dim=1).cpu().numpy() for m in models], axis=0)
+            [torch.sigmoid(m(batch)).cpu().numpy() for m in models], axis=0)
+    present = probs > threshold
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    tier_fields = [f"{t.lower()}_present" for t in TIERS]
     with open(output_path, "w", newline="") as f:
         writer = csv.DictWriter(
-            f, fieldnames=["window_index", "sample_start", "predicted_class",
-                            "confidence", "is_threat", "status"]
+            f, fieldnames=["window_index", "sample_start", "detected_classes",
+                            "confidences", "is_threat", "status"] + tier_fields
         )
         writer.writeheader()
-        for i, (start, p) in enumerate(zip(starts, probs)):
-            cls = CLASSES[p.argmax()]
-            writer.writerow({
+        for i, (start, p, flags) in enumerate(zip(starts, probs, present)):
+            detected = [CLASSES[j] for j in range(len(CLASSES)) if flags[j]]
+            row = {
                 "window_index": i,
                 "sample_start": start,
-                "predicted_class": cls,
-                "confidence": round(float(p.max()), 4),
-                "is_threat": cls in CFG["judged_classes"],
-                "status": _status(cls, float(p.max())),
-            })
+                "detected_classes": ";".join(detected) if detected else "NONE",
+                "confidences": ";".join(f"{c}={p[CLASS_TO_IDX[c]]:.4f}" for c in detected),
+                "is_threat": any(c in CFG["judged_classes"] for c in detected),
+                "status": _status(detected),
+            }
+            for t, members in TIERS.items():
+                row[f"{t.lower()}_present"] = any(c in members for c in detected)
+            writer.writerow(row)
 
-    n_threat = sum(CLASSES[p.argmax()] in CFG["judged_classes"] for p in probs)
+    n_threat = sum(
+        any(CLASSES[j] in CFG["judged_classes"] for j in range(len(CLASSES)) if flags[j])
+        for flags in present
+    )
     print(f"Wrote {len(probs)} classified windows to {output_path}")
     print(f"  {n_threat} flagged as Military/CEMA or Jamming")
 

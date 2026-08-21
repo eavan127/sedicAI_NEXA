@@ -4,6 +4,8 @@ Training loop for AMC_CNN.
 Usage:
     python -m src.train
 """
+from collections import defaultdict
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -16,17 +18,26 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def stratified_split(y, snr_labels, val_frac, test_frac, seed):
-    """Split stratified by (class, SNR bin) jointly.
+    """Split stratified by (label-combination, SNR bin) jointly.
 
     Stratifying by class alone would let an SNR bin land entirely in one split,
-    making the accuracy-vs-SNR curve meaningless for that bin.
+    making the accuracy-vs-SNR curve meaningless for that bin. `y` is now
+    multi-hot (N, num_classes) -- grouping by the FULL combination (not just
+    one "primary" class) keeps composite examples (e.g. BPSK+JAMMING)
+    balanced across splits the same way standalone examples are, instead of
+    collapsing a two-class row into whichever single class got picked as
+    representative.
     """
     rng = np.random.default_rng(seed)
-    train_idx, val_idx, test_idx = [], [], []
+    combo_lookup = defaultdict(list)
+    for i, row in enumerate(y):
+        combo_lookup[tuple(row.astype(int))].append(i)
 
-    for cls in np.unique(y):
-        for snr in np.unique(snr_labels):
-            group = np.flatnonzero((y == cls) & (snr_labels == snr))
+    train_idx, val_idx, test_idx = [], [], []
+    for combo, rows in combo_lookup.items():
+        rows = np.array(rows)
+        for snr in np.unique(snr_labels[rows]):
+            group = rows[snr_labels[rows] == snr]
             if group.size == 0:
                 continue
             rng.shuffle(group)
@@ -40,7 +51,11 @@ def stratified_split(y, snr_labels, val_frac, test_frac, seed):
 
 
 def compute_class_weights(y, num_classes, dampen=None):
-    """Inverse-frequency weights, so the rarer judged classes aren't drowned out.
+    """Inverse-frequency weight PER CLASS, used as BCEWithLogitsLoss's
+    `pos_weight` -- so the rarer judged classes aren't drowned out.
+
+    `y` is multi-hot (N, num_classes); a class's count is how many windows
+    have that bit set, whether standalone or as part of a composite example.
 
     `dampen`: optional {class_idx: multiplier} applied after the
     inverse-frequency calculation. NOISE_FLOOR is the current use case: with
@@ -53,7 +68,7 @@ evals/confusion_matrix.png), not just the low-SNR judged classes it was
 added to protect. Halving its weight makes that guess less rewarding
 without touching the other seven classes' balance.
     """
-    counts = np.maximum(np.bincount(y, minlength=num_classes), 1)
+    counts = np.maximum(y.sum(axis=0), 1)
     weights = counts.sum() / (num_classes * counts)
     if dampen:
         for idx, mult in dampen.items():
@@ -85,11 +100,19 @@ def compute_snr_weights(snr_labels, y=None, neutral_classes=()):
     that bin meant the model saw far more undifferentiated noise during
     training than intended, on top of already having a "say NOISE_FLOOR when
     unsure" option newly available -- measurably reinforcing that shortcut.
+
+    `y`, if given, is multi-hot (N, num_classes); an example is neutral when
+    ANY of its neutral-class bits is set (NOISE_FLOOR never co-occurs with
+    anything else by construction, so in practice this is just "is this a
+    NOISE_FLOOR example").
     """
     ratio = 10 ** (-np.asarray(snr_labels, dtype=np.float64) / 20)
     weights = ratio / ratio.mean()
     if y is not None and len(neutral_classes):
-        weights = np.where(np.isin(y, list(neutral_classes)), 1.0, weights)
+        is_neutral = np.zeros(len(weights), dtype=bool)
+        for idx in neutral_classes:
+            is_neutral |= (y[:, idx] == 1)
+        weights = np.where(is_neutral, 1.0, weights)
     return torch.tensor(weights, dtype=torch.float32)
 
 
@@ -133,7 +156,7 @@ def train(seed=None):
     dampen = {noise_floor_idx: 0.5} if noise_floor_idx is not None else None
 
     X_t = torch.tensor(X)
-    y_t = torch.tensor(y, dtype=torch.long)
+    y_t = torch.tensor(y, dtype=torch.float32)  # multi-hot -> BCEWithLogitsLoss wants float targets
     train_sampler = WeightedRandomSampler(
         compute_snr_weights(snr_labels[train_idx], y[train_idx], neutral_classes),
         num_samples=len(train_idx), replacement=True,
@@ -147,9 +170,13 @@ def train(seed=None):
     )
 
     model = AMC_CNN(num_classes=len(CLASSES), input_len=X.shape[-1]).to(DEVICE)
-    criterion = nn.CrossEntropyLoss(
-        weight=compute_class_weights(y, len(CLASSES), dampen=dampen).to(DEVICE)
+    # Multi-label: each class is an independent yes/no, so BCEWithLogitsLoss
+    # (not CrossEntropyLoss, which assumes exactly one correct class per
+    # example) -- pos_weight reuses the same inverse-frequency idea per class.
+    criterion = nn.BCEWithLogitsLoss(
+        pos_weight=compute_class_weights(y, len(CLASSES), dampen=dampen).to(DEVICE)
     )
+    threshold = CFG.get("multilabel_threshold", 0.5)
     optimizer = torch.optim.Adam(model.parameters(), lr=t["learning_rate"])
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, patience=t["scheduler_patience"]
@@ -172,19 +199,25 @@ def train(seed=None):
         train_loss /= len(train_loader.dataset)
 
         model.eval()
-        val_loss, correct = 0.0, 0
+        val_loss, correct_bits, total_bits = 0.0, 0, 0
         with torch.no_grad():
             for xb, yb in val_loader:
                 xb, yb = xb.to(DEVICE), yb.to(DEVICE)
                 out = model(xb)
                 val_loss += criterion(out, yb).item() * xb.size(0)
-                correct += (out.argmax(1) == yb).sum().item()
+                # Per-class-bit accuracy (Hamming accuracy), not argmax match --
+                # argmax doesn't apply once more than one class can be true at
+                # once. This counts each of the 8 independent yes/no calls per
+                # window, not "did every bit in the window match".
+                preds_bin = (torch.sigmoid(out) > threshold).float()
+                correct_bits += (preds_bin == yb).sum().item()
+                total_bits += yb.numel()
         val_loss /= len(val_loader.dataset)
-        val_acc = correct / len(val_loader.dataset)
+        val_acc = correct_bits / total_bits
         scheduler.step(val_loss)
 
         print(f"epoch {epoch+1}/{t['epochs']}  train_loss={train_loss:.4f}  "
-              f"val_loss={val_loss:.4f}  val_acc={val_acc:.4f}")
+              f"val_loss={val_loss:.4f}  val_bit_acc={val_acc:.4f}")
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss

@@ -3,7 +3,7 @@ Train N models with different seeds and average their predictions.
 
 Why this helps here specifically: seed variance measured 2.2 points on radar,
 2.5 on FHSS and 8.9 on jamming. A single run lands at a random point inside
-that range — sometimes 0.889, sometimes 0.911. Averaging softmax outputs
+that range — sometimes 0.889, sometimes 0.911. Averaging sigmoid outputs
 cancels the initialisation noise, so the result sits near the top of the range
 rather than wherever the dice fell.
 
@@ -50,7 +50,7 @@ def train_one(X, y, snr_labels, tr, va, seed):
     dampen = {noise_floor_idx: 0.5} if noise_floor_idx is not None else None
 
     X_t = torch.tensor(X)
-    y_t = torch.tensor(y, dtype=torch.long)
+    y_t = torch.tensor(y, dtype=torch.float32)  # multi-hot -> BCEWithLogitsLoss wants float targets
     train_sampler = WeightedRandomSampler(
         compute_snr_weights(snr_labels[tr], y[tr], neutral_classes),
         num_samples=len(tr), replacement=True)
@@ -59,8 +59,9 @@ def train_one(X, y, snr_labels, tr, va, seed):
     val_loader = DataLoader(TensorDataset(X_t[va], y_t[va]), batch_size=t["batch_size"])
 
     model = AMC_CNN(num_classes=len(CLASSES), input_len=X.shape[-1]).to(DEVICE)
-    criterion = nn.CrossEntropyLoss(
-        weight=compute_class_weights(y, len(CLASSES), dampen=dampen).to(DEVICE))
+    # Multi-label: each class is an independent yes/no -- see src/train.py.
+    criterion = nn.BCEWithLogitsLoss(
+        pos_weight=compute_class_weights(y, len(CLASSES), dampen=dampen).to(DEVICE))
     opt = torch.optim.Adam(model.parameters(), lr=t["learning_rate"])
     sched = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, patience=t["scheduler_patience"])
 
@@ -90,23 +91,32 @@ def train_one(X, y, snr_labels, tr, va, seed):
     return model
 
 
-def _recalls(preds, y_true):
-    return {c: float((preds[y_true == CLASS_TO_IDX[c]] == CLASS_TO_IDX[c]).mean())
-            for c in CFG["judged_classes"] if (y_true == CLASS_TO_IDX[c]).any()}
+def _recalls(present, y_true):
+    """present/y_true: (N, len(CLASSES)) 0/1 arrays -- recall of each judged
+    class's bit, among examples where that class is truly present (standalone
+    or as part of a composite)."""
+    out = {}
+    for c in CFG["judged_classes"]:
+        idx = CLASS_TO_IDX[c]
+        mask = y_true[:, idx] == 1
+        if mask.any():
+            out[c] = float(present[mask, idx].mean())
+    return out
 
 
 def _predict(model, X_np, tta=0):
-    """Softmax probabilities, optionally averaged over TTA phase rotations.
+    """Sigmoid probabilities (each class independent), optionally averaged
+    over TTA phase rotations.
 
     Phase is arbitrary at the receiver, so a rotated copy is the same signal
-    with the same label. Averaging over rotations cancels per-view noise.
+    with the same label(s). Averaging over rotations cancels per-view noise.
     """
     views = [X_np] + [phase_rotate_batch(X_np, t)
                       for t in np.linspace(0, 2 * np.pi, tta, endpoint=False)[1:]]
     out = None
     with torch.no_grad():
         for v in views:
-            p = torch.softmax(model(torch.tensor(v).to(DEVICE)), dim=1).cpu().numpy()
+            p = torch.sigmoid(model(torch.tensor(v).to(DEVICE))).cpu().numpy()
             out = p if out is None else out + p
     return out / len(views)
 
@@ -114,6 +124,7 @@ def _predict(model, X_np, tta=0):
 def main(n_models, tta=0):
     X, y, snr_labels = load_data()
     d = CFG["dataset"]
+    threshold = CFG.get("multilabel_threshold", 0.5)
     tr, va, te = stratified_split(y, snr_labels, d["val_frac"], d["test_frac"], d["seed"])
     X_test = X[te]
     y_test = y[te]
@@ -136,11 +147,12 @@ def main(n_models, tta=0):
         probs = _predict(model, X_test, tta)
         summed_probs = probs if summed_probs is None else summed_probs + probs
 
-        r = _recalls(probs.argmax(1), y_test)
+        r = _recalls((probs > threshold).astype(int), y_test)
         members.append(r)
         print(f"  member {i+1}: " + "  ".join(f"{c}={v:.4f}" for c, v in r.items()))
 
-    ens = _recalls((summed_probs / n_models).argmax(1), y_test)
+    ens_probs = summed_probs / n_models
+    ens = _recalls((ens_probs > threshold).astype(int), y_test)
 
     print(f"\n{'class':<14}{'single mean':>13}{'single best':>13}{'ENSEMBLE':>11}{'':>3}")
     print("-" * 56)

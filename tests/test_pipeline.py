@@ -11,6 +11,17 @@ from src.models.amc_cnn import AMC_CNN
 from src.train import compute_class_weights, stratified_split
 
 
+def _one_hot(class_indices, num_classes):
+    """Turn a flat list of class indices into a (N, num_classes) multi-hot
+    array, one bit per row -- the shape stratified_split/compute_class_weights
+    now expect, since a row can in principle have more than one bit set for a
+    composite example (unused by these tests, which only need standalone
+    rows)."""
+    y = np.zeros((len(class_indices), num_classes))
+    y[np.arange(len(class_indices)), class_indices] = 1
+    return y
+
+
 class TestModel:
     def test_output_shape(self):
         model = AMC_CNN(num_classes=len(CLASSES), input_len=1024)
@@ -25,9 +36,13 @@ class TestModel:
         assert model(torch.zeros(2, 2, input_len)).shape == (2, len(CLASSES))
 
     def test_gradients_flow(self):
+        """Uses BCEWithLogitsLoss with multi-hot float targets -- the actual
+        production loss (src/train.py), now that classes are judged
+        independently rather than via a single argmax winner."""
         model = AMC_CNN(num_classes=len(CLASSES), input_len=1024)
-        loss = torch.nn.functional.cross_entropy(
-            model(torch.randn(8, 2, 1024)), torch.randint(0, len(CLASSES), (8,))
+        targets = (torch.rand(8, len(CLASSES)) > 0.5).float()
+        loss = torch.nn.functional.binary_cross_entropy_with_logits(
+            model(torch.randn(8, 2, 1024)), targets
         )
         loss.backward()
         assert all(p.grad is not None and torch.isfinite(p.grad).all()
@@ -36,12 +51,12 @@ class TestModel:
 
 class TestSplit:
     def _fixture(self):
-        y, snr = [], []
+        labels, snr = [], []
         for cls in range(len(CLASSES)):
             for s in CFG["snr_bins_db"]:
-                y += [cls] * 20
+                labels += [cls] * 20
                 snr += [s] * 20
-        return np.array(y), np.array(snr, dtype=float)
+        return _one_hot(labels, len(CLASSES)), np.array(snr, dtype=float)
 
     def test_splits_are_disjoint_and_complete(self):
         y, snr = self._fixture()
@@ -56,7 +71,7 @@ class TestSplit:
         recall benchmark cannot be computed for a missing class."""
         y, snr = self._fixture()
         _, _, te = stratified_split(y, snr, 0.15, 0.15, seed=42)
-        assert set(np.unique(y[te])) == set(np.unique(y))
+        assert set(y.argmax(axis=1)[te]) == set(y.argmax(axis=1))
         assert set(np.unique(snr[te])) == set(np.unique(snr))
 
     def test_deterministic_for_a_given_seed(self):
@@ -70,10 +85,10 @@ class TestClassWeights:
     def test_rare_classes_weigh_more(self):
         """The judged classes are the minority; if weighting ever inverts, the
         model quietly optimises for the classes we are not scored on."""
-        y = np.array([0] * 900 + [1] * 100)
+        y = _one_hot([0] * 900 + [1] * 100, 2)
         w = compute_class_weights(y, 2)
         assert w[1] > w[0]
 
     def test_handles_absent_class_without_dividing_by_zero(self):
-        w = compute_class_weights(np.array([0, 0, 1]), num_classes=3)
+        w = compute_class_weights(_one_hot([0, 0, 1], 3), num_classes=3)
         assert torch.isfinite(w).all()

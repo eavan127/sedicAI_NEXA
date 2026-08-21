@@ -25,6 +25,8 @@ classes:
 
 judged_classes: [LFM_RADAR, FHSS, JAMMING]
 
+multilabel_threshold: 0.5
+
 dataset:
   examples_per_class_per_snr: 30
   val_frac: 0.2
@@ -34,6 +36,8 @@ dataset:
   # generator. The remainder is synthetic, so the class total still matches the
   # other classes instead of doubling. 0 = fully synthetic.
   radchar_fraction: 0.5
+  # Composite (jammer-overlaid-on-victim) examples, additive -- see default.yaml.
+  overlay_fraction: 0.3
 
 radar:
   pulse_width_s: [0.00001, 0.0001]

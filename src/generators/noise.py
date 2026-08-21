@@ -2,12 +2,17 @@
 NOISE_FLOOR: an empty channel -- nobody transmitting, receiver hearing only
 thermal noise.
 
-Why this is a class rather than an absence: softmax always assigns one of the
-available labels, so without a "nothing here" option a blank window is forced
-into whichever real class it least-poorly resembles. Barrage jamming is
-band-limited noise by construction, so empty spectrum lands there -- the model
-reports a hostile emitter on an empty channel, which is the most expensive
-false alarm the system can make.
+Why this is a class rather than an absence: originally because the model's
+output was softmax, which always assigns one of the available labels, so
+without a "nothing here" option a blank window was forced into whichever real
+class it least-poorly resembled -- barrage jamming, being band-limited noise
+by construction, is what empty spectrum landed on, reporting a hostile
+emitter on an empty channel. The output is now a per-class sigmoid (see
+src/models/amc_cnn.py), which CAN legitimately output "no class present" --
+but NOISE_FLOOR is kept anyway, as an explicit training target rather than an
+emergent absence: it still directly teaches "this shape means nothing is
+transmitting" instead of hoping every class's sigmoid happens to land below
+threshold on its own.
 
 This class deliberately carries NO structure at all. It is generated as pure
 complex AWGN and, unlike every other class, is NOT passed through add_awgn
