@@ -13,7 +13,7 @@ from collections import defaultdict
 import numpy as np
 
 from src.config import CFG, CLASS_TO_IDX, REPO_ROOT, multi_hot
-from src.data.composite import overlay_jamming
+from src.data.composite import mix_components, overlay_jamming
 from src.data.preprocess import add_awgn, preprocess_window
 from src.generators.fhss import random_fhss_example
 from src.generators.jamming import random_jamming_example
@@ -213,6 +213,126 @@ def build_composite_examples(radioml_overlay_pool, rng=None):
                 yield add_awgn(jammed, snr_db, rng=rng), class_set, snr_db
 
 
+def load_radioml_clean_pool(path=None, seed=None):
+    """Near-clean civilian windows for use INSIDE mixtures, {class: (n, 1024)}.
+
+    Separate from load_radioml_civilian() on purpose. That one returns windows
+    at the SNR they are LABELLED with, which is right for a standalone example
+    and for a jamming overlay (the jammer lands on already-noisy traffic, which
+    is what a receiver sees). It is wrong inside a mixture: the other component
+    is generated clean and the composite gets one add_awgn pass, so a
+    pre-noised civilian part would end up noisier than the window's own label
+    claims -- the same double-noising trap load_real_radar() warns about.
+
+    So mixtures draw from RadioML's high-SNR blocks and treat them as clean.
+
+    Returns {} (with a warning) if the file is missing, same contract as every
+    other loader here.
+    """
+    import h5py
+
+    path = path or RADIOML_PATH
+    if not path.exists():
+        print(f"  ! RadioML not found at {path} -- civilian mixtures will be skipped.")
+        return {}
+
+    rng = np.random.default_rng(seed if seed is not None else CFG["dataset"]["seed"] + 2)
+    min_snr = CFG["dataset"]["radioml_clean_min_snr_db"]
+    snr_indices = [i for i in range(RADIOML_N_SNR_BINS)
+                   if RADIOML_MIN_SNR_DB + 2 * i >= min_snr]
+    if not snr_indices:
+        raise ValueError(
+            f"radioml_clean_min_snr_db={min_snr} leaves no RadioML blocks (max is "
+            f"{RADIOML_MIN_SNR_DB + 2 * (RADIOML_N_SNR_BINS - 1)} dB)"
+        )
+
+    # One pool per class, sized to the largest number of draws any single class
+    # can need, then drawn from with replacement. Reuse is harmless: each draw
+    # gets an independent partner, SIR, JSR and AWGN, so two draws of the same
+    # frame are not two copies of the same training example.
+    n_per = CFG["dataset"]["examples_per_class_per_snr"]
+    n_mix = max(int(round(n_per * CFG["dataset"]["mixture_fraction"])), 0)
+    pool_size = max(n_mix * len(CFG["snr_bins_db"]), 1)
+    per_block = int(np.ceil(pool_size / len(snr_indices)))
+
+    pool = {}
+    with h5py.File(path, "r") as f:
+        X = f["X"]
+        for class_name, class_idx in RADIOML_TARGET_CLASSES.items():
+            chunks = []
+            for snr_idx in snr_indices:
+                start = (class_idx * RADIOML_N_SNR_BINS * RADIOML_EXAMPLES_PER_SNR_BLOCK
+                         + snr_idx * RADIOML_EXAMPLES_PER_SNR_BLOCK)
+                n = min(per_block, RADIOML_EXAMPLES_PER_SNR_BLOCK)
+                rows = np.sort(rng.choice(RADIOML_EXAMPLES_PER_SNR_BLOCK, n, replace=False))
+                block = X[start:start + RADIOML_EXAMPLES_PER_SNR_BLOCK][rows]
+                chunks.append(block[:, :, 0] + 1j * block[:, :, 1])
+            pool[class_name] = np.concatenate(chunks)[:pool_size].astype(np.complex64)
+
+    return pool
+
+
+MIXTURE_GENERATORS = {
+    "LFM_RADAR": random_radar_example,
+    "FHSS": random_fhss_example,
+    "JAMMING": random_jamming_example,
+}
+
+
+def build_mixture_examples(clean_pool, rng=None):
+    """Yield multi-emitter mixture examples, ADDITIVE to everything above.
+
+    Covers the combinations overlay_jamming does not: military x military,
+    military x civilian, and three-way. Every component is generated clean,
+    summed at a random SIR by mix_components(), and the composite gets exactly
+    one add_awgn pass -- so one SNR label describes the whole window.
+
+    Combos naming a civilian class are skipped when RadioML is absent, rather
+    than raising, so a machine without the 21 GB file still builds the rest.
+    """
+    rng = rng or np.random.default_rng(CFG["dataset"]["seed"] + 3)
+    n_per = CFG["dataset"]["examples_per_class_per_snr"]
+    n_mix = max(int(round(n_per * CFG["dataset"]["mixture_fraction"])), 0)
+    combos = CFG["dataset"].get("mixture_combos") or []
+    if n_mix == 0 or not combos:
+        return
+
+    for combo in combos:
+        combo = list(combo)
+        unknown = [c for c in combo if c not in CLASS_TO_IDX]
+        if unknown:
+            raise ValueError(f"mixture_combos names unknown classes: {unknown}")
+        if "NOISE_FLOOR" in combo:
+            raise ValueError(
+                f"NOISE_FLOOR cannot co-occur with an emitter (got {combo}) -- "
+                f"it means 'empty channel'."
+            )
+        civilian = [c for c in combo if c in RADIOML_TARGET_CLASSES]
+        if civilian and not all(c in clean_pool for c in civilian):
+            print(f"  ! skipping {'+'.join(combo)} -- needs RadioML")
+            continue
+
+        for snr_db in CFG["snr_bins_db"]:
+            for _ in range(n_mix):
+                components = []
+                for class_name in combo:
+                    if class_name in RADIOML_TARGET_CLASSES:
+                        frames = clean_pool[class_name]
+                        frame = frames[rng.integers(len(frames))]
+                        # Random phase: a receiver's absolute phase carries no
+                        # class information, and it decorrelates repeated draws
+                        # of the same frame.
+                        iq = np.asarray(frame, dtype=np.complex128) * np.exp(
+                            1j * rng.uniform(0, 2 * np.pi))
+                    else:
+                        iq = MIXTURE_GENERATORS[class_name](rng=rng)
+                    components.append((class_name, iq))
+
+                mixed, class_set = mix_components(components, rng=rng)
+                yield add_awgn(mixed, snr_db, rng=rng), class_set, snr_db
+
+
+
 def build_full_dataset():
     """Combine four sources into windowed (X, y, snr) arrays:
 
@@ -260,12 +380,18 @@ def build_full_dataset():
         add(iq, class_set, snr_db)
     n_composite = len(X) - n_before_composite
 
+    n_before_mixture = len(X)
+    for iq, class_set, snr_db in build_mixture_examples(load_radioml_clean_pool()):
+        add(iq, class_set, snr_db)
+    n_mixture = len(X) - n_before_mixture
+
     if not X:
         raise RuntimeError("No examples generated — check generators and RadioML loader.")
 
     print(f"  sources: {len(real_radar)} real RadChar, "
           f"{n_before_composite - len(real_radar)} synthetic/RadioML, "
-          f"{n_composite} composite (jammer-overlaid)")
+          f"{n_composite} composite (jammer-overlaid), "
+          f"{n_mixture} multi-emitter mixtures")
 
     return np.stack(X), np.stack(y), np.array(snr_labels, dtype=float)
 

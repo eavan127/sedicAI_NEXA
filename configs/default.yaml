@@ -92,6 +92,41 @@ dataset:
   # jamming-in-isolation examples.
   overlay_fraction: 0.3
 
+  # Multi-emitter MIXTURES, additive again -- generated per (combo, SNR bin) as
+  # a fraction of examples_per_class_per_snr, same convention as
+  # overlay_fraction above. overlay_fraction covers "victim + JAMMING"; these
+  # cover the combinations that are not about jamming at all: two legitimate
+  # emitters sharing a window, which is the ordinary state of a contested band.
+  mixture_fraction: 0.3
+  # Power offset of each extra component relative to the first, in dB, drawn
+  # per example. Widening it teaches the model to still find the weaker
+  # emitter; narrowing it makes every mixture an equal-power blend, which is
+  # not what a receiver sees.
+  mixture_sir_db: [-6, 6]
+  # RadioML windows used INSIDE a mixture are taken from its high-SNR bins and
+  # treated as clean, so the composite gets exactly one add_awgn pass and the
+  # SNR label describes the whole window. Standalone civilian examples and the
+  # jamming overlays are untouched by this -- they keep RadioML's own labelled
+  # noise, exactly as before.
+  radioml_clean_min_snr_db: 24
+  mixture_combos:
+    # --- military x military ---
+    - [LFM_RADAR, FHSS]
+    # --- military x civilian ---
+    - [BPSK, LFM_RADAR]
+    - [QPSK, LFM_RADAR]
+    - [16QAM, LFM_RADAR]
+    - [64QAM, LFM_RADAR]
+    - [BPSK, FHSS]
+    - [QPSK, FHSS]
+    - [16QAM, FHSS]
+    - [64QAM, FHSS]
+    # --- three-way: contested band. Kept to three combos; over-representing
+    #     the hardest case skews the per-class positive rates.
+    - [BPSK, LFM_RADAR, JAMMING]
+    - [QPSK, FHSS, JAMMING]
+    - [16QAM, LFM_RADAR, FHSS]
+
 # Literature-informed ranges — see docs appendix. Randomized per example so
 # the model learns the general signal concept, not one fixed signature.
 radar:

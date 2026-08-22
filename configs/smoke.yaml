@@ -38,6 +38,13 @@ dataset:
   radchar_fraction: 0.5
   # Composite (jammer-overlaid-on-victim) examples, additive -- see default.yaml.
   overlay_fraction: 0.3
+  mixture_fraction: 0.3
+  mixture_sir_db: [-6, 6]
+  radioml_clean_min_snr_db: 24
+  mixture_combos:
+    - [LFM_RADAR, FHSS]
+    - [64QAM, LFM_RADAR]
+    - [QPSK, FHSS, JAMMING]
 
 radar:
   pulse_width_s: [0.00001, 0.0001]
