@@ -15,9 +15,9 @@ signal:
   # fs must also exceed twice the highest instantaneous frequency any generator
   # produces, or signals alias and fold back as the wrong frequency. See
   # tests/test_config.py — the Nyquist checks there are load-bearing.
-  fs: 3200000            # RadChar native -> Nyquist +/-1.6 MHz
-  window_len: 512        # RadChar native -> 160 us of signal per window
-  total_duration: 0.002  # seconds per generated example
+  fs: 3200000 # RadChar native -> Nyquist +/-1.6 MHz
+  window_len: 512 # RadChar native -> 160 us of signal per window
+  total_duration: 0.002 # seconds per generated example
 
 # SNR sweep applied to every class, so the accuracy-vs-SNR curve covers
 # the "clean to faded/noisy" range the rules require.
@@ -53,11 +53,35 @@ judged_classes: [LFM_RADAR, FHSS, JAMMING]
 # one-line edit instead of a source hunt.
 benchmark_recall: 0.80
 
-# Per-class sigmoid decision threshold for the multi-label head: a class
-# counts as "present" in a window when sigmoid(logit) > this value. Classes
-# are judged independently, so more than one can be flagged in the same
-# window (e.g. BPSK AND JAMMING together).
-multilabel_threshold: 0.5
+# Sigmoid decision threshold for the multi-label head: a class counts as
+# "present" in a window when sigmoid(logit) > this value. Classes are judged
+# independently, so more than one can be flagged in the same window (e.g.
+# BPSK AND JAMMING together).
+#
+# ONE global threshold could not serve all three judged classes at once:
+# sweeping it from 0.5 down to 0.15 on the eileen-multilabel-complete run
+# (2026-08-23) gave:
+#     threshold   LFM_RADAR   FHSS    JAMMING   (recall)
+#     0.5          52.0%      59.7%    87.2%
+#     0.3          59.5%      71.3%    89.6%
+#     0.2          68.5%      79.5%    91.4%
+#     0.15         75.9%      84.0%    92.2%
+# FHSS and JAMMING passed the 80% gate well before LFM_RADAR did, so
+# continuing to drag the shared threshold down to rescue LFM_RADAR was
+# needlessly costing FHSS/JAMMING precision they did not need to give up
+# (JAMMING precision alone fell 98%->94% for a class that passed at 0.5).
+#
+# Per-class thresholds instead: push LFM_RADAR further down specifically,
+# and let FHSS/JAMMING recover toward higher, more precision-safe values
+# now that they have passing margin to spare. Starting points below are
+# extrapolated from the sweep above -- re-verify empirically (rerun
+# evaluate.py) before trusting them, especially LFM_RADAR's, and retune if
+# a fresh training run changes the model's probability calibration.
+multilabel_threshold: 0.5   # fallback for any class not listed below
+multilabel_thresholds_per_class:
+  LFM_RADAR: 0.10   # still failing at 0.15 (75.9%) -- push lower
+  FHSS: 0.18         # passed at 0.15 (84.0%, +4pt margin) -- ease back up
+  JAMMING: 0.35      # passed even at 0.5 (87.2%) -- recover precision
 
 dataset:
   # 400 -> 1000 helped substantially: all three judged classes moved at once,
@@ -152,11 +176,12 @@ radar:
   # Pulse width must stay below the window duration (160 us) so each window can
   # show pulse-then-silence. That listening gap is what separates radar from a
   # sweep jammer, which runs continuously.
-  pulse_width_s: [0.00001, 0.0001]     # 10-100 us
-  bandwidth_hz: [50000, 1500000]       # Nyquist allows up to 1.5 MHz
-  pri_s: [0.000017, 0.01]              # 17 us - 10 ms: RadChar through realistic
-  time_delay_s: [0.000001, 0.00001]    # 1-10 us, matching RadChar — pulses must
-                                        # not always start at sample 0
+  pulse_width_s: [0.00001, 0.0001] # 10-100 us
+  bandwidth_hz: [50000, 1500000] # Nyquist allows up to 1.5 MHz
+  pri_s: [0.000017, 0.01] # 17 us - 10 ms: RadChar through realistic
+  time_delay_s:
+    [0.000001, 0.00001] # 1-10 us, matching RadChar — pulses must
+    # not always start at sample 0
   # PRI is drawn conditional on pulse width so that pulse_width < PRI always.
   # A duty cycle above 100% would mean the next pulse starting before the
   # previous one ended — physically impossible, and it produced overlapping
@@ -177,8 +202,8 @@ radar:
   # RadChar fires a burst of 2-6 pulses then falls silent for the rest of the
   # frame; a continuously-scanning radar keeps transmitting. Both are real, so
   # burst_fraction of examples use a capped burst and the rest run continuous.
-  n_pulses: [2, 7]                     # upper bound exclusive -> 2..6
-  burst_fraction: 0.5                  # half burst, half continuous
+  n_pulses: [2, 7] # upper bound exclusive -> 2..6
+  burst_fraction: 0.5 # half burst, half continuous
 
 fhss:
   # CRITICAL: the dwell time (1 / hop_rate) must be much SHORTER than the
