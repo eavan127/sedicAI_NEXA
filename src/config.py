@@ -62,3 +62,18 @@ def resolve_multilabel_thresholds():
     default = CFG.get("multilabel_threshold", 0.5)
     per_class = CFG.get("multilabel_thresholds_per_class", {})
     return np.array([per_class.get(c, default) for c in CLASSES], dtype=np.float32)
+
+
+def resolve_class_weight_multipliers():
+    """{class_idx: multiplier} to apply on top of compute_class_weights'
+    inverse-frequency pos_weight (src/train.py) -- the `dampen` argument.
+
+    SHARED for the same reason as resolve_multilabel_thresholds(): src/train.py,
+    scripts/train_ensemble.py and scripts/measure_variance.py each used to
+    hand-build this dict with only NOISE_FLOOR's 0.5 dampen hardcoded inline,
+    so a class-weight tuning pass (e.g. boosting LFM_RADAR) would have had to
+    be copy-pasted into three places, or silently missed one of them, exactly
+    like the threshold fix did before it was centralised here.
+    """
+    overrides = CFG.get("class_weight_multipliers", {})
+    return {CLASS_TO_IDX[c]: mult for c, mult in overrides.items() if c in CLASS_TO_IDX}

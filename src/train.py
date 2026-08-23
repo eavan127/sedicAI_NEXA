@@ -11,7 +11,8 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset, WeightedRandomSampler
 
-from src.config import CFG, CLASSES, CLASS_TO_IDX, REPO_ROOT
+from src.config import (CFG, CLASSES, CLASS_TO_IDX, REPO_ROOT,
+                         resolve_class_weight_multipliers, resolve_multilabel_thresholds)
 from src.models.amc_cnn import AMC_CNN
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -149,11 +150,13 @@ def train(seed=None):
         y, snr_labels, d["val_frac"], d["test_frac"], d["seed"]
     )
 
-    # NOISE_FLOOR needs different treatment from every other class in both
-    # the sampler and the loss -- see compute_snr_weights/compute_class_weights.
+    # NOISE_FLOOR needs different treatment from every other class in the
+    # sampler -- see compute_snr_weights. The loss's per-class multipliers
+    # (NOISE_FLOOR's dampen plus any boost, e.g. LFM_RADAR) live in config,
+    # see resolve_class_weight_multipliers.
     noise_floor_idx = CLASS_TO_IDX.get("NOISE_FLOOR")
     neutral_classes = [noise_floor_idx] if noise_floor_idx is not None else []
-    dampen = {noise_floor_idx: 0.5} if noise_floor_idx is not None else None
+    dampen = resolve_class_weight_multipliers()
 
     X_t = torch.tensor(X)
     y_t = torch.tensor(y, dtype=torch.float32)  # multi-hot -> BCEWithLogitsLoss wants float targets
@@ -176,7 +179,10 @@ def train(seed=None):
     criterion = nn.BCEWithLogitsLoss(
         pos_weight=compute_class_weights(y, len(CLASSES), dampen=dampen).to(DEVICE)
     )
-    threshold = CFG.get("multilabel_threshold", 0.5)
+    # torch tensor, not the bare numpy array resolve_multilabel_thresholds()
+    # returns -- compared directly against `out`, which stays on DEVICE for
+    # the whole epoch loop below rather than round-tripping through numpy.
+    threshold = torch.tensor(resolve_multilabel_thresholds(), device=DEVICE)
     optimizer = torch.optim.Adam(model.parameters(), lr=t["learning_rate"])
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, patience=t["scheduler_patience"]

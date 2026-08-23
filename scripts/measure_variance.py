@@ -21,7 +21,8 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.config import CFG, CLASSES, CLASS_TO_IDX, resolve_multilabel_thresholds  # noqa: E402
+from src.config import (CFG, CLASSES, CLASS_TO_IDX,  # noqa: E402
+                         resolve_class_weight_multipliers, resolve_multilabel_thresholds)
 from src.models.amc_cnn import AMC_CNN  # noqa: E402
 from src.train import (compute_class_weights, compute_snr_weights, load_data,  # noqa: E402
                         set_seed, stratified_split)
@@ -39,7 +40,7 @@ def one_run(X, y, snr_labels, seed):
 
     noise_floor_idx = CLASS_TO_IDX.get("NOISE_FLOOR")
     neutral_classes = [noise_floor_idx] if noise_floor_idx is not None else []
-    dampen = {noise_floor_idx: 0.5} if noise_floor_idx is not None else None
+    dampen = resolve_class_weight_multipliers()
 
     X_t = torch.tensor(X)
     y_t = torch.tensor(y, dtype=torch.float32)  # multi-hot -> BCEWithLogitsLoss wants float targets

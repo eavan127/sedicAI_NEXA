@@ -25,7 +25,8 @@ from torch.utils.data import DataLoader, TensorDataset, WeightedRandomSampler
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.config import CFG, CLASSES, CLASS_TO_IDX, REPO_ROOT, resolve_multilabel_thresholds  # noqa: E402
+from src.config import (CFG, CLASSES, CLASS_TO_IDX, REPO_ROOT,  # noqa: E402
+                         resolve_class_weight_multipliers, resolve_multilabel_thresholds)
 from src.models.amc_cnn import AMC_CNN  # noqa: E402
 from src.data.preprocess import phase_rotate_batch  # noqa: E402
 from src.train import (compute_class_weights, compute_snr_weights, load_data,  # noqa: E402
@@ -42,12 +43,12 @@ def train_one(X, y, snr_labels, tr, va, seed):
     set_seed(seed)
     t = CFG["training"]
 
-    # NOISE_FLOOR needs different treatment from every other class in both
-    # the sampler and the loss -- see compute_snr_weights/compute_class_weights
-    # in src/train.py.
+    # NOISE_FLOOR needs different treatment from every other class in the
+    # sampler -- see compute_snr_weights in src/train.py. The loss's per-class
+    # multipliers live in config -- see resolve_class_weight_multipliers.
     noise_floor_idx = CLASS_TO_IDX.get("NOISE_FLOOR")
     neutral_classes = [noise_floor_idx] if noise_floor_idx is not None else []
-    dampen = {noise_floor_idx: 0.5} if noise_floor_idx is not None else None
+    dampen = resolve_class_weight_multipliers()
 
     X_t = torch.tensor(X)
     y_t = torch.tensor(y, dtype=torch.float32)  # multi-hot -> BCEWithLogitsLoss wants float targets

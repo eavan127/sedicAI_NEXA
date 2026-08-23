@@ -83,6 +83,33 @@ multilabel_thresholds_per_class:
   FHSS: 0.18         # passed at 0.15 (84.0%, +4pt margin) -- ease back up
   JAMMING: 0.35      # passed even at 0.5 (87.2%) -- recover precision
 
+# Per-class multiplier on compute_class_weights' inverse-frequency pos_weight
+# (src/train.py), applied in BCEWithLogitsLoss. >1 boosts a class (missing it
+# is penalised harder, pushing the model toward more confident positives);
+# <1 dampens it (NOISE_FLOOR's original use, see compute_class_weights'
+# docstring).
+#
+# Root-cause complement to the threshold table above, not a replacement: at
+# the default 0.5 threshold, LFM_RADAR (52.0%), FHSS (59.7%) and JAMMING
+# (87.2%) got the IDENTICAL pos_weight of ~0.72 from compute_class_weights,
+# because all three have equal positive-bit counts (20,400) in the dataset.
+# Equal weighting produced wildly different natural recall, so the gap is not
+# a class-frequency imbalance the inverse-frequency formula already accounts
+# for -- it's LFM_RADAR/FHSS being genuinely harder for the model to learn
+# (most likely feature overlap between the two in the military x military
+# composite examples), and the loss needs to be told that explicitly.
+#
+# Goal: after retraining with this, LFM_RADAR's natural (0.5-threshold)
+# recall should rise enough that multilabel_thresholds_per_class above can
+# come back up from 0.10 toward something less aggressive, without giving up
+# the >80% benchmark. Verify with measure_variance.py before trusting any
+# single run -- the 2.2-8.9 point seed spread noted in train_ensemble.py
+# applies here too. Starting multipliers, untested -- tune empirically:
+class_weight_multipliers:
+  NOISE_FLOOR: 0.5   # unchanged from the original dampen (see compute_class_weights)
+  LFM_RADAR: 1.6      # furthest from calibrated (52.0% @ 0.5) -- largest boost
+  FHSS: 1.3            # less severe (59.7% @ 0.5) -- smaller boost
+
 dataset:
   # 400 -> 1000 helped substantially: all three judged classes moved at once,
   # more than any generator tweak, because the model was overfitting badly at
