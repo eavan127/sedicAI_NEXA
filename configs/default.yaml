@@ -79,10 +79,19 @@ dataset:
   # other classes instead of doubling. 0 = fully synthetic.
   #
   # NOTE: RadChar-Tiny holds only ~245 LFM waveforms per SNR bin, so at 1000
-  # examples/bin this asks for 500 and receives ~245. The real/synthetic mix
-  # therefore lands nearer 24/76 than 50/50. build_dataset adapts and keeps the
-  # class balanced. Download RadChar-Small (4 GB) if more real data is wanted.
-  radchar_fraction: 0.5
+  # examples/bin a 0.5 fraction asks for 500 and receives ~245 -- the
+  # real/synthetic mix lands nearer 24/76 than 50/50 on Tiny alone.
+  #
+  # Bumped 0.5 -> 1.0 now that RadChar-Small is available (~2,439 LFM
+  # waveforms/SNR bin, comfortably above the 1000 requested): standalone
+  # LFM_RADAR is fully real rather than half-synthetic. This does NOT reach
+  # composite/mixture LFM_RADAR windows -- overlay_jamming() and
+  # mix_components() still draw from the synthetic generator directly, so the
+  # real fraction of ALL LFM_RADAR-positive windows tops out at
+  # standalone_count / total_count (~29%), not 100%. Extending those two
+  # functions to optionally draw a real waveform is the next step if more is
+  # needed later.
+  radchar_fraction: 1.0
   # Composite ("jammer overlaid on a real signal") examples, ADDITIVE on top
   # of the standalone per-class counts above -- standalone data is untouched.
   # Expressed as a fraction of examples_per_class_per_snr, generated per

@@ -32,7 +32,11 @@ LFM = 4
 RADCHAR_FS = 3.2e6          # fixed by the dataset
 RADCHAR_LEN = 512           # samples per waveform
 
-DEFAULT_PATH = REPO_ROOT / CFG["paths"]["raw_data"] / "RadChar-Tiny.h5"
+_RAW = REPO_ROOT / CFG["paths"]["raw_data"]
+# Prefer the larger variant when present -- RadChar-Small has ~10x Tiny's real
+# LFM examples per SNR bin, so a machine with both should use Small. Falls
+# back to Tiny so a machine with only Tiny still works unchanged.
+DEFAULT_PATH = _RAW / "RadChar-Small.h5" if (_RAW / "RadChar-Small.h5").exists() else _RAW / "RadChar-Tiny.h5"
 
 
 def load_radchar_lfm(path=None, per_snr=None, snr_bins=None, seed=42):
