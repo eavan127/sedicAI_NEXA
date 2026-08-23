@@ -16,7 +16,7 @@ import numpy as np
 import torch
 from sklearn.metrics import ConfusionMatrixDisplay, classification_report, multilabel_confusion_matrix
 
-from src.config import CFG, CLASSES, CLASS_TO_IDX, REPO_ROOT
+from src.config import CFG, CLASSES, CLASS_TO_IDX, REPO_ROOT, resolve_multilabel_thresholds
 from src.models.amc_cnn import AMC_CNN
 from src.train import load_data, stratified_split
 
@@ -128,16 +128,7 @@ def evaluate():
     model.load_state_dict(torch.load(ckpt, map_location=DEVICE))
     model.eval()
 
-    # Per-class thresholds override the scalar fallback where given -- see
-    # configs/default.yaml for why one shared threshold could not serve
-    # every judged class at once (JAMMING/FHSS were passing well before
-    # LFM_RADAR did, so a single number either left LFM_RADAR short or
-    # needlessly cost the other two precision they did not need to give up).
-    default_threshold = CFG.get("multilabel_threshold", 0.5)
-    per_class = CFG.get("multilabel_thresholds_per_class", {})
-    thresholds = np.array(
-        [per_class.get(cls, default_threshold) for cls in CLASSES], dtype=np.float32
-    )
+    thresholds = resolve_multilabel_thresholds()
 
     # Batched, not one giant forward pass -- X_test is the whole test split
     # (thousands of windows). A single unbatched call tries to materialize

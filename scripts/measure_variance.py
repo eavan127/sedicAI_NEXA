@@ -21,7 +21,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.config import CFG, CLASSES, CLASS_TO_IDX  # noqa: E402
+from src.config import CFG, CLASSES, CLASS_TO_IDX, resolve_multilabel_thresholds  # noqa: E402
 from src.models.amc_cnn import AMC_CNN  # noqa: E402
 from src.train import (compute_class_weights, compute_snr_weights, load_data,  # noqa: E402
                         set_seed, stratified_split)
@@ -81,7 +81,7 @@ def one_run(X, y, snr_labels, seed):
 
     model.load_state_dict(best_state)
     model.eval()
-    threshold = CFG.get("multilabel_threshold", 0.5)
+    threshold = resolve_multilabel_thresholds()
     # Batched -- X[te] can be thousands of test windows; one unbatched
     # forward pass OOMs a real GPU once the dataset is full-sized (see the
     # same fix in src/evaluate.py and scripts/train_ensemble.py).

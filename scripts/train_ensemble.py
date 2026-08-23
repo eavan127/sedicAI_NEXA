@@ -25,7 +25,7 @@ from torch.utils.data import DataLoader, TensorDataset, WeightedRandomSampler
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.config import CFG, CLASSES, CLASS_TO_IDX, REPO_ROOT  # noqa: E402
+from src.config import CFG, CLASSES, CLASS_TO_IDX, REPO_ROOT, resolve_multilabel_thresholds  # noqa: E402
 from src.models.amc_cnn import AMC_CNN  # noqa: E402
 from src.data.preprocess import phase_rotate_batch  # noqa: E402
 from src.train import (compute_class_weights, compute_snr_weights, load_data,  # noqa: E402
@@ -135,7 +135,7 @@ def _predict(model, X_np, tta=0):
 def main(n_models, tta=0):
     X, y, snr_labels = load_data()
     d = CFG["dataset"]
-    threshold = CFG.get("multilabel_threshold", 0.5)
+    threshold = resolve_multilabel_thresholds()
     tr, va, te = stratified_split(y, snr_labels, d["val_frac"], d["test_frac"], d["seed"])
     X_test = X[te]
     y_test = y[te]

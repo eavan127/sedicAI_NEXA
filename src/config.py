@@ -41,3 +41,24 @@ def multi_hot(class_names):
     for name in class_names:
         vec[CLASS_TO_IDX[name]] = 1.0
     return vec
+
+
+def resolve_multilabel_thresholds():
+    """Per-class sigmoid decision threshold, as a (len(CLASSES),) array in
+    CLASSES order. Falls back to `multilabel_threshold` for any class not
+    listed in `multilabel_thresholds_per_class`.
+
+    SHARED on purpose: every script that turns model probabilities into
+    present/absent predictions (evaluate.py, train_ensemble.py,
+    measure_variance.py) must call this instead of reading
+    `multilabel_threshold` directly. They used to each have their own copy of
+    that one-liner, which meant the per-class threshold fix that resolved the
+    LFM_RADAR/FHSS benchmark FAIL only applied to evaluate.py -- the ensemble
+    and variance scripts silently kept using the old single global 0.5
+    fallback until this was centralised.
+    """
+    import numpy as np
+
+    default = CFG.get("multilabel_threshold", 0.5)
+    per_class = CFG.get("multilabel_thresholds_per_class", {})
+    return np.array([per_class.get(c, default) for c in CLASSES], dtype=np.float32)
