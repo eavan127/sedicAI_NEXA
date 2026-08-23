@@ -129,8 +129,18 @@ def evaluate():
     model.eval()
 
     threshold = CFG.get("multilabel_threshold", 0.5)
+    # Batched, not one giant forward pass -- X_test is the whole test split
+    # (thousands of windows). A single unbatched call tries to materialize
+    # every intermediate activation (attention pooling's (batch, 193, time)
+    # tensor especially) for the entire split at once, which OOMs on a real
+    # GPU once the dataset is full-sized rather than a smoke/dry-run subset.
+    eval_batch_size = 256
+    probs_chunks = []
     with torch.no_grad():
-        probs = torch.sigmoid(model(torch.tensor(X_test).to(DEVICE))).cpu().numpy()
+        for i in range(0, len(X_test), eval_batch_size):
+            batch = torch.tensor(X_test[i:i + eval_batch_size]).to(DEVICE)
+            probs_chunks.append(torch.sigmoid(model(batch)).cpu().numpy())
+    probs = np.concatenate(probs_chunks, axis=0)
     preds = (probs > threshold).astype(int)
     y_test = y_test.astype(int)
 

@@ -82,8 +82,16 @@ def one_run(X, y, snr_labels, seed):
     model.load_state_dict(best_state)
     model.eval()
     threshold = CFG.get("multilabel_threshold", 0.5)
+    # Batched -- X[te] can be thousands of test windows; one unbatched
+    # forward pass OOMs a real GPU once the dataset is full-sized (see the
+    # same fix in src/evaluate.py and scripts/train_ensemble.py).
+    eval_batch_size = 256
+    probs_chunks = []
     with torch.no_grad():
-        present = (torch.sigmoid(model(torch.tensor(X[te]).to(DEVICE))) > threshold).cpu().numpy()
+        for i in range(0, len(te), eval_batch_size):
+            batch = torch.tensor(X[te][i:i + eval_batch_size]).to(DEVICE)
+            probs_chunks.append(torch.sigmoid(model(batch)).cpu().numpy())
+    present = np.concatenate(probs_chunks, axis=0) > threshold
 
     y_te = y[te]
     out = {}

@@ -104,19 +104,30 @@ def _recalls(present, y_true):
     return out
 
 
+EVAL_BATCH_SIZE = 256
+
+
 def _predict(model, X_np, tta=0):
     """Sigmoid probabilities (each class independent), optionally averaged
     over TTA phase rotations.
 
     Phase is arbitrary at the receiver, so a rotated copy is the same signal
     with the same label(s). Averaging over rotations cancels per-view noise.
+
+    Batched, not one forward pass over the whole split -- X_np can be
+    thousands of test windows, and a single unbatched call OOMs a real GPU
+    once the dataset is full-sized (see the same fix in src/evaluate.py).
     """
     views = [X_np] + [phase_rotate_batch(X_np, t)
                       for t in np.linspace(0, 2 * np.pi, tta, endpoint=False)[1:]]
     out = None
     with torch.no_grad():
         for v in views:
-            p = torch.sigmoid(model(torch.tensor(v).to(DEVICE))).cpu().numpy()
+            chunks = []
+            for i in range(0, len(v), EVAL_BATCH_SIZE):
+                batch = torch.tensor(v[i:i + EVAL_BATCH_SIZE]).to(DEVICE)
+                chunks.append(torch.sigmoid(model(batch)).cpu().numpy())
+            p = np.concatenate(chunks, axis=0)
             out = p if out is None else out + p
     return out / len(views)
 

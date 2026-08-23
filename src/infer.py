@@ -88,17 +88,24 @@ def run_inference(input_path, output_path, model_path=None, stride=None, ensembl
     print(f"Using {len(models)} model(s): {', '.join(p.name for p in paths)}")
 
     starts = range(0, len(iq) - window_len + 1, stride)
-    batch = torch.tensor(
-        np.stack([preprocess_window(iq[s:s + window_len], window_len) for s in starts])
-    ).to(DEVICE)
+    X_all = np.stack([preprocess_window(iq[s:s + window_len], window_len) for s in starts])
 
     threshold = CFG.get("multilabel_threshold", 0.5)
+    # Batched, not one forward pass over the whole stream -- a real Qualifier
+    # stream can be many thousands of windows, and pushing them all through
+    # the model at once OOMs a real GPU (same fix as src/evaluate.py and
+    # scripts/train_ensemble.py).
+    eval_batch_size = 256
+    probs_chunks = []
     with torch.no_grad():
-        # Multi-label: each class judged independently (sigmoid), not one
-        # winner (softmax) -- a window can flag several classes at once,
-        # e.g. a real signal AND jamming overlaid on top of it.
-        probs = np.mean(
-            [torch.sigmoid(m(batch)).cpu().numpy() for m in models], axis=0)
+        for i in range(0, len(X_all), eval_batch_size):
+            batch = torch.tensor(X_all[i:i + eval_batch_size]).to(DEVICE)
+            # Multi-label: each class judged independently (sigmoid), not one
+            # winner (softmax) -- a window can flag several classes at once,
+            # e.g. a real signal AND jamming overlaid on top of it.
+            probs_chunks.append(
+                np.mean([torch.sigmoid(m(batch)).cpu().numpy() for m in models], axis=0))
+    probs = np.concatenate(probs_chunks, axis=0)
     present = probs > threshold
 
     output_path = Path(output_path)
