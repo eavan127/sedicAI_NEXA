@@ -78,10 +78,23 @@ benchmark_recall: 0.80
 # evaluate.py) before trusting them, especially LFM_RADAR's, and retune if
 # a fresh training run changes the model's probability calibration.
 multilabel_threshold: 0.5   # fallback for any class not listed below
+# Replaced 2026-08-23: these three used to be picked by sweeping against
+# TEST recall directly (0.10/0.18/0.35), which tunes a hyperparameter
+# against the number being reported -- leakage, regardless of how well it
+# scored. Values below came from scripts/calibrate_thresholds.py against
+# the VAL split instead, on the checkpoint retrained with the
+# class_weight_multipliers boost below. Confirmed on a single held-out TEST
+# run (src/evaluate.py): LFM_RADAR recall 89.58% (was 83.86%), FHSS 82.29%
+# (was 81.31%), JAMMING 89.12% (was 88.95%) -- OVERALL PASS, and LFM_RADAR
+# needed a much less aggressive cutoff than before. Precision at this
+# operating point: LFM_RADAR ~49%, FHSS ~61%, JAMMING ~97% -- LFM_RADAR's
+# false-alarm rate is a known, disclosed tradeoff (recall prioritised per
+# the benchmark), not an oversight. Re-run calibrate_thresholds.py after any
+# retrain -- these are tied to this specific checkpoint's calibration.
 multilabel_thresholds_per_class:
-  LFM_RADAR: 0.10   # still failing at 0.15 (75.9%) -- push lower
-  FHSS: 0.18         # passed at 0.15 (84.0%, +4pt margin) -- ease back up
-  JAMMING: 0.35      # passed even at 0.5 (87.2%) -- recover precision
+  LFM_RADAR: 0.19
+  FHSS: 0.20
+  JAMMING: 0.90
 
 # Per-class multiplier on compute_class_weights' inverse-frequency pos_weight
 # (src/train.py), applied in BCEWithLogitsLoss. >1 boosts a class (missing it
@@ -99,12 +112,12 @@ multilabel_thresholds_per_class:
 # (most likely feature overlap between the two in the military x military
 # composite examples), and the loss needs to be told that explicitly.
 #
-# Goal: after retraining with this, LFM_RADAR's natural (0.5-threshold)
-# recall should rise enough that multilabel_thresholds_per_class above can
-# come back up from 0.10 toward something less aggressive, without giving up
-# the >80% benchmark. Verify with measure_variance.py before trusting any
-# single run -- the 2.2-8.9 point seed spread noted in train_ensemble.py
-# applies here too. Starting multipliers, untested -- tune empirically:
+# Confirmed working 2026-08-23: after retraining with this, LFM_RADAR's
+# calibrated threshold came back up from 0.10 to 0.19 while recall improved
+# (83.86% -> 89.58%, see multilabel_thresholds_per_class above) -- from a
+# single run, not yet re-verified with measure_variance.py against seed
+# noise (2.2-8.9 points measured on these classes previously). Re-tune these
+# multipliers if a future retrain's numbers don't hold up under that check:
 class_weight_multipliers:
   NOISE_FLOOR: 0.5   # unchanged from the original dampen (see compute_class_weights)
   LFM_RADAR: 1.6      # furthest from calibrated (52.0% @ 0.5) -- largest boost
