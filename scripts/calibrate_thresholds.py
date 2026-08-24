@@ -165,10 +165,13 @@ def main(ensemble, n_models, margin):
         flag = "PASS" if passed else "FAIL (best-recall fallback)"
         print(f"{cls:<12}{t:>10.2f}  {flag:<28}{prec_str:>11}")
 
-    print("\nPaste into configs/default.yaml (only judged classes strictly need to")
-    print("be listed -- non-judged rows are included here for completeness):")
+    print("\nPaste into configs/default.yaml -- ALL classes, not just judged ones:")
+    print("non-judged classes aren't gated by the benchmark, but a calibrated")
+    print("threshold beats an arbitrary 0.5 default for them too (this is how")
+    print("classes stuck near-zero recall, e.g. 16QAM/NOISE_FLOOR, actually get")
+    print("fixed -- omitting them here is why they never had before).")
     print("\nmultilabel_thresholds_per_class:")
-    for cls in CFG["judged_classes"]:
+    for cls in CLASSES:
         print(f"  {cls}: {results[cls]}")
 
     print("\nRemember: these numbers are only trustworthy if val_idx wasn't used to")
