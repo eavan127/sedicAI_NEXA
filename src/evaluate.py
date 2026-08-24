@@ -116,6 +116,27 @@ def comms_vs_jamming(y_true, y_pred):
     }
 
 
+def confusion_between(y_true, y_pred, class_a, class_b):
+    """Among class_a's false positives (predicted present, truly absent), what
+    fraction are windows where class_b is truly present?
+
+    A high fraction is direct evidence the model is substituting class_b for
+    class_a -- not just "unsure", but specifically reaching for the other
+    class -- which points at a targeted fix (e.g. separating the two in the
+    composite/overlay examples where both can co-occur) rather than more
+    generic loss-weight tuning. A low fraction means class_a's false
+    positives are spread across everything else, and this pairing isn't the
+    story.
+    """
+    a, b = CLASS_TO_IDX[class_a], CLASS_TO_IDX[class_b]
+    fp_mask = (y_pred[:, a] == 1) & (y_true[:, a] == 0)
+    n_fp = int(fp_mask.sum())
+    if n_fp == 0:
+        return None
+    overlap = int((y_true[fp_mask, b] == 1).sum())
+    return {"false_positives": n_fp, "fraction_that_are_true_" + class_b: overlap / n_fp}
+
+
 def evaluate():
     X, y, snr_labels = load_data()
     d = CFG["dataset"]
@@ -166,9 +187,21 @@ def evaluate():
     coarse = coarse_tier_metrics(y_test, preds)
     cvj = comms_vs_jamming(y_test, preds)
 
+    # LFM_RADAR and FHSS are the two classes needing the most aggressive
+    # threshold/loss-weight help (see configs/default.yaml) -- check whether
+    # that's because they're specifically confused with EACH OTHER (fixable
+    # by separating them in the composite data) or just individually hard
+    # (a different problem, threshold/weight tuning is closer to the right
+    # tool for that).
+    radar_fhss_confusion = {
+        "LFM_RADAR_fp_that_are_true_FHSS": confusion_between(y_test, preds, "LFM_RADAR", "FHSS"),
+        "FHSS_fp_that_are_true_LFM_RADAR": confusion_between(y_test, preds, "FHSS", "LFM_RADAR"),
+    }
+
     with open(evals_dir / "scorecard.json", "w") as f:
         json.dump({"per_class": report, "benchmark": scorecard,
-                    "coarse_tier": coarse, "comms_vs_jamming": cvj}, f, indent=2)
+                    "coarse_tier": coarse, "comms_vs_jamming": cvj,
+                    "radar_fhss_confusion": radar_fhss_confusion}, f, indent=2)
 
     # Flat CSVs alongside the JSON/PNG artifacts — Power BI (and Excel) read
     # CSV directly via Get Data > Text/CSV, no JSON connector needed. Same
@@ -197,6 +230,14 @@ def evaluate():
         if cvj["false_alarm_rate"] is not None:
             print(f"  false alarm rate        : {cvj['false_alarm_rate']:.4f}"
                   "   (civilian wrongly flagged as jamming)")
+
+    print("\n--- LFM_RADAR / FHSS cross-confusion ---")
+    for label, r in radar_fhss_confusion.items():
+        if r is None:
+            print(f"  {label}: no false positives to check")
+        else:
+            frac = next(v for k, v in r.items() if k.startswith("fraction"))
+            print(f"  {label}: {frac:.1%} of {r['false_positives']} false positives")
 
     print("\n--- Coarse tier (Civilian / Military / Hostile) ---")
     print(f"  tier accuracy: {coarse['accuracy']:.4f}")
