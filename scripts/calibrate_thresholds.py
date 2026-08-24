@@ -12,10 +12,20 @@ number doesn't come from".
 
 For each class, this sweeps candidate thresholds against val_idx and picks
 the highest threshold (best precision) that still clears
-CFG["benchmark_recall"] on val. If none clears it, falls back to the
-threshold that maximises val recall and flags it. Judged and non-judged
-classes are treated the same way -- non-judged classes aren't gated, but a
-calibrated threshold is still better than an arbitrary 0.5 default for them.
+CFG["benchmark_recall"] PLUS SAFETY_MARGIN on val. If none clears it, falls
+back to the threshold that maximises val recall and flags it. Judged and
+non-judged classes are treated the same way -- non-judged classes aren't
+gated, but a calibrated threshold is still better than an arbitrary 0.5
+default for them.
+
+SAFETY_MARGIN exists because val and test are different samples of the same
+distribution, not the same data -- a threshold picked to land EXACTLY on the
+80% floor on val has no room for ordinary val/test variance and can land
+below 80% on test. Measured case: an ensemble calibrated with zero margin
+picked LFM_RADAR=0.28 (passed val at 80.1% recall), which then scored 79.61%
+on test -- a FAIL, from noise, not from the threshold being wrong on the data
+it was picked on. Targeting benchmark_recall + SAFETY_MARGIN on val instead
+gives up a little precision to buy headroom against exactly this.
 
 Run this after any retrain (the model's probability calibration shifts every
 time), then run evaluate.py once for the number that goes in the brief.
@@ -52,6 +62,13 @@ from src.train import load_data, stratified_split  # noqa: E402
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 BENCHMARK_RECALL = CFG["benchmark_recall"]
+# Default headroom above the floor -- see module docstring. 3 points is a
+# starting point, not a measured optimum; the one gap actually observed so
+# far (LFM_RADAR, ensemble) was ~0.5 points, but that's a single data point,
+# not a reliable estimate of the true val/test variance for every class.
+# Override with --margin if a class needs more (or a retrain shows less is
+# enough).
+DEFAULT_SAFETY_MARGIN = 0.03
 CANDIDATES = np.round(np.arange(0.05, 0.96, 0.01), 2)
 EVAL_BATCH_SIZE = 256
 
@@ -65,10 +82,10 @@ def _predict_probs(model, X):
     return np.concatenate(chunks, axis=0)
 
 
-def _best_threshold(probs_col, true_col):
-    """Highest threshold (= best precision) that keeps recall >=
-    BENCHMARK_RECALL on this class, among CANDIDATES. Falls back to the
-    threshold with the best recall if none clears the floor."""
+def _best_threshold(probs_col, true_col, target_recall):
+    """Highest threshold (= best precision) that keeps recall >= target_recall
+    (BENCHMARK_RECALL + safety margin) on this class, among CANDIDATES. Falls
+    back to the threshold with the best recall if none clears the floor."""
     support = true_col.sum()
     if support == 0:
         return 0.5, None, False  # nothing to calibrate against -- leave default
@@ -78,7 +95,7 @@ def _best_threshold(probs_col, true_col):
         pred = probs_col > t
         tp = int((pred & (true_col == 1)).sum())
         recall = tp / support
-        if recall >= BENCHMARK_RECALL:
+        if recall >= target_recall:
             best_passing = t  # CANDIDATES is ascending, so the last one seen is highest
         if recall > best_recall_fallback[1]:
             best_recall_fallback = (t, recall)
@@ -108,7 +125,8 @@ def _ensemble_probs(ckpt_paths, X_val):
     return summed / len(ckpt_paths)
 
 
-def main(ensemble, n_models):
+def main(ensemble, n_models, margin):
+    target_recall = BENCHMARK_RECALL + margin
     X, y, snr_labels = load_data()
     d = CFG["dataset"]
     train_idx, val_idx, _ = stratified_split(y, snr_labels, d["val_frac"], d["test_frac"], d["seed"])
@@ -133,14 +151,15 @@ def main(ensemble, n_models):
         ckpt_desc = str(ckpt)
 
     print(f"Calibrating against: {ckpt_desc}")
-    print(f"Calibrating on val split ({len(val_idx)} windows), floor={BENCHMARK_RECALL:.0%}\n")
+    print(f"Calibrating on val split ({len(val_idx)} windows), floor={BENCHMARK_RECALL:.0%}"
+          f" + {margin:.0%} margin = targeting {target_recall:.0%}\n")
     print(f"{'class':<12}{'threshold':>10}{'val_recall_ok':>15}{'precision':>11}")
     print("-" * 48)
 
     results = {}
     for cls in CLASSES:
         idx = CLASS_TO_IDX[cls]
-        t, precision, passed = _best_threshold(probs[:, idx], y_val[:, idx])
+        t, precision, passed = _best_threshold(probs[:, idx], y_val[:, idx], target_recall)
         results[cls] = t
         prec_str = f"{precision:.3f}" if precision is not None else "n/a"
         flag = "PASS" if passed else "FAIL (best-recall fallback)"
@@ -164,5 +183,8 @@ if __name__ == "__main__":
     p.add_argument("--ensemble", action="store_true",
                     help="calibrate against the ensemble_*.pt average instead of best_model.pt")
     p.add_argument("--n-models", type=int, default=5)
+    p.add_argument("--margin", type=float, default=DEFAULT_SAFETY_MARGIN,
+                    help="extra recall required above benchmark_recall on val, as "
+                         "headroom against val/test variance (default 0.03 = 3 points)")
     a = p.parse_args()
-    main(a.ensemble, a.n_models)
+    main(a.ensemble, a.n_models, a.margin)
