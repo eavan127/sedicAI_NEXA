@@ -20,9 +20,17 @@ HOP_CHOICES = [("no overlap — 512", 512), ("50% — 256", 256),
 
 
 def _rows(session, smoothed):
+    """One row per event.
+
+    Class names and their peak confidences share a single column. Splitting
+    them across "Detected" and "Peak" printed every class name twice, and a
+    window carrying five simultaneous classes then needed ~1560px of table --
+    more than the page has, so it scrolled sideways and had to be zoomed to
+    read. One column says the same thing in roughly half the width.
+    """
     return [
         [i + 1, f"{e.start_us / 1000:.2f}", f"{e.duration_us / 1000:.2f}",
-         e.label, " · ".join(f"{c} {e.peak[c] * 100:.0f}%" for c in e.classes)]
+         " · ".join(f"{c} {e.peak[c] * 100:.0f}%" for c in e.classes)]
         for i, e in enumerate(session.emitter_events(smoothed=smoothed))
     ]
 
@@ -80,10 +88,18 @@ def build(state, get_model):
     # honest fix was giving the page more width (see app.py) rather than
     # squeezing columns. wrap lets long cells break; max_height keeps a long
     # event list scrollable in place instead of pushing the page down.
+    # Explicit widths are required for wrap to do anything: without them the
+    # component sizes each column to its content, so a six-class cell just
+    # makes the table wider than the page and scrolls sideways. Constraining
+    # the last column is what forces the long cell to wrap instead.
+    #
+    # (An earlier pass removed these on the belief they stopped the table
+    # rendering. That was a bad diagnosis -- the data was rendering fine and
+    # the DOM query used to check it was wrong.)
     events = gr.Dataframe(
-        headers=["#", "Start (ms)", "Duration (ms)", "Detected", "Peak"],
+        headers=["#", "Start (ms)", "Duration (ms)", "Detected (peak confidence)"],
         label="Detection events", interactive=False, wrap=True,
-        max_height=520)
+        max_height=520, column_widths=["5%", "12%", "14%", "69%"])
 
     outputs = [state, header, spectrum, waterfall, ribbon, events]
 
