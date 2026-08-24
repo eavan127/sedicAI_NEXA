@@ -3,9 +3,17 @@ Evaluation: per-class recall, confusion matrix, accuracy-vs-SNR curve, and a
 scorecard that states plainly whether the organiser's benchmark
 (`configs/default.yaml: benchmark_recall`) is met.
 
+--ensemble evaluates the AVERAGE of ensemble_0.pt..ensemble_{n-1}.pt
+(train_ensemble.py's checkpoints) instead of the single best_model.pt --
+use this to get the full 8-class report (accuracy-vs-SNR, confusion matrix,
+comms-vs-jamming) for the ensemble actually being submitted, not just the
+judged-class recall/precision train_ensemble.py's own scorecard reports.
+
 Usage:
     python -m src.evaluate
+    python -m src.evaluate --ensemble --n-models 5
 """
+import argparse
 import csv
 import json
 
@@ -137,32 +145,65 @@ def confusion_between(y_true, y_pred, class_a, class_b):
     return {"false_positives": n_fp, "fraction_that_are_true_" + class_b: overlap / n_fp}
 
 
-def evaluate():
+EVAL_BATCH_SIZE = 256
+
+
+def _predict_probs_one(model, X):
+    """Batched, not one giant forward pass -- X can be the whole test split
+    (thousands of windows). A single unbatched call tries to materialize
+    every intermediate activation (attention pooling's (batch, 193, time)
+    tensor especially) for the entire split at once, which OOMs on a real
+    GPU once the dataset is full-sized rather than a smoke/dry-run subset."""
+    chunks = []
+    with torch.no_grad():
+        for i in range(0, len(X), EVAL_BATCH_SIZE):
+            batch = torch.tensor(X[i:i + EVAL_BATCH_SIZE]).to(DEVICE)
+            chunks.append(torch.sigmoid(model(batch)).cpu().numpy())
+    return np.concatenate(chunks, axis=0)
+
+
+def _predict_probs(models, X):
+    """Average sigmoid probabilities over one or more models -- same
+    averaging train_ensemble.py's _predict uses, so this evaluation matches
+    what's actually submitted when given the 5 ensemble checkpoints."""
+    summed = None
+    for model in models:
+        p = _predict_probs_one(model, X)
+        summed = p if summed is None else summed + p
+    return summed / len(models)
+
+
+def evaluate(ensemble=False, n_models=5):
     X, y, snr_labels = load_data()
     d = CFG["dataset"]
     _, _, test_idx = stratified_split(y, snr_labels, d["val_frac"], d["test_frac"], d["seed"])
 
     X_test, y_test, snr_test = X[test_idx], y[test_idx], snr_labels[test_idx]
 
-    ckpt = REPO_ROOT / CFG["paths"]["checkpoints"] / "best_model.pt"
-    model = AMC_CNN(num_classes=len(CLASSES), input_len=X.shape[-1]).to(DEVICE)
-    model.load_state_dict(torch.load(ckpt, map_location=DEVICE))
-    model.eval()
+    ckpt_dir = REPO_ROOT / CFG["paths"]["checkpoints"]
+    if ensemble:
+        ckpt_paths = [ckpt_dir / f"ensemble_{i}.pt" for i in range(n_models)]
+        missing = [p for p in ckpt_paths if not p.exists()]
+        if missing:
+            raise FileNotFoundError(
+                f"missing ensemble checkpoints: {missing} -- run "
+                f"train_ensemble.py --models {n_models} first")
+        ckpt_desc = f"{n_models}-model ensemble average ({ckpt_dir}/ensemble_*.pt)"
+    else:
+        ckpt_paths = [ckpt_dir / "best_model.pt"]
+        ckpt_desc = str(ckpt_paths[0])
+
+    models = []
+    for p in ckpt_paths:
+        model = AMC_CNN(num_classes=len(CLASSES), input_len=X.shape[-1]).to(DEVICE)
+        model.load_state_dict(torch.load(p, map_location=DEVICE))
+        model.eval()
+        models.append(model)
+    print(f"Evaluating: {ckpt_desc}\n")
 
     thresholds = resolve_multilabel_thresholds()
 
-    # Batched, not one giant forward pass -- X_test is the whole test split
-    # (thousands of windows). A single unbatched call tries to materialize
-    # every intermediate activation (attention pooling's (batch, 193, time)
-    # tensor especially) for the entire split at once, which OOMs on a real
-    # GPU once the dataset is full-sized rather than a smoke/dry-run subset.
-    eval_batch_size = 256
-    probs_chunks = []
-    with torch.no_grad():
-        for i in range(0, len(X_test), eval_batch_size):
-            batch = torch.tensor(X_test[i:i + eval_batch_size]).to(DEVICE)
-            probs_chunks.append(torch.sigmoid(model(batch)).cpu().numpy())
-    probs = np.concatenate(probs_chunks, axis=0)
+    probs = _predict_probs(models, X_test)
     preds = (probs > thresholds).astype(int)   # thresholds broadcasts (8,) against probs (N, 8)
     y_test = y_test.astype(int)
 
@@ -321,4 +362,9 @@ def evaluate():
 
 
 if __name__ == "__main__":
-    evaluate()
+    p = argparse.ArgumentParser()
+    p.add_argument("--ensemble", action="store_true",
+                    help="evaluate the ensemble_*.pt average instead of best_model.pt")
+    p.add_argument("--n-models", type=int, default=5)
+    a = p.parse_args()
+    evaluate(a.ensemble, a.n_models)
