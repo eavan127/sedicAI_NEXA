@@ -84,7 +84,7 @@ def build(state):
 
     def _render(session, i):
         if session is None:
-            return "<i>Load a capture on RF Replay first.</i>", "", None
+            return "Load a capture on RF Replay first.", "", None
         idx = max(0, min(int(i) - 1, session.result.n_windows - 1))
         return (_probability_html(session, idx), _metadata_html(session, idx),
                 plots.attention_figure(session, idx))

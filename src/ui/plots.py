@@ -101,7 +101,7 @@ def waterfall_figure(session, smoothed=True, nperseg=256):
 def spectrum_figure(session):
     """MEASURED average power spectrum. Instrument styling only."""
     freqs, spectrum = power_spectrum_db(session.iq)
-    fig, ax = plt.subplots(figsize=(8, 1.7))
+    fig, ax = plt.subplots(figsize=(11, 1.5))
     ax.fill_between(freqs / 1e6, spectrum, spectrum.min(),
                      color=INSTRUMENT["color"], alpha=0.30)
     ax.plot(freqs / 1e6, spectrum, color=INSTRUMENT["color"],
@@ -116,7 +116,9 @@ def spectrum_figure(session):
 def ribbon_figure(session, smoothed=True):
     """MODEL tier ribbon, one cell per window."""
     tiers = session.tiers(smoothed=smoothed)
-    fig, ax = plt.subplots(figsize=(1.1, 6))
+    # Height matches waterfall_figure so the two sit flush in a Row rather
+    # than leaving a band of empty panel beneath the shorter one.
+    fig, ax = plt.subplots(figsize=(1.15, 6.5))
     for i, tier in enumerate(tiers):
         ax.add_patch(mpatches.Rectangle((0, i), 1, 1, color=tier_color(tier)))
     ax.set_xlim(0, 1)

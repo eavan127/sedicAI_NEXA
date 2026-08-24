@@ -3,6 +3,12 @@
 Named Replay, not Live: there is no SDR. The page name states that rather than
 relying on a badge to walk back a misleading title. OmniSIG itself supports
 recorded-file playback, so this is the same mode, not a lesser one.
+
+Layout note: controls sit in one compact bar across the top, not in a side
+column. A side column is only as useful as its tallest control and leaves a
+tall empty gutter beside the waterfall -- which pushed the detections table
+into a narrow strip that had to be zoomed to read. Full width below the
+controls gives the waterfall and the table the space they actually need.
 """
 import gradio as gr
 
@@ -26,6 +32,7 @@ def _render(session, smoothing_choice):
     rows = _rows(session, smoothed)
     head = (
         f"**● REPLAY** &nbsp; source `{session.source}` &nbsp;·&nbsp; "
+        f"BASEBAND · fs 3.2 MHz &nbsp;·&nbsp; "
         f"{session.duration_ms:.1f} ms &nbsp;·&nbsp; "
         f"{session.result.n_windows} windows @ hop {session.result.hop} "
         f"&nbsp;·&nbsp; **{len(rows)} events**"
@@ -39,34 +46,44 @@ def _render(session, smoothing_choice):
 
 def build(state, get_model):
     gr.Markdown("### RF Replay")
-    gr.Markdown(
-        "Recorded or synthesized capture — baseband, fs 3.2 MHz. "
-        "There is no live SDR ingest."
-    )
 
-    with gr.Row():
-        with gr.Column(scale=1):
-            scenario_btn = gr.Button("Synthesize scenario", variant="primary")
-            file_in = gr.File(label="…or upload raw IQ (interleaved float32)")
-            upload_btn = gr.Button("Analyze upload")
-            hop = gr.Dropdown(choices=HOP_CHOICES, value=256,
-                               label="Window hop (overlap)")
-            smoothing = gr.Radio(choices=["Smoothed", "Raw"], value="Smoothed",
-                                  label="Display")
-            gr.Markdown(
-                "<small>Smoothing, the NOISE_FLOOR gate and event hold are "
-                "display-only. The Performance page is always per-window, "
-                "ungated and unsmoothed.</small>"
-            )
-        with gr.Column(scale=3):
-            header = gr.Markdown()
-            spectrum = gr.Plot(label="Power spectrum — measured")
-            with gr.Row():
-                waterfall = gr.Plot(label="Waterfall (measured) + detections (model)")
-                ribbon = gr.Plot(label="Tier")
-            events = gr.Dataframe(
-                headers=["#", "Start (ms)", "Duration (ms)", "Detected", "Peak"],
-                label="Detection events", interactive=False)
+    # --- compact control bar, one row, above everything -------------------
+    with gr.Row(equal_height=True):
+        scenario_btn = gr.Button("Synthesize scenario", variant="primary",
+                                  scale=2, min_width=170)
+        file_in = gr.File(label="Upload raw IQ (interleaved float32)",
+                           file_count="single", height=78, scale=3,
+                           min_width=200)
+        upload_btn = gr.Button("Analyze upload", scale=2, min_width=140)
+        hop = gr.Dropdown(choices=HOP_CHOICES, value=256, scale=2,
+                           min_width=150, label="Window hop")
+        smoothing = gr.Radio(choices=["Smoothed", "Raw"], value="Smoothed",
+                              scale=2, min_width=150, label="Display")
+
+    gr.Markdown(
+        "<div style='font-size:12px;color:#5F6B72;margin:-6px 0 4px 0;'>"
+        "Smoothing, the NOISE_FLOOR gate and event hold are display-only. "
+        "The Performance page is always per-window, ungated and unsmoothed."
+        "</div>")
+
+    header = gr.Markdown()
+    spectrum = gr.Plot(label="Power spectrum — measured")
+
+    with gr.Row(equal_height=True):
+        waterfall = gr.Plot(label="Waterfall (measured) + detections (model)",
+                             scale=9)
+        ribbon = gr.Plot(label="Tier", scale=1, min_width=110)
+
+    # Kept plain: fixed column widths fought the content. A window with five
+    # simultaneous classes puts "BPSK + QPSK + 16QAM + LFM_RADAR + FHSS +
+    # JAMMING" in one cell and a five-way peak breakdown in the next, so the
+    # honest fix was giving the page more width (see app.py) rather than
+    # squeezing columns. wrap lets long cells break; max_height keeps a long
+    # event list scrollable in place instead of pushing the page down.
+    events = gr.Dataframe(
+        headers=["#", "Start (ms)", "Duration (ms)", "Detected", "Peak"],
+        label="Detection events", interactive=False, wrap=True,
+        max_height=520)
 
     outputs = [state, header, spectrum, waterfall, ribbon, events]
 

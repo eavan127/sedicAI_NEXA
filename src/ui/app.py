@@ -19,6 +19,14 @@ CUSTOM_CSS = f"""
 .gradio-container {{
   background: {BG} !important;
   font-family: {FONT_STACK} !important;
+  /* Gradio caps the shell at ~1200px. The waterfall and the detections table
+     both want more than that -- the table needs ~1740px once a window carries
+     five simultaneous classes -- and the cap was forcing a horizontal scroll
+     that made the table unreadable without zooming. */
+  max-width: 100% !important;
+  width: 100% !important;
+  padding-left: 26px !important;
+  padding-right: 26px !important;
 }}
 .gradio-container, .gradio-container * {{
   color: {TEXT};
@@ -43,6 +51,12 @@ button.primary:hover, .gr-button-primary:hover {{
 }}
 thead th {{ background: {BRAND_OLIVE_TINT} !important; }}
 footer {{ display: none !important; }}
+/* No italics anywhere. Gradio italicises markdown emphasis and some captions
+   by default; killing it globally is more reliable than auditing every
+   string. Emphasis is carried by weight and colour instead. */
+.gradio-container em, .gradio-container i, .gradio-container * {{
+  font-style: normal !important;
+}}
 """
 
 
@@ -93,12 +107,9 @@ def build_app():
             f'<div style="border-left:1px solid {GRID};padding-left:22px;">'
             f'<div style="font-size:24px;font-weight:700;letter-spacing:0.16em;'
             f'color:{BRAND_SLATE};line-height:1.1;">OMNI</div>'
-            f'<div style="font-size:12px;color:{TEXT_DIM};letter-spacing:0.03em;'
-            f'margin-top:3px;">AI-Powered RF Spectrum Intelligence '
-            f'&nbsp;·&nbsp; TEAM NEXA</div>'
-            f'<div style="font-size:11px;color:{BRAND_OLIVE};font-weight:600;'
-            f'letter-spacing:0.06em;margin-top:4px;">BASEBAND · fs 3.2 MHz '
-            f'&nbsp;·&nbsp; ● REPLAY — no live SDR</div></div></div>')
+            f'<div style="font-size:13px;color:{TEXT_DIM};letter-spacing:0.02em;'
+            f'margin-top:4px;">AI-Powered RF Spectrum Intelligence</div>'
+            f'</div></div>')
 
         state = gr.State(None)
 

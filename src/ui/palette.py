@@ -19,11 +19,12 @@ decoration. Brand is not semantics.
 import numpy as np
 
 # --- SEDIC 26 brand -------------------------------------------------------
-# Sampled from the challenge logo: olive wordmark, dark slate tagline.
-BRAND_OLIVE = "#55613D"
-BRAND_OLIVE_DARK = "#3D4A2A"
-BRAND_OLIVE_TINT = "#EDF0E7"
-BRAND_SLATE = "#1F2A33"
+# Sampled directly out of assets/sedic_logo.png rather than eyeballed -- the
+# olive wordmark and the dark slate tagline, as the file actually stores them.
+BRAND_OLIVE = "#627143"
+BRAND_OLIVE_DARK = "#4A552F"
+BRAND_OLIVE_TINT = "#EFF1EA"
+BRAND_SLATE = "#121C27"
 
 # --- light ground ---------------------------------------------------------
 BG = "#F7F8F5"
@@ -35,6 +36,9 @@ TEXT_DIM = "#5F6B72"
 # Sans-serif throughout, per the SEDIC brand.
 FONT_STACK = ('"Inter", "Segoe UI", "Helvetica Neue", Arial, '
               '"Noto Sans", sans-serif')
+# No italics anywhere in the UI. Emphasis is carried by weight and colour
+# instead -- see the font-style rule in app.py's CSS, which enforces it
+# globally rather than relying on every call site to remember.
 MONO_STACK = ('"JetBrains Mono", "Cascadia Mono", Consolas, '
               '"DejaVu Sans Mono", monospace')
 

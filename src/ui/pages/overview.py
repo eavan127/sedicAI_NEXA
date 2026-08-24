@@ -25,7 +25,7 @@ def build(state):
 
     def _render(session):
         if session is None:
-            return "<i>No capture loaded.</i>", None, ""
+            return "No capture loaded.", None, ""
 
         occ = occupancy(session.iq)
         events = session.emitter_events()
