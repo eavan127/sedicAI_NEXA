@@ -8,6 +8,7 @@ tensorboard
 pyyaml
 pytest
 h5py          # reading RadChar and RadioML (.h5) — P1 and P2 both need this
+gradio        # scripts/inference_ui.py
 
 # Tools, not dependencies — install only if you need them:
 #   pip install kaggle       (P1/P2, for downloading the datasets)
