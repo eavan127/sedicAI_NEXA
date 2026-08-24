@@ -12,6 +12,9 @@ which is why it is the last lever available when the data is settled.
 
 Usage:
     python scripts/train_ensemble.py --models 5
+    python scripts/train_ensemble.py --models 5 --eval-only   # re-score existing
+                                                                 # checkpoints, e.g.
+                                                                 # after a threshold change
 """
 import argparse
 import json
@@ -133,7 +136,7 @@ def _predict(model, X_np, tta=0):
     return out / len(views)
 
 
-def main(n_models, tta=0):
+def main(n_models, tta=0, eval_only=False):
     X, y, snr_labels = load_data()
     d = CFG["dataset"]
     threshold = resolve_multilabel_thresholds()
@@ -144,7 +147,20 @@ def main(n_models, tta=0):
     ckpt_dir = REPO_ROOT / CFG["paths"]["checkpoints"]
     ckpt_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"Training {n_models} members on identical data, different seeds.")
+    if eval_only:
+        ckpt_paths = [ckpt_dir / f"ensemble_{i}.pt" for i in range(n_models)]
+        missing = [p for p in ckpt_paths if not p.exists()]
+        if missing:
+            raise FileNotFoundError(
+                f"--eval-only needs existing checkpoints, missing: {missing} -- "
+                f"run without --eval-only first to train them")
+        print(f"Re-scoring {n_models} EXISTING checkpoints against the current")
+        print("thresholds in config -- no retraining. Use this after changing")
+        print("multilabel_thresholds_per_class (e.g. from calibrate_thresholds.py")
+        print("--ensemble) to check the effect without paying for a fresh 5-model")
+        print("training run.")
+    else:
+        print(f"Training {n_models} members on identical data, different seeds.")
     if tta:
         print(f"Averaging {tta} phase rotations per prediction (TTA).")
     print()
@@ -153,8 +169,13 @@ def main(n_models, tta=0):
     members = []
 
     for i in range(n_models):
-        model = train_one(X, y, snr_labels, tr, va, seed=2000 + i)
-        torch.save(model.state_dict(), ckpt_dir / f"ensemble_{i}.pt")
+        if eval_only:
+            model = AMC_CNN(num_classes=len(CLASSES), input_len=X.shape[-1]).to(DEVICE)
+            model.load_state_dict(torch.load(ckpt_dir / f"ensemble_{i}.pt", map_location=DEVICE))
+            model.eval()
+        else:
+            model = train_one(X, y, snr_labels, tr, va, seed=2000 + i)
+            torch.save(model.state_dict(), ckpt_dir / f"ensemble_{i}.pt")
 
         probs = _predict(model, X_test, tta)
         summed_probs = probs if summed_probs is None else summed_probs + probs
@@ -196,5 +217,8 @@ if __name__ == "__main__":
     p.add_argument("--models", type=int, default=5)
     p.add_argument("--tta", type=int, default=0,
                    help="average N phase rotations per prediction (0 = off, 4 is a good start)")
+    p.add_argument("--eval-only", action="store_true",
+                   help="re-score existing ensemble_*.pt checkpoints against current "
+                        "config thresholds, no retraining")
     a = p.parse_args()
-    main(a.models, a.tta)
+    main(a.models, a.tta, a.eval_only)
