@@ -293,3 +293,39 @@ def test_noise_floor_is_empty_tier_not_a_threat():
 def test_tier_of_classes_is_public_and_worst_first():
     assert tier_of_classes(("BPSK", "JAMMING")) == "Hostile"
     assert tier_of_classes(()) == "Empty"
+
+
+from src.config import resolve_multilabel_thresholds
+from src.measure import estimate_snr_db, noise_floor_power
+from src.scenarios import build_scenario
+
+
+def test_full_core_pipeline_runs_on_a_scenario(model):
+    """Scenario -> windows -> model -> smoothing -> events, end to end.
+
+    Uses an untrained model, so this asserts on plumbing and bookkeeping, not
+    on whether the right class was found."""
+    iq, segments = build_scenario(fs=3_200_000, total_duration=0.01, seed=0)
+
+    result = classify_capture(iq, model, hop=256, fs=3_200_000)
+    assert result.n_windows == 1 + (32_000 - 512) // 256
+
+    thresholds = dict(zip(CLASSES, resolve_multilabel_thresholds()))
+    events = detections(smooth(result, alpha=0.3), thresholds)
+    for e in events:
+        assert 0.0 <= e.start_us < e.end_us
+        assert set(e.classes).issubset(set(CLASSES))
+
+    assert len(tier_track(result, thresholds)) == result.n_windows
+
+    snr = estimate_snr_db(iq[:512], noise_floor_power(iq))
+    assert np.isfinite(snr)
+
+
+def test_capture_is_never_normalized_by_the_pipeline(model):
+    """Guard for the spec's normalization rule: classify_capture must not
+    modify the caller's capture, and must not normalize it in place."""
+    iq, _ = build_scenario(fs=3_200_000, total_duration=0.005, seed=1)
+    before = iq.copy()
+    classify_capture(iq, model, hop=512, fs=3_200_000)
+    np.testing.assert_array_equal(iq, before)

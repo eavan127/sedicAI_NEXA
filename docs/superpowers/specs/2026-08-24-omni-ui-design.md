@@ -334,7 +334,10 @@ of the page and of the class.
 documented command) but becomes a thin shim.
 
 ```
-src/timeline.py          sliding-window inference, pure, testable
+src/timeline.py          MODEL-derived: windows, probabilities, attention,
+                         smoothing, event grouping, tier track
+src/measure.py           MEASURED-derived: noise floor, SNR estimate,
+                         occupancy, power spectrum
 src/scenarios.py         synthesized captures + ground truth
 src/ui/palette.py        dark console palette, tier colors
 src/ui/plots.py          waterfall, spectrum trace, ribbon, attention
@@ -351,6 +354,17 @@ in isolation:
 - `smooth(result, alpha) -> TimelineResult`
 - `detections(result, thresholds) -> list[Detection]` (grouped events)
 - `tier_track(result, thresholds)`
+- `tier_of_classes(class_names)`
+
+`src/measure.py` was split out of the original plan for `src/ui/plots.py` so
+that SNR estimation and occupancy are testable without matplotlib, and so
+MEASURED logic never shares a module with MODEL logic — making the provenance
+rule structural rather than a naming convention.
+
+`TIERS` moved from `src/evaluate.py` to `src/config.py` for the same reason:
+`evaluate.py` imports matplotlib and sklearn at module scope, so importing
+`TIERS` from it would have pulled both into the dependency-light core. It is
+re-exported from `evaluate.py`, so existing call sites are unchanged.
 
 ## Known bug fixed as part of this work
 
