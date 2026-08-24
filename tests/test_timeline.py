@@ -54,3 +54,70 @@ def test_output_is_float32():
 def test_rejects_non_positive_hop():
     with pytest.raises(ValueError):
         sliding_windows(_ramp(1024), 512, 0)
+
+
+import torch
+
+from src.config import CLASSES
+from src.models.amc_cnn import AMC_CNN
+from src.timeline import TimelineResult, classify_capture
+
+
+@pytest.fixture(scope="module")
+def model():
+    """Untrained model. Predictions are meaningless, which is fine -- these
+    tests check plumbing, shapes and bookkeeping, not accuracy."""
+    m = AMC_CNN(num_classes=len(CLASSES), input_len=512)
+    m.eval()
+    return m
+
+
+def test_classify_capture_shapes(model):
+    iq = (np.random.randn(4096) + 1j * np.random.randn(4096))
+    result = classify_capture(iq, model, hop=256)
+    assert isinstance(result, TimelineResult)
+    assert result.probs.shape == (result.n_windows, len(CLASSES))
+    assert result.starts.shape == (result.n_windows,)
+    assert result.attn.shape == (result.n_windows, 512)
+    assert result.hop == 256
+    assert result.window_len == 512
+
+
+def test_probabilities_are_independent_not_a_simplex(model):
+    """Multi-label sigmoid: rows must NOT sum to 1. If they do, someone
+    replaced sigmoid with softmax and co-occurrence is gone."""
+    iq = (np.random.randn(4096) + 1j * np.random.randn(4096))
+    result = classify_capture(iq, model, hop=256)
+    assert ((result.probs >= 0) & (result.probs <= 1)).all()
+    assert not np.allclose(result.probs.sum(axis=1), 1.0)
+
+
+def test_attention_rows_sum_to_one(model):
+    """Attention is a per-window softmax over time -- each row is its own
+    distribution, which is why heights are not comparable across windows."""
+    iq = (np.random.randn(4096) + 1j * np.random.randn(4096))
+    result = classify_capture(iq, model, hop=256)
+    np.testing.assert_allclose(result.attn.sum(axis=1), 1.0, rtol=1e-4)
+
+
+def test_times_us_maps_windows_to_capture_position(model):
+    iq = (np.random.randn(2048) + 1j * np.random.randn(2048))
+    result = classify_capture(iq, model, hop=512, fs=3_200_000)
+    # window 1 starts at sample 512 -> 512 / 3.2e6 s = 160 us
+    assert result.times_us[0] == pytest.approx(0.0)
+    assert result.times_us[1] == pytest.approx(160.0)
+
+
+def test_batching_does_not_change_results(model):
+    iq = (np.random.randn(8192) + 1j * np.random.randn(8192))
+    a = classify_capture(iq, model, hop=256, batch_size=4)
+    b = classify_capture(iq, model, hop=256, batch_size=4096)
+    np.testing.assert_allclose(a.probs, b.probs, atol=1e-5)
+
+
+def test_hook_is_removed_after_call(model):
+    """A leaked forward hook would silently accumulate across calls."""
+    before = len(model.attn_pool.score._forward_hooks)
+    classify_capture(np.random.randn(1024) + 1j * np.random.randn(1024),
+                     model, hop=512)
+    assert len(model.attn_pool.score._forward_hooks) == before
