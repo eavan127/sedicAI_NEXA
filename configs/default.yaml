@@ -147,6 +147,27 @@ dataset:
   # bought nothing measurable while doubling training time and pushing the
   # upload from 74 MB to 147 MB. Reverted.
   examples_per_class_per_snr: 1000
+  # STANDALONE civilian (BPSK/QPSK/16QAM/64QAM) examples specifically --
+  # overrides examples_per_class_per_snr for load_radioml_civilian() only,
+  # leaving every synthetic class (LFM_RADAR/FHSS/JAMMING/NOISE_FLOOR) and
+  # the overlay/mixture counts untouched.
+  #
+  # Untested lever, not a confirmed fix: civilian recall is weak (BPSK 52%,
+  # QPSK 25%, 64QAM 13%, 16QAM 1% on the 2026-08-24 ensemble) despite
+  # already getting a HIGHER automatic loss weight than the judged classes
+  # did pre-boost (inverse-frequency gives less-common classes more weight,
+  # and civilian classes are less common: ~13,200 total presence count vs
+  # 20,400 for LFM_RADAR/FHSS/JAMMING). More weight didn't fix it, so the
+  # leading theory is QAM constellation density under noise, not data
+  # volume -- but that's inference, not something diagnosed the way the
+  # FHSS hop-rate confusion was. This is real RadioML data (not synthetic),
+  # so trying it is cheap relative to e.g. the FHSS fix: no new generator
+  # code, no new metadata pipeline, just pulling more of what's already
+  # there. RadioML has up to 4096 examples per (class, SNR) bin -- 3000
+  # leaves margin below that ceiling. Re-run build_dataset.py and retrain
+  # to test; if civilian recall doesn't move meaningfully, that confirms
+  # (not just suggests) data volume isn't the bottleneck.
+  civilian_examples_per_snr: 3000
   val_frac: 0.15
   test_frac: 0.15
   seed: 42

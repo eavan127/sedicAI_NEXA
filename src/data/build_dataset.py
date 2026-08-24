@@ -85,7 +85,11 @@ def load_radioml_civilian(path=None, seed=None):
         return []
 
     rng = np.random.default_rng(seed if seed is not None else CFG["dataset"]["seed"])
-    n_per = CFG["dataset"]["examples_per_class_per_snr"]
+    # Falls back to the shared count if civilian_examples_per_snr isn't set,
+    # so this stays a no-op for anyone who hasn't opted into the override --
+    # see configs/default.yaml's dataset.civilian_examples_per_snr comment.
+    n_per = CFG["dataset"].get("civilian_examples_per_snr",
+                                CFG["dataset"]["examples_per_class_per_snr"])
     out = []
 
     with h5py.File(path, "r") as f:
