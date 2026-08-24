@@ -104,9 +104,9 @@ multilabel_threshold: 0.5 # fallback for any class not listed below
 # Re-run calibrate_thresholds.py --ensemble after any retrain -- these are
 # tied to this specific set of 5 checkpoints' calibration.
 multilabel_thresholds_per_class:
-  LFM_RADAR: 0.25
-  FHSS: 0.26
-  JAMMING: 0.79
+  LFM_RADAR: 0.26
+  FHSS: 0.27
+  JAMMING: 0.77
 
 # Per-class multiplier on compute_class_weights' inverse-frequency pos_weight
 # (src/train.py), applied in BCEWithLogitsLoss. >1 boosts a class (missing it
