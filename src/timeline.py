@@ -12,7 +12,7 @@ from dataclasses import dataclass, replace
 import numpy as np
 import torch
 
-from src.config import CFG
+from src.config import CFG, CLASSES, TIERS
 from src.data.preprocess import preprocess_window
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -154,3 +154,89 @@ def smooth(result, alpha=0.3):
         acc = alpha * p[i] + (1 - alpha) * acc
         out[i] = acc
     return replace(result, probs=out.astype(np.float32))
+
+
+@dataclass
+class Detection:
+    """One grouped detection event, spanning a run of consecutive windows
+    that all reported the same set of classes."""
+    start_us: float
+    end_us: float
+    duration_us: float
+    classes: tuple
+    peak: dict
+    start_window: int
+    end_window: int
+
+    @property
+    def label(self):
+        return " + ".join(self.classes)
+
+
+def _detected_sets(result, thresholds):
+    """Per window, the tuple of class names over their own threshold."""
+    thr = np.array([thresholds[c] for c in CLASSES], dtype=np.float32)
+    over = result.probs > thr
+    return [tuple(c for i, c in enumerate(CLASSES) if row[i]) for row in over]
+
+
+def detections(result, thresholds):
+    """Group consecutive windows into events.
+
+    Grouping keys on the WHOLE detected set, not one class at a time. A run
+    where FHSS and JAMMING both fire is one `FHSS + JAMMING` event -- grouping
+    per class would emit two overlapping rows describing one situation.
+
+    Without grouping, a detections table shows one emitter once per window
+    (~40 rows for a 6 ms emitter at hop 256) and any "Detections: N" readout
+    counts windows rather than signals.
+    """
+    sets = _detected_sets(result, thresholds)
+    events, i = [], 0
+    while i < len(sets):
+        current = sets[i]
+        if not current:
+            i += 1
+            continue
+        j = i
+        while j + 1 < len(sets) and sets[j + 1] == current:
+            j += 1
+
+        peak = {c: float(result.probs[i:j + 1, CLASSES.index(c)].max())
+                for c in current}
+        start_us = float(result.starts[i]) / result.fs * 1e6
+        end_us = float(result.starts[j] + result.window_len) / result.fs * 1e6
+        events.append(Detection(
+            start_us=start_us, end_us=end_us, duration_us=end_us - start_us,
+            classes=current, peak=peak, start_window=i, end_window=j,
+        ))
+        i = j + 1
+    return events
+
+
+# Worst-first. The ribbon shows the most serious thing present in a window,
+# so a jammer overlaid on civilian traffic reads Hostile, not Civilian.
+TIER_PRIORITY = ("Hostile", "Military", "Civilian", "Empty")
+
+_TIER_OF = {cls: tier for tier, members in TIERS.items() for cls in members}
+
+
+def tier_of_classes(class_names):
+    """Worst tier present among a set of class names.
+
+    Public because the UI needs it for detection-box and alert colouring --
+    keeping it private would have every call site reaching into _TIER_OF and
+    reimplementing the priority order.
+    """
+    tiers = {_TIER_OF[c] for c in class_names}
+    return next((t for t in TIER_PRIORITY if t in tiers), "Empty")
+
+
+def tier_track(result, thresholds):
+    """One tier name per window, for the ribbon.
+
+    NOISE_FLOOR maps to Empty, the same as nothing-detected: both mean "no
+    emitter here". They are distinguishable in the probability list; on the
+    ribbon they are the same operational state.
+    """
+    return [tier_of_classes(d) for d in _detected_sets(result, thresholds)]

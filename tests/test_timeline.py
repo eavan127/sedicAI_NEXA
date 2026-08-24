@@ -183,3 +183,113 @@ def test_smoothing_preserves_other_fields():
     out = smooth(r, alpha=0.4)
     assert out.hop == r.hop and out.window_len == r.window_len
     np.testing.assert_array_equal(out.starts, r.starts)
+
+
+from src.timeline import Detection, detections, tier_of_classes, tier_track
+
+# Class order is CLASSES: BPSK QPSK 16QAM 64QAM LFM_RADAR FHSS JAMMING NOISE_FLOOR
+FHSS_I, JAM_I, RADAR_I = 5, 6, 4
+BPSK_I, NOISE_I = 0, 7
+FLAT = {c: 0.5 for c in CLASSES}
+
+
+def test_consecutive_same_class_windows_merge_into_one_event():
+    probs = np.zeros((5, 8), dtype=np.float32)
+    probs[1:4, FHSS_I] = 0.9
+    events = detections(_result(probs), FLAT)
+    assert len(events) == 1
+    assert events[0].classes == ("FHSS",)
+    assert events[0].start_window == 1 and events[0].end_window == 3
+
+
+def test_two_classes_together_are_one_event_not_two():
+    """A run where FHSS and JAMMING are both over threshold is ONE event
+    labelled FHSS + JAMMING, not two overlapping single-class events."""
+    probs = np.zeros((4, 8), dtype=np.float32)
+    probs[:, FHSS_I] = 0.9
+    probs[:, JAM_I] = 0.85
+    events = detections(_result(probs), FLAT)
+    assert len(events) == 1
+    assert set(events[0].classes) == {"FHSS", "JAMMING"}
+
+
+def test_change_in_detected_set_starts_a_new_event():
+    probs = np.zeros((4, 8), dtype=np.float32)
+    probs[:, FHSS_I] = 0.9
+    probs[2:, JAM_I] = 0.9        # jammer joins halfway
+    events = detections(_result(probs), FLAT)
+    assert len(events) == 2
+    assert events[0].classes == ("FHSS",)
+    assert set(events[1].classes) == {"FHSS", "JAMMING"}
+
+
+def test_windows_with_nothing_over_threshold_produce_no_event():
+    probs = np.zeros((5, 8), dtype=np.float32)
+    assert detections(_result(probs), FLAT) == []
+
+
+def test_peak_confidence_is_per_class_maximum():
+    probs = np.zeros((3, 8), dtype=np.float32)
+    probs[:, FHSS_I] = [0.7, 0.94, 0.8]
+    events = detections(_result(probs), FLAT)
+    assert events[0].peak["FHSS"] == pytest.approx(0.94)
+
+
+def test_event_times_span_first_window_start_to_last_window_end():
+    probs = np.zeros((4, 8), dtype=np.float32)
+    probs[1:3, FHSS_I] = 0.9
+    r = _result(probs, hop=256, window_len=512, fs=3_200_000)
+    e = detections(r, FLAT)[0]
+    # starts at sample 256 -> 80 us; last window starts 512, ends 1024 -> 320 us
+    assert e.start_us == pytest.approx(80.0)
+    assert e.end_us == pytest.approx(320.0)
+    assert e.duration_us == pytest.approx(240.0)
+
+
+def test_per_class_thresholds_are_honoured():
+    """LFM_RADAR at 0.30 must fire under a 0.26 threshold but not a 0.5 one."""
+    probs = np.zeros((2, 8), dtype=np.float32)
+    probs[:, RADAR_I] = 0.30
+    lenient = dict(FLAT, LFM_RADAR=0.26)
+    assert len(detections(_result(probs), lenient)) == 1
+    assert detections(_result(probs), FLAT) == []
+
+
+def test_event_count_is_events_not_windows():
+    probs = np.zeros((40, 8), dtype=np.float32)
+    probs[:, FHSS_I] = 0.9
+    assert len(detections(_result(probs), FLAT)) == 1
+
+
+def test_tier_track_returns_one_tier_per_window():
+    assert len(tier_track(_result(np.zeros((4, 8), dtype=np.float32)), FLAT)) == 4
+
+
+def test_hostile_outranks_military_and_civilian():
+    """A jammer sitting on top of a civilian signal must colour the ribbon
+    Hostile -- the worst thing present is what an operator needs to see."""
+    probs = np.zeros((1, 8), dtype=np.float32)
+    probs[0, [BPSK_I, FHSS_I, JAM_I]] = 0.9
+    assert tier_track(_result(probs), FLAT)[0] == "Hostile"
+
+
+def test_military_outranks_civilian():
+    probs = np.zeros((1, 8), dtype=np.float32)
+    probs[0, [BPSK_I, RADAR_I]] = 0.9
+    assert tier_track(_result(probs), FLAT)[0] == "Military"
+
+
+def test_nothing_over_threshold_is_empty_tier():
+    probs = np.zeros((1, 8), dtype=np.float32)
+    assert tier_track(_result(probs), FLAT)[0] == "Empty"
+
+
+def test_noise_floor_is_empty_tier_not_a_threat():
+    probs = np.zeros((1, 8), dtype=np.float32)
+    probs[0, NOISE_I] = 0.95
+    assert tier_track(_result(probs), FLAT)[0] == "Empty"
+
+
+def test_tier_of_classes_is_public_and_worst_first():
+    assert tier_of_classes(("BPSK", "JAMMING")) == "Hostile"
+    assert tier_of_classes(()) == "Empty"
