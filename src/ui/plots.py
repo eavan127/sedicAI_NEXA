@@ -14,8 +14,14 @@ from scipy.signal import stft
 from src.config import CFG
 from src.measure import power_spectrum_db
 from src.timeline import tier_of_classes
-from src.ui.palette import (BG, INSTRUMENT, PANEL, TEXT_DIM, TRUTH_STYLE,
-                             WATERFALL_CMAP, style_axes, tier_color)
+from src.ui.palette import (BG, GRID, INSTRUMENT, MPL_FONT, PANEL, TEXT_DIM,
+                             TRUTH_STYLE, WATERFALL_CMAP, style_axes,
+                             tier_color)
+
+# Sans-serif across every figure this package owns, matching the SEDIC brand.
+# Set once at import: matplotlib resolves the first family actually installed.
+plt.rcParams["font.family"] = "sans-serif"
+plt.rcParams["font.sans-serif"] = MPL_FONT
 
 
 def waterfall_figure(session, smoothed=True, nperseg=256):
@@ -151,7 +157,7 @@ def attention_figure(session, window_index):
     twin.tick_params(colors=TEXT_DIM, labelsize=8)
     twin.yaxis.label.set_color(TEXT_DIM)
     for spine in twin.spines.values():
-        spine.set_color("#1f2933")
+        spine.set_color(GRID)
 
     style_axes(fig, ax)
     plt.tight_layout()

@@ -8,7 +8,7 @@ import gradio as gr
 from src.config import CFG, CLASSES
 from src.measure import estimate_snr_db
 from src.ui import plots
-from src.ui.palette import PANEL, TEXT, TEXT_DIM
+from src.ui.palette import GRID, MONO_STACK, PANEL, TEXT, TEXT_DIM
 
 
 def _probability_html(session, window_index):
@@ -27,7 +27,7 @@ def _probability_html(session, window_index):
         hit = probs[i] > session.thresholds[cls]
         mark, color = ("✓", TEXT) if hit else ("○", TEXT_DIM)
         rows.append(
-            f'<div style="font-family:monospace;color:{color};">'
+            f'<div style="font-family:{MONO_STACK};color:{color};">'
             f'{mark} {cls:<11} {probs[i]:.2f} '
             f'<span style="color:{TEXT_DIM};font-size:11px;">'
             f'thr {session.thresholds[cls]:.2f}</span></div>')
@@ -35,8 +35,8 @@ def _probability_html(session, window_index):
     noise_p = probs[CLASSES.index("NOISE_FLOOR")]
     quiet = noise_p > session.thresholds["NOISE_FLOOR"]
     noise_block = (
-        f'<div style="margin-top:12px;padding-top:8px;border-top:1px solid #1f2933;'
-        f'font-family:monospace;color:{TEXT};">'
+        f'<div style="margin-top:12px;padding-top:8px;border-top:1px solid {GRID};'
+        f'font-family:{MONO_STACK};color:{TEXT};">'
         f'{"✓" if quiet else "○"} NOISE_FLOOR {noise_p:.2f}<br>'
         f'<span style="color:{TEXT_DIM};">Signal state: '
         f'{"QUIET / NO SIGNAL" if quiet else "ACTIVE"}</span></div>')
@@ -57,7 +57,7 @@ def _metadata_html(session, window_index):
         window = session.iq[start:start + result.window_len]
         snr = f"est. {estimate_snr_db(window, session.noise_power):.1f} dB"
     return (
-        f'<div style="font-family:monospace;color:{TEXT};background:{PANEL};'
+        f'<div style="font-family:{MONO_STACK};color:{TEXT};background:{PANEL};'
         f'padding:14px;border-radius:6px;margin-top:10px;">'
         f'WINDOW   #{window_index + 1} / {result.n_windows}<br>'
         f'OFFSET   {start / CFG["signal"]["fs"] * 1000:.3f} ms<br>'

@@ -42,3 +42,6 @@ Thumbs.db
 
 # Ensemble members
 results/ensemble_*.pt
+
+# SEDIC brand asset -- not ours to redistribute; drop it in locally
+assets/sedic_logo.png

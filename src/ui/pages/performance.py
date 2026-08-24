@@ -9,11 +9,10 @@ Numbers here are ALWAYS per-window, ungated and unsmoothed. The RF Replay
 smoothing toggle, the NOISE_FLOOR gate and the event hold do not reach this
 page, by construction: nothing here imports them.
 
-Deliberately keeps the LIGHT palette. confusion_matrix.png and
-accuracy_vs_snr.png are written by src/evaluate.py and shared with the rest of
-the team (Colab downloads, brief figures); restyling them is not this
-package's call. The mismatch with the dark console is intentional and
-documented in the spec.
+confusion_matrix.png and accuracy_vs_snr.png are written by src/evaluate.py
+and shared with the rest of the team (Colab downloads, brief figures);
+restyling them is not this package's call. They are embedded as-is. The bar
+chart this file draws itself does follow the console palette.
 """
 import json
 
@@ -24,17 +23,19 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from src.config import CFG, CLASSES, REPO_ROOT, TIERS
+from src.ui.palette import GRID, MPL_FONT, PANEL, TEXT, TEXT_DIM, TIER_COLOR
 
 CKPT_PATH = REPO_ROOT / CFG["paths"]["checkpoints"] / "best_model.pt"
 EVALS_DIR = REPO_ROOT / CFG["paths"]["evals"]
 
-# Light palette, matching the dashboard this was ported from.
-_PANEL = "#ffffff"
-_GRID = "#e1e7ee"
-_TEXT = "#17212b"
-_TEXT_DIM = "#5b6b7c"
-_TIER_COLOR = {"Civilian": "#0d9488", "Military": "#b45309",
-               "Hostile": "#dc2626", "Empty": "#5b6b7c"}
+# Shares the console palette now that the console is light too -- there is no
+# longer a reason for this page to carry its own colour table. The FIGURES
+# written by src/evaluate.py are still not ours to restyle; only the bar chart
+# this file draws itself is affected.
+_PANEL, _GRID, _TEXT, _TEXT_DIM = PANEL, GRID, TEXT, TEXT_DIM
+_TIER_COLOR = TIER_COLOR
+plt.rcParams["font.family"] = "sans-serif"
+plt.rcParams["font.sans-serif"] = MPL_FONT
 _TIER_OF = {cls: tier for tier, members in TIERS.items() for cls in members}
 
 
