@@ -125,3 +125,32 @@ def classify_capture(iq, model, hop=None, window_len=None, fs=None,
         attn=np.concatenate(attn_batches).astype(np.float32),
         hop=hop, window_len=window_len, fs=fs,
     )
+
+
+def smooth(result, alpha=0.3):
+    """Exponential moving average applied to EACH CLASS independently.
+
+    Per-class, not majority-vote-over-argmax, and the difference is the whole
+    point: this model is multi-label, so "jammer overlaid on a victim signal"
+    is a legitimate two-class answer. Voting for a single winner would delete
+    exactly the case the composite training examples exist to teach.
+
+    DISPLAY ONLY. Benchmark numbers (src/evaluate.py) stay per-window and
+    unsmoothed -- smoothing suppresses brief events, which on a benchmark
+    judged by recall would quietly cost real detections. See the spec's
+    two-pipeline table.
+
+    alpha is the weight on the newest window: higher = more responsive, lower
+    = steadier.
+    """
+    if not 0 < alpha <= 1:
+        raise ValueError(f"alpha must be in (0, 1], got {alpha}")
+
+    p = result.probs
+    out = np.empty_like(p)
+    acc = p[0].astype(np.float64)
+    out[0] = acc
+    for i in range(1, len(p)):
+        acc = alpha * p[i] + (1 - alpha) * acc
+        out[i] = acc
+    return replace(result, probs=out.astype(np.float32))

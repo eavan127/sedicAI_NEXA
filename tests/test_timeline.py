@@ -121,3 +121,65 @@ def test_hook_is_removed_after_call(model):
     classify_capture(np.random.randn(1024) + 1j * np.random.randn(1024),
                      model, hop=512)
     assert len(model.attn_pool.score._forward_hooks) == before
+
+
+from src.timeline import smooth
+
+
+def _result(probs, hop=256, window_len=512, fs=3_200_000):
+    probs = np.asarray(probs, dtype=np.float32)
+    n = len(probs)
+    return TimelineResult(
+        probs=probs,
+        starts=np.arange(n) * hop,
+        attn=np.full((n, window_len), 1.0 / window_len, dtype=np.float32),
+        hop=hop, window_len=window_len, fs=fs,
+    )
+
+
+def test_smoothing_suppresses_a_single_window_spike():
+    """One noisy window must not survive as a detection."""
+    probs = np.zeros((5, 8), dtype=np.float32)
+    probs[:, 5] = 0.9              # FHSS steady
+    probs[2, 6] = 0.95             # JAMMING one-window blip
+    out = smooth(_result(probs), alpha=0.3)
+    assert out.probs[2, 6] < 0.5
+    assert out.probs[4, 5] > 0.5
+
+
+def test_smoothing_preserves_co_occurrence():
+    """Two classes true together must both survive -- this is what a majority
+    vote over argmax would destroy."""
+    probs = np.zeros((10, 8), dtype=np.float32)
+    probs[:, 5] = 0.9              # FHSS
+    probs[:, 6] = 0.85             # JAMMING, sustained
+    out = smooth(_result(probs), alpha=0.3)
+    assert out.probs[-1, 5] > 0.8
+    assert out.probs[-1, 6] > 0.8
+
+
+def test_smoothing_never_normalizes_rows():
+    probs = np.full((6, 8), 0.9, dtype=np.float32)
+    out = smooth(_result(probs), alpha=0.5)
+    assert out.probs[-1].sum() > 1.0
+
+
+def test_smoothing_leaves_first_window_untouched():
+    probs = np.zeros((3, 8), dtype=np.float32)
+    probs[0, 4] = 0.7
+    out = smooth(_result(probs), alpha=0.3)
+    assert out.probs[0, 4] == pytest.approx(0.7)
+
+
+def test_smoothing_does_not_mutate_input():
+    r = _result(np.full((4, 8), 0.5, dtype=np.float32))
+    original = r.probs.copy()
+    smooth(r, alpha=0.4)
+    np.testing.assert_array_equal(r.probs, original)
+
+
+def test_smoothing_preserves_other_fields():
+    r = _result(np.full((4, 8), 0.5, dtype=np.float32))
+    out = smooth(r, alpha=0.4)
+    assert out.hop == r.hop and out.window_len == r.window_len
+    np.testing.assert_array_equal(out.starts, r.starts)
