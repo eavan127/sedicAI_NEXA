@@ -329,3 +329,97 @@ def test_capture_is_never_normalized_by_the_pipeline(model):
     before = iq.copy()
     classify_capture(iq, model, hop=512, fs=3_200_000)
     np.testing.assert_array_equal(iq, before)
+
+
+from src.timeline import apply_hold, apply_noise_gate
+
+
+def test_noise_gate_drops_weak_emitters_on_an_empty_window():
+    """The calibrated thresholds are tuned on the dataset, where every window
+    is an emitter or a labelled NOISE_FLOOR example. On a real quiet gap
+    LFM_RADAR sits ~0.4, over its 0.26 threshold -- phantom radar on empty
+    spectrum. The gate uses the dataset's own invariant that NOISE_FLOOR never
+    co-occurs with anything."""
+    probs = np.zeros((1, 8), dtype=np.float32)
+    probs[0, RADAR_I] = 0.45
+    probs[0, NOISE_I] = 0.94
+    thresholds = dict(FLAT, LFM_RADAR=0.26)
+    r = _result(probs)
+    assert set(detections(r, thresholds)[0].classes) == {"LFM_RADAR", "NOISE_FLOOR"}
+    gated = detections(r, thresholds, noise_gate=0.5)
+    assert gated[0].classes == ("NOISE_FLOOR",)
+
+
+def test_noise_gate_leaves_a_genuinely_active_window_alone():
+    probs = np.zeros((1, 8), dtype=np.float32)
+    probs[0, FHSS_I] = 0.98
+    probs[0, NOISE_I] = 0.02
+    assert detections(_result(probs), FLAT, noise_gate=0.5)[0].classes == ("FHSS",)
+
+
+def test_hold_bridges_a_pulsed_emitters_gap():
+    """max_duty_cycle 0.15 means most windows inside a radar's active period
+    contain no pulse, fragmenting one emitter into dozens of events."""
+    probs = np.zeros((7, 8), dtype=np.float32)
+    probs[[0, 3, 6], FHSS_I] = 0.9        # present, gap, present, gap, present
+    assert len(detections(_result(probs), FLAT)) == 3
+    held = detections(_result(probs), FLAT, hold_us=1000.0)
+    assert len(held) == 1
+    assert held[0].start_window == 0 and held[0].end_window == 6
+
+
+def test_hold_does_not_bridge_a_gap_longer_than_the_hold():
+    probs = np.zeros((30, 8), dtype=np.float32)
+    probs[[0, 29], FHSS_I] = 0.9
+    assert len(detections(_result(probs), FLAT, hold_us=100.0)) == 2
+
+
+def test_hold_is_per_class_and_does_not_chain_transitively():
+    """Merging whole events whenever their class sets intersect chains
+    radar->FHSS->jamming and collapses a capture into one event. Filling each
+    class's own track cannot do that."""
+    probs = np.zeros((3, 8), dtype=np.float32)
+    probs[0, RADAR_I] = 0.9
+    probs[1, FHSS_I] = 0.9
+    probs[2, JAM_I] = 0.9
+    events = detections(_result(probs), FLAT, hold_us=2000.0)
+    assert len(events) > 1, "per-class hold must not merge disjoint emitters"
+
+
+def test_noise_floor_is_never_held():
+    """An empty channel is a state, not a pulsed emitter -- holding it would
+    make it overlap a held emitter and produce a co-occurrence the dataset
+    says cannot exist."""
+    probs = np.zeros((5, 8), dtype=np.float32)
+    probs[[0, 4], NOISE_I] = 0.95
+    probs[1:4, FHSS_I] = 0.9
+    events = detections(_result(probs), FLAT, noise_gate=0.5, hold_us=2000.0)
+    for e in events:
+        assert not ({"NOISE_FLOOR"} < set(e.classes)), \
+            f"NOISE_FLOOR co-occurred with an emitter: {e.classes}"
+
+
+def test_emitter_wins_over_noise_floor_after_hold():
+    probs = np.zeros((3, 8), dtype=np.float32)
+    probs[[0, 2], FHSS_I] = 0.9
+    probs[1, NOISE_I] = 0.95
+    events = detections(_result(probs), FLAT, noise_gate=0.5, hold_us=2000.0)
+    assert len(events) == 1
+    assert events[0].classes == ("FHSS",)
+
+
+def test_display_rules_default_to_off():
+    """detections() stays a plain primitive so the scorecard path is
+    unaffected -- only the UI opts in."""
+    probs = np.zeros((3, 8), dtype=np.float32)
+    probs[[0, 2], FHSS_I] = 0.9
+    assert len(detections(_result(probs), FLAT)) == 2
+
+
+def test_tier_track_accepts_the_same_display_rules():
+    probs = np.zeros((1, 8), dtype=np.float32)
+    probs[0, RADAR_I] = 0.45
+    probs[0, NOISE_I] = 0.94
+    thresholds = dict(FLAT, LFM_RADAR=0.26)
+    assert tier_track(_result(probs), thresholds)[0] == "Military"
+    assert tier_track(_result(probs), thresholds, noise_gate=0.5)[0] == "Empty"

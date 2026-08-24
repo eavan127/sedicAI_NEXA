@@ -167,6 +167,45 @@ Suggested wording for the technical report: *temporal probability
 smoothing and event grouping are applied exclusively at the deployment
 visualization layer and are not applied during benchmark evaluation.*
 
+### Deployment-layer detection rules
+
+Two rules beyond smoothing, discovered when the trained checkpoint was first
+run over a continuous scenario. Both are DISPLAY ONLY and default to off in
+`src/timeline.py`; only the UI opts in. The scorecard path never uses them.
+
+**NOISE_FLOOR gate.** The per-class thresholds (LFM_RADAR 0.26, FHSS 0.27)
+were calibrated on the *dataset*, where every window is either an emitter or
+a labelled NOISE_FLOOR example. A continuous capture has genuinely quiet
+gaps, and in those gaps LFM_RADAR sits around 0.38–0.50 — comfortably over
+0.26. Measured on a 3-emitter, 50 ms scenario: **243 events**, nearly all
+phantom radar on empty spectrum.
+
+The fix uses the dataset's own construction invariant — NOISE_FLOOR never
+co-occurs with any other class — so a window where NOISE_FLOOR dominates is
+empty and everything else is dropped. First detection moves from 0.00 ms to
+**5.04 ms**, against a truth radar start of **5.0 ms**.
+
+**Per-class hold (hangover).** With `max_duty_cycle: 0.15`, most windows
+inside a radar's active period contain no pulse, so one emitter fragments
+into dozens of events. Hold bridges short gaps in each class's presence.
+
+Critically **per class, not per detected-set**. Merging whole events whenever
+their class sets intersect chains transitively — radar overlaps FHSS overlaps
+jamming — and collapses an entire 50 ms capture into a single event. That was
+measured, not hypothesized.
+
+NOISE_FLOOR is excluded from hold: an empty channel is a state, not a pulsed
+emitter, and holding it would make it overlap a held emitter. After hold,
+mutual exclusion is re-asserted so an emitter always beats NOISE_FLOOR.
+
+Measured on the same scenario (gate 0.5, hold 3 ms): **243 → 10 events**,
+with FHSS at 12.5–34.9 ms against a truth of 15.0–35.0, and JAMMING at
+28.1–42.6 against 27.5–42.5.
+
+Residual `LFM_RADAR` at 40–57% and `BPSK`/`QPSK` around 60% during heavy
+jamming are genuine model behaviour, not artefacts. They are displayed
+honestly and not suppressed.
+
 ### Event grouping
 
 Consecutive windows sharing a class merge into one detection event with

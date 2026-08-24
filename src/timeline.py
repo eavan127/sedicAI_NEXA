@@ -12,7 +12,7 @@ from dataclasses import dataclass, replace
 import numpy as np
 import torch
 
-from src.config import CFG, CLASSES, TIERS
+from src.config import CFG, CLASS_TO_IDX, CLASSES, TIERS
 from src.data.preprocess import preprocess_window
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -173,15 +173,111 @@ class Detection:
         return " + ".join(self.classes)
 
 
-def _detected_sets(result, thresholds):
-    """Per window, the tuple of class names over their own threshold."""
+def _over_threshold(result, thresholds):
+    """(n_windows, n_classes) boolean: is each class over its OWN threshold."""
     thr = np.array([thresholds[c] for c in CLASSES], dtype=np.float32)
-    over = result.probs > thr
+    return result.probs > thr
+
+
+def _sets_from_matrix(over):
     return [tuple(c for i, c in enumerate(CLASSES) if row[i]) for row in over]
 
 
-def detections(result, thresholds):
+def _detected_sets(result, thresholds):
+    """Per window, the tuple of class names over their own threshold."""
+    return _sets_from_matrix(_over_threshold(result, thresholds))
+
+
+def apply_noise_gate(probs, over, gate=0.5):
+    """Where NOISE_FLOOR dominates, the window is empty -- drop everything else.
+
+    Grounded in how the dataset was built: NOISE_FLOOR never co-occurs with
+    any other class (see compute_snr_weights' docstring in src/train.py), so a
+    window where NOISE_FLOOR is strong AND some emitter is weakly over its
+    threshold is out of distribution, and NOISE_FLOOR is the answer.
+
+    This matters because the per-class thresholds are calibrated on the
+    DATASET, where every window is either an emitter or a labelled NOISE_FLOOR
+    example. A continuous capture has genuinely quiet gaps, and in those gaps
+    LFM_RADAR sits around 0.38-0.50 -- comfortably over its 0.26 threshold.
+    Without this gate a 3-emitter scenario reported 243 events, nearly all of
+    them phantom radar on empty spectrum.
+
+    DISPLAY ONLY, like smoothing. The scorecard stays per-window and ungated.
+    """
+    if "NOISE_FLOOR" not in CLASS_TO_IDX:
+        return over
+    noise_idx = CLASS_TO_IDX["NOISE_FLOOR"]
+    out = over.copy()
+    empty = probs[:, noise_idx] > gate
+    out[empty, :] = False
+    out[empty, noise_idx] = True
+    return out
+
+
+def apply_hold(over, hold_windows):
+    """Bridge short gaps in each class's presence, INDEPENDENTLY per class.
+
+    A pulsed emitter is genuinely absent between pulses: with
+    max_duty_cycle 0.15, most windows inside a radar's active period contain
+    no pulse at all, so one radar fragments into dozens of events. Real
+    detectors solve this with a hangover timer; this is that.
+
+    Per class, not per detected-set. Merging whole events whenever their class
+    sets intersect chains transitively -- radar overlaps FHSS overlaps
+    jamming -- and collapses an entire capture into a single event. Filling
+    gaps in each class's own track and only then regrouping cannot do that.
+    """
+    if hold_windows <= 0:
+        return over
+    out = over.copy()
+    # NOISE_FLOOR is excluded: it denotes an EMPTY channel, which is a state,
+    # not a pulsed emitter. Holding it would bridge quiet gaps the same way it
+    # bridges a radar's inter-pulse gaps, and the filled NOISE_FLOOR span would
+    # then overlap the filled emitter span -- producing "LFM_RADAR +
+    # NOISE_FLOOR" events, which the dataset says cannot exist.
+    noise_idx = CLASS_TO_IDX.get("NOISE_FLOOR")
+    for j in range(over.shape[1]):
+        if j == noise_idx:
+            continue
+        idx = np.flatnonzero(over[:, j])
+        for a, b in zip(idx[:-1], idx[1:]):
+            if b - a - 1 <= hold_windows:
+                out[a + 1:b, j] = True
+    return out
+
+
+def _resolved_matrix(result, thresholds, noise_gate=None, hold_us=0.0):
+    """Threshold, then apply the two deployment-layer rules in order."""
+    over = _over_threshold(result, thresholds)
+    if noise_gate is not None:
+        over = apply_noise_gate(result.probs, over, noise_gate)
+    if hold_us > 0:
+        hold_windows = int(round(hold_us * result.fs / 1e6 / result.hop))
+        over = apply_hold(over, hold_windows)
+        # Re-assert mutual exclusion AFTER hold, and ONLY after hold. Holding
+        # an emitter across a gap can extend it over windows where NOISE_FLOOR
+        # was legitimately detected; "an emitter is present AND the channel is
+        # empty" is not a state the dataset contains, so the emitter wins.
+        #
+        # Scoped to this branch deliberately: applying it unconditionally would
+        # change plain detections(result, thresholds) output, and this function
+        # has to stay a primitive that the scorecard path can rely on.
+        noise_idx = CLASS_TO_IDX.get("NOISE_FLOOR")
+        if noise_idx is not None:
+            others = np.delete(over, noise_idx, axis=1).any(axis=1)
+            over = over.copy()
+            over[others, noise_idx] = False
+    return over
+
+
+def detections(result, thresholds, noise_gate=None, hold_us=0.0):
     """Group consecutive windows into events.
+
+    `noise_gate` and `hold_us` are DISPLAY-LAYER rules and default to off, so
+    this stays a plain primitive and the scorecard path is unaffected. The UI
+    turns them on; src/evaluate.py never does. See apply_noise_gate and
+    apply_hold for why each exists.
 
     Grouping keys on the WHOLE detected set, not one class at a time. A run
     where FHSS and JAMMING both fire is one `FHSS + JAMMING` event -- grouping
@@ -191,7 +287,8 @@ def detections(result, thresholds):
     (~40 rows for a 6 ms emitter at hop 256) and any "Detections: N" readout
     counts windows rather than signals.
     """
-    sets = _detected_sets(result, thresholds)
+    sets = _sets_from_matrix(
+        _resolved_matrix(result, thresholds, noise_gate, hold_us))
     events, i = [], 0
     while i < len(sets):
         current = sets[i]
@@ -232,11 +329,12 @@ def tier_of_classes(class_names):
     return next((t for t in TIER_PRIORITY if t in tiers), "Empty")
 
 
-def tier_track(result, thresholds):
+def tier_track(result, thresholds, noise_gate=None, hold_us=0.0):
     """One tier name per window, for the ribbon.
 
     NOISE_FLOOR maps to Empty, the same as nothing-detected: both mean "no
     emitter here". They are distinguishable in the probability list; on the
     ribbon they are the same operational state.
     """
-    return [tier_of_classes(d) for d in _detected_sets(result, thresholds)]
+    return [tier_of_classes(d) for d in _sets_from_matrix(
+        _resolved_matrix(result, thresholds, noise_gate, hold_us))]
