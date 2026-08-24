@@ -108,6 +108,21 @@ def _recalls(present, y_true):
     return out
 
 
+def _precisions(present, y_true):
+    """Of everything predicted present for a judged class, what fraction
+    actually is -- the false-alarm-rate side of the recall/precision
+    tradeoff. Not computed anywhere else for the ensemble (only evaluate.py's
+    single-model path reports it), so this scorecard has been recall-only
+    until now -- easy to miss that a recall win came with a precision cost."""
+    out = {}
+    for c in CFG["judged_classes"]:
+        idx = CLASS_TO_IDX[c]
+        pred_pos = present[:, idx] == 1
+        if pred_pos.any():
+            out[c] = float(y_true[pred_pos, idx].mean())
+    return out
+
+
 EVAL_BATCH_SIZE = 256
 
 
@@ -185,19 +200,23 @@ def main(n_models, tta=0, eval_only=False):
         print(f"  member {i+1}: " + "  ".join(f"{c}={v:.4f}" for c, v in r.items()))
 
     ens_probs = summed_probs / n_models
-    ens = _recalls((ens_probs > threshold).astype(int), y_test)
+    ens_present = (ens_probs > threshold).astype(int)
+    ens = _recalls(ens_present, y_test)
+    ens_precision = _precisions(ens_present, y_test)
 
-    print(f"\n{'class':<14}{'single mean':>13}{'single best':>13}{'ENSEMBLE':>11}{'':>3}")
-    print("-" * 56)
+    print(f"\n{'class':<14}{'single mean':>13}{'single best':>13}{'ENSEMBLE':>11}"
+          f"{'precision':>12}{'':>3}")
+    print("-" * 68)
     scorecard = {"n_models": n_models, "tta": tta, "members": members,
-                  "ensemble": ens, "passed": True}
+                  "ensemble": ens, "ensemble_precision": ens_precision, "passed": True}
 
     for c in ens:
         vals = [m[c] for m in members]
         mark = "PASS" if ens[c] >= BENCHMARK else "FAIL"
         scorecard["passed"] &= ens[c] >= BENCHMARK
+        prec_str = f"{ens_precision[c]:.4f}" if c in ens_precision else "n/a"
         print(f"{c:<14}{np.mean(vals):>13.4f}{max(vals):>13.4f}"
-              f"{ens[c]:>11.4f}  {mark}")
+              f"{ens[c]:>11.4f}{prec_str:>12}  {mark}")
 
     print(f"\n  OVERALL: {'PASS' if scorecard['passed'] else 'FAIL'}")
 
