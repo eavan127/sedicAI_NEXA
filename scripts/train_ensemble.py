@@ -18,6 +18,7 @@ Usage:
 """
 import argparse
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -151,7 +152,7 @@ def _predict(model, X_np, tta=0):
     return out / len(views)
 
 
-def main(n_models, tta=0, eval_only=False):
+def main(n_models, tta=0, eval_only=False, sync_dir=None):
     X, y, snr_labels = load_data()
     d = CFG["dataset"]
     threshold = resolve_multilabel_thresholds()
@@ -161,6 +162,20 @@ def main(n_models, tta=0, eval_only=False):
 
     ckpt_dir = REPO_ROOT / CFG["paths"]["checkpoints"]
     ckpt_dir.mkdir(parents=True, exist_ok=True)
+
+    # Colab's disk is temporary -- if the session dies mid-run (idle timeout,
+    # disconnect, restart), anything only saved to ckpt_dir is gone with it.
+    # --sync-dir (e.g. a mounted Drive path) copies each member out the
+    # moment IT finishes, not after all n_models complete, so a mid-run
+    # death loses at most the member currently training, not everything
+    # trained so far. This is what actually fixes that problem -- a
+    # container running inside the same ephemeral VM would not, since the
+    # VM disappearing takes the container with it.
+    sync_path = Path(sync_dir) if sync_dir else None
+    if sync_path:
+        sync_path.mkdir(parents=True, exist_ok=True)
+        print(f"Syncing each checkpoint to {sync_path} as it completes "
+              f"(survives this session dying mid-run).\n")
 
     if eval_only:
         ckpt_paths = [ckpt_dir / f"ensemble_{i}.pt" for i in range(n_models)]
@@ -190,7 +205,11 @@ def main(n_models, tta=0, eval_only=False):
             model.eval()
         else:
             model = train_one(X, y, snr_labels, tr, va, seed=2000 + i)
-            torch.save(model.state_dict(), ckpt_dir / f"ensemble_{i}.pt")
+            ckpt_path = ckpt_dir / f"ensemble_{i}.pt"
+            torch.save(model.state_dict(), ckpt_path)
+            if sync_path:
+                shutil.copy2(ckpt_path, sync_path / ckpt_path.name)
+                print(f"  member {i+1} synced -> {sync_path / ckpt_path.name}")
 
         probs = _predict(model, X_test, tta)
         summed_probs = probs if summed_probs is None else summed_probs + probs
@@ -239,5 +258,10 @@ if __name__ == "__main__":
     p.add_argument("--eval-only", action="store_true",
                    help="re-score existing ensemble_*.pt checkpoints against current "
                         "config thresholds, no retraining")
+    p.add_argument("--sync-dir", default=None,
+                   help="copy each checkpoint here the moment it finishes training, e.g. "
+                        "a mounted Drive path (/content/drive/MyDrive/sedic/...) -- so a "
+                        "Colab session dying mid-run only loses the member in progress, "
+                        "not every member trained so far")
     a = p.parse_args()
-    main(a.models, a.tta, a.eval_only)
+    main(a.models, a.tta, a.eval_only, a.sync_dir)
