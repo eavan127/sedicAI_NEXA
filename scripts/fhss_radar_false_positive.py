@@ -20,8 +20,16 @@ mistakes for radar, or whether the false-positive rate is flat across
 parameters (in which case the leak isn't about FHSS's own shape at all, and
 the real driver is something else, e.g. how LFM_RADAR was trained).
 
+--ensemble averages predictions over ensemble_0.pt..ensemble_{n-1}.pt instead
+of loading best_model.pt -- necessary to get a trustworthy answer once the
+ensemble (not a single model) is what's actually being submitted and
+calibrated for. Same reasoning as calibrate_thresholds.py's --ensemble flag:
+a single model's threshold/behaviour doesn't transfer cleanly to the
+ensemble's averaged probabilities.
+
 Usage:
     python scripts/fhss_radar_false_positive.py --n 800
+    python scripts/fhss_radar_false_positive.py --n 800 --ensemble --n-models 5
 """
 import argparse
 import sys
@@ -41,7 +49,29 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 WINDOW_LEN = CFG["signal"]["window_len"]
 
 
-def noise_control_check(model, threshold, n=500, seed_offset=777):
+def _load_models(ckpt_paths):
+    models = []
+    for ckpt in ckpt_paths:
+        model = AMC_CNN(num_classes=len(CLASSES), input_len=WINDOW_LEN).to(DEVICE)
+        model.load_state_dict(torch.load(ckpt, map_location=DEVICE))
+        model.eval()
+        models.append(model)
+    return models
+
+
+def _predict_probs(models, X):
+    """Average sigmoid probabilities over one or more models -- same
+    averaging train_ensemble.py's _predict uses, so this diagnostic sees
+    exactly what the submitted ensemble actually outputs."""
+    summed = None
+    with torch.no_grad():
+        for model in models:
+            p = torch.sigmoid(model(torch.tensor(X).to(DEVICE))).cpu().numpy()
+            summed = p if summed is None else summed + p
+    return summed / len(models)
+
+
+def noise_control_check(models, threshold, n=500, seed_offset=777):
     """Sanity check before trusting anything else in this script: does the
     model flag LFM_RADAR on signals that are neither FHSS nor anything else --
     pure complex Gaussian noise, nothing transmitting?
@@ -63,8 +93,7 @@ def noise_control_check(model, threshold, n=500, seed_offset=777):
         noise = rng.standard_normal(WINDOW_LEN) + 1j * rng.standard_normal(WINDOW_LEN)
         windows.append(preprocess_window(noise, WINDOW_LEN))
     X = np.stack(windows).astype(np.float32)
-    with torch.no_grad():
-        probs = torch.sigmoid(model(torch.tensor(X).to(DEVICE))).cpu().numpy()
+    probs = _predict_probs(models, X)
     radar_prob = probs[:, CLASS_TO_IDX["LFM_RADAR"]]
     return float((radar_prob > threshold).mean()), float(radar_prob.mean())
 
@@ -83,20 +112,29 @@ def _bucket_report(values, false_positive, radar_prob, label, bins, bin_labels):
     print(f"  correlation({label}, radar_prob) = {r:+.3f}\n")
 
 
-def main(n):
+def main(n, ensemble, n_models):
     rng = np.random.default_rng(CFG["dataset"]["seed"] + 199)
     fs = CFG["signal"]["fs"]
     total_duration = CFG["signal"]["total_duration"]
     cfg = CFG["fhss"]
 
-    ckpt = REPO_ROOT / CFG["paths"]["checkpoints"] / "best_model.pt"
-    model = AMC_CNN(num_classes=len(CLASSES), input_len=WINDOW_LEN).to(DEVICE)
-    model.load_state_dict(torch.load(ckpt, map_location=DEVICE))
-    model.eval()
+    ckpt_dir = REPO_ROOT / CFG["paths"]["checkpoints"]
+    if ensemble:
+        ckpt_paths = [ckpt_dir / f"ensemble_{i}.pt" for i in range(n_models)]
+        missing = [p for p in ckpt_paths if not p.exists()]
+        if missing:
+            raise FileNotFoundError(
+                f"missing ensemble checkpoints: {missing} -- run "
+                f"train_ensemble.py --models {n_models} first")
+        ckpt_desc = f"{n_models}-model ensemble average ({ckpt_dir}/ensemble_*.pt)"
+    else:
+        ckpt_paths = [ckpt_dir / "best_model.pt"]
+        ckpt_desc = str(ckpt_paths[0])
+    models = _load_models(ckpt_paths)
     threshold = resolve_multilabel_thresholds()[CLASS_TO_IDX["LFM_RADAR"]]
 
-    noise_fp_rate, noise_mean_prob = noise_control_check(model, threshold)
-    print(f"Checkpoint: {ckpt}")
+    noise_fp_rate, noise_mean_prob = noise_control_check(models, threshold)
+    print(f"Checkpoint: {ckpt_desc}")
     print(f"LFM_RADAR threshold used: {threshold:.3f}")
     print(f"\n--- Noise control (sanity check, not FHSS) ---")
     print(f"  pure noise false-positive rate: {noise_fp_rate:.1%}  (mean prob {noise_mean_prob:.3f})")
@@ -134,8 +172,7 @@ def main(n):
     spacings = np.array(spacings)
     X = np.stack(windows).astype(np.float32)
 
-    with torch.no_grad():
-        probs = torch.sigmoid(model(torch.tensor(X).to(DEVICE))).cpu().numpy()
+    probs = _predict_probs(models, X)
     radar_prob = probs[:, CLASS_TO_IDX["LFM_RADAR"]]
     false_positive = radar_prob > threshold  # ground truth is "absent" for every example here
 
@@ -178,4 +215,8 @@ def main(n):
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--n", type=int, default=800)
-    main(p.parse_args().n)
+    p.add_argument("--ensemble", action="store_true",
+                    help="average over ensemble_*.pt instead of best_model.pt")
+    p.add_argument("--n-models", type=int, default=5)
+    a = p.parse_args()
+    main(a.n, a.ensemble, a.n_models)
