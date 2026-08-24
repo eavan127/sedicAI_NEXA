@@ -991,7 +991,58 @@ git commit -m "feat(ui): Model page introspecting the loaded checkpoint"
 **Files:**
 - Create: `src/ui/pages/performance.py`
 
-- [ ] **Step 1: Port the existing dashboard**
+**Parity requirement — read before writing any code.**
+
+Performance is the one page that must never become a second evaluation
+implementation. It **displays** what `src/evaluate.py` produces; it does not
+recompute anything.
+
+    src/evaluate.py
+          |
+          +-- metrics
+          +-- confusion_matrix.png
+          +-- accuracy_vs_snr.png
+                    |
+                    v
+             Performance page
+
+NOT:
+
+    Performance page
+          |
+          +-- independently recalculates metrics
+
+If this page ever derives its own recall, FAR or confusion matrix, a judge can
+be shown numbers that disagree with the official scorecard. That is a worse
+failure than the page not existing.
+
+Binding rules for this task:
+
+1. Inspect and preserve the existing `build_dashboard()` implementation and
+   its data sources. Reproduce current behaviour exactly.
+2. Do not change evaluation logic, metric definitions, or generated figures.
+3. Do not import UI code into the core engine, and do not import
+   `src/timeline.py` smoothing into this page. Numbers here are always
+   per-window and unsmoothed.
+4. Verify the displayed confusion matrix, accuracy-vs-SNR plot, per-class
+   recall and false-alarm rate are IDENTICAL to the existing implementation
+   before and after the port.
+
+- [ ] **Step 1: Record the pre-port baseline**
+
+Before touching anything, capture what the current implementation produces:
+
+```bash
+python -m src.evaluate
+cp evals/scorecard.json /tmp/scorecard_before.json
+cp evals/confusion_matrix.png /tmp/cm_before.png
+cp evals/accuracy_vs_snr.png /tmp/snr_before.png
+echo "baseline captured"
+```
+
+Expected: `baseline captured`
+
+- [ ] **Step 2: Port the existing dashboard**
 
 Move the `build_dashboard` function and its bar-chart helper out of the
 current `scripts/inference_ui.py` into `src/ui/pages/performance.py` unchanged
@@ -1037,16 +1088,42 @@ Copy the body of the old `build_dashboard` into a module-level
 `_build_dashboard()` in this file, together with the light-palette helper it
 depends on (`_style_light_axes` from the old script). Do not change its logic.
 
-- [ ] **Step 2: Verify it still runs**
+- [ ] **Step 3: Verify it still imports**
 
 Run: `python -c "from src.ui.pages import performance; print('import ok')"`
 Expected: `import ok`
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Verify parity against the baseline**
+
+Re-run evaluation through the ported page's code path and diff against the
+baseline captured in Step 1:
+
+```bash
+python -c "
+import sys; sys.path.insert(0,'.')
+from src.ui.pages.performance import _build_dashboard
+_build_dashboard()
+print('dashboard ran')
+"
+python -c "
+import json
+before = json.load(open('/tmp/scorecard_before.json'))
+after = json.load(open('evals/scorecard.json'))
+assert before == after, 'PARITY BROKEN: scorecard changed after the port'
+print('scorecard identical')
+"
+```
+
+Expected: `dashboard ran` then `scorecard identical`
+
+If the scorecard differs, the port changed evaluation behaviour. Fix the port
+— do not update the baseline.
+
+- [ ] **Step 5: Commit**
 
 ```bash
 git add src/ui/pages/performance.py
-git commit -m "feat(ui): port Results dashboard to Performance page"
+git commit -m "feat(ui): port Results dashboard to Performance page, verified identical"
 ```
 
 ---
@@ -1285,9 +1362,123 @@ git commit -m "test: confirm UI uses per-class thresholds throughout"
 
 ---
 
+## Task 14: Inference-context and smoothing-isolation tests
+
+The console now has two distinct inference contexts (one window vs a whole
+capture) and a display transform (smoothing) that must never leak into
+reported metrics. Pin all of it.
+
+**Files:**
+- Modify: `tests/test_ui_session.py`
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `tests/test_ui_session.py`:
+
+```python
+from src.timeline import detections
+
+
+def test_context_1_single_test_example_is_exactly_one_window(model):
+    """512 samples -> 1 window, no timeline. Signal Analysis must still work
+    in this degenerate case."""
+    X = np.random.randn(1, 2, 512).astype(np.float32)
+    y = np.zeros((1, 8), dtype=np.float32)
+    snr = np.array([-6.0])
+    from src.ui.session import load_test_example
+    s = load_test_example(model, X, y, snr, 0)
+    assert s.result.n_windows == 1
+    assert s.source == "test-example"
+    assert s.snr_known is True
+    assert s.true_snr_db == pytest.approx(-6.0)
+    assert s.truth is None
+
+
+def test_context_2_capture_has_a_timeline_and_groupable_events(model):
+    """A multi-window capture must produce a timeline events can group over."""
+    s = load_scenario(model, total_duration=0.01, hop=256, seed=0)
+    assert s.result.n_windows > 1
+    assert s.result.times_us[1] > s.result.times_us[0]
+    assert isinstance(s.events(), list)
+
+
+def test_context_3_two_classes_produce_one_combined_event(model):
+    """FHSS 0.90 + JAMMING 0.85 -> both detected -> ONE event."""
+    s = load_scenario(model, total_duration=0.005, hop=512, seed=0)
+    probs = np.zeros((4, 8), dtype=np.float32)
+    probs[:, CLASSES.index("FHSS")] = 0.90
+    probs[:, CLASSES.index("JAMMING")] = 0.85
+    from dataclasses import replace
+    forced = replace(s.result, probs=probs, starts=np.arange(4) * 512)
+    events = detections(forced, s.thresholds)
+    assert len(events) == 1
+    assert set(events[0].classes) == {"FHSS", "JAMMING"}
+    assert events[0].label in ("FHSS + JAMMING", "JAMMING + FHSS")
+
+
+def test_context_4_smoothing_does_not_mutate_the_raw_result(model):
+    """THE key isolation test: the raw per-window probabilities the scorecard
+    would use must be byte-identical before and after smoothing is applied for
+    display."""
+    s = load_scenario(model, total_duration=0.01, hop=256, seed=0)
+    raw_before = s.result.probs.copy()
+
+    s.events(smoothed=True)
+    s.tiers(smoothed=True)
+    s.smoothed_result()
+
+    np.testing.assert_array_equal(s.result.probs, raw_before)
+
+
+def test_smoothed_and_raw_can_disagree(model):
+    """If these could never differ, the toggle would be decorative and the
+    isolation guarantee would be untestable."""
+    s = load_scenario(model, total_duration=0.02, hop=256, seed=3)
+    assert s.events(smoothed=True) is not None
+    assert s.events(smoothed=False) is not None
+
+
+def test_scorecard_path_never_imports_smoothing():
+    """src/evaluate.py must not reach for the display-only transform."""
+    import inspect
+
+    import src.evaluate as ev
+    source = inspect.getsource(ev)
+    assert "smooth" not in source, (
+        "src/evaluate.py references smoothing -- benchmark numbers must stay "
+        "per-window and unsmoothed"
+    )
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `python -m pytest tests/test_ui_session.py -k "context or smoothing or scorecard" -v`
+Expected: FAIL — `ImportError` on `load_test_example` until Task 2 is complete
+
+- [ ] **Step 3: Fix anything the tests surface**
+
+No new production code is expected — these pin behaviour built in Tasks 1–2
+and the core plan. If one fails, fix the defect at its source.
+
+- [ ] **Step 4: Run the whole suite**
+
+Run: `python -m pytest tests/ -v`
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add tests/test_ui_session.py
+git commit -m "test: pin inference contexts and smoothing isolation"
+```
+
+---
+
 ## Definition of Done
 
 - `python -m pytest tests/ -v` passes
+- Performance page scorecard is byte-identical to the pre-port baseline
+- Smoothing never mutates `session.result.probs`
 - `python scripts/inference_ui.py` serves all six pages
 - Every check in Task 12 Step 3 passes
 - No detection overlay is bounded in frequency; no `LIVE` badge; no GHz carrier anywhere
