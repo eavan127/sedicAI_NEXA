@@ -163,11 +163,19 @@ dataset:
   # FHSS hop-rate confusion was. This is real RadioML data (not synthetic),
   # so trying it is cheap relative to e.g. the FHSS fix: no new generator
   # code, no new metadata pipeline, just pulling more of what's already
-  # there. RadioML has up to 4096 examples per (class, SNR) bin -- 3000
-  # leaves margin below that ceiling. Re-run build_dataset.py and retrain
-  # to test; if civilian recall doesn't move meaningfully, that confirms
-  # (not just suggests) data volume isn't the bottleneck.
-  civilian_examples_per_snr: 3000
+  # there. Re-run build_dataset.py and retrain to test; if civilian recall
+  # doesn't move meaningfully, that confirms (not just suggests) data
+  # volume isn't the bottleneck.
+  #
+  # 3796, not 4096: RadioML has exactly 4096 rows per (class, SNR) bin, and
+  # the composite-overlay pool (see overlay_fraction below) needs its own
+  # 300 rows per bin, DISJOINT from whatever standalone claims here --
+  # load_radioml_civilian() now guarantees that disjointness by construction
+  # (same seed, non-overlapping offsets) rather than hoping two
+  # independently-seeded draws don't collide, which they provably do once
+  # combined demand passes half the block. 3796 + 300 = 4096 exactly: this
+  # is the real ceiling, not a conservative guess below it.
+  civilian_examples_per_snr: 3796
   val_frac: 0.15
   test_frac: 0.15
   seed: 42
