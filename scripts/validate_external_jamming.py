@@ -29,7 +29,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.config import CFG, CLASSES, CLASS_TO_IDX, REPO_ROOT  # noqa: E402
+from src.config import CFG, CLASSES, CLASS_TO_IDX, REPO_ROOT, resolve_multilabel_thresholds  # noqa: E402
 from src.data.preprocess import preprocess_window  # noqa: E402
 from src.models.amc_cnn import AMC_CNN  # noqa: E402
 
@@ -54,18 +54,50 @@ def windows_from_capture(iq, window_len, stride):
     return np.stack([preprocess_window(iq[s:s + window_len], window_len) for s in starts])
 
 
-def main(data_dir, split, model_path, stride, max_files):
+def _load_models(ckpt_paths, window_len):
+    models = []
+    for p in ckpt_paths:
+        model = AMC_CNN(num_classes=len(CLASSES), input_len=window_len).to(DEVICE)
+        model.load_state_dict(torch.load(p, map_location=DEVICE))
+        model.eval()
+        models.append(model)
+    return models
+
+
+def _predict_probs(models, batch):
+    """Average sigmoid probabilities over one or more models -- same
+    averaging train_ensemble.py's _predict uses, so this checks what the
+    actually-submitted ensemble does, not a single unrepresentative model."""
+    summed = None
+    with torch.no_grad():
+        for model in models:
+            p = torch.sigmoid(model(batch))
+            summed = p if summed is None else summed + p
+    return summed / len(models)
+
+
+def main(data_dir, split, model_path, stride, max_files, ensemble, n_models):
     window_len = CFG["signal"]["window_len"]
     stride = stride or window_len
 
-    ckpt = Path(model_path) if model_path else REPO_ROOT / CFG["paths"]["checkpoints"] / "best_model.pt"
-    model = AMC_CNN(num_classes=len(CLASSES), input_len=window_len).to(DEVICE)
-    model.load_state_dict(torch.load(ckpt, map_location=DEVICE))
-    model.eval()
-    print(f"Loaded {ckpt.name}\n")
+    ckpt_dir = REPO_ROOT / CFG["paths"]["checkpoints"]
+    if ensemble:
+        ckpt_paths = [ckpt_dir / f"ensemble_{i}.pt" for i in range(n_models)]
+        missing = [p for p in ckpt_paths if not p.exists()]
+        if missing:
+            raise FileNotFoundError(
+                f"missing ensemble checkpoints: {missing} -- run "
+                f"train_ensemble.py --models {n_models} first")
+        ckpt_desc = f"{n_models}-model ensemble average"
+    else:
+        ckpt_paths = [Path(model_path) if model_path else ckpt_dir / "best_model.pt"]
+        ckpt_desc = ckpt_paths[0].name
+    models = _load_models(ckpt_paths, window_len)
+    threshold = resolve_multilabel_thresholds()[JAM_IDX]
+    print(f"Loaded {ckpt_desc}, JAMMING threshold={threshold:.3f}\n")
 
-    print(f"{'category':<14}{'files':>7}{'windows':>9}{'jam-recall':>12}{'top mistake':>16}")
-    print("-" * 62)
+    print(f"{'category':<14}{'files':>7}{'windows':>9}{'jam-recall':>12}{'mean prob':>11}")
+    print("-" * 57)
 
     overall_tp = overall_fn = overall_fp = overall_tn = 0
 
@@ -76,17 +108,19 @@ def main(data_dir, split, model_path, stride, max_files):
             print(f"{cat:<14}  (no files found at {folder})")
             continue
 
-        preds = []
+        jam_probs = []
         for f in files:
             iq = load_mat_iq(f)
             batch = windows_from_capture(iq, window_len, stride)
-            with torch.no_grad():
-                out = model(torch.tensor(batch).to(DEVICE)).argmax(1).cpu().numpy()
-            preds.append(out)
-        preds = np.concatenate(preds)
+            # sigmoid, not argmax -- JAMMING is an independent yes/no call, not
+            # a competing single-label prediction, matching every other
+            # evaluation in this pipeline post multi-label pivot.
+            probs = _predict_probs(models, torch.tensor(batch).to(DEVICE))[:, JAM_IDX]
+            jam_probs.append(probs.cpu().numpy())
+        jam_probs = np.concatenate(jam_probs)
+        pred_is_jam = jam_probs > threshold
 
         true_is_jam = cat != "NoJam"
-        pred_is_jam = preds == JAM_IDX
 
         if true_is_jam:
             tp, fn = int(pred_is_jam.sum()), int((~pred_is_jam).sum())
@@ -99,13 +133,7 @@ def main(data_dir, split, model_path, stride, max_files):
             overall_tn += tn
             recall = tn / (tn + fp)  # for NoJam, "recall" = correctly-quiet rate
 
-        wrong = preds[preds != (JAM_IDX if true_is_jam else preds)]
-        idx, cnt = (np.unique(preds[preds != JAM_IDX], return_counts=True)
-                    if true_is_jam else np.unique(preds[pred_is_jam], return_counts=True))
-        top = CLASSES[idx[cnt.argmax()]] if len(idx) else "-"
-
-        label = "jam-recall" if true_is_jam else "quiet-rate"
-        print(f"{cat:<14}{len(files):>7}{len(preds):>9}{recall:>11.1%}{'  ' + top:>16}")
+        print(f"{cat:<14}{len(files):>7}{len(jam_probs):>9}{recall:>11.1%}{jam_probs.mean():>11.3f}")
 
     print()
     if overall_tp + overall_fn:
@@ -127,5 +155,8 @@ if __name__ == "__main__":
                    help="window stride in samples (default: non-overlapping)")
     p.add_argument("--max-files", type=int, default=50,
                    help="cap files per category -- 16,368-sample .mat files add up fast")
+    p.add_argument("--ensemble", action="store_true",
+                   help="average over ensemble_*.pt instead of best_model.pt/--model")
+    p.add_argument("--n-models", type=int, default=5)
     a = p.parse_args()
-    main(a.data_dir, a.split, a.model, a.stride, a.max_files)
+    main(a.data_dir, a.split, a.model, a.stride, a.max_files, a.ensemble, a.n_models)
