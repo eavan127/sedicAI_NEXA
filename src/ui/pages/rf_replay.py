@@ -48,10 +48,7 @@ def _render(session, smoothing_choice):
         f"{session.result.n_windows} windows @ hop {session.result.hop} "
         f"&nbsp;·&nbsp; **{len(rows)} events**"
     )
-    return (session, head,
-            plots.spectrum_figure(session),
-            plots.waterfall_figure(session, smoothed=smoothed),
-            plots.ribbon_figure(session, smoothed=smoothed),
+    return (session, head, plots.console_figure(session, smoothed=smoothed),
             rows)
 
 
@@ -78,12 +75,12 @@ def build(state, get_model):
         "</div>")
 
     header = gr.Markdown()
-    spectrum = gr.Plot(label="Power spectrum — measured")
-
-    with gr.Row(equal_height=True):
-        waterfall = gr.Plot(label="Waterfall (measured) + detections (model)",
-                             scale=9)
-        ribbon = gr.Plot(label="Tier", scale=1, min_width=110)
+    # One figure, not three. Spectrum, waterfall, detection lanes and the tier
+    # ribbon share a single time axis, so a detection can be read straight down
+    # against the signal that produced it and against ground truth. As
+    # separate plots they were three independent axes that only looked
+    # adjacent.
+    console = gr.Plot(label="Spectrum · waterfall · detections · tier — shared time axis")
 
     # Kept plain: fixed column widths fought the content. A window with five
     # simultaneous classes puts "BPSK + QPSK + 16QAM + LFM_RADAR + FHSS +
@@ -104,7 +101,7 @@ def build(state, get_model):
         label="Detection events", interactive=False, wrap=True,
         max_height=520, column_widths=["5%", "12%", "14%", "69%"])
 
-    outputs = [state, header, spectrum, waterfall, ribbon, events]
+    outputs = [state, header, console, events]
 
     scenario_btn.click(
         lambda h, sm: _render(load_scenario(get_model(), total_duration=0.05,
@@ -119,5 +116,5 @@ def build(state, get_model):
 
     smoothing.change(
         lambda s, sm: _render(s, sm) if s is not None
-        else (s, "Load a capture first.", None, None, None, []),
+        else (s, "Load a capture first.", None, []),
         inputs=[state, smoothing], outputs=outputs)
