@@ -8,33 +8,63 @@ from src.ui.pages import (alerts, model_page, overview, performance, rf_replay,
                            signal_analysis)
 from src.ui.palette import (BG, BRAND_OLIVE, BRAND_OLIVE_DARK,
                              BRAND_OLIVE_TINT, BRAND_SLATE, FONT_STACK, GRID,
-                             PANEL, TEXT, TEXT_DIM)
+                             MONO_STACK, PANEL, TEXT, TEXT_DIM)
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 CKPT_PATH = REPO_ROOT / CFG["paths"]["checkpoints"] / "best_model.pt"
 
-LOGO_PATH = REPO_ROOT / "assets" / "sedic_logo.png"
-
 CUSTOM_CSS = f"""
+/* Gradio resolves its own palette from CSS custom properties, and picks the
+   DARK set when the browser reports a dark colour scheme. Setting only
+   backgrounds left --body-text-color at #f1f5f9 -- near-white text on a white
+   panel, contrast ratio 1.03, invisible. Overriding the variables themselves
+   fixes every component at once; overriding `color` per element does not,
+   because Gradio's own scoped classes are more specific.
+   The .dark block repeats them so a dark-mode browser gets the light theme
+   too, rather than half of each. */
+.gradio-container, .gradio-container .dark, .dark {{
+  --body-background-fill: {BG};
+  --body-text-color: {TEXT};
+  --body-text-color-subdued: {TEXT_DIM};
+  --background-fill-primary: {PANEL};
+  --background-fill-secondary: {BG};
+  --block-background-fill: {PANEL};
+  --panel-background-fill: {PANEL};
+  --block-label-background-fill: {PANEL};
+  --block-label-text-color: {TEXT_DIM};
+  --block-title-text-color: {TEXT};
+  --block-info-text-color: {TEXT_DIM};
+  --block-border-color: {GRID};
+  --border-color-primary: {GRID};
+  --border-color-accent: {BRAND_OLIVE};
+  --input-background-fill: {PANEL};
+  --input-border-color: {GRID};
+  --input-placeholder-color: {TEXT_DIM};
+  --table-even-background-fill: {PANEL};
+  --table-odd-background-fill: {BG};
+  --table-border-color: {GRID};
+  --button-secondary-background-fill: {PANEL};
+  --button-secondary-text-color: {TEXT};
+  --button-secondary-border-color: {GRID};
+  --link-text-color: {BRAND_OLIVE_DARK};
+  --color-accent: {BRAND_OLIVE};
+  --color-accent-soft: {BRAND_OLIVE_TINT};
+}}
 .gradio-container {{
   background: {BG} !important;
   font-family: {FONT_STACK} !important;
   /* Gradio caps the shell at ~1200px. The waterfall and the detections table
-     both want more than that -- the table needs ~1740px once a window carries
-     five simultaneous classes -- and the cap was forcing a horizontal scroll
-     that made the table unreadable without zooming. */
+     both want more than that, and the cap forced a horizontal scroll that made
+     the table unreadable without zooming. */
   max-width: 100% !important;
   width: 100% !important;
   padding-left: 26px !important;
   padding-right: 26px !important;
 }}
-.gradio-container, .gradio-container * {{
-  color: {TEXT};
+.gradio-container *, .gradio-container p, .gradio-container span,
+.gradio-container label, .gradio-container h1, .gradio-container h2,
+.gradio-container h3, .gradio-container td, .gradio-container th {{
   font-family: {FONT_STACK};
-}}
-.gr-panel, .block, .form {{
-  background: {PANEL} !important;
-  border-color: {GRID} !important;
 }}
 button.primary, .gr-button-primary {{
   background: {BRAND_OLIVE} !important;
@@ -44,12 +74,22 @@ button.primary, .gr-button-primary {{
 button.primary:hover, .gr-button-primary:hover {{
   background: {BRAND_OLIVE_DARK} !important;
 }}
+.tab-nav button {{ color: {TEXT_DIM} !important; }}
 .tab-nav button.selected {{
   color: {BRAND_OLIVE_DARK} !important;
   border-bottom-color: {BRAND_OLIVE} !important;
   font-weight: 600;
 }}
-thead th {{ background: {BRAND_OLIVE_TINT} !important; }}
+thead th {{ background: {BRAND_OLIVE_TINT} !important; color: {TEXT} !important; }}
+/* Inline code keeps Gradio's dark code surface even after the variables are
+   overridden, which put dark text on a dark chip. Give it the brand tint. */
+.gradio-container code, .gradio-container kbd, .gradio-container samp {{
+  background: {BRAND_OLIVE_TINT} !important;
+  color: {BRAND_OLIVE_DARK} !important;
+  font-family: {MONO_STACK};
+  padding: 1px 5px;
+  border-radius: 3px;
+}}
 footer {{ display: none !important; }}
 /* No italics anywhere. Gradio italicises markdown emphasis and some captions
    by default; killing it globally is more reliable than auditing every
@@ -58,6 +98,8 @@ footer {{ display: none !important; }}
   font-style: normal !important;
 }}
 """
+
+LOGO_PATH = REPO_ROOT / "assets" / "sedic_logo.png"
 
 
 def _logo_html():
