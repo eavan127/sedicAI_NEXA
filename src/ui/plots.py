@@ -12,7 +12,7 @@ import numpy as np
 from scipy.signal import stft
 
 from src.config import CFG
-from src.measure import power_spectrum_db
+from src.measure import estimate_snr_db, power_spectrum_db
 from src.timeline import tier_of_classes
 from src.ui.palette import (BG, GRID, INSTRUMENT, MPL_FONT, PANEL, TEXT_DIM,
                              TRUTH_STYLE, WATERFALL_CMAP, style_axes,
@@ -67,13 +67,35 @@ def waterfall_figure(session, smoothed=True, nperseg=256):
             (freqs_mhz[0], event.start_us / 1000.0), span,
             event.duration_us / 1000.0,
             fill=False, edgecolor=color, linewidth=2.0, zorder=5))
-        if event.duration_us / 1000.0 >= min_labelled_ms:
-            ax.text(freqs_mhz[0] + span * 0.01,
-                     event.start_us / 1000.0 + event.duration_us / 2000.0,
-                     event.label, color=color, fontsize=8, va="center",
-                     fontweight="bold", zorder=6,
-                     bbox=dict(facecolor=PANEL, edgecolor=color, alpha=0.92,
-                                boxstyle="round,pad=0.3", linewidth=0.8))
+        if event.duration_us / 1000.0 < min_labelled_ms:
+            continue
+
+        # Class + confidence, one line per class, the way an RF console
+        # labels a detection. MODEL provenance -- tier colour.
+        classes_text = "\n".join(
+            f"{c}  {event.peak[c] * 100:.0f}%" for c in event.classes)
+        y_mid = event.start_us / 1000.0 + event.duration_us / 2000.0
+        snr_text = _event_snr_text(session, event)
+
+        # Class block sits just above the event's midline, signal level just
+        # below it, so the two stack without overlapping regardless of how
+        # many classes the event carries.
+        ax.text(freqs_mhz[0] + span * 0.012, y_mid, classes_text,
+                 color=color, fontsize=8,
+                 va="bottom" if snr_text else "center", ha="left",
+                 fontweight="bold", linespacing=1.4, zorder=6,
+                 bbox=dict(facecolor=PANEL, edgecolor=color, alpha=0.93,
+                            boxstyle="round,pad=0.35", linewidth=0.9))
+
+        # Signal level, drawn SEPARATELY in instrument styling. It shares the
+        # label visually but not provenance: the classifier does not produce
+        # SNR, so it must not wear the tier colour that marks model output.
+        if snr_text:
+            ax.text(freqs_mhz[0] + span * 0.012, y_mid, snr_text,
+                     color=INSTRUMENT["color"], fontsize=7,
+                     va="top", ha="left", zorder=6,
+                     bbox=dict(facecolor=PANEL, edgecolor=GRID, alpha=0.9,
+                                boxstyle="round,pad=0.2", linewidth=0.6))
 
     # TRUTH: scenario only, dashed outline, never filled.
     if session.truth:
@@ -96,6 +118,29 @@ def waterfall_figure(session, smoothed=True, nperseg=256):
     ax.grid(False)      # a grid drawn over a waterfall obscures the data
     plt.tight_layout()
     return fig
+
+
+def _event_snr_text(session, event):
+    """Signal level for one event.
+
+    Always MEASURED and per-event, estimated from the capture's own noise
+    floor over that event's samples, and always prefixed `est.` so it can
+    never be read as a calibrated measurement.
+
+    Deliberately NOT the scenario's known SNR: that value describes the whole
+    capture, so printing it on every box repeated one number down the page and
+    told an operator nothing about the individual detection. The known
+    capture-level figure belongs in the status line, and is shown there.
+
+    Never MODEL -- the classifier does not estimate SNR.
+    """
+    result = session.result
+    lo = int(result.starts[event.start_window])
+    hi = int(result.starts[event.end_window]) + result.window_len
+    segment = session.iq[lo:min(hi, len(session.iq))]
+    if len(segment) < 8:
+        return None
+    return f"est. {estimate_snr_db(segment, session.noise_power):.1f} dB"
 
 
 def spectrum_figure(session):

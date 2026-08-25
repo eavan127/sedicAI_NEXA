@@ -38,9 +38,12 @@ def _rows(session, smoothed):
 def _render(session, smoothing_choice):
     smoothed = smoothing_choice == "Smoothed"
     rows = _rows(session, smoothed)
+    snr_note = (f"SNR {session.true_snr_db:.1f} dB KNOWN &nbsp;·&nbsp; "
+                if session.snr_known and session.true_snr_db is not None
+                else "")
     head = (
         f"**● REPLAY** &nbsp; source `{session.source}` &nbsp;·&nbsp; "
-        f"BASEBAND · fs 3.2 MHz &nbsp;·&nbsp; "
+        f"BASEBAND · fs 3.2 MHz &nbsp;·&nbsp; {snr_note}"
         f"{session.duration_ms:.1f} ms &nbsp;·&nbsp; "
         f"{session.result.n_windows} windows @ hop {session.result.hop} "
         f"&nbsp;·&nbsp; **{len(rows)} events**"
