@@ -11,7 +11,8 @@ import gradio as gr
 from src.measure import occupancy
 from src.timeline import tier_of_classes
 from src.ui import plots
-from src.ui.palette import PANEL, TEXT, TEXT_DIM, tier_color
+from src.ui.palette import (BRAND_OLIVE, GRID, PANEL, TEXT, TEXT_DIM,
+                             tier_color)
 
 
 def build(state):
@@ -29,6 +30,9 @@ def build(state):
 
         occ = occupancy(session.iq)
         events = session.emitter_events()
+        tiers = session.tiers()
+        empty_pct = tiers.count("Empty") / max(len(tiers), 1) * 100
+        channel_empty = empty_pct >= 90
         tier_counts = {}
         for e in events:
             t = tier_of_classes(e.classes)
@@ -45,7 +49,10 @@ def build(state):
             f'not windows</span><br>'
             f'Windows     {session.result.n_windows:5d}   '
             f'<span style="color:{TEXT_DIM};">hop {session.result.hop} · '
-            f'{session.duration_ms:.1f} ms capture</span></div>')
+            f'{session.duration_ms:.1f} ms capture</span><br>'
+            f'Channel     {empty_pct:5.0f}%   '
+            f'<span style="color:{TEXT_DIM};">model — windows reported as '
+            f'empty spectrum</span></div>')
 
         chips = "".join(
             f'<span style="display:inline-block;margin:4px 8px 0 0;padding:2px 10px;'
@@ -54,7 +61,33 @@ def build(state):
             f'{t} {n}</span>'
             for t, n in sorted(tier_counts.items()))
 
-        if events:
+        if channel_empty:
+            # An empty channel headlined by its own single false positive is
+            # actively misleading -- "LATEST DETECTION: LFM_RADAR" was the
+            # whole card for a capture the model read as 99% empty. State the
+            # channel first; keep the detection visible underneath, because
+            # suppressing real model output would be worse than showing it.
+            extra = ""
+            if events:
+                e = events[-1]
+                extra = (
+                    f'<div style="margin-top:12px;padding-top:10px;'
+                    f'border-top:1px solid {GRID};color:{TEXT_DIM};'
+                    f'font-size:12px;">Isolated detection, not sustained: '
+                    f'<span style="color:{tier_color(tier_of_classes(e.classes))};'
+                    f'font-weight:600;">{e.label}</span> at '
+                    f'{e.start_us / 1000:.2f} ms for {e.duration_us / 1000:.2f} ms'
+                    f'</div>')
+            latest_html = (
+                f'<div style="background:{PANEL};padding:16px;border-radius:6px;'
+                f'color:{TEXT};">'
+                f'<div style="color:{TEXT_DIM};font-size:11px;">CHANNEL STATE</div>'
+                f'<div style="font-size:22px;font-weight:700;color:{BRAND_OLIVE};'
+                f'margin:6px 0;">EMPTY</div>'
+                f'<div style="color:{TEXT_DIM};font-family:monospace;font-size:12px;">'
+                f'{empty_pct:.0f}% of windows report no emitter</div>'
+                f'{extra}</div>')
+        elif events:
             e = events[-1]
             color = tier_color(tier_of_classes(e.classes))
             latest_html = (
