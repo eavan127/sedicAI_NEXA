@@ -1,0 +1,160 @@
+"""Assembles the six OMNI pages."""
+import gradio as gr
+import torch
+import torch.nn as nn
+
+from src.config import CFG, CLASSES, REPO_ROOT
+from src.models.amc_cnn import AMC_CNN
+from src.ui.app_models import load_model, model_label  # noqa: F401
+from src.ui.pages import (alerts, model_page, overview, performance, rf_replay,
+                           signal_analysis)
+from src.ui.palette import (BG, BRAND_OLIVE, BRAND_OLIVE_DARK,
+                             BRAND_OLIVE_TINT, BRAND_SLATE, FONT_STACK, GRID,
+                             MONO_STACK, PANEL, TEXT, TEXT_DIM)
+
+CUSTOM_CSS = f"""
+/* Gradio resolves its own palette from CSS custom properties, and picks the
+   DARK set when the browser reports a dark colour scheme. Setting only
+   backgrounds left --body-text-color at #f1f5f9 -- near-white text on a white
+   panel, contrast ratio 1.03, invisible. Overriding the variables themselves
+   fixes every component at once; overriding `color` per element does not,
+   because Gradio's own scoped classes are more specific.
+   The .dark block repeats them so a dark-mode browser gets the light theme
+   too, rather than half of each. */
+.gradio-container, .gradio-container .dark, .dark {{
+  --body-background-fill: {BG};
+  --body-text-color: {TEXT};
+  --body-text-color-subdued: {TEXT_DIM};
+  --background-fill-primary: {PANEL};
+  --background-fill-secondary: {BG};
+  --block-background-fill: {PANEL};
+  --panel-background-fill: {PANEL};
+  --block-label-background-fill: {PANEL};
+  --block-label-text-color: {TEXT_DIM};
+  --block-title-text-color: {TEXT};
+  --block-info-text-color: {TEXT_DIM};
+  --block-border-color: {GRID};
+  --border-color-primary: {GRID};
+  --border-color-accent: {BRAND_OLIVE};
+  --input-background-fill: {PANEL};
+  --input-border-color: {GRID};
+  --input-placeholder-color: {TEXT_DIM};
+  --table-even-background-fill: {PANEL};
+  --table-odd-background-fill: {BG};
+  --table-border-color: {GRID};
+  --button-secondary-background-fill: {PANEL};
+  --button-secondary-text-color: {TEXT};
+  --button-secondary-border-color: {GRID};
+  --link-text-color: {BRAND_OLIVE_DARK};
+  --color-accent: {BRAND_OLIVE};
+  --color-accent-soft: {BRAND_OLIVE_TINT};
+}}
+.gradio-container {{
+  background: {BG} !important;
+  font-family: {FONT_STACK} !important;
+  /* Gradio caps the shell at ~1200px. The waterfall and the detections table
+     both want more than that, and the cap forced a horizontal scroll that made
+     the table unreadable without zooming. */
+  max-width: 100% !important;
+  width: 100% !important;
+  padding-left: 26px !important;
+  padding-right: 26px !important;
+}}
+.gradio-container *, .gradio-container p, .gradio-container span,
+.gradio-container label, .gradio-container h1, .gradio-container h2,
+.gradio-container h3, .gradio-container td, .gradio-container th {{
+  font-family: {FONT_STACK};
+}}
+button.primary, .gr-button-primary {{
+  background: {BRAND_OLIVE} !important;
+  border-color: {BRAND_OLIVE_DARK} !important;
+  color: #ffffff !important;
+}}
+button.primary:hover, .gr-button-primary:hover {{
+  background: {BRAND_OLIVE_DARK} !important;
+}}
+.tab-nav button {{ color: {TEXT_DIM} !important; }}
+.tab-nav button.selected {{
+  color: {BRAND_OLIVE_DARK} !important;
+  border-bottom-color: {BRAND_OLIVE} !important;
+  font-weight: 600;
+}}
+thead th {{ background: {BRAND_OLIVE_TINT} !important; color: {TEXT} !important; }}
+/* Inline code keeps Gradio's dark code surface even after the variables are
+   overridden, which put dark text on a dark chip. Give it the brand tint. */
+.gradio-container code, .gradio-container kbd, .gradio-container samp {{
+  background: {BRAND_OLIVE_TINT} !important;
+  color: {BRAND_OLIVE_DARK} !important;
+  font-family: {MONO_STACK};
+  padding: 1px 5px;
+  border-radius: 3px;
+}}
+footer {{ display: none !important; }}
+/* No italics anywhere. Gradio italicises markdown emphasis and some captions
+   by default; killing it globally is more reliable than auditing every
+   string. Emphasis is carried by weight and colour instead. */
+.gradio-container em, .gradio-container i, .gradio-container * {{
+  font-style: normal !important;
+}}
+"""
+
+LOGO_PATH = REPO_ROOT / "assets" / "sedic_logo.png"
+
+
+def _logo_html():
+    """SEDIC 26 logo, if the file has been placed in assets/.
+
+    Falls back to a typographic lockup rather than a broken image, so the app
+    still runs for anyone who has not copied the asset in -- it is not checked
+    into git.
+    """
+    if LOGO_PATH.exists():
+        import base64
+        b64 = base64.b64encode(LOGO_PATH.read_bytes()).decode()
+        return (f'<img src="data:image/png;base64,{b64}" alt="SEDIC 26" '
+                f'style="height:52px;width:auto;display:block;">')
+    return (f'<div style="font-size:26px;font-weight:800;letter-spacing:0.08em;'
+            f'color:{BRAND_OLIVE};line-height:1;">SEDIC<span '
+            f'style="font-size:16px;vertical-align:super;">26</span></div>')
+
+
+THEME = gr.themes.Base(primary_hue="teal", neutral_hue="slate")
+
+
+def build_app():
+    with gr.Blocks(title="OMNI — RF Spectrum Intelligence") as demo:
+        gr.HTML(
+            f'<div style="display:flex;align-items:center;gap:22px;'
+            f'padding:16px 0 12px 0;border-bottom:2px solid {BRAND_OLIVE};'
+            f'margin-bottom:14px;">'
+            + _logo_html() +
+            f'<div style="border-left:1px solid {GRID};padding-left:22px;">'
+            f'<div style="font-size:24px;font-weight:700;letter-spacing:0.16em;'
+            f'color:{BRAND_SLATE};line-height:1.1;">OMNI</div>'
+            f'<div style="font-size:13px;color:{TEXT_DIM};letter-spacing:0.02em;'
+            f'margin-top:4px;">AI-Powered RF Spectrum Intelligence</div>'
+            f'</div></div>')
+
+        state = gr.State(None)
+
+        with gr.Tabs():
+            with gr.Tab("Overview"):
+                overview.build(state)
+            with gr.Tab("RF Replay"):
+                rf_replay.build(state, load_model)
+            with gr.Tab("Signal Analysis"):
+                signal_analysis.build(state)
+            with gr.Tab("Performance"):
+                performance.build()
+            with gr.Tab("Model"):
+                model_page.build(load_model)
+            with gr.Tab("Alerts"):
+                alerts.build(state)
+
+    return demo
+
+
+def launch(**kwargs):
+    """Gradio 6 takes css and theme on launch(), not on the Blocks
+    constructor, so they are applied here rather than at build time."""
+    return build_app().launch(css=CUSTOM_CSS, theme=THEME, **kwargs)
