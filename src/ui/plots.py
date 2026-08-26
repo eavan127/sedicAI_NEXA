@@ -23,6 +23,72 @@ from src.ui.palette import (BG, GRID, INSTRUMENT, MPL_FONT, PANEL, TEXT_DIM,
 plt.rcParams["font.family"] = "sans-serif"
 plt.rcParams["font.sans-serif"] = MPL_FONT
 
+# RadioML 2018.01A is stored at 8 samples per symbol. Named rather than
+# inlined because it is the one constant a capture at another rate would
+# invalidate: the decimation below would then sample the pulse shape instead
+# of the symbol instants, and the constellation would be wrong without looking
+# wrong.
+SAMPLES_PER_SYMBOL = 8
+
+
+def carrier_offset(window, order=4):
+    """Blind estimate of residual carrier offset, in cycles per sample.
+
+    Raising the signal to the 4th power collapses a QPSK or QAM constellation
+    onto a single tone at 4x the offset, which then shows as an FFT peak. The
+    4th power is used for BPSK too: it locks there as well, at the cost of a
+    90-degree phase ambiguity, which is harmless here because the panel only
+    de-rotates and never labels an axis with an absolute phase.
+
+    MEASURED, not MODEL -- this reads the capture's own samples and fits
+    nothing to an expected constellation, so it cannot manufacture clusters
+    the samples do not contain.
+    """
+    z = np.asarray(window)
+    if len(z) < order * 2:
+        return 0.0
+    spectrum = np.abs(np.fft.fft(z ** order))
+    k = int(np.argmax(spectrum))
+    if k >= len(z) / 2:          # negative frequencies live in the upper half
+        k -= len(z)
+    return k / len(z) / order
+
+
+def recover_symbols(window, sps=SAMPLES_PER_SYMBOL):
+    """Symbol points from one raw IQ window.
+
+    Returns (points, offset_estimate, timing_phase).
+
+    Three operations, none of them model-derived: unit-power scaling,
+    de-rotation by the estimated carrier offset, and decimation to one sample
+    per symbol at the timing phase whose points have the tightest amplitude
+    spread.
+
+    Degenerate windows -- shorter than one symbol, or carrying no power --
+    come back unchanged rather than raising. This feeds a display; a capture
+    with a silent stretch in it must render, not crash the page.
+    """
+    z = np.asarray(window).astype(complex)
+    power = float(np.mean(np.abs(z) ** 2)) if len(z) else 0.0
+    if len(z) < sps or power <= 0:
+        return z, 0.0, 0
+
+    z = z / np.sqrt(power)
+    offset = carrier_offset(z)
+    z = z * np.exp(-2j * np.pi * offset * np.arange(len(z)))
+
+    best_phase, best_score, best_points = 0, -np.inf, z[::sps]
+    for phase in range(sps):
+        points = z[phase::sps]
+        # Power over amplitude spread. At the symbol instant the amplitudes
+        # take the constellation's own discrete levels; between symbols they
+        # smear across the pulse shape, which widens the spread.
+        score = float(np.mean(np.abs(points) ** 2) /
+                       (np.var(np.abs(points)) + 1e-9))
+        if score > best_score:
+            best_phase, best_score, best_points = phase, score, points
+    return best_points, offset, best_phase
+
 
 def waterfall_figure(session, smoothed=True, nperseg=256):
     """Waterfall with x = frequency (MHz) and y = time, matching the classic
