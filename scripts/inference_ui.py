@@ -13,6 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.ui.app import launch  # noqa: E402
+import os
 
 if __name__ == "__main__":
-    launch()
+    launch(server_name="0.0.0.0", server_port=int(os.environ.get("PORT", 7860)))
