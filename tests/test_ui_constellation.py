@@ -138,48 +138,103 @@ def _session(probs_by_class, n_windows=6):
         thresholds=dict(zip(CLASSES, resolve_multilabel_thresholds())))
 
 
-def test_selector_picks_the_strongest_civilian_window():
-    s = _session({"QPSK": [0.30, 0.30, 0.30, 0.95, 0.30, 0.30]})
+def test_civilian_windows_returns_empty_for_radar_only():
+    """A radar-only capture has no civilian window, and the panel must be
+    hidden rather than showing the noise floor as a constellation."""
+    s = _session({"LFM_RADAR": [0.90] * 6})
     s.display_smoothed = False
-    index, cls, prob = s.best_civilian_window()
-    assert (index, cls) == (3, "QPSK")
-    assert prob == pytest.approx(0.95, abs=1e-6)
+    assert s.civilian_windows() == []
 
 
-def test_selector_prefers_the_strongest_class_not_the_first():
+def test_civilian_windows_returns_count_evenly_spaced_including_first_and_last():
+    """20 windows all clear QPSK's threshold; count defaults to 4. The
+    selection is by POSITION in the qualifying list, not by probability --
+    the probabilities here climb steadily so a confidence-ranked pick would
+    have chosen the last four, not four spread across the whole span."""
+    s = _session({"QPSK": list(np.linspace(0.30, 0.90, 20))}, n_windows=20)
+    s.display_smoothed = False
+    picks = s.civilian_windows()
+    indices = [p[0] for p in picks]
+    assert len(picks) == 4
+    assert indices == sorted(indices)              # ascending time order
+    assert indices[0] == 0                          # first qualifying window
+    assert indices[-1] == 19                        # last qualifying window
+    assert all(cls == "QPSK" for _, cls, _ in picks)
+
+
+def test_civilian_windows_returns_all_qualifying_when_fewer_than_count():
+    """Only three of six windows clear threshold; count=4 must not pad or
+    repeat -- the panel shows exactly what qualified."""
+    s = _session({"QPSK": [0.60, 0.10, 0.10, 0.60, 0.10, 0.70]})
+    s.display_smoothed = False
+    picks = s.civilian_windows()
+    assert [p[0] for p in picks] == [0, 3, 5]
+    assert [p[2] for p in picks] == pytest.approx([0.60, 0.60, 0.70], abs=1e-6)
+
+
+def test_civilian_windows_picks_the_strongest_class_not_the_first():
     """CIVILIAN is iterated in class order, so a selector that returned the
     first class over threshold would answer BPSK here and be wrong."""
     s = _session({"BPSK": [0.40] * 6,
                    "16QAM": [0.10, 0.10, 0.99, 0.10, 0.10, 0.10]})
     s.display_smoothed = False
-    index, cls, prob = s.best_civilian_window()
-    assert (index, cls) == (2, "16QAM")
-    assert prob == pytest.approx(0.99, abs=1e-6)
+    picks = s.civilian_windows()
+    assert picks == [(2, "16QAM", pytest.approx(0.99, abs=1e-6))]
 
 
-def test_selector_returns_none_when_no_civilian_clears_threshold():
-    """A radar-only capture has no civilian window, and the panel must be
-    hidden rather than showing the noise floor as a constellation."""
-    s = _session({"LFM_RADAR": [0.90] * 6})
+def test_civilian_windows_does_not_select_by_cluster_quality():
+    """Ten windows all clear threshold. Odd-indexed windows carry a high
+    class probability (0.99) AND samples that recover to a tight cluster;
+    even-indexed windows carry a low-but-qualifying probability (0.30) and
+    pure noise that will not cluster at all. Neither "most confident" nor
+    "cleanest looking" would choose [0, 3, 6, 9] -- only even spacing in time
+    order does. This is the property Task 9 exists to enforce: no quality
+    judgement anywhere in the selection.
+    """
+    rng = np.random.default_rng(2)
+    window_len = hop = 512
+    chunks = []
+    for i in range(10):
+        if i % 2 == 1:
+            chunks.append(_qpsk(n_symbols=64, seed=i))       # clean, high-prob
+        else:
+            noise = (rng.normal(0, 1, window_len)
+                      + 1j * rng.normal(0, 1, window_len))    # noisy, low-prob
+            chunks.append(noise)
+    iq = np.concatenate(chunks)
+    probs = np.full((10, len(CLASSES)), 0.01, dtype=np.float32)
+    probs[:, CLASSES.index("QPSK")] = [0.99 if i % 2 == 1 else 0.30
+                                         for i in range(10)]
+    result = TimelineResult(
+        probs=probs, starts=np.arange(10) * hop,
+        attn=np.zeros((10, window_len), dtype=np.float32),
+        hop=hop, window_len=window_len, fs=CFG["signal"]["fs"])
+    s = CaptureSession(
+        iq=iq, result=result, source="scenario", noise_power=0.01,
+        thresholds=dict(zip(CLASSES, resolve_multilabel_thresholds())))
     s.display_smoothed = False
-    assert s.best_civilian_window() is None
+    picks = s.civilian_windows()
+    assert [p[0] for p in picks] == [0, 3, 6, 9]
 
 
-def test_selector_follows_the_sessions_display_mode():
-    """Every page reads one view. Smoothing damps the spike but must not move
-    the pick off the window that carries it."""
+def test_civilian_windows_follows_the_sessions_display_mode():
+    """Every page reads one view. Smoothing damps the spike, which must show
+    up in the probabilities civilian_windows returns."""
     s = _session({"QPSK": [0.30, 0.30, 0.30, 0.95, 0.30, 0.30]})
+    s.display_smoothed = False
+    raw_peak = max(p for _, _, p in s.civilian_windows())
+    assert raw_peak == pytest.approx(0.95, abs=1e-6)
+
     s.display_smoothed = True
-    index, cls, prob = s.best_civilian_window()
-    assert (index, cls) == (3, "QPSK")
-    assert prob < 0.95           # smoothed, so damped below the raw peak
+    smoothed_peak = max(p for _, _, p in s.civilian_windows())
+    assert smoothed_peak < raw_peak
 
 
-def test_selector_handles_a_capture_with_no_windows():
+def test_civilian_windows_handles_a_capture_with_no_windows():
     s = _session({"QPSK": [0.95] * 6})
     s.result.probs = s.result.probs[:0]
     s.result.starts = s.result.starts[:0]
-    assert s.best_civilian_window() is None
+    assert s.civilian_windows() == []
 
 
 def test_figure_is_none_when_there_is_no_civilian_window():
@@ -188,38 +243,40 @@ def test_figure_is_none_when_there_is_no_civilian_window():
     assert constellation_figure(s) is None
 
 
-def test_figure_has_two_square_axes():
-    s = _session({"QPSK": [0.30, 0.30, 0.30, 0.95, 0.30, 0.30]})
+def test_figure_has_two_times_count_square_axes():
+    s = _session({"QPSK": [0.60, 0.60, 0.60, 0.95, 0.60, 0.60]})
     s.display_smoothed = False
     fig = constellation_figure(s)
     try:
-        assert len(fig.axes) == 2
+        assert len(fig.axes) == 8            # 2 rows x 4 columns
         for ax in fig.axes:
             assert ax.get_aspect() == 1.0
     finally:
         plt.close(fig)
 
 
-def test_raw_axis_plots_every_sample_and_symbol_axis_one_per_symbol():
-    """The left panel is the model's actual input; the right is one point per
-    symbol. If they ever plot the same count, the decimation silently stopped
-    happening."""
-    s = _session({"QPSK": [0.30, 0.30, 0.30, 0.95, 0.30, 0.30]})
+def test_top_row_plots_512_points_bottom_row_plots_64():
+    """Top row is the exact (2, 512) array the model is fed; bottom row is
+    one point per symbol. If they ever plot the same count, decimation
+    silently stopped happening."""
+    s = _session({"QPSK": [0.60, 0.60, 0.60, 0.95, 0.60, 0.60]})
     s.display_smoothed = False
     fig = constellation_figure(s)
     try:
-        raw_ax, sym_ax = fig.axes
-        assert raw_ax.collections[0].get_offsets().shape[0] == 512
-        assert (sym_ax.collections[0].get_offsets().shape[0]
-                 == 512 // SAMPLES_PER_SYMBOL)
+        top_row, bottom_row = fig.axes[:4], fig.axes[4:]
+        for ax in top_row:
+            assert ax.collections[0].get_offsets().shape[0] == 512
+        for ax in bottom_row:
+            assert (ax.collections[0].get_offsets().shape[0]
+                     == 512 // SAMPLES_PER_SYMBOL)
     finally:
         plt.close(fig)
 
 
 def test_scatter_points_carry_measured_styling_not_a_tier_colour():
-    """Provenance rule: both panels are computed from the capture's own
-    samples, so they must not wear the colour that marks model output."""
-    s = _session({"QPSK": [0.30, 0.30, 0.30, 0.95, 0.30, 0.30]})
+    """Provenance rule: every panel is computed from the capture's own
+    samples, so none of them may wear the colour that marks model output."""
+    s = _session({"QPSK": [0.60, 0.60, 0.60, 0.95, 0.60, 0.60]})
     s.display_smoothed = False
     fig = constellation_figure(s)
     try:
@@ -231,18 +288,35 @@ def test_scatter_points_carry_measured_styling_not_a_tier_colour():
         plt.close(fig)
 
 
-def test_caption_names_the_class_the_window_and_the_recovery_chain():
-    s = _session({"QPSK": [0.30, 0.30, 0.30, 0.95, 0.30, 0.30]})
+def test_per_column_class_probability_carries_tier_colour():
+    """The one MODEL element on the panel is each column's class probability
+    -- everything else, including the window index and time, is MEASURED."""
+    s = _session({"QPSK": [0.60, 0.60, 0.60, 0.95, 0.60, 0.60]})
+    s.display_smoothed = False
+    fig = constellation_figure(s)
+    try:
+        top_row = fig.axes[:4]
+        for ax in top_row:
+            prob_texts = [t for t in ax.texts if "QPSK" in t.get_text()]
+            assert prob_texts
+            assert all(t.get_color() == tier_color("Civilian")
+                        for t in prob_texts)
+    finally:
+        plt.close(fig)
+
+
+def test_captions_name_class_chain_caveat_and_selection_rule():
+    s = _session({"QPSK": [0.60, 0.60, 0.60, 0.95, 0.60, 0.60]})
     s.display_smoothed = False
     fig = constellation_figure(s)
     try:
         captions = " ".join(t.get_text() for t in fig.texts)
         assert "QPSK" in captions
-        assert "window 3" in captions
+        assert "matched filter" in captions
         assert "de-rotate" in captions
-        assert "64QAM" in captions        # the point-count caveat
-        model_text = [t for t in fig.texts if "QPSK" in t.get_text()]
-        assert any(t.get_color() == tier_color("Civilian") for t in model_text)
+        assert "64QAM" in captions                  # cluster-count caveat
+        assert "spaced evenly" in captions           # selection rule
+        assert "seam" in captions                    # splice caveat
     finally:
         plt.close(fig)
 
@@ -250,25 +324,25 @@ def test_caption_names_the_class_the_window_and_the_recovery_chain():
 def test_figure_does_not_claim_recovery_on_a_window_with_no_power():
     """A near-silent window that the model still classified as civilian above
     threshold is not hypothetical for this project -- confident classification
-    on near-empty signal has bitten this console before. If the panel labels
-    512 raw samples "512 symbol points" and states a de-rotate that never
-    happened, it is not merely wrong, it is lying about the one thing this
-    display exists to prove: that the clusters it shows came from real
-    recovery. Claiming recovery that did not occur is the worst kind of error
-    here, worse than showing nothing."""
-    s = _session({"QPSK": [0.30, 0.30, 0.30, 0.95, 0.30, 0.30]})
+    on near-empty signal has bitten this console before. If a column labels
+    512 raw samples "64 symbol points" it is not merely wrong, it is lying
+    about the one thing this display exists to prove: that the clusters it
+    shows came from real recovery. The zeroed window must still be one of the
+    four shown -- degenerate windows are not filtered out of the spread, they
+    are shown honestly as having nothing to recover."""
+    s = _session({"QPSK": [0.60, 0.60, 0.60, 0.95, 0.60, 0.60]})
     s.display_smoothed = False
+    picks = s.civilian_windows()
+    zeroed_index = picks[1][0]
     s.iq = s.iq.copy()
-    s.iq[3 * 512:4 * 512] = 0
+    s.iq[zeroed_index * 512:(zeroed_index + 1) * 512] = 0
     fig = constellation_figure(s)
     try:
-        captions = " ".join(t.get_text() for t in fig.texts)
-        titles = " ".join(ax.get_title() for ax in fig.axes)
-        combined = captions + " " + titles
-        assert "symbol points" not in combined
-        assert "64QAM" not in combined
-        assert "de-rotate" not in combined
-        assert "no power" in combined
+        titles = [ax.get_title() for ax in fig.axes]
+        no_power_titles = [t for t in titles if "no power" in t]
+        symbol_titles = [t for t in titles if "symbol points" in t]
+        assert len(no_power_titles) == 1
+        assert len(symbol_titles) == len(picks) - 1
     finally:
         plt.close(fig)
 

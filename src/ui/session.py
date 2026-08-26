@@ -141,23 +141,43 @@ class CaptureSession:
         judged = set(CFG["judged_classes"])
         return [e for e in self.events(smoothed) if judged & set(e.classes)]
 
-    def best_civilian_window(self, smoothed=None):
-        """The window carrying the strongest civilian evidence.
+    def civilian_windows(self, count=4, smoothed=None):
+        """`count` windows spread evenly across the strongest civilian class's
+        span, in time order.
 
-        Returns (index, class_name, probability), or None when no window
-        clears its class threshold -- which is what a radar-only or empty
-        capture looks like, and what tells the page to hide the constellation
-        panel entirely rather than plot a noise floor as a constellation.
+        Two stages, and they must not be conflated:
 
-        Strongest across ALL civilian classes, not the first one over
-        threshold: BPSK sits first in CLASSES, so first-match would answer
-        BPSK for a capture whose actual emitter is 16QAM.
+        1. WHICH CLASS -- of BPSK/QPSK/16QAM/64QAM, whichever's PEAK
+           probability across the capture is highest, and only if that peak
+           clears the class's own threshold. This is the model's own answer
+           to "what modulation is this" (unchanged from the selector this
+           replaces), not a quality judgement -- it never looks at how any
+           window's samples actually cluster.
+        2. WHICH WINDOWS -- every window where that class clears threshold,
+           in time order, then `count` of them at evenly spaced POSITIONS in
+           that list: first, last, and evenly between. If fewer than `count`
+           qualify, all of them come back, unpadded.
+
+        The spacing is even rather than best-first on purpose. A panel that
+        showed the tightest-clustering windows would be choosing the picture
+        that most looks like the answer it displays -- the same fabrication
+        the old single-window, confidence-ranked selector committed, just
+        moved from "best class" to "best window". An operator could not then
+        tell a genuinely clean emitter from a lucky window pulled out of a
+        noisy span. Even spacing carries no opinion about how a window
+        looks, so what reaches the screen is the real spread, seams and all.
+
+        Returns a list of (index, class_name, probability), or [] when no
+        window clears any civilian class's threshold -- which is what a
+        radar-only or empty capture looks like, and what tells the page to
+        hide the constellation panel entirely rather than plot a noise floor
+        as a constellation.
         """
         smoothed = self.display_smoothed if smoothed is None else smoothed
         if not len(self.result.probs):
             # smooth() indexes probs[0] to seed its accumulator, so an empty
             # capture must be caught here rather than after resolving.
-            return None
+            return []
         probs = self._resolved(smoothed).probs
 
         # No .get(cls, 0.5) fallback: 0.5 is not a safe default here, it is
@@ -167,18 +187,30 @@ class CaptureSession:
         # below 0.5. A missing key means the thresholds dict was built wrong,
         # and that should raise, not silently score against the known-wrong
         # value.
-        best = None
+        best_class, best_peak = None, -np.inf
         for cls in CIVILIAN:
             column = probs[:, CLASSES.index(cls)]
-            index = int(np.argmax(column))
-            prob = float(column[index])
-            if prob < self.thresholds[cls]:
+            peak = float(np.max(column))
+            if peak < self.thresholds[cls]:
                 continue
             # Strict >, so an exact tie between two civilian classes keeps
             # whichever comes first in CIVILIAN order.
-            if best is None or prob > best[2]:
-                best = (index, cls, prob)
-        return best
+            if peak > best_peak:
+                best_class, best_peak = cls, peak
+        if best_class is None:
+            return []
+
+        column = probs[:, CLASSES.index(best_class)]
+        qualifying = np.flatnonzero(column >= self.thresholds[best_class])
+        if len(qualifying) <= count:
+            chosen = qualifying
+        else:
+            # Evenly spaced POSITIONS in the qualifying list -- not evenly
+            # spaced window indices -- so a span with gaps still returns
+            # `count` windows rather than landing some picks in the gaps.
+            positions = np.round(np.linspace(0, len(qualifying) - 1, count))
+            chosen = qualifying[np.unique(positions.astype(int))]
+        return [(int(i), best_class, float(column[i])) for i in chosen]
 
 
 def analyze(iq, model, source, hop=None, truth=None, true_snr_db=None,

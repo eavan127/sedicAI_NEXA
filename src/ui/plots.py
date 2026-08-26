@@ -134,95 +134,111 @@ def recover_symbols(window, sps=SAMPLES_PER_SYMBOL):
     return best_points, offset, best_phase
 
 
-def constellation_figure(session, smoothed=None):
-    """IQ constellation for the strongest civilian window, or None.
+def constellation_figure(session, smoothed=None, count=4):
+    """IQ constellations for `count` civilian windows spread across the span,
+    or None.
 
     Why this panel exists: the waterfall cannot tell civilian modulations
     apart. BPSK, QPSK, 16QAM and 64QAM are the same flat wideband smear on it
     at every SNR. Cluster count IS the modulation order -- 2, 4, 16, 64 -- so
     this is the one display that carries the distinction.
 
-    Two axes, both MEASURED. The left is the exact (2, 512) array the model is
-    fed. The right is the SAME samples through recover_symbols: unit-power
-    scaling, de-rotation, decimation. Neither is model output, so neither
-    wears a tier colour. The single MODEL element is the caption's detected
-    class, which does.
+    `count` columns, 2 rows each, all MEASURED. Top row is the exact (2, 512)
+    array the model is fed for that window; bottom row is the SAME samples
+    through recover_symbols: unit-power scaling, matched filter, de-rotation,
+    decimation. Neither row is model output, so neither wears a tier colour.
+    The one MODEL element is each column's class-probability text.
 
-    Deliberately ONE window. Pooling several would give more points, but the
-    4th-power carrier estimate leaves a 90-degree ambiguity per window, so
-    pooled BPSK would render four clusters instead of two -- the display would
-    assert the wrong modulation order. The caption states the resulting point
-    limit instead.
+    Four SEPARATE windows, not one pooled scatter. The 4th-power carrier
+    estimate leaves a 90-degree ambiguity per window, so pooling would render
+    a BPSK capture as four clusters instead of two -- asserting the wrong
+    modulation order. Keeping each window in its own axes avoids that without
+    giving up the spread session.civilian_windows() exists to show.
 
-    Returns None when no window carries a civilian class above threshold; the
-    page hides the component rather than drawing an empty panel.
+    Returns None when civilian_windows() returns no windows; the page hides
+    the component rather than drawing an empty panel.
     """
-    pick = session.best_civilian_window(smoothed)
-    if pick is None:
+    picks = session.civilian_windows(count=count, smoothed=smoothed)
+    if not picks:
         return None
-    index, class_name, prob = pick
+    class_name = picks[0][1]           # one class for the whole figure
 
-    start = int(session.result.starts[index])
-    window = session.iq[start:start + session.result.window_len]
-    points, offset, phase = recover_symbols(window)
-    raw = window / np.sqrt(np.mean(np.abs(window) ** 2) + 1e-20)
+    n = len(picks)
+    fig, axes = plt.subplots(2, n, figsize=(3.2 * n, 6.4), squeeze=False)
+    ax_top, ax_bot = axes[0], axes[1]
 
-    # recover_symbols hands a degenerate window back UNCHANGED -- no scaling,
-    # no de-rotation, no decimation -- rather than raising, because a silent
-    # stretch in a capture must still render. Decimation is the one operation
-    # that always shrinks the array, so "points is shorter than window" is the
-    # honest test for whether recovery actually ran. A window can still reach
-    # here with no power: the model classifies windows independently of this
-    # panel and can call a near-silent window civilian above threshold. This
-    # display exists to prove clusters came from real recovery, so it must
-    # never dress up 512 raw samples as symbol points -- that would be the one
-    # lie this console cannot afford.
-    recovered = len(points) < len(window)
+    for col, (index, cls, prob) in enumerate(picks):
+        start = int(session.result.starts[index])
+        window = session.iq[start:start + session.result.window_len]
+        points, offset, phase = recover_symbols(window)
+        raw = window / np.sqrt(np.mean(np.abs(window) ** 2) + 1e-20)
 
-    fig, (ax_raw, ax_sym) = plt.subplots(1, 2, figsize=(9.5, 5.0))
-    ax_raw.scatter(raw.real, raw.imag, s=4, alpha=0.45, linewidths=0,
-                    color=INSTRUMENT["color"])
-    ax_raw.set_title(f"raw I/Q — {len(raw)} samples, as the model is fed",
-                      fontsize=8, color=TEXT_DIM)
-    ax_sym.scatter(points.real, points.imag, s=20, alpha=0.85, linewidths=0,
-                    color=INSTRUMENT["color"])
-    if recovered:
-        ax_sym.set_title(f"recovered — {len(points)} symbol points",
-                          fontsize=8, color=TEXT_DIM)
-    else:
-        ax_sym.set_title("recovery skipped — no power in this window",
-                          fontsize=8, color=TEXT_DIM)
+        # recover_symbols hands a degenerate window back UNCHANGED -- no
+        # scaling, no de-rotation, no decimation -- rather than raising,
+        # because a silent stretch in a capture must still render.
+        # Decimation is the one operation that always shrinks the array, so
+        # "points is shorter than window" is the honest test for whether
+        # recovery actually ran. A window can still reach here with no
+        # power: the model classifies windows independently of this panel
+        # and can call a near-silent window civilian above threshold. This
+        # display exists to prove clusters came from real recovery, so a
+        # column must never dress up 512 raw samples as symbol points --
+        # that would be the one lie this console cannot afford.
+        recovered = len(points) < len(window)
 
-    for ax in (ax_raw, ax_sym):
+        ax_r, ax_s = ax_top[col], ax_bot[col]
+        ax_r.scatter(raw.real, raw.imag, s=4, alpha=0.45, linewidths=0,
+                      color=INSTRUMENT["color"])
+        ax_s.scatter(points.real, points.imag, s=20, alpha=0.85, linewidths=0,
+                      color=INSTRUMENT["color"])
+
+        t_ms = start / CFG["signal"]["fs"] * 1e3
+        # Window index and time are MEASURED -- TEXT_DIM. The class
+        # probability sits above it as a separate text so it alone can carry
+        # the tier colour; set_title only takes one colour for the whole
+        # string, which cannot express that split.
+        ax_r.set_title(f"win {index} @ {t_ms:.2f} ms", fontsize=7,
+                        color=TEXT_DIM, pad=14)
+        ax_r.text(0.5, 1.16, f"{cls} {prob * 100:.0f}%",
+                   transform=ax_r.transAxes, ha="center", fontsize=7,
+                   fontweight="bold", color=tier_color("Civilian"))
+
+        if recovered:
+            ax_s.set_title(f"{len(points)} symbol points", fontsize=7,
+                            color=TEXT_DIM)
+        else:
+            ax_s.set_title("no power in this window", fontsize=7,
+                            color=TEXT_DIM)
+
+        for ax in (ax_r, ax_s):
+            # Equal aspect, or a QPSK square renders as a rectangle and the
+            # eye reads a constellation that is not there.
+            ax.set_aspect("equal")
+
+    # Only the leftmost column carries a Y label and only the bottom row
+    # carries X labels -- repeating "I (measured)" 2 * count times is noise,
+    # not information, once every column shares the same units.
+    ax_top[0].set_ylabel("Q (measured)")
+    ax_bot[0].set_ylabel("Q (measured)")
+    for ax in ax_bot:
         ax.set_xlabel("I (measured)")
-        ax.set_ylabel("Q (measured)")
-        # Equal aspect, or a QPSK square renders as a rectangle and the eye
-        # reads a constellation that is not there.
-        ax.set_aspect("equal")
 
-    t_ms = start / CFG["signal"]["fs"] * 1e3
-    snr_text = f"est. {estimate_snr_db(window, session.noise_power):.1f} dB"
-    if recovered:
-        chain_text = (f"unit-power scale → matched filter → "
-                       f"de-rotate {offset:+.4f} cyc/sample "
-                       f"→ decimate 1-in-{SAMPLES_PER_SYMBOL} at phase {phase}")
-    else:
-        chain_text = "no power in this window — nothing to scale, rotate, or decimate"
-    fig.text(0.01, 0.055, f"window {index} @ {t_ms:.2f} ms · {snr_text} · "
-              f"{chain_text}",
-              color=TEXT_DIM, fontsize=7)
-    fig.text(0.01, 0.005, f"{class_name} {prob * 100:.0f}%",
-              color=tier_color("Civilian"), fontsize=8, fontweight="bold")
-    if recovered:
-        caveat_text = (f"cluster count is the modulation order — {len(points)} "
-                        f"symbols separates 2 clusters from 4, not enough to "
-                        f"resolve 64QAM")
-    else:
-        caveat_text = "no power to recover — nothing here to cluster"
-    fig.text(0.16, 0.005, caveat_text, color=TEXT_DIM, fontsize=7)
+    symbols_per_window = session.result.window_len // SAMPLES_PER_SYMBOL
+    chain_text = (f"{class_name} — unit-power scale → matched filter → "
+                   f"de-rotate → decimate 1-in-{SAMPLES_PER_SYMBOL}")
+    caveat_text = (f"cluster count is the modulation order — "
+                    f"{symbols_per_window} symbols separates 2 clusters "
+                    f"from 4, not enough to resolve 64QAM")
+    selection_text = (
+        "four windows spaced evenly across the civilian span, not chosen "
+        "for how they look — a synthesized scene splices independent "
+        "recordings, so some windows straddle a seam and will not cluster")
+    fig.text(0.01, 0.075, chain_text, color=TEXT_DIM, fontsize=7)
+    fig.text(0.01, 0.045, caveat_text, color=TEXT_DIM, fontsize=7)
+    fig.text(0.01, 0.015, selection_text, color=TEXT_DIM, fontsize=7)
 
-    style_axes(fig, [ax_raw, ax_sym])
-    fig.tight_layout(rect=[0, 0.09, 1, 1])
+    style_axes(fig, list(fig.axes))
+    fig.tight_layout(rect=[0, 0.12, 1, 0.90])
     return fig
 
 
