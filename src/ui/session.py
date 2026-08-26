@@ -101,6 +101,13 @@ class CaptureSession:
     # so in the header, rather than silently showing a number that disagrees
     # with the dropdown the operator picked.
     snr_capped: bool = False
+    # What the operator actually asked for, in dB. Only meaningful alongside
+    # snr_capped: the header needs BOTH figures to say what was requested and
+    # what was delivered -- "capped from 20 dB" -- rather than the achieved
+    # number alone plus a word ("library") that names an implementation
+    # detail no other line in this UI uses. None for every non-capped
+    # session, so the header falls back to its old, uncapped phrasing.
+    requested_snr_db: float = None
 
     @property
     def duration_ms(self):
@@ -301,6 +308,8 @@ def load_scenario(model, total_duration=0.05, hop=None, snr_db=0, seed=None,
     session = analyze(iq, model, source="scenario", hop=hop, truth=segments,
                        true_snr_db=true_snr_db)
     session.snr_capped = bool(needs_library and snr_db > library_snr_db)
+    if session.snr_capped:
+        session.requested_snr_db = snr_db
     return session
 
 

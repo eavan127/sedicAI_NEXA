@@ -240,12 +240,12 @@ def build_scenario(fs=None, total_duration=0.1, snr_db=-6, seed=0,
             continue
         length = end - start
 
-        if class_name in GENERATORS:
+        is_civilian = class_name not in GENERATORS
+        if not is_civilian:
             emitter = np.asarray(GENERATORS[class_name](
                 fs=fs, total_duration=length / fs, rng=rng))
         else:
             emitter = _from_library(class_name, length, library or {}, rng)
-            civilian_spans.append((start, end))
         if len(emitter) < length:
             emitter = np.pad(emitter, (0, length - len(emitter)))
         emitter = emitter[:length] * raised_cosine_ramp(length)
@@ -271,7 +271,16 @@ def build_scenario(fs=None, total_duration=0.1, snr_db=-6, seed=0,
 
         iq[start:end] += emitter
         active[start:end] = True
-        emitter_powers.append((class_name, float(np.mean(np.abs(emitter) ** 2))))
+        power = float(np.mean(np.abs(emitter) ** 2))
+        emitter_powers.append((class_name, power))
+        # Recorded AFTER the unit-power/SIR scaling above, so this is the
+        # span's own ACTUAL placed power -- not the pre-scaling power the
+        # old (start, end)-only version of this list held. Task 10e: the
+        # noise section below needs each civilian span's own power to
+        # compute that span's own carried noise, not the first non-jamming
+        # emitter's.
+        if is_civilian:
+            civilian_spans.append((start, end, power))
         segments.append(ScenarioSegment(
             class_name, start / fs, end / fs,
             radiating_spans=_radiating_spans(emitter, start, fs)))
@@ -301,20 +310,30 @@ def build_scenario(fs=None, total_duration=0.1, snr_db=-6, seed=0,
     else:
         # The civilian recording already carries noise at library_snr_db, so
         # a target SNR better than that bin is not achievable -- you can add
-        # noise to a recording but never remove it. The floor actually used
-        # is therefore the noisier (lower-SNR, i.e. higher-power) of the two.
-        carried = reference_power / (10 ** (library_snr_db / 10.0))
-        floor = max(target, carried)
+        # noise to a recording but never remove it. Each civilian span's
+        # carried noise is referenced to THAT SPAN'S OWN placed power, not
+        # the first non-jamming emitter's -- a civilian emitter that isn't
+        # first gets SIR-scaled by up to +/-6 dB, so its real carried noise
+        # differs from reference_power (previously this used reference_power
+        # for every span, which was wrong whenever the first non-jamming
+        # emitter was not that span's own civilian recording -- off by
+        # ~330x in a constructed case, and silently applying one shared
+        # top-up scalar to two civilian spans with different carried noise
+        # in the two-civilian case).
+        carried_by_span = [(start, end, power / (10 ** (library_snr_db / 10.0)))
+                            for start, end, power in civilian_spans]
+        # The floor actually used is the noisier (lower-SNR, i.e.
+        # higher-power) of the target and every span's own carried noise.
+        floor = max([target] + [carried for _, _, carried in carried_by_span])
 
         # Everywhere gets `floor`, except inside a civilian span, which
-        # already has `carried` baked into the recording and only needs
-        # `floor - carried` added on top. Noise powers add, so the added
-        # component's AMPLITUDE scale is sqrt(floor - carried), not
-        # sqrt(floor) - sqrt(carried).
+        # already has that span's own `carried` baked into the recording
+        # and only needs `floor - carried` added on top. Noise powers add,
+        # so the added component's AMPLITUDE scale is sqrt(floor - carried),
+        # not sqrt(floor) - sqrt(carried).
         added_power = np.full(n_total, floor, dtype=np.float64)
-        topped_up = max(floor - carried, 0.0)
-        for start, end in civilian_spans:
-            added_power[start:end] = topped_up
+        for start, end, carried in carried_by_span:
+            added_power[start:end] = max(floor - carried, 0.0)
         iq += noise * np.sqrt(added_power / 2.0)
 
     return iq, segments

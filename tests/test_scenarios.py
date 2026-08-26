@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from src.config import CLASSES
+from src.config import CFG, CLASSES
 from src.scenarios import ScenarioSegment, build_scenario, raised_cosine_ramp
 
 
@@ -211,3 +211,110 @@ def test_the_noise_floor_stays_uniform_across_a_civilian_capture():
     occupied = np.mean(np.abs(iq[16000:18000]) ** 2)
     assert quiet > 0
     assert quiet < occupied
+
+
+# --- 10e: carried must come from each civilian span's OWN power ------------
+#
+# Both tests below fix mixture_sir_db to a single value (min == max) so the
+# SIR scale rng.uniform draws is deterministic, and use a CONSTANT-amplitude
+# library recording (not the Gaussian-noise stand-in the other tests use) so
+# unit_power's normalisation lands on an exactly-known power every time.
+# That makes the noise floor analytically predictable:
+#
+#   reference_power is always ~1.0 -- unit_power forces the FIRST non-jamming
+#   emitter's OWN measured power to exactly 1.0, regardless of which class it
+#   is (this holds for any continuous emitter; a pulsed one like LFM_RADAR
+#   has a lower whole-window mean because unit_power normalises ACTIVE power,
+#   which is why these fixtures use FHSS/QPSK rather than radar).
+#
+#   carried_i = span_i's own placed power / 10**(library_snr_db / 10)
+#   floor = max(target, carried_1, carried_2, ...)
+#
+# With a forced SIR of +6 dB (power gain 10**0.6 = 3.981x) and
+# snr_db == library_snr_db == 10, target = carried_for_the_UNSCALED_span =
+# 0.1, but the SCALED civilian span's own carried is 0.398 -- four times
+# larger, so it alone should set `floor`. The bug used reference_power
+# (~1.0, or whatever emitter happens to be first) for EVERY span's carried,
+# which reproduces 0.1 regardless of the scaled span's real power. That is
+# not a subtle numerical difference -- it was verified directly against the
+# pre-fix code (git stash the fix and re-run this scenario): the pre-fix
+# quiet-region floor measured ~0.098, ~4x low, matching the 0.1 the buggy
+# formula predicts; post-fix it measures ~0.39, matching the 0.398 the
+# per-span formula predicts.
+def _constant_library(cls, n=20):
+    """A deterministic, non-random stand-in for a real dataset recording.
+    Every sample has the same |amplitude|, so unit_power's normalisation
+    lands on an EXACTLY known power (not a statistical estimate) -- needed
+    so the expected noise floor below can be computed analytically rather
+    than approximately."""
+    return {cls: np.ones((n, 2, 512), dtype=np.float32)}
+
+
+def test_carried_noise_uses_the_civilian_spans_own_power_not_the_first_emitter(monkeypatch):
+    """Non-civilian emitter FIRST (sets reference_power), civilian SECOND and
+    SIR-scaled well above the reference. The floor must reflect the
+    civilian's OWN carried noise, not the unrelated first emitter's -- and
+    that floor must be the SAME number everywhere outside an emitter span
+    (before, between, and after), not just self-consistent within one
+    implementation."""
+    monkeypatch.setitem(CFG["dataset"], "mixture_sir_db", (6.0, 6.0))
+    fs = 3_200_000
+    lib = _constant_library("QPSK")
+    script = [("FHSS", 0.05, 0.30), ("QPSK", 0.40, 0.65)]
+    iq, segments = build_scenario(fs=fs, total_duration=0.02, snr_db=10,
+                                   seed=5, script=script, library=lib,
+                                   library_snr_db=10)
+    n = len(iq)
+    before = np.mean(np.abs(iq[:int(0.03 * n)]) ** 2)
+    gap = np.mean(np.abs(iq[int(0.32 * n):int(0.38 * n)]) ** 2)
+    after = np.mean(np.abs(iq[int(0.68 * n):]) ** 2)
+
+    expected_floor = 10 ** 0.6 / 10  # QPSK's own carried noise, ~0.398
+    wrong_floor = 1.0 / 10           # what reference_power (FHSS, ~1.0) predicts
+
+    for label, measured in [("before", before), ("gap", gap), ("after", after)]:
+        assert measured == pytest.approx(expected_floor, rel=0.25), (
+            f"{label} region floor {measured:.4f} is not the civilian span's "
+            f"own carried noise (~{expected_floor:.4f})"
+        )
+        assert abs(measured - wrong_floor) > abs(measured - expected_floor), (
+            f"{label} region floor {measured:.4f} is closer to the "
+            f"reference-emitter-derived (wrong) floor {wrong_floor:.4f} than "
+            f"to the civilian span's own (correct) floor {expected_floor:.4f}"
+        )
+    assert before == pytest.approx(gap, rel=0.15)
+    assert gap == pytest.approx(after, rel=0.15)
+
+
+def test_carried_noise_is_correct_for_each_of_two_civilian_spans(monkeypatch):
+    """Two civilian emitters at different positions -- the first sets
+    reference_power (so its own carried noise happens to match the old
+    single shared scalar), the second is SIR-scaled well above it. The old
+    code applied ONE shared top-up scalar (derived from the first span) to
+    BOTH spans; this asserts the floor everywhere -- including outside
+    either civilian span -- reflects the correct per-span accounting, which
+    for `floor = max(target, carried_1, carried_2)` is dominated by the
+    second (higher-power) span's own carried noise."""
+    monkeypatch.setitem(CFG["dataset"], "mixture_sir_db", (6.0, 6.0))
+    fs = 3_200_000
+    lib = _constant_library("QPSK")
+    script = [("QPSK", 0.05, 0.30), ("QPSK", 0.40, 0.65)]
+    iq, segments = build_scenario(fs=fs, total_duration=0.02, snr_db=10,
+                                   seed=5, script=script, library=lib,
+                                   library_snr_db=10)
+    n = len(iq)
+    before = np.mean(np.abs(iq[:int(0.03 * n)]) ** 2)
+    gap = np.mean(np.abs(iq[int(0.32 * n):int(0.38 * n)]) ** 2)
+    after = np.mean(np.abs(iq[int(0.68 * n):]) ** 2)
+
+    expected_floor = 10 ** 0.6 / 10  # second span's own carried noise, ~0.398
+    wrong_floor = 1.0 / 10           # what the shared scalar (first span) predicts
+
+    for label, measured in [("before", before), ("gap", gap), ("after", after)]:
+        assert measured == pytest.approx(expected_floor, rel=0.25), (
+            f"{label} region floor {measured:.4f} does not reflect the "
+            f"second civilian span's own carried noise (~{expected_floor:.4f})"
+        )
+        assert abs(measured - wrong_floor) > abs(measured - expected_floor)
+    assert before == pytest.approx(gap, rel=0.15)
+    assert gap == pytest.approx(after, rel=0.15)

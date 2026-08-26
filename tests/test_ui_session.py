@@ -271,3 +271,41 @@ def test_snr_capped_flag_set_only_when_a_civilian_request_exceeds_the_library_bi
     s2 = load_scenario(model, total_duration=0.01, hop=512,
                         snr_db=cleanest + 20, case="All three")
     assert s2.snr_capped is False
+
+
+def test_requested_snr_db_carries_what_the_operator_actually_asked_for(model):
+    """10f: the header needs both the requested and achieved SNR to say
+    "capped from X dB" rather than the achieved figure alone plus a word
+    ("library") that names an implementation detail. requested_snr_db must
+    equal the dropdown value the operator picked, not the achieved
+    true_snr_db it got capped down to -- and must stay None when nothing was
+    capped, so an uncapped session's header keeps its old phrasing."""
+    from src.config import CFG
+    cleanest = max(CFG["snr_bins_db"])
+    requested = cleanest + 20
+    s = load_scenario(model, total_duration=0.01, hop=512,
+                       snr_db=requested, case="Civilian only")
+    assert s.snr_capped is True
+    assert s.requested_snr_db == requested
+    assert s.requested_snr_db != s.true_snr_db
+
+    s2 = load_scenario(model, total_duration=0.01, hop=512,
+                        snr_db=requested, case="All three")
+    assert s2.snr_capped is False
+    assert s2.requested_snr_db is None
+
+
+def test_capped_header_says_what_was_requested_and_delivered(model):
+    """The RF Replay header must say what the operator asked for AND what
+    the capture actually delivered -- "capped from 20 dB" -- rather than the
+    achieved figure alone dressed up with a word ("library") that names an
+    implementation detail no other line in this UI uses."""
+    from src.config import CFG
+    from src.ui.pages.rf_replay import _render
+    cleanest = max(CFG["snr_bins_db"])
+    requested = cleanest + 20
+    s = load_scenario(model, total_duration=0.01, hop=512,
+                       snr_db=requested, case="Civilian only")
+    head = _render(s, "Raw", "single")[1]
+    assert f"capped from {requested:.0f} dB" in head
+    assert "library" not in head.lower()

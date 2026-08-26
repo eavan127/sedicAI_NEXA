@@ -72,9 +72,13 @@ def _render(session, smoothing_choice, model_choice="auto", case_note=""):
     # smoothed while this page showed raw.
     session.display_smoothed = smoothed
     rows = _rows(session, smoothed)
+    # "capped from X dB" says what was requested AND what was delivered --
+    # "capped by library" only gave the achieved figure and named an
+    # implementation detail ("library") that appears nowhere else in the UI.
     snr_note = (
         f"SNR {session.true_snr_db:.1f} dB KNOWN"
-        + (" (capped by library)" if session.snr_capped else "")
+        + (f" (capped from {session.requested_snr_db:.0f} dB)"
+           if session.snr_capped else "")
         + " &nbsp;·&nbsp; "
         if session.snr_known and session.true_snr_db is not None
         else "")
