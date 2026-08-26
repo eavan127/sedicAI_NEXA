@@ -67,6 +67,10 @@ def _channel_state(session, smoothed):
 
 def _render(session, smoothing_choice, model_choice="auto", case_note=""):
     smoothed = smoothing_choice == "Smoothed"
+    # Record the choice on the session so Overview and Alerts show the same
+    # view. They read the same capture; without this they silently stayed on
+    # smoothed while this page showed raw.
+    session.display_smoothed = smoothed
     rows = _rows(session, smoothed)
     snr_note = (f"SNR {session.true_snr_db:.1f} dB KNOWN &nbsp;·&nbsp; "
                 if session.snr_known and session.true_snr_db is not None

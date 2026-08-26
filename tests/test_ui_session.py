@@ -213,3 +213,33 @@ def test_busy_channel_is_not_announced_as_empty():
 def test_channel_state_handles_an_empty_timeline():
     from src.ui.pages.rf_replay import _channel_state
     assert _channel_state(_StubSession([]), True) == ""
+
+
+def test_display_mode_is_carried_on_the_session(model):
+    """Every page reads the same capture, so they must read the same view.
+
+    RF Replay owns the smoothing toggle; Overview and Alerts render from the
+    same session. Before this, switching RF Replay to Raw left them on
+    smoothed -- 70 events on one page and 7 on another, with nothing on screen
+    explaining the difference.
+    """
+    s = load_scenario(model, total_duration=0.02, hop=512, seed=1,
+                       case="All three")
+    assert s.display_smoothed is True
+
+    s.display_smoothed = False
+    assert s.events() == s.events(smoothed=False)
+    assert s.tiers() == s.tiers(smoothed=False)
+
+    s.display_smoothed = True
+    assert s.events() == s.events(smoothed=True)
+
+
+def test_display_mode_survives_a_model_switch(model):
+    """reanalyze() rebuilds the session for a different model; the operator's
+    view choice is a property of the session, not of the model."""
+    from src.ui.session import reanalyze
+    s = load_scenario(model, total_duration=0.02, hop=512, seed=1,
+                       case="All three")
+    s.display_smoothed = False
+    assert reanalyze(s, model).display_smoothed is False

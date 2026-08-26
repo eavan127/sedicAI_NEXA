@@ -81,6 +81,12 @@ class CaptureSession:
     smoothing_alpha: float = DEFAULT_ALPHA
     noise_gate: float = DEFAULT_NOISE_GATE
     hold_us: float = DEFAULT_HOLD_US
+    # Which view the operator has selected. Lives on the session so every page
+    # reads one source: RF Replay owns the toggle, but Overview and Alerts
+    # read the same capture, and a console that reports 70 events on one page
+    # and 7 on another -- with nothing on screen explaining the difference --
+    # is worse than either number alone.
+    display_smoothed: bool = True
 
     @property
     def duration_ms(self):
@@ -100,19 +106,21 @@ class CaptureSession:
             return {"noise_gate": self.noise_gate, "hold_us": self.hold_us}
         return {"noise_gate": None, "hold_us": 0.0}
 
-    def events(self, smoothed=True):
+    def events(self, smoothed=None):
+        smoothed = self.display_smoothed if smoothed is None else smoothed
         return detections(self._resolved(smoothed), self.thresholds,
                            **self._rules(smoothed))
 
-    def emitter_events(self, smoothed=True):
+    def emitter_events(self, smoothed=None):
         """Events with an actual emitter -- empty channel is not an event."""
         return [e for e in self.events(smoothed) if e.classes != ("NOISE_FLOOR",)]
 
-    def tiers(self, smoothed=True):
+    def tiers(self, smoothed=None):
+        smoothed = self.display_smoothed if smoothed is None else smoothed
         return tier_track(self._resolved(smoothed), self.thresholds,
                            **self._rules(smoothed))
 
-    def judged_events(self, smoothed=True):
+    def judged_events(self, smoothed=None):
         """Events involving a judged class. NOISE_FLOOR can never appear --
         it is the absence of an emitter, so an alert on it would invert the
         purpose of both the Alerts page and the class."""
@@ -160,9 +168,11 @@ def reanalyze(session, model, hop=None):
     on the same signal. Truth and known SNR carry over because they are
     properties of the capture, not of whichever model just looked at it.
     """
-    return analyze(session.iq, model, source=session.source,
-                    hop=hop or session.result.hop, truth=session.truth,
-                    true_snr_db=session.true_snr_db)
+    fresh = analyze(session.iq, model, source=session.source,
+                     hop=hop or session.result.hop, truth=session.truth,
+                     true_snr_db=session.true_snr_db)
+    fresh.display_smoothed = session.display_smoothed
+    return fresh
 
 
 def load_scenario(model, total_duration=0.05, hop=None, snr_db=0, seed=None,
