@@ -95,8 +95,9 @@ def test_per_emitter_snr_is_stable_as_emitters_are_added():
 
 def test_named_cases_cover_single_through_contested():
     from src.scenarios import CASES
-    assert set(CASES) == {"Radar only", "FHSS only", "Jamming only",
-                           "Radar + FHSS", "FHSS + Jamming", "All three"}
+    synthetic = {"Radar only", "FHSS only", "Jamming only",
+                  "Radar + FHSS", "FHSS + Jamming", "All three"}
+    assert synthetic <= set(CASES), "the generator-only cases must all exist"
     for name, script in CASES.items():
         assert script, f"{name} has an empty script"
         for cls, a, b in script:
@@ -104,13 +105,41 @@ def test_named_cases_cover_single_through_contested():
             assert 0.0 <= a < b <= 1.0, f"{name}: bad span {a}-{b}"
 
 
-def test_every_named_case_builds_and_returns_matching_truth():
-    from src.scenarios import CASES
+def test_every_generator_case_builds_and_returns_matching_truth():
+    """Cases built purely from generators. Civilian cases need a library of
+    real captures and are covered separately."""
+    from src.scenarios import CASES, GENERATORS
     for name, script in CASES.items():
+        if any(c not in GENERATORS for c, _, _ in script):
+            continue
         iq, segments = build_scenario(fs=3_200_000, total_duration=0.01,
                                        snr_db=0, seed=5, script=script)
         assert len(iq) == 32_000, name
         assert {s.class_name for s in segments} == {c for c, _, _ in script}, name
+
+
+def test_civilian_case_requires_a_library_and_says_so():
+    """Civilian classes have no generator. Failing loudly beats silently
+    producing a scene with the emitter missing."""
+    from src.scenarios import CASES, CIVILIAN
+    civ_case = next(s for n, s in CASES.items()
+                     if any(c in CIVILIAN for c, _, _ in s))
+    with pytest.raises(ValueError, match="no generator"):
+        build_scenario(fs=3_200_000, total_duration=0.01, seed=5,
+                        script=civ_case)
+
+
+def test_civilian_case_builds_when_a_library_is_supplied():
+    from src.scenarios import CASES, CIVILIAN
+    rng = np.random.default_rng(0)
+    name, script = next((n, s) for n, s in CASES.items()
+                         if any(c in CIVILIAN for c, _, _ in s))
+    lib = {c: rng.normal(0, 1, (20, 2, 512)).astype(np.float32)
+           for c, _, _ in script if c in CIVILIAN}
+    iq, segments = build_scenario(fs=3_200_000, total_duration=0.01, snr_db=0,
+                                   seed=5, script=script, library=lib)
+    assert len(iq) == 32_000
+    assert {s.class_name for s in segments} == {c for c, _, _ in script}
 
 
 def test_pulsed_emitter_reports_radiating_spans_not_just_schedule():
