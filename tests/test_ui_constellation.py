@@ -168,3 +168,72 @@ def test_selector_handles_a_capture_with_no_windows():
     s.result.probs = s.result.probs[:0]
     s.result.starts = s.result.starts[:0]
     assert s.best_civilian_window() is None
+
+
+from src.ui.palette import INSTRUMENT, tier_color
+from src.ui.plots import constellation_figure
+
+
+def test_figure_is_none_when_there_is_no_civilian_window():
+    s = _session({"LFM_RADAR": [0.90] * 6})
+    s.display_smoothed = False
+    assert constellation_figure(s) is None
+
+
+def test_figure_has_two_square_axes():
+    s = _session({"QPSK": [0.30, 0.30, 0.30, 0.95, 0.30, 0.30]})
+    s.display_smoothed = False
+    fig = constellation_figure(s)
+    try:
+        assert len(fig.axes) == 2
+        for ax in fig.axes:
+            assert ax.get_aspect() == 1.0
+    finally:
+        plt.close(fig)
+
+
+def test_raw_axis_plots_every_sample_and_symbol_axis_one_per_symbol():
+    """The left panel is the model's actual input; the right is one point per
+    symbol. If they ever plot the same count, the decimation silently stopped
+    happening."""
+    s = _session({"QPSK": [0.30, 0.30, 0.30, 0.95, 0.30, 0.30]})
+    s.display_smoothed = False
+    fig = constellation_figure(s)
+    try:
+        raw_ax, sym_ax = fig.axes
+        assert raw_ax.collections[0].get_offsets().shape[0] == 512
+        assert (sym_ax.collections[0].get_offsets().shape[0]
+                 == 512 // SAMPLES_PER_SYMBOL)
+    finally:
+        plt.close(fig)
+
+
+def test_scatter_points_carry_measured_styling_not_a_tier_colour():
+    """Provenance rule: both panels are computed from the capture's own
+    samples, so they must not wear the colour that marks model output."""
+    s = _session({"QPSK": [0.30, 0.30, 0.30, 0.95, 0.30, 0.30]})
+    s.display_smoothed = False
+    fig = constellation_figure(s)
+    try:
+        expected = matplotlib.colors.to_rgb(INSTRUMENT["color"])
+        for ax in fig.axes:
+            colour = ax.collections[0].get_facecolor()[0]
+            assert np.allclose(colour[:3], expected)
+    finally:
+        plt.close(fig)
+
+
+def test_caption_names_the_class_the_window_and_the_recovery_chain():
+    s = _session({"QPSK": [0.30, 0.30, 0.30, 0.95, 0.30, 0.30]})
+    s.display_smoothed = False
+    fig = constellation_figure(s)
+    try:
+        captions = " ".join(t.get_text() for t in fig.texts)
+        assert "QPSK" in captions
+        assert "window 3" in captions
+        assert "de-rotate" in captions
+        assert "64QAM" in captions        # the point-count caveat
+        model_text = [t for t in fig.texts if "QPSK" in t.get_text()]
+        assert any(t.get_color() == tier_color("Civilian") for t in model_text)
+    finally:
+        plt.close(fig)

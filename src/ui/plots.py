@@ -94,6 +94,75 @@ def recover_symbols(window, sps=SAMPLES_PER_SYMBOL):
     return best_points, offset, best_phase
 
 
+def constellation_figure(session, smoothed=None):
+    """IQ constellation for the strongest civilian window, or None.
+
+    Why this panel exists: the waterfall cannot tell civilian modulations
+    apart. BPSK, QPSK, 16QAM and 64QAM are the same flat wideband smear on it
+    at every SNR. Cluster count IS the modulation order -- 2, 4, 16, 64 -- so
+    this is the one display that carries the distinction.
+
+    Two axes, both MEASURED. The left is the exact (2, 512) array the model is
+    fed. The right is the SAME samples through recover_symbols: unit-power
+    scaling, de-rotation, decimation. Neither is model output, so neither
+    wears a tier colour. The single MODEL element is the caption's detected
+    class, which does.
+
+    Deliberately ONE window. Pooling several would give more points, but the
+    4th-power carrier estimate leaves a 90-degree ambiguity per window, so
+    pooled BPSK would render four clusters instead of two -- the display would
+    assert the wrong modulation order. The caption states the resulting point
+    limit instead.
+
+    Returns None when no window carries a civilian class above threshold; the
+    page hides the component rather than drawing an empty panel.
+    """
+    pick = session.best_civilian_window(smoothed)
+    if pick is None:
+        return None
+    index, class_name, prob = pick
+
+    start = int(session.result.starts[index])
+    window = session.iq[start:start + session.result.window_len]
+    points, offset, phase = recover_symbols(window)
+    raw = window / np.sqrt(np.mean(np.abs(window) ** 2) + 1e-20)
+
+    fig, (ax_raw, ax_sym) = plt.subplots(1, 2, figsize=(9.5, 5.0))
+    ax_raw.scatter(raw.real, raw.imag, s=4, alpha=0.45, linewidths=0,
+                    color=INSTRUMENT["color"])
+    ax_raw.set_title(f"raw I/Q — {len(raw)} samples, as the model is fed",
+                      fontsize=8, color=TEXT_DIM)
+    ax_sym.scatter(points.real, points.imag, s=20, alpha=0.85, linewidths=0,
+                    color=INSTRUMENT["color"])
+    ax_sym.set_title(f"recovered — {len(points)} symbol points",
+                      fontsize=8, color=TEXT_DIM)
+
+    for ax in (ax_raw, ax_sym):
+        ax.set_xlabel("I (measured)")
+        ax.set_ylabel("Q (measured)")
+        # Equal aspect, or a QPSK square renders as a rectangle and the eye
+        # reads a constellation that is not there.
+        ax.set_aspect("equal")
+
+    t_ms = start / CFG["signal"]["fs"] * 1e3
+    snr_text = f"est. {estimate_snr_db(window, session.noise_power):.1f} dB"
+    fig.text(0.01, 0.055,
+              f"window {index} @ {t_ms:.2f} ms · {snr_text} · unit-power scale "
+              f"→ de-rotate {offset:+.4f} cyc/sample → decimate 1-in-"
+              f"{SAMPLES_PER_SYMBOL} at phase {phase}",
+              color=TEXT_DIM, fontsize=7)
+    fig.text(0.01, 0.005, f"{class_name} {prob * 100:.0f}%",
+              color=tier_color("Civilian"), fontsize=8, fontweight="bold")
+    fig.text(0.16, 0.005,
+              f"cluster count is the modulation order — {len(points)} symbols "
+              f"separates 2 clusters from 4, not enough to resolve 64QAM",
+              color=TEXT_DIM, fontsize=7)
+
+    style_axes(fig, [ax_raw, ax_sym])
+    fig.tight_layout(rect=[0, 0.09, 1, 1])
+    return fig
+
+
 def waterfall_figure(session, smoothed=True, nperseg=256):
     """Waterfall with x = frequency (MHz) and y = time, matching the classic
     RF-console convention, plus MODEL detection overlays.
