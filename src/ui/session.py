@@ -146,13 +146,22 @@ class CaptureSession:
             return None
         probs = self._resolved(smoothed).probs
 
+        # No .get(cls, 0.5) fallback: 0.5 is not a safe default here, it is
+        # the specific bug per-class calibration replaced. configs/default.yaml
+        # documents 16QAM recall at 1.3% under a flat 0.5 threshold versus
+        # 73.0% at its calibrated 0.265, and every civilian threshold sits
+        # below 0.5. A missing key means the thresholds dict was built wrong,
+        # and that should raise, not silently score against the known-wrong
+        # value.
         best = None
         for cls in CIVILIAN:
             column = probs[:, CLASSES.index(cls)]
             index = int(np.argmax(column))
             prob = float(column[index])
-            if prob < self.thresholds.get(cls, 0.5):
+            if prob < self.thresholds[cls]:
                 continue
+            # Strict >, so an exact tie between two civilian classes keeps
+            # whichever comes first in CIVILIAN order.
             if best is None or prob > best[2]:
                 best = (index, cls, prob)
         return best
