@@ -445,7 +445,8 @@ def test_rrc_taps_are_symmetric_and_peak_at_the_centre_tap():
     assert np.argmax(np.abs(taps)) == len(taps) // 2
 
 
-def test_rrc_self_convolution_is_nyquist_zero_isi():
+@pytest.mark.parametrize("beta", [0.20, 0.35])
+def test_rrc_self_convolution_is_nyquist_zero_isi(beta):
     """Pins rrc_taps against a property of a REAL root-raised cosine, not
     against this codebase's own pipeline output.
 
@@ -462,30 +463,47 @@ def test_rrc_self_convolution_is_nyquist_zero_isi():
     from the filter's definition, not from any code in this file, so it is
     what actually pins rrc_taps.
 
-    Tolerance: measured on the real taps, the largest of these near-zero
-    samples (k=1..3, k=4 sits at the truncated edge of the 8-symbol span and
-    is excluded) is ~0.0026 of the peak. With the reviewer's sign flipped,
-    the same samples come out to ~0.0035-0.0047 of the peak -- so 0.003 sits
-    between the two and catches the corruption. This was verified by making
-    the flip, running this test, and confirming it fails (see the commit
-    message / PR notes for the captured failure output); the sign is
-    restored in the shipped code.
+    Evaluated at span=32 -- NOT the shipped RRC_SPAN_SYMBOLS=8 -- and at
+    both roll-offs the code's own comment treats as equally valid (0.20 and
+    0.35). The residual being measured is finite-span truncation error, so
+    it shrinks as the span grows; pinning it at the shipped span put the
+    correct-case max (~0.0026) and a corrupted-case min (~0.0035) only ~15%
+    apart on each side of the tolerance -- fragile enough that changing
+    RRC_ROLLOFF or RRC_SPAN_SYMBOLS later could fail this test for a reason
+    that has nothing to do with a broken filter. At span=32 the correct-case
+    residual shrinks (truncation error falls with span) while a genuine sign
+    error stays broken, so the gap widens instead of narrowing.
+
+    Measured at span=32, k=1..15 (k=16 sits at the truncated edge and is
+    excluded, same reasoning as before just at 4x the span):
+        beta=0.20  correct max   0.000379   corrupted (sign-flipped) min   0.6476
+        beta=0.35  correct max   0.000193   corrupted (sign-flipped) min   0.004736
+    The tightest gap across both roll-offs is beta=0.20's correct max
+    (0.000379) against beta=0.35's corrupted min (0.004736) -- still better
+    than 12x apart. tolerance=0.001 sits with >2.5x margin below every
+    correct-case value and >4.7x margin above every corrupted-case value
+    measured above (beta=0.20's corrupted case is nowhere near the boundary
+    at 0.6476, so it is beta=0.35's corrupted case, 0.004736, that actually
+    sets the tight side of this margin). Verified: flipping the sign and
+    running this test at both roll-offs fails both parametrizations (see the
+    commit message for the captured failure output); the sign is restored in
+    the shipped code.
     """
-    taps = rrc_taps(SAMPLES_PER_SYMBOL)
-    sps = SAMPLES_PER_SYMBOL
+    sps, span = SAMPLES_PER_SYMBOL, 32
+    taps = rrc_taps(sps, beta=beta, span=span)
     raised_cosine = np.convolve(taps, taps)
     center = len(raised_cosine) // 2
     peak = raised_cosine[center]
     assert peak == pytest.approx(1.0, abs=1e-9)
 
-    # k=4 would land exactly on the truncated edge of the 8-symbol span,
-    # where finite-length truncation error dominates -- not a meaningful
-    # check of the Nyquist property. k=1..3 sit well inside the span.
-    for k in range(1, RRC_SPAN_SYMBOLS // 2):
+    # k=span//2 would land exactly on the truncated edge of the span, where
+    # finite-length truncation error dominates -- not a meaningful check of
+    # the Nyquist property. k=1..span//2-1 sit well inside the span.
+    for k in range(1, span // 2):
         isi = raised_cosine[center + k * sps] / peak
-        assert abs(isi) < 0.003, (
-            f"raised cosine at symbol offset {k} is {isi!r}, not ~0 -- "
-            f"rrc_taps is not producing a real root-raised cosine")
+        assert abs(isi) < 0.001, (
+            f"raised cosine at symbol offset {k} (beta={beta}) is {isi!r}, "
+            f"not ~0 -- rrc_taps is not producing a real root-raised cosine")
 
 
 def test_matched_filter_tightens_clusters_a_raw_decimation_leaves_smeared():
