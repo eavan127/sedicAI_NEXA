@@ -29,7 +29,8 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.config import CFG, CLASSES, CLASS_TO_IDX, REPO_ROOT  # noqa: E402
+from src.config import (CFG, CLASSES, CLASS_TO_IDX, REPO_ROOT,  # noqa: E402
+                         resolve_multilabel_thresholds)
 from src.data.preprocess import preprocess_window  # noqa: E402
 from src.models.amc_cnn import AMC_CNN  # noqa: E402
 
@@ -58,11 +59,37 @@ def main(data_dir, split, model_path, stride, max_files):
     window_len = CFG["signal"]["window_len"]
     stride = stride or window_len
 
-    ckpt = Path(model_path) if model_path else REPO_ROOT / CFG["paths"]["checkpoints"] / "best_model.pt"
-    model = AMC_CNN(num_classes=len(CLASSES), input_len=window_len).to(DEVICE)
-    model.load_state_dict(torch.load(ckpt, map_location=DEVICE))
-    model.eval()
-    print(f"Loaded {ckpt.name}\n")
+    ckpt_dir = REPO_ROOT / CFG["paths"]["checkpoints"]
+    ensemble = sorted(ckpt_dir.glob("ensemble_*.pt"))
+    if model_path:
+        paths, desc = [Path(model_path)], Path(model_path).name
+    elif ensemble:
+        paths, desc = ensemble, f"{len(ensemble)}-model ensemble average"
+    else:
+        paths, desc = [ckpt_dir / "best_model.pt"], "best_model.pt"
+
+    models = []
+    for pth in paths:
+        m = AMC_CNN(num_classes=len(CLASSES), input_len=window_len).to(DEVICE)
+        m.load_state_dict(torch.load(pth, map_location=DEVICE))
+        m.eval()
+        models.append(m)
+
+    # Per-class threshold on sigmoid outputs -- NOT argmax. This model is
+    # multi-label, and argmax is a single-label decision rule left over from
+    # before that change.
+    #
+    # The reason is consistency, not bias direction: the scorecard, the
+    # console and this script must all call JAMMING the same way, or an
+    # external number cannot be compared with an internal one. Measured on
+    # 2,000 true-JAMMING windows from the held-out split, argmax actually
+    # scored HIGHER than the threshold (92.8% vs 89.6%) -- JAMMING's threshold
+    # of 0.77 is a high bar, so argmax accepting sub-threshold jamming
+    # outweighs it rejecting jamming that a victim narrowly outranks. Either
+    # way, only the threshold rule is comparable to evals/scorecard.json.
+    jam_threshold = float(resolve_multilabel_thresholds()[JAM_IDX])
+    print(f"Loaded {desc}")
+    print(f"JAMMING threshold {jam_threshold:.2f} (sigmoid, multi-label)\n")
 
     print(f"{'category':<14}{'files':>7}{'windows':>9}{'jam-recall':>12}{'top mistake':>16}")
     print("-" * 62)
@@ -81,12 +108,14 @@ def main(data_dir, split, model_path, stride, max_files):
             iq = load_mat_iq(f)
             batch = windows_from_capture(iq, window_len, stride)
             with torch.no_grad():
-                out = model(torch.tensor(batch).to(DEVICE)).argmax(1).cpu().numpy()
-            preds.append(out)
-        preds = np.concatenate(preds)
+                xb = torch.tensor(batch).to(DEVICE)
+                probs = sum(torch.sigmoid(m(xb)) for m in models) / len(models)
+            preds.append(probs.cpu().numpy())
+        probs = np.concatenate(preds)
 
         true_is_jam = cat != "NoJam"
-        pred_is_jam = preds == JAM_IDX
+        pred_is_jam = probs[:, JAM_IDX] > jam_threshold
+        preds = probs.argmax(1)   # only used to name the most common mistake
 
         if true_is_jam:
             tp, fn = int(pred_is_jam.sum()), int((~pred_is_jam).sum())

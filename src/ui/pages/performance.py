@@ -64,9 +64,17 @@ def _build_dashboard(progress=gr.Progress()):
     if not CKPT_PATH.exists():
         raise gr.Error(f"No checkpoint at {CKPT_PATH}. Train or copy one there first.")
 
-    progress(0.1, desc="Running evaluation on the held-out test split...")
+    # Evaluate whatever the console itself loads. This previously called
+    # evaluate() with no arguments, which always scores the SINGLE
+    # best_model.pt -- so with an ensemble present the Performance page
+    # reported one model while RF Replay ran five, and the page could show
+    # FAIL for a configuration that passes. The console must not disagree
+    # with itself about its own results.
+    from src.ui.app_models import ensemble_available, model_label
+    use_ensemble = ensemble_available()
+    progress(0.1, desc=f"Evaluating {model_label('auto')}...")
     try:
-        run_full_evaluation()
+        run_full_evaluation(ensemble=use_ensemble, n_models=5)
     except RuntimeError as e:
         raise gr.Error(f"Evaluation failed against the current checkpoint: {e}")
 
@@ -84,13 +92,30 @@ def _build_dashboard(progress=gr.Progress()):
     for cls, r in bench["judged_classes"].items():
         mark = "✅" if r["passed"] else "❌"
         lines.append(f"- **{cls}**: recall {r['recall']:.1%} {mark}")
+    # --- category view -------------------------------------------------
+    # Every class, grouped by tier. The benchmark judges three classes, so a
+    # page showing only those reads as though the model knows three things.
+    # Civilian is not judged, but "can it tell traffic from interference" is
+    # exactly what the CEMA criterion turns on, so it belongs on screen.
+    lines.append("\n#### By category\n")
+    lines.append("| category | classes | tier recall |")
+    lines.append("|---|---|---|")
+    for tier, members in TIERS.items():
+        present = [c for c in members if per_class.get(c, {}).get("support", 0)]
+        if not present:
+            continue
+        rec = coarse["per_tier_recall"].get(tier)
+        detail = ", ".join(f"{c} {per_class[c]['recall']:.0%}" for c in present)
+        lines.append(f"| **{tier}** | {detail} | "
+                      + ("—" if rec is None else f"**{rec:.1%}**") + " |")
     if cvj:
-        lines.append(f"\n**Comms vs Hostile CEMA** — discrimination accuracy "
-                      f"{cvj['accuracy']:.1%}, jamming recall {cvj['jamming_recall']:.1%}, "
-                      f"false alarm rate {cvj['false_alarm_rate']:.1%}")
-    lines.append(f"\n**Coarse tier accuracy**: {coarse['accuracy']:.1%}")
-    for tier, rec in coarse["per_tier_recall"].items():
-        lines.append(f"  - {tier}: {rec:.1%}" if rec is not None else f"  - {tier}: n/a")
+        lines.append(f"| **CEMA** — comms vs hostile | jamming recall "
+                      f"{cvj['jamming_recall']:.1%}, false alarm "
+                      f"{cvj['false_alarm_rate']:.2%} | "
+                      f"**{cvj['accuracy']:.1%}** |")
+
+    lines.append(f"\n**Coarse tier accuracy**: {coarse['accuracy']:.1%}"
+                  f" &nbsp;·&nbsp; evaluated: **{model_label('auto')}**")
     summary_md = "\n".join(lines)
 
     fig, ax = plt.subplots(figsize=(7, 3.5))
@@ -131,10 +156,15 @@ def _build_breakdown(progress=gr.Progress()):
                                    d["seed"])
 
     progress(0.3, desc="Running the model over the test split...")
-    r = single_vs_multi(load_model("auto"), X[test], y[test], snr[test])
+    # ALL eight classes, not just the judged three. Civilian classes are not
+    # scored by the benchmark, but "can it tell traffic from interference"
+    # is the question the CEMA criterion actually turns on, and leaving them
+    # out made the page look like the model only knows three things.
+    r = single_vs_multi(load_model("auto"), X[test], y[test], snr[test],
+                         classes=list(CLASSES))
 
     progress(0.85, desc="Building chart...")
-    fig, ax = plt.subplots(figsize=(8, 4))
+    fig, ax = plt.subplots(figsize=(9, 4.5))
     for cls in r.classes:
         colour = _TIER_COLOR[_TIER_OF[cls]]
         for group, style, marker in (("single", "-", "o"), ("multi", "--", "s")):
@@ -148,7 +178,7 @@ def _build_breakdown(progress=gr.Progress()):
     ax.set_xlabel("SNR (dB)")
     ax.set_ylabel("recall (%)")
     ax.set_ylim(0, 102)
-    leg = ax.legend(fontsize=7, ncol=3, loc="lower right")
+    leg = ax.legend(fontsize=6, ncol=4, loc="lower right")
     _style_light_axes(fig, ax)
     leg.get_frame().set_facecolor(_PANEL)
     plt.tight_layout()
@@ -158,16 +188,24 @@ def _build_breakdown(progress=gr.Progress()):
             f"{r.n_windows['multi']:,} multi-signal windows in the test split\n\n"
             f"Solid = one emitter in the window. Dashed = emitters overlapping. "
             f"Dotted red line is the {CFG['benchmark_recall']:.0%} gate.\n\n")
-    head += "| class | " + " | ".join(f"{s:+d} dB" for s in r.snr_bins) + " | all |\n"
-    head += "|" + "---|" * (len(r.snr_bins) + 2) + "\n"
+    head += ("| category | class | " + " | ".join(f"{s:+d} dB" for s in r.snr_bins)
+              + " | all |\n")
+    head += "|" + "---|" * (len(r.snr_bins) + 3) + "\n"
     for group in ("single", "multi"):
         for cls in r.classes:
+            # A class absent from this group entirely (NOISE_FLOOR never
+            # co-occurs, so it has no multi-signal rows) would otherwise print
+            # a row of em-dashes that reads like a failure rather than an
+            # absence.
+            if all(r.recall[group][cls][sb] is None for sb in r.snr_bins):
+                continue
             cells = []
             for sb in r.snr_bins:
                 v = r.recall[group][cls][sb]
                 cells.append("—" if v is None else f"{v:.0f}%")
             tot = r.totals[group][cls]
-            head += (f"| {cls} ({group}) | " + " | ".join(cells) + " | "
+            head += (f"| {_TIER_OF[cls]} | {cls} ({group}) | "
+                      + " | ".join(cells) + " | "
                       + ("—" if tot is None else f"**{tot:.0f}%**") + " |\n")
 
     progress(1.0, desc="Done")
