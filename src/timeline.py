@@ -188,6 +188,16 @@ def _detected_sets(result, thresholds):
     return _sets_from_matrix(_over_threshold(result, thresholds))
 
 
+# Single shared lookup for NOISE_FLOOR's index (or None if the class doesn't
+# exist in this config) -- apply_noise_gate, apply_hold and _resolved_matrix
+# all need to know it to enforce "NOISE_FLOOR is mutually exclusive with
+# every emitter", and used to each do their own CLASS_TO_IDX lookup with a
+# different guard idiom (a `not in` membership check here, a `.get()` +
+# `is not None` check there). One shared constant instead of three ways to
+# ask the same question.
+_NOISE_FLOOR_IDX = CLASS_TO_IDX.get("NOISE_FLOOR")
+
+
 def apply_noise_gate(probs, over, gate=0.5):
     """Where NOISE_FLOOR dominates, the window is empty -- drop everything else.
 
@@ -205,13 +215,12 @@ def apply_noise_gate(probs, over, gate=0.5):
 
     DISPLAY ONLY, like smoothing. The scorecard stays per-window and ungated.
     """
-    if "NOISE_FLOOR" not in CLASS_TO_IDX:
+    if _NOISE_FLOOR_IDX is None:
         return over
-    noise_idx = CLASS_TO_IDX["NOISE_FLOOR"]
     out = over.copy()
-    empty = probs[:, noise_idx] > gate
+    empty = probs[:, _NOISE_FLOOR_IDX] > gate
     out[empty, :] = False
-    out[empty, noise_idx] = True
+    out[empty, _NOISE_FLOOR_IDX] = True
     return out
 
 
@@ -236,9 +245,8 @@ def apply_hold(over, hold_windows):
     # bridges a radar's inter-pulse gaps, and the filled NOISE_FLOOR span would
     # then overlap the filled emitter span -- producing "LFM_RADAR +
     # NOISE_FLOOR" events, which the dataset says cannot exist.
-    noise_idx = CLASS_TO_IDX.get("NOISE_FLOOR")
     for j in range(over.shape[1]):
-        if j == noise_idx:
+        if j == _NOISE_FLOOR_IDX:
             continue
         idx = np.flatnonzero(over[:, j])
         for a, b in zip(idx[:-1], idx[1:]):
@@ -263,11 +271,10 @@ def _resolved_matrix(result, thresholds, noise_gate=None, hold_us=0.0):
         # Scoped to this branch deliberately: applying it unconditionally would
         # change plain detections(result, thresholds) output, and this function
         # has to stay a primitive that the scorecard path can rely on.
-        noise_idx = CLASS_TO_IDX.get("NOISE_FLOOR")
-        if noise_idx is not None:
-            others = np.delete(over, noise_idx, axis=1).any(axis=1)
+        if _NOISE_FLOOR_IDX is not None:
+            others = np.delete(over, _NOISE_FLOOR_IDX, axis=1).any(axis=1)
             over = over.copy()
-            over[others, noise_idx] = False
+            over[others, _NOISE_FLOOR_IDX] = False
     return over
 
 

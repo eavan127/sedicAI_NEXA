@@ -9,7 +9,7 @@ This layer is where the DISPLAY-ONLY rules get turned on. src/timeline.py
 defaults them off so it stays a primitive the scorecard path can rely on; the
 UI opts in here, and only here.
 """
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 
@@ -74,9 +74,24 @@ class CaptureSession:
     def judged_events(self, smoothed=True):
         """Events involving a judged class. NOISE_FLOOR can never appear --
         it is the absence of an emitter, so an alert on it would invert the
-        purpose of both the Alerts page and the class."""
+        purpose of both the Alerts page and the class.
+
+        Stripped explicitly from each event's classes/peak here, not just
+        inherited from the smoothed-mode noise-gate pipeline -- that pipeline
+        (apply_noise_gate, the post-hold mutual-exclusion reassertion) is
+        skipped entirely when smoothed=False, so without this the invariant
+        would depend on no caller ever passing smoothed=False here -- true
+        today, but RF Replay already has a Raw/Smoothed toggle wired to the
+        same underlying events() this method calls.
+        """
         judged = set(CFG["judged_classes"])
-        return [e for e in self.events(smoothed) if judged & set(e.classes)]
+        out = []
+        for e in self.events(smoothed):
+            classes = tuple(c for c in e.classes if c != "NOISE_FLOOR")
+            if judged & set(classes):
+                out.append(replace(e, classes=classes,
+                                    peak={c: v for c, v in e.peak.items() if c != "NOISE_FLOOR"}))
+        return out
 
 
 def analyze(iq, model, source, hop=None, truth=None, true_snr_db=None,

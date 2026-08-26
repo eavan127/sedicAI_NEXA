@@ -57,6 +57,7 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.config import CFG, CLASSES, CLASS_TO_IDX, REPO_ROOT  # noqa: E402
+from src.evaluate import predict_probs  # noqa: E402
 from src.models.amc_cnn import AMC_CNN  # noqa: E402
 from src.train import load_data, stratified_split  # noqa: E402
 
@@ -70,16 +71,6 @@ BENCHMARK_RECALL = CFG["benchmark_recall"]
 # enough).
 DEFAULT_SAFETY_MARGIN = 0.03
 CANDIDATES = np.round(np.arange(0.05, 0.96, 0.01), 2)
-EVAL_BATCH_SIZE = 256
-
-
-def _predict_probs(model, X):
-    chunks = []
-    with torch.no_grad():
-        for i in range(0, len(X), EVAL_BATCH_SIZE):
-            batch = torch.tensor(X[i:i + EVAL_BATCH_SIZE]).to(DEVICE)
-            chunks.append(torch.sigmoid(model(batch)).cpu().numpy())
-    return np.concatenate(chunks, axis=0)
 
 
 def _best_threshold(probs_col, true_col, target_recall):
@@ -111,21 +102,7 @@ def _best_threshold(probs_col, true_col, target_recall):
     return float(t), None, False
 
 
-def _ensemble_probs(ckpt_paths, X_val):
-    """Average sigmoid probabilities over several checkpoints -- same
-    averaging train_ensemble.py's _predict does, so calibration matches what
-    the ensemble actually outputs at inference time."""
-    summed = None
-    for ckpt in ckpt_paths:
-        model = AMC_CNN(num_classes=len(CLASSES), input_len=X_val.shape[-1]).to(DEVICE)
-        model.load_state_dict(torch.load(ckpt, map_location=DEVICE))
-        model.eval()
-        p = _predict_probs(model, X_val)
-        summed = p if summed is None else summed + p
-    return summed / len(ckpt_paths)
-
-
-def main(ensemble, n_models, margin):
+def main(ensemble, n_models, margin, tta=0):
     target_recall = BENCHMARK_RECALL + margin
     X, y, snr_labels = load_data()
     d = CFG["dataset"]
@@ -140,15 +117,25 @@ def main(ensemble, n_models, margin):
             raise FileNotFoundError(
                 f"missing ensemble checkpoints: {missing} -- run "
                 f"train_ensemble.py --models {n_models} first")
-        probs = _ensemble_probs(ckpt_paths, X_val)
         ckpt_desc = f"{n_models}-model ensemble average ({ckpt_dir}/ensemble_*.pt)"
     else:
-        ckpt = ckpt_dir / "best_model.pt"
+        ckpt_paths = [ckpt_dir / "best_model.pt"]
+        ckpt_desc = str(ckpt_paths[0])
+    if tta:
+        ckpt_desc += f", TTA={tta}"
+
+    models = []
+    for p in ckpt_paths:
         model = AMC_CNN(num_classes=len(CLASSES), input_len=X.shape[-1]).to(DEVICE)
-        model.load_state_dict(torch.load(ckpt, map_location=DEVICE))
+        model.load_state_dict(torch.load(p, map_location=DEVICE))
         model.eval()
-        probs = _predict_probs(model, X_val)
-        ckpt_desc = str(ckpt)
+        models.append(model)
+    # Same averaging (and, with --tta, the same TTA) predict_probs uses in
+    # evaluate.py/train_ensemble.py -- calibrating against a differently-
+    # averaged probability than what's actually deployed is exactly the
+    # single-model-vs-ensemble compression bug this module's docstring
+    # describes, now also possible via a TTA mismatch if the two drift apart.
+    probs = predict_probs(models, X_val, tta=tta)
 
     print(f"Calibrating against: {ckpt_desc}")
     print(f"Calibrating on val split ({len(val_idx)} windows), floor={BENCHMARK_RECALL:.0%}"
@@ -186,5 +173,8 @@ if __name__ == "__main__":
     p.add_argument("--margin", type=float, default=DEFAULT_SAFETY_MARGIN,
                     help="extra recall required above benchmark_recall on val, as "
                          "headroom against val/test variance (default 0.03 = 3 points)")
+    p.add_argument("--tta", type=int, default=0,
+                    help="average N phase rotations per prediction -- MUST match whatever "
+                         "train_ensemble.py used to produce these checkpoints, 0 = off")
     a = p.parse_args()
-    main(a.ensemble, a.n_models, a.margin)
+    main(a.ensemble, a.n_models, a.margin, a.tta)

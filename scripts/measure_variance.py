@@ -21,78 +21,19 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.config import (CFG, CLASSES, CLASS_TO_IDX,  # noqa: E402
-                         resolve_class_weight_multipliers, resolve_multilabel_thresholds)
-from src.models.amc_cnn import AMC_CNN  # noqa: E402
-from src.train import (compute_class_weights, compute_snr_weights, load_data,  # noqa: E402
-                        set_seed, stratified_split)
-from torch.utils.data import DataLoader, TensorDataset, WeightedRandomSampler  # noqa: E402
-import torch.nn as nn  # noqa: E402
+from src.config import CFG, CLASS_TO_IDX, resolve_multilabel_thresholds  # noqa: E402
+from src.evaluate import predict_probs  # noqa: E402
+from src.train import load_data, stratified_split, train_model  # noqa: E402
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def one_run(X, y, snr_labels, seed):
-    """Train once and return per-class recall on the held-out test split."""
-    set_seed(seed)
-    d, t = CFG["dataset"], CFG["training"]
-    tr, va, te = stratified_split(y, snr_labels, d["val_frac"], d["test_frac"], d["seed"])
+def one_run(X, y, snr_labels, seed, tr, va, te):
+    """Train once (on the given split) and return per-class recall on `te`."""
+    model, _ = train_model(X, y, snr_labels, tr, va, seed, verbose=False)
 
-    noise_floor_idx = CLASS_TO_IDX.get("NOISE_FLOOR")
-    neutral_classes = [noise_floor_idx] if noise_floor_idx is not None else []
-    dampen = resolve_class_weight_multipliers()
-
-    X_t = torch.tensor(X)
-    y_t = torch.tensor(y, dtype=torch.float32)  # multi-hot -> BCEWithLogitsLoss wants float targets
-    train_sampler = WeightedRandomSampler(
-        compute_snr_weights(snr_labels[tr], y[tr], neutral_classes),
-        num_samples=len(tr), replacement=True)
-    train_loader = DataLoader(TensorDataset(X_t[tr], y_t[tr]),
-                              batch_size=t["batch_size"], sampler=train_sampler)
-    val_loader = DataLoader(TensorDataset(X_t[va], y_t[va]), batch_size=t["batch_size"])
-
-    model = AMC_CNN(num_classes=len(CLASSES), input_len=X.shape[-1]).to(DEVICE)
-    # Multi-label: each class is an independent yes/no -- see src/train.py.
-    criterion = nn.BCEWithLogitsLoss(
-        pos_weight=compute_class_weights(y, len(CLASSES), dampen=dampen).to(DEVICE))
-    opt = torch.optim.Adam(model.parameters(), lr=t["learning_rate"])
-    sched = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, patience=t["scheduler_patience"])
-
-    best_loss, best_state = float("inf"), None
-    for _ in range(t["epochs"]):
-        model.train()
-        for xb, yb in train_loader:
-            xb, yb = xb.to(DEVICE), yb.to(DEVICE)
-            opt.zero_grad()
-            loss = criterion(model(xb), yb)
-            loss.backward()
-            opt.step()
-
-        model.eval()
-        vloss = 0.0
-        with torch.no_grad():
-            for xb, yb in val_loader:
-                xb, yb = xb.to(DEVICE), yb.to(DEVICE)
-                vloss += criterion(model(xb), yb).item() * xb.size(0)
-        vloss /= len(val_loader.dataset)
-        sched.step(vloss)
-        if vloss < best_loss:
-            best_loss = vloss
-            best_state = {k: v.clone() for k, v in model.state_dict().items()}
-
-    model.load_state_dict(best_state)
-    model.eval()
     threshold = resolve_multilabel_thresholds()
-    # Batched -- X[te] can be thousands of test windows; one unbatched
-    # forward pass OOMs a real GPU once the dataset is full-sized (see the
-    # same fix in src/evaluate.py and scripts/train_ensemble.py).
-    eval_batch_size = 256
-    probs_chunks = []
-    with torch.no_grad():
-        for i in range(0, len(te), eval_batch_size):
-            batch = torch.tensor(X[te][i:i + eval_batch_size]).to(DEVICE)
-            probs_chunks.append(torch.sigmoid(model(batch)).cpu().numpy())
-    present = np.concatenate(probs_chunks, axis=0) > threshold
+    present = predict_probs([model], X[te]) > threshold
 
     y_te = y[te]
     out = {}
@@ -106,12 +47,19 @@ def one_run(X, y, snr_labels, seed):
 
 def main(runs):
     X, y, snr_labels = load_data()
+    d = CFG["dataset"]
+    # Computed once, not per run -- d["seed"] never changes between runs, so
+    # every run trained on a different SEED but must still be scored against
+    # the SAME held-out split; recomputing it `runs` times was pure repeated
+    # work for byte-identical output.
+    tr, va, te = stratified_split(y, snr_labels, d["val_frac"], d["test_frac"], d["seed"])
+
     print(f"Training {runs} times on IDENTICAL data and config.")
     print("Only the random seed differs.\n")
 
     results = []
     for i in range(runs):
-        r = one_run(X, y, snr_labels, seed=1000 + i)
+        r = one_run(X, y, snr_labels, seed=1000 + i, tr=tr, va=va, te=te)
         results.append(r)
         print(f"  run {i+1}: " + "  ".join(f"{c}={v:.4f}" for c, v in r.items()))
 

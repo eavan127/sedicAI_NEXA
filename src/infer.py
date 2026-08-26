@@ -12,9 +12,9 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from src.config import CFG, CLASS_TO_IDX, CLASSES, REPO_ROOT
+from src.config import CFG, CLASS_TO_IDX, CLASSES, REPO_ROOT, resolve_multilabel_thresholds
 from src.data.preprocess import preprocess_window
-from src.evaluate import TIERS
+from src.evaluate import TIERS, predict_probs
 from src.models.amc_cnn import AMC_CNN
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -33,20 +33,27 @@ def load_iq_file(path, dtype=np.float32):
     return raw[0::2] + 1j * raw[1::2]
 
 
-def _load_models(model_path=None, ensemble=False):
-    """One checkpoint, or every ensemble member if --ensemble is given.
+def _load_models(model_path=None, ensemble=False, n_models=5):
+    """One checkpoint, or exactly `n_models` ensemble members if --ensemble.
 
     Averaging members cancels initialisation noise. Seed variance measured 2.2
     points on radar and 8.9 on jamming, so a single checkpoint lands at a random
     point in that range — not what you want for the submitted run.
+
+    Exact count, not a glob of everything in results/ -- matches
+    train_ensemble.py/evaluate.py/calibrate_thresholds.py, all of which require
+    exactly ensemble_0.pt..ensemble_{n_models-1}.pt. A bare glob would silently
+    average in stale extra checkpoints left over from a differently-sized
+    ensemble that was never cleared out of results/.
     """
     ckpt_dir = REPO_ROOT / CFG["paths"]["checkpoints"]
     if ensemble:
-        paths = sorted(ckpt_dir.glob("ensemble_*.pt"))
-        if not paths:
+        paths = [ckpt_dir / f"ensemble_{i}.pt" for i in range(n_models)]
+        missing = [p for p in paths if not p.exists()]
+        if missing:
             raise FileNotFoundError(
-                f"No ensemble members in {ckpt_dir}. "
-                "Run: python scripts/train_ensemble.py --models 5")
+                f"missing ensemble checkpoints: {missing} -- run "
+                f"python scripts/train_ensemble.py --models {n_models} first")
     else:
         paths = [Path(model_path) if model_path else ckpt_dir / "best_model.pt"]
 
@@ -75,7 +82,8 @@ def _status(detected_classes):
     return "TRACKED" if any(c in CFG["judged_classes"] for c in detected_classes) else "MONITOR"
 
 
-def run_inference(input_path, output_path, model_path=None, stride=None, ensemble=False):
+def run_inference(input_path, output_path, model_path=None, stride=None, ensemble=False,
+                   n_models=5):
     cfg_sig = CFG["signal"]
     window_len = cfg_sig["window_len"]
     stride = stride or window_len
@@ -84,28 +92,22 @@ def run_inference(input_path, output_path, model_path=None, stride=None, ensembl
     if len(iq) < window_len:
         raise ValueError(f"Input has {len(iq)} samples, need at least {window_len}")
 
-    models, paths = _load_models(model_path, ensemble)
+    models, paths = _load_models(model_path, ensemble, n_models)
     print(f"Using {len(models)} model(s): {', '.join(p.name for p in paths)}")
 
     starts = range(0, len(iq) - window_len + 1, stride)
     X_all = np.stack([preprocess_window(iq[s:s + window_len], window_len) for s in starts])
 
-    threshold = CFG.get("multilabel_threshold", 0.5)
-    # Batched, not one forward pass over the whole stream -- a real Qualifier
-    # stream can be many thousands of windows, and pushing them all through
-    # the model at once OOMs a real GPU (same fix as src/evaluate.py and
-    # scripts/train_ensemble.py).
-    eval_batch_size = 256
-    probs_chunks = []
-    with torch.no_grad():
-        for i in range(0, len(X_all), eval_batch_size):
-            batch = torch.tensor(X_all[i:i + eval_batch_size]).to(DEVICE)
-            # Multi-label: each class judged independently (sigmoid), not one
-            # winner (softmax) -- a window can flag several classes at once,
-            # e.g. a real signal AND jamming overlaid on top of it.
-            probs_chunks.append(
-                np.mean([torch.sigmoid(m(batch)).cpu().numpy() for m in models], axis=0))
-    probs = np.concatenate(probs_chunks, axis=0)
+    # Per-class calibrated thresholds (configs/default.yaml:
+    # multilabel_thresholds_per_class), NOT a single flat value -- this is the
+    # actual submission-generating script, so it must apply the SAME decision
+    # rule evaluate.py scored the benchmark against. Multi-label: each class
+    # judged independently (sigmoid), not one winner (softmax) -- a window can
+    # flag several classes at once, e.g. a real signal AND jamming overlaid on
+    # top of it. predict_probs also handles the batching (a real Qualifier
+    # stream can be many thousands of windows).
+    threshold = resolve_multilabel_thresholds()
+    probs = predict_probs(models, X_all)
     present = probs > threshold
 
     output_path = Path(output_path)
@@ -147,6 +149,9 @@ if __name__ == "__main__":
     parser.add_argument("--stride", type=int, default=None,
                         help="overlap windows; smaller catches bursts on a boundary")
     parser.add_argument("--ensemble", action="store_true",
-                        help="average every results/ensemble_*.pt instead of one checkpoint")
+                        help="average the ensemble_0.pt..ensemble_{n-1}.pt checkpoints "
+                             "instead of one, see --n-models")
+    parser.add_argument("--n-models", type=int, default=5,
+                        help="number of ensemble checkpoints to require/average with --ensemble")
     args = parser.parse_args()
-    run_inference(args.input, args.output, args.model, args.stride, args.ensemble)
+    run_inference(args.input, args.output, args.model, args.stride, args.ensemble, args.n_models)

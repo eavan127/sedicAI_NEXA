@@ -8,6 +8,11 @@ it. This loads an existing (7-class) X/y/snr_labels.npy, generates the same
 per-SNR-bin volume of NOISE_FLOOR the real build_dataset.py would (matching
 configs/default.yaml: examples_per_class_per_snr), and appends them.
 
+`y` is multi-hot (N, len(CLASSES)), same as build_dataset.py's multi_hot()
+produces -- NOT a 1D array of integer class indices. A dataset built before
+the multi-label pivot won't load correctly here; rebuild from scratch with
+`python -m src.data.build_dataset` instead.
+
 Only valid if the existing dataset's classes are exactly CLASSES[:-1] (every
 class except NOISE_FLOOR) -- checked before writing anything.
 
@@ -36,7 +41,14 @@ def main(data_dir, out_dir, seed):
     y = np.load(data_dir / "y.npy")
     snr_labels = np.load(data_dir / "snr_labels.npy")
 
-    present = set(np.unique(y))
+    if y.ndim != 2 or y.shape[1] != len(CLASSES):
+        raise ValueError(
+            f"y.npy has shape {y.shape}, expected (N, {len(CLASSES)}) multi-hot -- "
+            "this looks like a pre-multi-label dataset. Rebuild from scratch with "
+            "`python -m src.data.build_dataset` instead of appending to it."
+        )
+
+    present = set(np.flatnonzero(y.sum(axis=0)))
     expected = set(range(len(CLASSES))) - {NOISE_IDX}
     if present != expected:
         raise ValueError(
@@ -53,11 +65,13 @@ def main(data_dir, out_dir, seed):
     for snr_db in CFG["snr_bins_db"]:
         for _ in range(n_per):
             new_X.append(preprocess_window(random_noise_example(rng=rng), window_len))
-            new_y.append(NOISE_IDX)
+            row = np.zeros(len(CLASSES), dtype=y.dtype)
+            row[NOISE_IDX] = 1
+            new_y.append(row)
             new_snr.append(snr_db)
 
     new_X = np.stack(new_X).astype(X.dtype)
-    new_y = np.array(new_y, dtype=y.dtype)
+    new_y = np.stack(new_y).astype(y.dtype)
     new_snr = np.array(new_snr, dtype=snr_labels.dtype)
 
     X_out = np.concatenate([X, new_X])
@@ -73,7 +87,7 @@ def main(data_dir, out_dir, seed):
     print(f"Added {len(new_y)} NOISE_FLOOR examples ({n_per} per SNR bin x "
           f"{len(CFG['snr_bins_db'])} bins) to {len(y)} existing examples.")
     print(f"Wrote {len(y_out)} total examples to {out_dir}/")
-    print("Class counts:", {CLASSES[c]: int((y_out == c).sum()) for c in sorted(set(y_out))})
+    print("Class presence counts:", {CLASSES[c]: int(y_out[:, c].sum()) for c in range(len(CLASSES))})
 
 
 if __name__ == "__main__":

@@ -20,10 +20,11 @@ N_ENSEMBLE = 5
 class EnsembleModel(nn.Module):
     """Averages sigmoid probabilities across ensemble members.
 
-    Averages PROBABILITIES, not logits -- matching _predict_probs in
-    src/evaluate.py and _predict in train_ensemble.py, so the console shows
-    the same numbers the scorecard does. Averaging logits instead would give
-    a different (and unsubmitted) answer.
+    Averages PROBABILITIES, not logits -- matching predict_probs in
+    src/evaluate.py (shared by train_ensemble.py, calibrate_thresholds.py,
+    measure_variance.py and src/infer.py), so the console shows the same
+    numbers the scorecard does. Averaging logits instead would give a
+    different (and unsubmitted) answer.
 
     forward() returns the average back in LOGIT space, because every caller
     does sigmoid(model(x)). sigmoid(logit(p)) == p exactly, so the interface

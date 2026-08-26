@@ -139,16 +139,21 @@ def set_seed(seed):
         torch.cuda.manual_seed_all(seed)
 
 
-def train(seed=None):
-    X, y, snr_labels = load_data()
-    d = CFG["dataset"]
+def train_model(X, y, snr_labels, train_idx, val_idx, seed, verbose=False):
+    """Train one model to its best-validation-loss state and return it.
+
+    SHARED on purpose -- train() (the single submitted checkpoint),
+    scripts/train_ensemble.py (N seeds averaged) and scripts/measure_variance.py
+    (N seeds compared) used to each hand-copy this loop. That divergence is how
+    compute_class_weights ended up called on the FULL dataset (train+val+test)
+    in two of the three copies instead of `y[train_idx]` -- fixed here, once,
+    instead of three places that can silently drift apart again.
+
+    Returns (model, best_val_loss); does not save anything to disk -- callers
+    decide whether/where a checkpoint belongs.
+    """
+    set_seed(seed)
     t = CFG["training"]
-
-    set_seed(d["seed"] if seed is None else seed)
-
-    train_idx, val_idx, _ = stratified_split(
-        y, snr_labels, d["val_frac"], d["test_frac"], d["seed"]
-    )
 
     # NOISE_FLOOR needs different treatment from every other class in the
     # sampler -- see compute_snr_weights. The loss's per-class multipliers
@@ -176,21 +181,22 @@ def train(seed=None):
     # Multi-label: each class is an independent yes/no, so BCEWithLogitsLoss
     # (not CrossEntropyLoss, which assumes exactly one correct class per
     # example) -- pos_weight reuses the same inverse-frequency idea per class.
+    # TRAIN split only -- held-out val/test label statistics must never
+    # influence what the loss rewards during training.
     criterion = nn.BCEWithLogitsLoss(
-        pos_weight=compute_class_weights(y, len(CLASSES), dampen=dampen).to(DEVICE)
+        pos_weight=compute_class_weights(y[train_idx], len(CLASSES), dampen=dampen).to(DEVICE)
     )
     # torch tensor, not the bare numpy array resolve_multilabel_thresholds()
     # returns -- compared directly against `out`, which stays on DEVICE for
     # the whole epoch loop below rather than round-tripping through numpy.
-    threshold = torch.tensor(resolve_multilabel_thresholds(), device=DEVICE)
+    # Only needed for the verbose per-epoch val_bit_acc printout.
+    threshold = torch.tensor(resolve_multilabel_thresholds(), device=DEVICE) if verbose else None
     optimizer = torch.optim.Adam(model.parameters(), lr=t["learning_rate"])
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, patience=t["scheduler_patience"]
     )
 
-    ckpt_dir = REPO_ROOT / CFG["paths"]["checkpoints"]
-    ckpt_dir.mkdir(parents=True, exist_ok=True)
-    best_val_loss = float("inf")
+    best_val_loss, best_state = float("inf"), None
 
     for epoch in range(t["epochs"]):
         model.train()
@@ -211,25 +217,49 @@ def train(seed=None):
                 xb, yb = xb.to(DEVICE), yb.to(DEVICE)
                 out = model(xb)
                 val_loss += criterion(out, yb).item() * xb.size(0)
-                # Per-class-bit accuracy (Hamming accuracy), not argmax match --
-                # argmax doesn't apply once more than one class can be true at
-                # once. This counts each of the 8 independent yes/no calls per
-                # window, not "did every bit in the window match".
-                preds_bin = (torch.sigmoid(out) > threshold).float()
-                correct_bits += (preds_bin == yb).sum().item()
-                total_bits += yb.numel()
+                if verbose:
+                    # Per-class-bit accuracy (Hamming accuracy), not argmax
+                    # match -- argmax doesn't apply once more than one class
+                    # can be true at once. This counts each of the 8
+                    # independent yes/no calls per window, not "did every
+                    # bit in the window match".
+                    preds_bin = (torch.sigmoid(out) > threshold).float()
+                    correct_bits += (preds_bin == yb).sum().item()
+                    total_bits += yb.numel()
         val_loss /= len(val_loader.dataset)
-        val_acc = correct_bits / total_bits
         scheduler.step(val_loss)
 
-        print(f"epoch {epoch+1}/{t['epochs']}  train_loss={train_loss:.4f}  "
-              f"val_loss={val_loss:.4f}  val_bit_acc={val_acc:.4f}")
+        if verbose:
+            val_acc = correct_bits / total_bits
+            print(f"epoch {epoch+1}/{t['epochs']}  train_loss={train_loss:.4f}  "
+                  f"val_loss={val_loss:.4f}  val_bit_acc={val_acc:.4f}")
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            torch.save(model.state_dict(), ckpt_dir / "best_model.pt")
+            best_state = {k: v.clone() for k, v in model.state_dict().items()}
 
-    print(f"Done. Best checkpoint: {ckpt_dir / 'best_model.pt'}")
+    model.load_state_dict(best_state)
+    model.eval()
+    return model, best_val_loss
+
+
+def train(seed=None):
+    X, y, snr_labels = load_data()
+    d = CFG["dataset"]
+
+    train_idx, val_idx, _ = stratified_split(
+        y, snr_labels, d["val_frac"], d["test_frac"], d["seed"]
+    )
+
+    model, best_val_loss = train_model(
+        X, y, snr_labels, train_idx, val_idx,
+        seed=d["seed"] if seed is None else seed, verbose=True,
+    )
+
+    ckpt_dir = REPO_ROOT / CFG["paths"]["checkpoints"]
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    torch.save(model.state_dict(), ckpt_dir / "best_model.pt")
+    print(f"Done. Best checkpoint: {ckpt_dir / 'best_model.pt'} (val_loss={best_val_loss:.4f})")
 
 
 if __name__ == "__main__":

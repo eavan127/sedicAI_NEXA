@@ -23,76 +23,20 @@ from pathlib import Path
 
 import numpy as np
 import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader, TensorDataset, WeightedRandomSampler
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.config import (CFG, CLASSES, CLASS_TO_IDX, REPO_ROOT,  # noqa: E402
-                         resolve_class_weight_multipliers, resolve_multilabel_thresholds)
+from src.config import CFG, CLASSES, CLASS_TO_IDX, REPO_ROOT, resolve_multilabel_thresholds  # noqa: E402
+from src.evaluate import predict_probs  # noqa: E402
 from src.models.amc_cnn import AMC_CNN  # noqa: E402
-from src.data.preprocess import phase_rotate_batch  # noqa: E402
-from src.train import (compute_class_weights, compute_snr_weights, load_data,  # noqa: E402
-                        set_seed, stratified_split)
+from src.train import load_data, stratified_split, train_model  # noqa: E402
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # Official rules (SEDIC 2026 RF track, 11 Aug public release) require >80%
-# recall on Military/CEMA + Jamming, not 90% — match evaluate.py's benchmark.
-BENCHMARK = 0.80
-
-
-def train_one(X, y, snr_labels, tr, va, seed):
-    """Train a single member and return it at its best-validation state."""
-    set_seed(seed)
-    t = CFG["training"]
-
-    # NOISE_FLOOR needs different treatment from every other class in the
-    # sampler -- see compute_snr_weights in src/train.py. The loss's per-class
-    # multipliers live in config -- see resolve_class_weight_multipliers.
-    noise_floor_idx = CLASS_TO_IDX.get("NOISE_FLOOR")
-    neutral_classes = [noise_floor_idx] if noise_floor_idx is not None else []
-    dampen = resolve_class_weight_multipliers()
-
-    X_t = torch.tensor(X)
-    y_t = torch.tensor(y, dtype=torch.float32)  # multi-hot -> BCEWithLogitsLoss wants float targets
-    train_sampler = WeightedRandomSampler(
-        compute_snr_weights(snr_labels[tr], y[tr], neutral_classes),
-        num_samples=len(tr), replacement=True)
-    train_loader = DataLoader(TensorDataset(X_t[tr], y_t[tr]),
-                              batch_size=t["batch_size"], sampler=train_sampler)
-    val_loader = DataLoader(TensorDataset(X_t[va], y_t[va]), batch_size=t["batch_size"])
-
-    model = AMC_CNN(num_classes=len(CLASSES), input_len=X.shape[-1]).to(DEVICE)
-    # Multi-label: each class is an independent yes/no -- see src/train.py.
-    criterion = nn.BCEWithLogitsLoss(
-        pos_weight=compute_class_weights(y, len(CLASSES), dampen=dampen).to(DEVICE))
-    opt = torch.optim.Adam(model.parameters(), lr=t["learning_rate"])
-    sched = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, patience=t["scheduler_patience"])
-
-    best_loss, best_state = float("inf"), None
-    for _ in range(t["epochs"]):
-        model.train()
-        for xb, yb in train_loader:
-            xb, yb = xb.to(DEVICE), yb.to(DEVICE)
-            opt.zero_grad()
-            criterion(model(xb), yb).backward()
-            opt.step()
-
-        model.eval()
-        vloss = 0.0
-        with torch.no_grad():
-            for xb, yb in val_loader:
-                xb, yb = xb.to(DEVICE), yb.to(DEVICE)
-                vloss += criterion(model(xb), yb).item() * xb.size(0)
-        vloss /= len(val_loader.dataset)
-        sched.step(vloss)
-        if vloss < best_loss:
-            best_loss = vloss
-            best_state = {k: v.clone() for k, v in model.state_dict().items()}
-
-    model.load_state_dict(best_state)
-    model.eval()
-    return model
+# recall on Military/CEMA + Jamming, not 90% -- read from config (not
+# hardcoded) so this stays in lockstep with evaluate.py and the organizer's
+# actual current number if it's revised again.
+BENCHMARK = CFG["benchmark_recall"]
 
 
 def _recalls(present, y_true):
@@ -121,34 +65,6 @@ def _precisions(present, y_true):
         if pred_pos.any():
             out[c] = float(y_true[pred_pos, idx].mean())
     return out
-
-
-EVAL_BATCH_SIZE = 256
-
-
-def _predict(model, X_np, tta=0):
-    """Sigmoid probabilities (each class independent), optionally averaged
-    over TTA phase rotations.
-
-    Phase is arbitrary at the receiver, so a rotated copy is the same signal
-    with the same label(s). Averaging over rotations cancels per-view noise.
-
-    Batched, not one forward pass over the whole split -- X_np can be
-    thousands of test windows, and a single unbatched call OOMs a real GPU
-    once the dataset is full-sized (see the same fix in src/evaluate.py).
-    """
-    views = [X_np] + [phase_rotate_batch(X_np, t)
-                      for t in np.linspace(0, 2 * np.pi, tta, endpoint=False)[1:]]
-    out = None
-    with torch.no_grad():
-        for v in views:
-            chunks = []
-            for i in range(0, len(v), EVAL_BATCH_SIZE):
-                batch = torch.tensor(v[i:i + EVAL_BATCH_SIZE]).to(DEVICE)
-                chunks.append(torch.sigmoid(model(batch)).cpu().numpy())
-            p = np.concatenate(chunks, axis=0)
-            out = p if out is None else out + p
-    return out / len(views)
 
 
 def main(n_models, tta=0, eval_only=False):
@@ -189,10 +105,10 @@ def main(n_models, tta=0, eval_only=False):
             model.load_state_dict(torch.load(ckpt_dir / f"ensemble_{i}.pt", map_location=DEVICE))
             model.eval()
         else:
-            model = train_one(X, y, snr_labels, tr, va, seed=2000 + i)
+            model, _ = train_model(X, y, snr_labels, tr, va, seed=2000 + i, verbose=False)
             torch.save(model.state_dict(), ckpt_dir / f"ensemble_{i}.pt")
 
-        probs = _predict(model, X_test, tta)
+        probs = predict_probs([model], X_test, tta=tta)
         summed_probs = probs if summed_probs is None else summed_probs + probs
 
         r = _recalls((probs > threshold).astype(int), y_test)

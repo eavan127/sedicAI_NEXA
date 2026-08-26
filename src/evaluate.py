@@ -35,7 +35,14 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # Earlier drafts of our docs targeted 90% as a stricter internal bar; keep
 # reporting against the actual published number so the brief states the real
 # margin, not a self-imposed one.
-BENCHMARK_RECALL = 0.80
+#
+# Read from config, not hardcoded -- this used to be a literal 0.80 here (and
+# in scripts/train_ensemble.py) despite configs/default.yaml's own comment
+# claiming "kept here... so the next threshold change is a one-line edit
+# instead of a source hunt", which was only true for calibrate_thresholds.py.
+# If the organizer revises the benchmark again (already happened once,
+# 90%->80%), every script must move together.
+BENCHMARK_RECALL = CFG["benchmark_recall"]
 
 # Coarse tiers. The 7-class number is what the gate is scored on, but the tier
 # call is what matters operationally: mistaking a distant phone for an attack
@@ -146,32 +153,51 @@ def confusion_between(y_true, y_pred, class_a, class_b):
 EVAL_BATCH_SIZE = 256
 
 
-def _predict_probs_one(model, X):
-    """Batched, not one giant forward pass -- X can be the whole test split
-    (thousands of windows). A single unbatched call tries to materialize
-    every intermediate activation (attention pooling's (batch, 193, time)
-    tensor especially) for the entire split at once, which OOMs on a real
-    GPU once the dataset is full-sized rather than a smoke/dry-run subset."""
-    chunks = []
-    with torch.no_grad():
-        for i in range(0, len(X), EVAL_BATCH_SIZE):
-            batch = torch.tensor(X[i:i + EVAL_BATCH_SIZE]).to(DEVICE)
-            chunks.append(torch.sigmoid(model(batch)).cpu().numpy())
-    return np.concatenate(chunks, axis=0)
+def predict_probs(models, X, tta=0, batch_size=EVAL_BATCH_SIZE):
+    """Sigmoid probabilities, averaged over `models` (pass a single-element
+    list for one model) and, if tta>0, over `tta` phase-rotated views of X.
 
+    SHARED on purpose -- src/infer.py, scripts/train_ensemble.py,
+    scripts/calibrate_thresholds.py and scripts/measure_variance.py all used
+    to carry their own copy of this batched-sigmoid loop. Divergence between
+    those copies is exactly how a TTA-trained ensemble ended up calibrated
+    and scored without TTA, and how src/infer.py (the actual submission
+    script) ended up not averaging over models the same way evaluate.py does.
 
-def _predict_probs(models, X):
-    """Average sigmoid probabilities over one or more models -- same
-    averaging train_ensemble.py's _predict uses, so this evaluation matches
-    what's actually submitted when given the 5 ensemble checkpoints."""
+    Phase is arbitrary at the receiver, so a rotated copy of a window carries
+    the same label(s) -- averaging predictions over rotations cancels
+    per-view noise the same way averaging over ensemble members cancels
+    initialisation noise (see src/data/preprocess.py's phase_rotate_batch).
+
+    Batched, not one forward pass over the whole split -- X can be the whole
+    test split (thousands of windows). A single unbatched call tries to
+    materialize every intermediate activation (attention pooling's
+    (batch, 193, time) tensor especially) for the entire split at once, which
+    OOMs on a real GPU once the dataset is full-sized rather than a
+    smoke/dry-run subset. Batches, not models, are the outer loop: each batch
+    is uploaded to DEVICE once and shared across every model's forward pass,
+    instead of re-uploading the same data once per ensemble member.
+    """
+    from src.data.preprocess import phase_rotate_batch
+
+    views = [X] if not tta else [X] + [
+        phase_rotate_batch(X, t) for t in np.linspace(0, 2 * np.pi, tta, endpoint=False)[1:]
+    ]
+
     summed = None
-    for model in models:
-        p = _predict_probs_one(model, X)
+    for v in views:
+        chunks = []
+        with torch.no_grad():
+            for i in range(0, len(v), batch_size):
+                batch = torch.tensor(v[i:i + batch_size]).to(DEVICE)
+                probs = np.mean([torch.sigmoid(m(batch)).cpu().numpy() for m in models], axis=0)
+                chunks.append(probs)
+        p = np.concatenate(chunks, axis=0)
         summed = p if summed is None else summed + p
-    return summed / len(models)
+    return summed / len(views)
 
 
-def evaluate(ensemble=False, n_models=5):
+def evaluate(ensemble=False, n_models=5, tta=0):
     X, y, snr_labels = load_data()
     d = CFG["dataset"]
     _, _, test_idx = stratified_split(y, snr_labels, d["val_frac"], d["test_frac"], d["seed"])
@@ -190,6 +216,8 @@ def evaluate(ensemble=False, n_models=5):
     else:
         ckpt_paths = [ckpt_dir / "best_model.pt"]
         ckpt_desc = str(ckpt_paths[0])
+    if tta:
+        ckpt_desc += f", TTA={tta}"
 
     models = []
     for p in ckpt_paths:
@@ -201,7 +229,11 @@ def evaluate(ensemble=False, n_models=5):
 
     thresholds = resolve_multilabel_thresholds()
 
-    probs = _predict_probs(models, X_test)
+    # tta must match whatever train_ensemble.py used to produce these
+    # checkpoints' reported numbers -- pass --tta here too if that run used it,
+    # or this scores a different (non-TTA) prediction than the one that
+    # justified TTA in the first place.
+    probs = predict_probs(models, X_test, tta=tta)
     preds = (probs > thresholds).astype(int)   # thresholds broadcasts (8,) against probs (N, 8)
     y_test = y_test.astype(int)
 
@@ -364,5 +396,8 @@ if __name__ == "__main__":
     p.add_argument("--ensemble", action="store_true",
                     help="evaluate the ensemble_*.pt average instead of best_model.pt")
     p.add_argument("--n-models", type=int, default=5)
+    p.add_argument("--tta", type=int, default=0,
+                    help="average N phase rotations per prediction -- match whatever "
+                         "train_ensemble.py used, 0 = off")
     a = p.parse_args()
-    evaluate(a.ensemble, a.n_models)
+    evaluate(a.ensemble, a.n_models, a.tta)

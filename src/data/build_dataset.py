@@ -67,11 +67,22 @@ RADIOML_N_SNR_BINS = 26
 RADIOML_MIN_SNR_DB = -20
 
 
-def load_radioml_civilian(path=None, seed=None):
+def load_radioml_civilian(path=None, seed=None, n_per=None, offset=0):
     """Load BPSK/QPSK/16QAM/64QAM from RadioML2018.01A.
 
     Returns list of (iq_complex_array, class_name, snr_db) tuples, subsampled
-    to CFG['dataset']['examples_per_class_per_snr'] per (class, SNR) bin.
+    to `n_per` (default CFG['dataset']['civilian_examples_per_snr']) per
+    (class, SNR) bin.
+
+    `offset` lets a second call draw a DISJOINT slice of the same per-block
+    permutation: two calls with the SAME `seed` (the default) visit the same
+    (class, SNR) blocks in the same order and therefore draw the same
+    `rng.permutation(len(block))` at each step, so `rows[0:n_per]` in one call
+    and `rows[offset:offset+n]` in another can never overlap as long as
+    `offset >= n_per` of the first call. This replaces two INDEPENDENTLY
+    seeded draws (seed and seed+1), which pigeonhole makes impossible to keep
+    disjoint once the two draws' sizes sum to more than the 4096-row block --
+    see build_composite_examples' docstring on why disjointness matters here.
 
     Missing file returns [] (with a warning) so the rest of the pipeline
     stays runnable as a dry run -- same contract as load_real_radar().
@@ -88,8 +99,8 @@ def load_radioml_civilian(path=None, seed=None):
     # Falls back to the shared count if civilian_examples_per_snr isn't set,
     # so this stays a no-op for anyone who hasn't opted into the override --
     # see configs/default.yaml's dataset.civilian_examples_per_snr comment.
-    n_per = CFG["dataset"].get("civilian_examples_per_snr",
-                                CFG["dataset"]["examples_per_class_per_snr"])
+    n_per = n_per if n_per is not None else CFG["dataset"].get(
+        "civilian_examples_per_snr", CFG["dataset"]["examples_per_class_per_snr"])
     out = []
 
     with h5py.File(path, "r") as f:
@@ -109,9 +120,17 @@ def load_radioml_civilian(path=None, seed=None):
                 )
                 block = X[block_start:block_start + RADIOML_EXAMPLES_PER_SNR_BLOCK]
 
-                n = min(n_per, len(block))
-                rows = rng.choice(len(block), n, replace=False)
-                rows.sort()  # contiguous-ish access is friendlier to h5py than arbitrary order
+                # One permutation per block, THEN sliced by offset -- not
+                # rng.choice(..., replace=False) per call, which gives two
+                # calls (even with the same seed) no relationship to each
+                # other and no way to guarantee disjointness.
+                perm = rng.permutation(len(block))
+                n = min(n_per, max(len(block) - offset, 0))
+                if n < n_per:
+                    print(f"  ! RadioML block for {class_name}@{snr_db}dB has only "
+                          f"{max(len(block) - offset, 0)} rows left after offset={offset} "
+                          f"(wanted {n_per}) -- using {n}.")
+                rows = np.sort(perm[offset:offset + n])  # contiguous-ish access is friendlier to h5py
                 iq = block[rows, :, 0] + 1j * block[rows, :, 1]
 
                 out.extend((iq[i], class_name, float(snr_db)) for i in range(n))
@@ -183,10 +202,10 @@ def build_composite_examples(radioml_overlay_pool, rng=None):
     """Yield jammer-overlaid-on-victim examples, ADDITIVE to the standalone
     dataset built by build_synthetic_examples/load_radioml_civilian.
 
-    `radioml_overlay_pool` must come from a SEPARATE load_radioml_civilian()
-    call (different seed) than the one used for standalone civilian
-    examples, so composite victims aren't the literal same rows already
-    used standalone.
+    `radioml_overlay_pool` must come from a load_radioml_civilian() call using
+    an `offset` past the standalone civilian draw's `n_per` (see that
+    function's docstring), so composite victims aren't the literal same rows
+    already used standalone.
 
     civilian victims (RadioML) already carry their own SNR-labelled noise,
     same as standalone civilian examples -- see load_radioml_civilian's
@@ -367,7 +386,9 @@ def build_full_dataset():
     real_radar = load_real_radar()
     n_real_per_bin = (len(real_radar) // max(len(CFG["snr_bins_db"]), 1)) if real_radar else 0
 
-    for iq, class_name, snr_db in load_radioml_civilian():
+    n_civilian = CFG["dataset"].get("civilian_examples_per_snr",
+                                     CFG["dataset"]["examples_per_class_per_snr"])
+    for iq, class_name, snr_db in load_radioml_civilian(n_per=n_civilian):
         add(iq, class_name, snr_db)
 
     for iq, class_name, snr_db in real_radar:
@@ -377,9 +398,12 @@ def build_full_dataset():
         add(iq, class_name, snr_db)
 
     n_before_composite = len(X)
-    # Independent draw (seed+1), NOT the same rows used for standalone civilian
-    # examples above -- see build_composite_examples' docstring.
-    radioml_overlay_pool = load_radioml_civilian(seed=CFG["dataset"]["seed"] + 1)
+    # SAME seed as the standalone draw above, offset PAST its n_civilian rows
+    # -- guarantees disjoint rows from a shared per-block permutation instead
+    # of trusting two independently-seeded draws not to collide, which
+    # pigeonhole makes impossible once civilian_examples_per_snr exceeds half
+    # the 4096-row RadioML block (see load_radioml_civilian's docstring).
+    radioml_overlay_pool = load_radioml_civilian(n_per=n_civilian, offset=n_civilian)
     for iq, class_set, snr_db in build_composite_examples(radioml_overlay_pool):
         add(iq, class_set, snr_db)
     n_composite = len(X) - n_before_composite

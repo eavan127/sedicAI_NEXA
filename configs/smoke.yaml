@@ -25,6 +25,11 @@ classes:
 
 judged_classes: [LFM_RADAR, FHSS, JAMMING]
 
+# Was only implicitly 0.80 via a hardcoded literal in evaluate.py/
+# train_ensemble.py -- now that those read CFG["benchmark_recall"] like
+# calibrate_thresholds.py always did, it must actually exist here too.
+benchmark_recall: 0.80
+
 multilabel_threshold: 0.5
 
 dataset:
