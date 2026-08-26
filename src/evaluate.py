@@ -24,7 +24,8 @@ import numpy as np
 import torch
 from sklearn.metrics import ConfusionMatrixDisplay, classification_report, multilabel_confusion_matrix
 
-from src.config import CFG, CLASSES, CLASS_TO_IDX, REPO_ROOT, resolve_multilabel_thresholds
+from src.config import (CFG, CLASSES, CLASS_TO_IDX, REPO_ROOT, TIERS,
+                         resolve_multilabel_thresholds)
 from src.models.amc_cnn import AMC_CNN
 from src.train import load_data, stratified_split
 
@@ -40,13 +41,10 @@ BENCHMARK_RECALL = 0.80
 # call is what matters operationally: mistaking a distant phone for an attack
 # (civilian -> hostile) is a false alarm, whereas confusing 16QAM with 64QAM at
 # low SNR still yields the correct decision, "this is ordinary traffic".
-TIERS = {"Civilian": ["BPSK", "QPSK", "16QAM", "64QAM"],
-         "Military": ["LFM_RADAR", "FHSS"],
-         "Hostile": ["JAMMING"],
-         # Its own tier, not folded into Civilian: an empty channel is not
-         # "ordinary traffic", it is the absence of any emitter. Merging the
-         # two would hide the false alarm this class exists to prevent.
-         "Empty": ["NOISE_FLOOR"]}
+# TIERS now lives in src/config.py and is re-exported above, so importing it
+# no longer drags matplotlib and sklearn into dependency-light callers like
+# src/timeline.py. Existing `from src.evaluate import TIERS` call sites keep
+# working unchanged.
 
 
 def _tier_of(class_name):

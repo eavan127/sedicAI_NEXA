@@ -27,6 +27,18 @@ CFG = load_config()
 CLASSES = CFG["classes"]
 CLASS_TO_IDX = {c: i for i, c in enumerate(CLASSES)}
 
+# Operational grouping used by the UI ribbon and the Alerts page, and by
+# evaluate.py's per-tier reporting. Lives here rather than in evaluate.py so
+# that importing it does not pull in matplotlib and sklearn -- src/timeline.py
+# needs it and must stay dependency-light.
+TIERS = {"Civilian": ["BPSK", "QPSK", "16QAM", "64QAM"],
+         "Military": ["LFM_RADAR", "FHSS"],
+         "Hostile": ["JAMMING"],
+         # Its own tier, not folded into Civilian: an empty channel is not
+         # "ordinary traffic", it is the absence of any emitter. Merging the
+         # two would hide the false alarm this class exists to prevent.
+         "Empty": ["NOISE_FLOOR"]}
+
 
 def multi_hot(class_names):
     """Turn a set/iterable of class names into a (len(CLASSES),) 0/1 vector.
