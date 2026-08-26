@@ -224,16 +224,51 @@ class TestJamming:
             assert measured == pytest.approx(jsr_db, abs=0.5)
 
     def test_tone_jammer_sits_at_requested_frequencies(self):
+        """Each requested tone must appear as a distinct peak at its own bin.
+
+        This test failed once in a full-suite run and passed on every rerun.
+        The cause was never identified: the original assertion survives 5,000
+        unseeded runs without a single failure, so the obvious theory (the
+        per-tone amplitude draw of uniform(0.5, 1.0) landing near the 0.5
+        factor the assertion used) does not hold.
+
+        Rewritten to remove the two things that could plausibly carry
+        nondeterminism, rather than to fix a diagnosed cause:
+
+        1. The rng is now seeded, as every other test in this class already
+           does. A seeded test cannot flake on a draw whatever the mechanism.
+        2. The assertion now measures what its comment always claimed. It
+           compared each tone's bin against the GLOBAL maximum, which is a
+           statement about the two tones' relative amplitudes, not about
+           whether a tone sits at the requested frequency. Comparing against
+           the non-tone background tests the real property and is indifferent
+           to how the amplitudes were drawn.
+
+        Skirt width and threshold are measured, not guessed. These tones do
+        not land on exact bin centres (-120 kHz / 781.25 Hz = -153.6), so
+        leakage spreads well past a few bins; at +/-30 bins the worst observed
+        peak-to-background ratio over 300 seeds is 38x, so 10x leaves ample
+        headroom.
+        """
+        rng = np.random.default_rng(4)
         n = 4096
         freqs = [-120e3, 80e3]
-        sig = generate_tone_jamming(FS, n, freqs)
+        sig = generate_tone_jamming(FS, n, freqs, rng=rng)
 
         spectrum = np.abs(np.fft.fft(sig))
         freq_axis = np.fft.fftfreq(n, d=1 / FS)
-        for f in freqs:
-            bin_idx = np.argmin(np.abs(freq_axis - f))
-            # Each requested tone should dominate its neighbourhood
-            assert spectrum[bin_idx] > 0.5 * spectrum.max()
+        tone_bins = [int(np.argmin(np.abs(freq_axis - f))) for f in freqs]
+
+        background = np.ones(n, dtype=bool)
+        for b in tone_bins:
+            background[max(b - 30, 0):b + 31] = False   # exclude leakage skirts
+        background_peak = spectrum[background].max()
+
+        for f, b in zip(freqs, tone_bins):
+            assert spectrum[b] > 10 * background_peak, (
+                f"tone at {f / 1e3:.0f} kHz is not a distinct peak: "
+                f"bin={spectrum[b]:.1f} vs background={background_peak:.1f}"
+            )
 
     def test_barrage_jammer_is_broadband(self):
         """Barrage jamming must spread energy widely, not concentrate in one bin."""
