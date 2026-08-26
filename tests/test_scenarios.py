@@ -111,3 +111,30 @@ def test_every_named_case_builds_and_returns_matching_truth():
                                        snr_db=0, seed=5, script=script)
         assert len(iq) == 32_000, name
         assert {s.class_name for s in segments} == {c for c, _, _ in script}, name
+
+
+def test_pulsed_emitter_reports_radiating_spans_not_just_schedule():
+    """A pulsed radar is scheduled across its whole segment but transmits in
+    a small fraction of it. Scoring a detector against the schedule counts
+    every silent gap as a miss, which measures duty cycle rather than the
+    model -- and does so identically at every SNR."""
+    from src.scenarios import CASES
+    _, truth = build_scenario(total_duration=0.03, snr_db=60, seed=33,
+                               script=CASES["Radar only"])
+    seg = truth[0]
+    assert seg.radiating_spans, "pulsed emitter reported no radiating spans"
+    assert seg.duty < 0.5, f"radar duty {seg.duty:.2f} — expected well under half"
+    for a, b in seg.radiating_spans:
+        assert seg.start_s <= a < b <= seg.end_s + 1e-9
+
+
+def test_continuous_emitter_is_radiating_almost_throughout():
+    from src.scenarios import CASES
+    _, truth = build_scenario(total_duration=0.03, snr_db=60, seed=33,
+                               script=CASES["FHSS only"])
+    assert truth[0].duty > 0.8, "continuous emitter should radiate throughout"
+
+
+def test_duty_defaults_to_one_when_spans_are_absent():
+    seg = ScenarioSegment("FHSS", 0.0, 0.01)
+    assert seg.duty == 1.0

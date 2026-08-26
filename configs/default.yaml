@@ -107,6 +107,26 @@ multilabel_thresholds_per_class:
   LFM_RADAR: 0.26
   FHSS: 0.27
   JAMMING: 0.77
+  # Civilian classes were never calibrated -- they sat on the 0.5 fallback
+  # while the judged three were tuned, which is why 16QAM read 1.3% recall
+  # and looked like a model that had learned nothing about it. It had: 96% of
+  # true 16QAM windows score above the median negative. The probabilities are
+  # informative, they simply live below 0.5.
+  #
+  # Selected by best F1 on the VALIDATION split, reported on test, so there is
+  # no selection leakage. Recall at these values (test split, 5-model
+  # ensemble): BPSK 57.6%, QPSK 47.4%, 16QAM 73.0%, 64QAM 64.0% -- against
+  # 51.8 / 25.3 / 1.3 / 13.0 at 0.5.
+  #
+  # The cost is precision: 16QAM 37%, 64QAM 35%, QPSK 47%, BPSK 86%. These
+  # classes are NOT judged, and the criterion that does depend on them --
+  # comms-vs-hostile discrimination -- is about not calling civilian traffic
+  # JAMMING, which these thresholds do not affect. Re-check that false-alarm
+  # rate after any change here.
+  BPSK: 0.33
+  QPSK: 0.265
+  16QAM: 0.265
+  64QAM: 0.275
 
 # Per-class multiplier on compute_class_weights' inverse-frequency pos_weight
 # (src/train.py), applied in BCEWithLogitsLoss. >1 boosts a class (missing it

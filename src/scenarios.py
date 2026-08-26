@@ -29,12 +29,37 @@ GENERATORS = {
 
 @dataclass
 class ScenarioSegment:
-    """Ground truth for one emitter's active period. TRUTH provenance -- the
-    UI renders these in outline styling, never as if they were detections,
-    and never at all for uploaded captures."""
+    """Ground truth for one emitter. TRUTH provenance -- the UI renders these
+    in outline styling, never as if they were detections, and never at all for
+    uploaded captures.
+
+    Two different truths, because two different questions:
+
+    start_s/end_s is when the emitter is SCHEDULED -- operationally "a radar is
+    operating here", true even between pulses.
+
+    radiating_spans is when it is actually PUT ENERGY IN THE AIR. A pulsed
+    radar at max_duty_cycle 0.15 in burst mode can be scheduled across half the
+    capture while transmitting in under 2% of it. Scoring a detector against
+    the scheduled span then counts every silent gap as a miss, which measures
+    the duty cycle rather than the model -- and does so identically at every
+    SNR, since the pulse pattern is fixed for a seed.
+
+    Use radiating_spans to evaluate detection. Use start_s/end_s to describe
+    the scenario.
+    """
     class_name: str
     start_s: float
     end_s: float
+    radiating_spans: list = None
+
+    @property
+    def duty(self):
+        """Fraction of the scheduled span in which the emitter transmits."""
+        if not self.radiating_spans:
+            return 1.0
+        on = sum(b - a for a, b in self.radiating_spans)
+        return on / max(self.end_s - self.start_s, 1e-12)
 
 
 def raised_cosine_ramp(n_samples, ramp_len=256):
@@ -75,6 +100,41 @@ CASES = {
     "FHSS + Jamming": [("FHSS", 0.15, 0.70), ("JAMMING", 0.40, 0.85)],
     "All three": DEFAULT_SCRIPT,
 }
+
+
+def _radiating_spans(emitter, offset, fs, rel_threshold=0.05, min_gap_s=2e-5):
+    """Time spans where a CLEAN emitter is actually transmitting.
+
+    Computed before noise is added, so this is genuine ground truth rather
+    than an energy detector's opinion. The threshold is relative to the
+    emitter's own peak, so it does not depend on absolute scaling.
+
+    Gaps shorter than min_gap_s are bridged: a pulse's own envelope dips
+    between cycles, and splitting on those would produce thousands of
+    one-sample spans describing a single continuous transmission.
+    """
+    power = np.abs(emitter) ** 2
+    if power.max() <= 0:
+        return []
+    on = power > rel_threshold * power.max()
+    if not on.any():
+        return []
+
+    edges = np.diff(on.astype(np.int8))
+    starts = list(np.flatnonzero(edges == 1) + 1)
+    ends = list(np.flatnonzero(edges == -1) + 1)
+    if on[0]:
+        starts.insert(0, 0)
+    if on[-1]:
+        ends.append(len(on))
+
+    spans, min_gap = [], int(min_gap_s * fs)
+    for a, b in zip(starts, ends):
+        if spans and a - spans[-1][1] <= min_gap:
+            spans[-1] = (spans[-1][0], b)
+        else:
+            spans.append((a, b))
+    return [((offset + a) / fs, (offset + b) / fs) for a, b in spans]
 
 
 def build_scenario(fs=None, total_duration=0.1, snr_db=-6, seed=0,
@@ -150,7 +210,9 @@ def build_scenario(fs=None, total_duration=0.1, snr_db=-6, seed=0,
         iq[start:end] += emitter
         active[start:end] = True
         emitter_powers.append((class_name, float(np.mean(np.abs(emitter) ** 2))))
-        segments.append(ScenarioSegment(class_name, start / fs, end / fs))
+        segments.append(ScenarioSegment(
+            class_name, start / fs, end / fs,
+            radiating_spans=_radiating_spans(emitter, start, fs)))
 
     # Noise references the FIRST NON-JAMMING emitter, exactly as
     # mix_components does ("the first non-JAMMING entry is the power
