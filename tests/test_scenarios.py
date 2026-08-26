@@ -66,3 +66,28 @@ def test_segments_reference_real_class_names():
     _, segments = build_scenario(fs=3_200_000, total_duration=0.01, seed=0)
     for s in segments:
         assert s.class_name in CLASSES
+
+
+def test_per_emitter_snr_is_stable_as_emitters_are_added():
+    """Adding a second emitter must not quietly raise the noise floor.
+
+    Noise was previously scaled from the pooled power of every active sample,
+    so overlapping emitters pushed the mean up and the noise with it -- making
+    a two-emitter scenario at a given nominal SNR genuinely harder than a
+    one-emitter scenario at the same nominal SNR. That invalidated any
+    comparison across scenarios at fixed SNR.
+    """
+    fs = 3_200_000
+    one, _ = build_scenario(fs=fs, total_duration=0.02, snr_db=0, seed=3,
+                             script=[("FHSS", 0.2, 0.8)])
+    two, _ = build_scenario(fs=fs, total_duration=0.02, snr_db=0, seed=3,
+                             script=[("FHSS", 0.2, 0.8), ("JAMMING", 0.4, 0.9)])
+
+    # Quiet head of the capture is noise only, in both cases.
+    quiet = slice(0, int(0.15 * 0.02 * fs))
+    n1 = float(np.mean(np.abs(one[quiet]) ** 2))
+    n2 = float(np.mean(np.abs(two[quiet]) ** 2))
+    assert n2 == pytest.approx(n1, rel=0.5), (
+        f"noise floor moved when a second emitter was added: {n1:.4g} -> "
+        f"{n2:.4g}; per-emitter SNR is not comparable across scenarios"
+    )

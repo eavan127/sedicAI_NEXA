@@ -111,6 +111,19 @@ def analyze(iq, model, source, hop=None, truth=None, true_snr_db=None,
     )
 
 
+def reanalyze(session, model, hop=None):
+    """Re-run a DIFFERENT model over the capture already loaded.
+
+    Without this, switching models meant clicking Synthesize again, which
+    generates a fresh random capture -- so the two models were never compared
+    on the same signal. Truth and known SNR carry over because they are
+    properties of the capture, not of whichever model just looked at it.
+    """
+    return analyze(session.iq, model, source=session.source,
+                    hop=hop or session.result.hop, truth=session.truth,
+                    true_snr_db=session.true_snr_db)
+
+
 def load_scenario(model, total_duration=0.05, hop=None, snr_db=0, seed=None):
     seed = np.random.randint(0, 100000) if seed is None else seed
     iq, segments = build_scenario(total_duration=total_duration,

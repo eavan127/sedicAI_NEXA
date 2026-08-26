@@ -71,10 +71,19 @@ def build_scenario(fs=None, total_duration=0.1, snr_db=-6, seed=0,
     has to survive so the waterfall, the noise floor and the SNR readout mean
     something.
 
-    Noise is added once, at the end, scaled against the power of the ACTIVE
-    regions only. Scaling against the whole capture would let the quiet gaps
-    drag the mean down and make the active regions land at a higher SNR than
-    requested.
+    Noise is added once at the end, scaled against the mean of the PER-EMITTER
+    powers -- not against the pooled power of every active sample.
+
+    Pooling was a real measurement bug. Where two emitters overlap, the summed
+    power is higher, so the pooled mean rose with the number of emitters and
+    the noise scaled up with it. A two-emitter scenario at "-6 dB" was
+    therefore markedly harder than a one-emitter scenario at "-6 dB", and any
+    comparison across cases at a fixed nominal SNR was measuring the scenario
+    builder rather than the model.
+
+    Referencing the per-emitter mean keeps each emitter at roughly the
+    requested SNR regardless of how many others share the capture, which is
+    what makes case-to-case comparison meaningful.
     """
     fs = fs or CFG["signal"]["fs"]
     script = script if script is not None else DEFAULT_SCRIPT
@@ -84,6 +93,7 @@ def build_scenario(fs=None, total_duration=0.1, snr_db=-6, seed=0,
     iq = np.zeros(n_total, dtype=np.complex128)
     segments = []
     active = np.zeros(n_total, dtype=bool)
+    emitter_powers = []
 
     for class_name, start_frac, end_frac in script:
         start = int(start_frac * n_total)
@@ -100,10 +110,11 @@ def build_scenario(fs=None, total_duration=0.1, snr_db=-6, seed=0,
 
         iq[start:end] += emitter
         active[start:end] = True
+        emitter_powers.append(float(np.mean(np.abs(emitter) ** 2)))
         segments.append(ScenarioSegment(class_name, start / fs, end / fs))
 
-    signal_power = float(np.mean(np.abs(iq[active]) ** 2)) if active.any() else 1.0
-    noise_power = signal_power / (10 ** (snr_db / 10.0))
+    reference_power = float(np.mean(emitter_powers)) if emitter_powers else 1.0
+    noise_power = reference_power / (10 ** (snr_db / 10.0))
     noise = rng.normal(0, 1, n_total) + 1j * rng.normal(0, 1, n_total)
     iq += noise * np.sqrt(noise_power / 2.0)
 

@@ -13,7 +13,8 @@ controls gives the waterfall and the table the space they actually need.
 import gradio as gr
 
 from src.ui import plots
-from src.ui.session import load_scenario, load_upload
+from src.ui.app_models import ensemble_available, load_model, model_label
+from src.ui.session import load_scenario, load_upload, reanalyze
 
 HOP_CHOICES = [("no overlap — 512", 512), ("50% — 256", 256),
                 ("75% — 128", 128), ("87.5% — 64", 64)]
@@ -35,7 +36,7 @@ def _rows(session, smoothed):
     ]
 
 
-def _render(session, smoothing_choice):
+def _render(session, smoothing_choice, model_choice="auto"):
     smoothed = smoothing_choice == "Smoothed"
     rows = _rows(session, smoothed)
     snr_note = (f"SNR {session.true_snr_db:.1f} dB KNOWN &nbsp;·&nbsp; "
@@ -44,6 +45,7 @@ def _render(session, smoothing_choice):
     head = (
         f"**● REPLAY** &nbsp; source `{session.source}` &nbsp;·&nbsp; "
         f"BASEBAND · fs 3.2 MHz &nbsp;·&nbsp; {snr_note}"
+        f"{model_choice} &nbsp;·&nbsp; "
         f"{session.duration_ms:.1f} ms &nbsp;·&nbsp; "
         f"{session.result.n_windows} windows @ hop {session.result.hop} "
         f"&nbsp;·&nbsp; **{len(rows)} events**"
@@ -67,6 +69,11 @@ def build(state, get_model):
                            min_width=150, label="Window hop")
         smoothing = gr.Radio(choices=["Smoothed", "Raw"], value="Smoothed",
                               scale=2, min_width=150, label="Display")
+        model_sel = gr.Dropdown(
+            choices=[("Ensemble (5 models)", "ensemble"),
+                      ("Single — best_model.pt", "single")],
+            value="ensemble" if ensemble_available() else "single",
+            scale=2, min_width=170, label="Model")
 
     gr.Markdown(
         "<div style='font-size:12px;color:#5F6B72;margin:-6px 0 4px 0;'>"
@@ -104,17 +111,25 @@ def build(state, get_model):
     outputs = [state, header, console, events]
 
     scenario_btn.click(
-        lambda h, sm: _render(load_scenario(get_model(), total_duration=0.05,
-                                             hop=h), sm),
-        inputs=[hop, smoothing], outputs=outputs)
+        lambda h, sm, mw: _render(
+            load_scenario(load_model(mw), total_duration=0.05, hop=h),
+            sm, model_label(mw)),
+        inputs=[hop, smoothing, model_sel], outputs=outputs)
 
     upload_btn.click(
-        lambda f, h, sm: _render(
-            load_upload(f.name if hasattr(f, "name") else f, get_model(), hop=h),
-            sm),
-        inputs=[file_in, hop, smoothing], outputs=outputs)
+        lambda f, h, sm, mw: _render(
+            load_upload(f.name if hasattr(f, "name") else f, load_model(mw),
+                         hop=h),
+            sm, model_label(mw)),
+        inputs=[file_in, hop, smoothing, model_sel], outputs=outputs)
+
+    model_sel.change(
+        lambda s, sm, mw: _render(reanalyze(s, load_model(mw)), sm,
+                                   model_label(mw)) if s is not None
+        else (s, "Load a capture first.", None, []),
+        inputs=[state, smoothing, model_sel], outputs=outputs)
 
     smoothing.change(
-        lambda s, sm: _render(s, sm) if s is not None
+        lambda s, sm, mw: _render(s, sm, model_label(mw)) if s is not None
         else (s, "Load a capture first.", None, []),
-        inputs=[state, smoothing], outputs=outputs)
+        inputs=[state, smoothing, model_sel], outputs=outputs)

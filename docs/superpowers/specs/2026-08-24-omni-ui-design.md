@@ -459,6 +459,89 @@ inference from receptive-field analysis, not an established result. Stated
 that way it is a sharper motivation for the next experiment than "add
 STFT", and it is what attention pooling already exists to address.
 
+## Measured model behaviour on continuous captures
+
+Measured 2026-08-26 with the 5-model ensemble, over synthesized scenarios at
+hop 512, 30 ms captures, SNR −10 dB to +10 dB. These are properties of the
+model, not of the console, but they decide what the console can honestly
+claim — and two of them are visible on screen, so they belong here.
+
+### Emitter masking — the significant one
+
+A jammer overlapping an FHSS emitter is **not detected at all** for the
+duration of the overlap, at every SNR tested:
+
+    TRUTH      FHSS  4.5 ────────────────── 21.0
+               JAM              12.0 ───────────────── 25.5
+                                └── overlap ──┘
+
+    DETECTED   FHSS  4.6 ────────────────── 21.3    correct
+               JAM                            21.1 ──── 25.6
+                                ✗ missed across the whole overlap
+
+Recall lands at 4.5/13.5 ≈ 33%, which is exactly the jammer's non-overlapped
+fraction. It does not improve with SNR — case D sits at 32% from −2 dB
+upward — so this is not a detectability limit. The model commits to one class
+where two are true.
+
+This directly undercuts the multi-label premise the composite training
+examples exist to establish, and it is the most important open problem in the
+system. The console displays it faithfully (the JAMMING lane simply stops
+during the overlap), but it is a model defect, not a display one.
+
+### JAMMING collapses at −10 dB
+
+Single-emitter jamming recall runs 95–97% from −6 dB up and falls to **2%** at
+−10 dB. Single-emitter, so no scenario confound. Worth stating alongside the
+low-SNR robustness claim, which does not hold uniformly across classes.
+
+### Radar-only fabricates a sustained JAMMING track
+
+A capture containing only a radar produces a JAMMING detection covering
+23–53% of its duration, at every SNR — a hostile-emitter alarm on a scenario
+with no jammer in it. Also single-emitter.
+
+### The model is most reliable when the spectrum is busy
+
+Counterintuitively, the three-emitter case produced **zero** false tracks at
+any SNR, while isolated single emitters produced the worst. Everything the
+model fired on in the busy case was genuinely present. Useful framing for the
+brief: this system is better at sorting a crowded band than at confirming an
+empty one.
+
+### A measurement bug found and fixed along the way
+
+`build_scenario` scaled noise from the pooled power of every active sample.
+Where emitters overlap the summed power is higher, so the pooled mean rose
+with the emitter count and the noise rose with it — a two-emitter scenario at
+"−6 dB" was genuinely harder than a one-emitter scenario at "−6 dB", and any
+comparison across cases at fixed nominal SNR was measuring the scenario
+builder rather than the model. Noise is now referenced to the mean
+per-emitter power, with a regression test pinning it.
+
+Correcting it changed the multi-emitter numbers but did **not** explain them:
+the masking above survived the fix.
+
+## Model loading
+
+`src/ui/app_models.py` loads either a single checkpoint or the 5-model
+ensemble, selectable on RF Replay and defaulting to the ensemble when all five
+members are present — that is what the team submits.
+
+`EnsembleModel` averages sigmoid PROBABILITIES, matching `_predict_probs` in
+`src/evaluate.py` and `_predict` in `train_ensemble.py`, so the console and the
+scorecard agree; averaging logits would give a different and unsubmitted
+answer. Verified against evaluate.py's own averaging to 6e-08. `forward()`
+returns the average back in logit space because every caller applies sigmoid,
+and `sigmoid(logit(p)) == p` exactly — so no call site needs to know whether
+it holds one model or five.
+
+Attention is taken from member 0, not averaged: attention weights are a
+per-model internal, and averaging five would draw a curve no model computed.
+
+Switching model re-runs inference over the capture already loaded rather than
+generating a fresh one, so two models can be compared on the same signal.
+
 ## Out of scope
 
 - Restyling `src/evaluate.py`'s shared figures

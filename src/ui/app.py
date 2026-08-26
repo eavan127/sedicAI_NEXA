@@ -1,17 +1,16 @@
 """Assembles the six OMNI pages."""
 import gradio as gr
 import torch
+import torch.nn as nn
 
 from src.config import CFG, CLASSES, REPO_ROOT
 from src.models.amc_cnn import AMC_CNN
+from src.ui.app_models import load_model, model_label  # noqa: F401
 from src.ui.pages import (alerts, model_page, overview, performance, rf_replay,
                            signal_analysis)
 from src.ui.palette import (BG, BRAND_OLIVE, BRAND_OLIVE_DARK,
                              BRAND_OLIVE_TINT, BRAND_SLATE, FONT_STACK, GRID,
                              MONO_STACK, PANEL, TEXT, TEXT_DIM)
-
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-CKPT_PATH = REPO_ROOT / CFG["paths"]["checkpoints"] / "best_model.pt"
 
 CUSTOM_CSS = f"""
 /* Gradio resolves its own palette from CSS custom properties, and picks the
@@ -117,23 +116,6 @@ def _logo_html():
     return (f'<div style="font-size:26px;font-weight:800;letter-spacing:0.08em;'
             f'color:{BRAND_OLIVE};line-height:1;">SEDIC<span '
             f'style="font-size:16px;vertical-align:super;">26</span></div>')
-
-
-def load_model():
-    """Read from disk on every call -- no caching, so dropping a freshly
-    trained checkpoint into results/ takes effect without a restart."""
-    model = AMC_CNN(num_classes=len(CLASSES),
-                     input_len=CFG["signal"]["window_len"]).to(DEVICE)
-    if not CKPT_PATH.exists():
-        raise gr.Error(f"No checkpoint at {CKPT_PATH}. Train one first.")
-    try:
-        model.load_state_dict(torch.load(CKPT_PATH, map_location=DEVICE))
-    except RuntimeError as exc:
-        raise gr.Error(
-            f"{CKPT_PATH} does not match the current model architecture. "
-            f"Train a fresh one with the current code. Details: {exc}")
-    model.eval()
-    return model
 
 
 THEME = gr.themes.Base(primary_hue="teal", neutral_hue="slate")

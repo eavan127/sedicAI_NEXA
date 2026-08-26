@@ -21,9 +21,12 @@ def build(get_model):
     def _render():
         model = get_model()
         total = sum(p.numel() for p in model.parameters())
+        members = getattr(model, "members", None)
+        # An ensemble has no branches of its own; report member 0's.
+        probe = members[0] if members else model
         branches = "<br>".join(
-            f"           {name:<14} {sum(p.numel() for p in getattr(model, name).parameters()):,}"
-            for name in ("iq_branch", "stft_branch") if hasattr(model, name))
+            f"           {name:<14} {sum(p.numel() for p in getattr(probe, name).parameters()):,}"
+            for name in ("iq_branch", "stft_branch") if hasattr(probe, name))
         window_len = CFG["signal"]["window_len"]
         fs = CFG["signal"]["fs"]
         thresholds = "<br>".join(
