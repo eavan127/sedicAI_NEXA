@@ -127,6 +127,36 @@ class CaptureSession:
         judged = set(CFG["judged_classes"])
         return [e for e in self.events(smoothed) if judged & set(e.classes)]
 
+    def best_civilian_window(self, smoothed=None):
+        """The window carrying the strongest civilian evidence.
+
+        Returns (index, class_name, probability), or None when no window
+        clears its class threshold -- which is what a radar-only or empty
+        capture looks like, and what tells the page to hide the constellation
+        panel entirely rather than plot a noise floor as a constellation.
+
+        Strongest across ALL civilian classes, not the first one over
+        threshold: BPSK sits first in CLASSES, so first-match would answer
+        BPSK for a capture whose actual emitter is 16QAM.
+        """
+        smoothed = self.display_smoothed if smoothed is None else smoothed
+        if not len(self.result.probs):
+            # smooth() indexes probs[0] to seed its accumulator, so an empty
+            # capture must be caught here rather than after resolving.
+            return None
+        probs = self._resolved(smoothed).probs
+
+        best = None
+        for cls in CIVILIAN:
+            column = probs[:, CLASSES.index(cls)]
+            index = int(np.argmax(column))
+            prob = float(column[index])
+            if prob < self.thresholds.get(cls, 0.5):
+                continue
+            if best is None or prob > best[2]:
+                best = (index, cls, prob)
+        return best
+
 
 def analyze(iq, model, source, hop=None, truth=None, true_snr_db=None,
             max_windows=MAX_WINDOWS):

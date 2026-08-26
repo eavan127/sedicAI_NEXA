@@ -96,3 +96,75 @@ def test_window_shorter_than_one_symbol_is_returned_untouched():
     points, offset, phase = recover_symbols(short)
     assert np.allclose(points, short)
     assert offset == 0.0
+
+
+from src.config import CFG, CLASSES, resolve_multilabel_thresholds
+from src.timeline import TimelineResult
+from src.ui.session import CaptureSession
+
+
+def _session(probs_by_class, n_windows=6):
+    """A CaptureSession with hand-set probabilities.
+
+    The UI fixtures elsewhere in this suite run an UNTRAINED model, whose
+    probabilities come from random weights. That is fine for asserting a page
+    renders; it is useless for asserting WHICH window a selector picks.
+    Setting probs directly makes the selection logic itself the thing under
+    test.
+    """
+    window_len = hop = 512
+    iq = np.concatenate([_qpsk(n_symbols=64, seed=i) for i in range(n_windows)])
+    probs = np.full((n_windows, len(CLASSES)), 0.01, dtype=np.float32)
+    for cls, column in probs_by_class.items():
+        probs[:, CLASSES.index(cls)] = column
+    result = TimelineResult(
+        probs=probs, starts=np.arange(n_windows) * hop,
+        attn=np.zeros((n_windows, window_len), dtype=np.float32),
+        hop=hop, window_len=window_len, fs=CFG["signal"]["fs"])
+    return CaptureSession(
+        iq=iq, result=result, source="scenario", noise_power=0.01,
+        thresholds=dict(zip(CLASSES, resolve_multilabel_thresholds())))
+
+
+def test_selector_picks_the_strongest_civilian_window():
+    s = _session({"QPSK": [0.30, 0.30, 0.30, 0.95, 0.30, 0.30]})
+    s.display_smoothed = False
+    index, cls, prob = s.best_civilian_window()
+    assert (index, cls) == (3, "QPSK")
+    assert prob == pytest.approx(0.95, abs=1e-6)
+
+
+def test_selector_prefers_the_strongest_class_not_the_first():
+    """CIVILIAN is iterated in class order, so a selector that returned the
+    first class over threshold would answer BPSK here and be wrong."""
+    s = _session({"BPSK": [0.40] * 6,
+                   "16QAM": [0.10, 0.10, 0.99, 0.10, 0.10, 0.10]})
+    s.display_smoothed = False
+    index, cls, prob = s.best_civilian_window()
+    assert (index, cls) == (2, "16QAM")
+    assert prob == pytest.approx(0.99, abs=1e-6)
+
+
+def test_selector_returns_none_when_no_civilian_clears_threshold():
+    """A radar-only capture has no civilian window, and the panel must be
+    hidden rather than showing the noise floor as a constellation."""
+    s = _session({"LFM_RADAR": [0.90] * 6})
+    s.display_smoothed = False
+    assert s.best_civilian_window() is None
+
+
+def test_selector_follows_the_sessions_display_mode():
+    """Every page reads one view. Smoothing damps the spike but must not move
+    the pick off the window that carries it."""
+    s = _session({"QPSK": [0.30, 0.30, 0.30, 0.95, 0.30, 0.30]})
+    s.display_smoothed = True
+    index, cls, prob = s.best_civilian_window()
+    assert (index, cls) == (3, "QPSK")
+    assert prob < 0.95           # smoothed, so damped below the raw peak
+
+
+def test_selector_handles_a_capture_with_no_windows():
+    s = _session({"QPSK": [0.95] * 6})
+    s.result.probs = s.result.probs[:0]
+    s.result.starts = s.result.starts[:0]
+    assert s.best_civilian_window() is None
