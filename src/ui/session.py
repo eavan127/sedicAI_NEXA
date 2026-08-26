@@ -19,6 +19,13 @@ from src.scenarios import CASES, CIVILIAN, build_scenario
 
 _CIVILIAN_LIBRARY = None
 
+# The SNR bin civilian_library() draws from -- the cleanest available, so a
+# civilian recording carries as little of its own noise as possible before
+# build_scenario adds more. Exposed as a module constant so load_scenario
+# passes the exact same value build_scenario uses to compute the achieved
+# SNR, rather than recomputing it (and risking the two drifting apart).
+CLEANEST_LIBRARY_SNR_DB = max(CFG["snr_bins_db"])
+
 
 def civilian_library():
     """Real RadioML captures per civilian class, drawn from the TRAIN split.
@@ -45,7 +52,7 @@ def civilian_library():
         # scene's stated SNR would be a fiction. build_dataset solves the same
         # problem for its composites via radioml_clean_min_snr_db: use the
         # cleanest civilian available, then noise it once.
-        cleanest = max(CFG["snr_bins_db"])
+        cleanest = CLEANEST_LIBRARY_SNR_DB
         lib = {}
         for cls in CIVILIAN:
             j = CLASSES.index(cls)
@@ -87,6 +94,13 @@ class CaptureSession:
     # and 7 on another -- with nothing on screen explaining the difference --
     # is worse than either number alone.
     display_smoothed: bool = True
+    # True when the requested SNR was above what the capture could actually
+    # achieve -- currently only possible for a civilian scene, whose library
+    # recording already carries noise at its own labelled SNR and so cannot
+    # be made cleaner than that bin. Lives on the session so the page can say
+    # so in the header, rather than silently showing a number that disagrees
+    # with the dropdown the operator picked.
+    snr_capped: bool = False
 
     @property
     def duration_ms(self):
@@ -224,11 +238,20 @@ def load_scenario(model, total_duration=0.05, hop=None, snr_db=0, seed=None,
     seed = np.random.randint(0, 100000) if seed is None else seed
     script = CASES.get(case) if case else None
     needs_library = script and any(c in CIVILIAN for c, _, _ in script)
+    library_snr_db = CLEANEST_LIBRARY_SNR_DB if needs_library else None
     iq, segments = build_scenario(
         total_duration=total_duration, snr_db=snr_db, seed=seed, script=script,
-        library=civilian_library() if needs_library else None)
-    return analyze(iq, model, source="scenario", hop=hop, truth=segments,
-                    true_snr_db=snr_db)
+        library=civilian_library() if needs_library else None,
+        library_snr_db=library_snr_db)
+
+    # A civilian recording already carries noise at library_snr_db, so a
+    # requested SNR above that bin is not achievable -- the achieved figure
+    # is whichever is worse (lower).
+    true_snr_db = (min(snr_db, library_snr_db) if needs_library else snr_db)
+    session = analyze(iq, model, source="scenario", hop=hop, truth=segments,
+                       true_snr_db=true_snr_db)
+    session.snr_capped = bool(needs_library and snr_db > library_snr_db)
+    return session
 
 
 def load_upload(path, model, hop=None):

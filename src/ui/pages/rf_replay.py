@@ -72,9 +72,12 @@ def _render(session, smoothing_choice, model_choice="auto", case_note=""):
     # smoothed while this page showed raw.
     session.display_smoothed = smoothed
     rows = _rows(session, smoothed)
-    snr_note = (f"SNR {session.true_snr_db:.1f} dB KNOWN &nbsp;·&nbsp; "
-                if session.snr_known and session.true_snr_db is not None
-                else "")
+    snr_note = (
+        f"SNR {session.true_snr_db:.1f} dB KNOWN"
+        + (" (capped by library)" if session.snr_capped else "")
+        + " &nbsp;·&nbsp; "
+        if session.snr_known and session.true_snr_db is not None
+        else "")
     head = (
         f"**● REPLAY** &nbsp; source `{session.source}` &nbsp;·&nbsp; "
         f"BASEBAND · fs 3.2 MHz &nbsp;·&nbsp; {snr_note}"

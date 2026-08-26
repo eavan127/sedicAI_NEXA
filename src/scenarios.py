@@ -187,12 +187,20 @@ def _radiating_spans(emitter, offset, fs, rel_threshold=0.05, min_gap_s=2e-5):
 
 
 def build_scenario(fs=None, total_duration=0.1, snr_db=-6, seed=0,
-                    script=None, library=None):
+                    script=None, library=None, library_snr_db=None):
     """Build one continuous capture with known ground truth.
 
     Returns (iq, segments). The capture is NOT normalized: absolute amplitude
     has to survive so the waterfall, the noise floor and the SNR readout mean
     something.
+
+    library_snr_db is the SNR bin `library` was drawn from (civilian_library()
+    in src/ui/session.py always draws from the cleanest available bin). A
+    civilian recording already carries noise at that SNR, so noising it again
+    on top of the scenario noise would double-count -- a scene labelled
+    "+10 dB" would really be about +6.9 dB. When library_snr_db is None, or
+    the script has no civilian emitter, behaviour is exactly what it was
+    before this parameter existed: same values, same RNG draws.
 
     Noise is added once at the end, scaled against the mean of the PER-EMITTER
     powers -- not against the pooled power of every active sample.
@@ -223,6 +231,7 @@ def build_scenario(fs=None, total_duration=0.1, snr_db=-6, seed=0,
     segments = []
     active = np.zeros(n_total, dtype=bool)
     emitter_powers = []
+    civilian_spans = []
 
     for class_name, start_frac, end_frac in script:
         start = int(start_frac * n_total)
@@ -236,6 +245,7 @@ def build_scenario(fs=None, total_duration=0.1, snr_db=-6, seed=0,
                 fs=fs, total_duration=length / fs, rng=rng))
         else:
             emitter = _from_library(class_name, length, library or {}, rng)
+            civilian_spans.append((start, end))
         if len(emitter) < length:
             emitter = np.pad(emitter, (0, length - len(emitter)))
         emitter = emitter[:length] * raised_cosine_ramp(length)
@@ -274,8 +284,37 @@ def build_scenario(fs=None, total_duration=0.1, snr_db=-6, seed=0,
     non_jam = [p for name, p in emitter_powers if name != "JAMMING"]
     reference_power = (non_jam[0] if non_jam
                         else (emitter_powers[0][1] if emitter_powers else 1.0))
-    noise_power = reference_power / (10 ** (snr_db / 10.0))
+    target = reference_power / (10 ** (snr_db / 10.0))
+
+    # Two draws of exactly n_total values, in exactly this order, regardless
+    # of what follows -- every synthetic (non-civilian) scenario in the
+    # project depends on this exact RNG draw sequence for a given seed, and
+    # drawing per-segment or drawing a different count would move all of
+    # them. The per-sample scaling below is applied as a multiplication
+    # AFTER both draws, never by changing what or how much is drawn.
     noise = rng.normal(0, 1, n_total) + 1j * rng.normal(0, 1, n_total)
-    iq += noise * np.sqrt(noise_power / 2.0)
+
+    if library_snr_db is None or not civilian_spans:
+        # No civilian emitter (or no library SNR given): behaviour must be
+        # bit-identical to before this parameter existed.
+        iq += noise * np.sqrt(target / 2.0)
+    else:
+        # The civilian recording already carries noise at library_snr_db, so
+        # a target SNR better than that bin is not achievable -- you can add
+        # noise to a recording but never remove it. The floor actually used
+        # is therefore the noisier (lower-SNR, i.e. higher-power) of the two.
+        carried = reference_power / (10 ** (library_snr_db / 10.0))
+        floor = max(target, carried)
+
+        # Everywhere gets `floor`, except inside a civilian span, which
+        # already has `carried` baked into the recording and only needs
+        # `floor - carried` added on top. Noise powers add, so the added
+        # component's AMPLITUDE scale is sqrt(floor - carried), not
+        # sqrt(floor) - sqrt(carried).
+        added_power = np.full(n_total, floor, dtype=np.float64)
+        topped_up = max(floor - carried, 0.0)
+        for start, end in civilian_spans:
+            added_power[start:end] = topped_up
+        iq += noise * np.sqrt(added_power / 2.0)
 
     return iq, segments

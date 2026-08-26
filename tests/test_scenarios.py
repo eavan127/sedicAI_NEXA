@@ -167,3 +167,47 @@ def test_continuous_emitter_is_radiating_almost_throughout():
 def test_duty_defaults_to_one_when_spans_are_absent():
     seg = ScenarioSegment("FHSS", 0.0, 0.01)
     assert seg.duty == 1.0
+
+
+def test_a_scene_with_no_civilian_emitter_ignores_the_library_snr():
+    """The double-noise correction must be invisible to every synthetic case."""
+    from src.scenarios import CASES
+    a, _ = build_scenario(fs=3_200_000, total_duration=0.01, snr_db=0, seed=7,
+                           script=CASES["All three"])
+    b, _ = build_scenario(fs=3_200_000, total_duration=0.01, snr_db=0, seed=7,
+                           script=CASES["All three"], library_snr_db=10)
+    assert np.allclose(a, b)
+
+
+def test_a_civilian_emitter_is_not_noised_twice():
+    """The library capture already carries noise at its labelled SNR. A full
+    second helping on top makes a scene labelled +10 dB really +6.9 dB."""
+    from src.scenarios import CASES, CIVILIAN
+    rng = np.random.default_rng(0)
+    script = CASES["Civilian only"]
+    lib = {c: rng.normal(0, 1, (20, 2, 512)).astype(np.float32)
+           for c, _, _ in script if c in CIVILIAN}
+    twice, _ = build_scenario(fs=3_200_000, total_duration=0.01, snr_db=10,
+                               seed=7, script=script, library=lib)
+    once, _ = build_scenario(fs=3_200_000, total_duration=0.01, snr_db=10,
+                              seed=7, script=script, library=lib,
+                              library_snr_db=10)
+    assert np.mean(np.abs(once) ** 2) < np.mean(np.abs(twice) ** 2)
+
+
+def test_the_noise_floor_stays_uniform_across_a_civilian_capture():
+    """Silence outside the emitter would break the NOISE_FLOOR class and the
+    occupancy readout, so the empty stretches must carry the same floor as the
+    occupied ones."""
+    from src.scenarios import CASES, CIVILIAN
+    rng = np.random.default_rng(0)
+    script = CASES["Civilian only"]          # the emitter spans 25%-75%
+    lib = {c: rng.normal(0, 1, (20, 2, 512)).astype(np.float32)
+           for c, _, _ in script if c in CIVILIAN}
+    iq, _ = build_scenario(fs=3_200_000, total_duration=0.01, snr_db=10,
+                            seed=7, script=script, library=lib,
+                            library_snr_db=10)
+    quiet = np.mean(np.abs(iq[:2000]) ** 2)
+    occupied = np.mean(np.abs(iq[16000:18000]) ** 2)
+    assert quiet > 0
+    assert quiet < occupied
