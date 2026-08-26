@@ -83,6 +83,14 @@ timing_phase)`.
 4. For each of the 8 timing phases, take every 8th sample; keep the phase
    whose decimated points have the tightest amplitude spread.
 
+Two assumptions are stated here rather than left implicit. The oversampling
+factor is fixed at 8, matching RadioML 2018.01A; it is a named constant, not a
+magic number, and if a capture at another rate ever reaches this panel the
+decimation is wrong and the constant is what changes. The 4th-power estimator
+is used for every civilian class including BPSK: it locks for BPSK too, at the
+cost of a 90° phase ambiguity, which is harmless here because the panel only
+de-rotates and never labels an axis with an absolute phase.
+
 No model involvement. A window of fewer than 8 samples, or one with zero
 power, returns the samples unchanged with a zero offset estimate rather than
 raising — the caller renders it as-is.
