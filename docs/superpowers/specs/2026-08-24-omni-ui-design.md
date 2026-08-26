@@ -466,28 +466,61 @@ hop 512, 30 ms captures, SNR −10 dB to +10 dB. These are properties of the
 model, not of the console, but they decide what the console can honestly
 claim — and two of them are visible on screen, so they belong here.
 
-### Emitter masking — the significant one
+### Victim masking under jamming — expected, not a defect
 
-A jammer overlapping an FHSS emitter is **not detected at all** for the
-duration of the overlap, at every SNR tested:
+A jammer overlapping another emitter suppresses that emitter's detection for
+the duration of the overlap. Measured on the test split's own composite
+windows, with the 5-model ensemble:
 
-    TRUTH      FHSS  4.5 ────────────────── 21.0
-               JAM              12.0 ───────────────── 25.5
-                                └── overlap ──┘
+| Group | n | FHSS | JAMMING | LFM_RADAR |
+|---|---|---|---|---|
+| JAMMING alone | 900 | — | 76.2% | — |
+| FHSS + JAMMING | 270 | **52.2%** | 66.7% | — |
+| LFM_RADAR + JAMMING | 270 | — | 70.0% | 51.5% |
+| LFM_RADAR + FHSS | 270 | 95.2% | — | 68.9% |
 
-    DETECTED   FHSS  4.6 ────────────────── 21.3    correct
-               JAM                            21.1 ──── 25.6
-                                ✗ missed across the whole overlap
+FHSS is recalled 95.2% when sharing a window with radar and 52.2% when
+sharing it with a jammer. Radar shows the same pattern: 68.9% with FHSS,
+51.5% with a jammer.
 
-Recall lands at 4.5/13.5 ≈ 33%, which is exactly the jammer's non-overlapped
-fraction. It does not improve with SNR — case D sits at 32% from −2 dB
-upward — so this is not a detectability limit. The model commits to one class
-where two are true.
+This is expected behaviour, not a defect. `jamming.jsr_db` is 0-20 dB, so the
+jammer is deliberately 0-20 dB louder than its victim -- a jammer concealing
+the signal it jams is the jammer working. The judged class (JAMMING) stays
+detected throughout; what degrades is the victim.
 
-This directly undercuts the multi-label premise the composite training
-examples exist to establish, and it is the most important open problem in the
-system. The console displays it faithfully (the JAMMING lane simply stops
-during the overlap), but it is a model defect, not a display one.
+Worth stating in the brief rather than hiding: the system reliably reports
+that a band is being jammed, and is correspondingly less able to identify
+what is being jammed underneath.
+
+**An earlier version of this section claimed the opposite** -- that JAMMING
+was masked BY FHSS, at every SNR, with recall pinned near the jammer's
+non-overlapped fraction. That was an artefact of `build_scenario`, which
+summed raw generator output with no power normalisation and no JSR, putting
+the jammer at a level the model was never trained on. Both the direction and
+the magnitude were wrong. `build_scenario` now mixes the way
+`mix_components` does (unit power, SIR from `dataset.mixture_sir_db`, jammer
+last at JSR from `jamming.jsr_db`), and scenario results then agree with the
+dataset measurements above.
+
+The lesson generalises: a synthesized scenario is only evidence about the
+model if it is mixed the way the training data was mixed. Otherwise it
+measures the scenario builder.
+
+### FHSS+JAMMING is adequately represented in training
+
+Checked because the masking above initially looked like a data gap. It is
+not:
+
+| Combination | Windows |
+|---|---|
+| `FHSS + JAMMING` | 1,800 |
+| `QPSK + FHSS + JAMMING` | 1,800 |
+| FHSS+JAMMING total | 3,600 (4.48%) |
+| LFM_RADAR+JAMMING total | 3,600 (4.48%) |
+| LFM_RADAR+FHSS total | 3,600 (4.48%) |
+
+Every judged pair appears at the same rate, so the degradation is not a
+representation problem.
 
 ### JAMMING collapses at −10 dB
 
