@@ -51,7 +51,19 @@ def rrc_taps(sps, beta=RRC_ROLLOFF, span=RRC_SPAN_SYMBOLS):
     The two singular points -- t = 0 and t = 1/(4*beta) -- are written out
     separately because the general expression divides by zero at exactly those
     samples. Both branches are the limit of the closed form.
+
+    `span * sps` must be even -- an odd `span` and an odd `sps` together
+    (this project's own SAMPLES_PER_SYMBOL/RRC_SPAN_SYMBOLS are 8 and 8, so it
+    never happens here, but both are parameters a caller could still pass
+    oddly) would produce an even-length filter with no centre tap: the t = 0
+    branch above would never fire, and the "adds no delay" claim in this
+    docstring would silently stop being true. Raising here turns that into a
+    loud failure instead of a filter that quietly lies about its own delay.
     """
+    if (span * sps) % 2:
+        raise ValueError(
+            f"rrc_taps needs an odd tap count for a centre tap (no delay): "
+            f"span ({span}) and sps ({sps}) cannot both be odd")
     t = np.arange(-span * sps / 2, span * sps / 2 + 1) / sps
     taps = np.empty_like(t)
     for i, ti in enumerate(t):
@@ -100,10 +112,21 @@ def recover_symbols(window, sps=SAMPLES_PER_SYMBOL):
 
     Returns (points, offset_estimate, timing_phase).
 
-    Three operations, none of them model-derived: unit-power scaling,
-    de-rotation by the estimated carrier offset, and decimation to one sample
-    per symbol at the timing phase whose points have the tightest amplitude
-    spread.
+    Four operations, none of them model-derived: unit-power scaling, matched
+    filtering with the RRC receive filter (rrc_taps), de-rotation by the
+    estimated carrier offset, and decimation to one sample per symbol at the
+    timing phase whose points have the tightest amplitude spread.
+
+    The matched filter runs with mode="same", which convolves the samples
+    near each edge of the window against implicit zero padding rather than
+    real signal -- measured, the first recovered symbol comes out about 46%
+    low and the second about 12% low, with the rest of the window
+    undistorted. Rather than let a couple of points quietly pull toward the
+    origin and misrepresent the constellation, any symbol whose filter
+    support (half the filter length either side) extends past the window
+    edge is dropped from the returned points. On a 512-sample window at
+    SAMPLES_PER_SYMBOL=8 with the default RRC taps (65 taps, so a 32-sample
+    margin each side) this drops 4 symbols per edge, leaving 56 of the 64.
 
     Degenerate windows -- shorter than one symbol, or carrying no power --
     come back unchanged rather than raising. This feeds a display; a capture
@@ -117,13 +140,23 @@ def recover_symbols(window, sps=SAMPLES_PER_SYMBOL):
     z = z / np.sqrt(power)
     # Matched filter first: the carrier estimate is a 4th-power FFT peak, and
     # it finds that peak more reliably once the out-of-band noise is gone.
-    z = np.convolve(z, rrc_taps(sps), mode="same")
+    taps = rrc_taps(sps)
+    z = np.convolve(z, taps, mode="same")
     offset = carrier_offset(z)
     z = z * np.exp(-2j * np.pi * offset * np.arange(len(z)))
 
-    best_phase, best_score, best_points = 0, -np.inf, z[::sps]
+    # Samples whose filter support ran off the edge of `window` and into
+    # mode="same"'s implicit zero padding -- see the docstring above.
+    margin = len(taps) // 2
+    lo, hi = margin, len(z) - 1 - margin
+
+    best_phase, best_score, best_points = 0, -np.inf, np.array([], dtype=complex)
     for phase in range(sps):
-        points = z[phase::sps]
+        idx = np.arange(phase, len(z), sps)
+        idx = idx[(idx >= lo) & (idx <= hi)]
+        points = z[idx]
+        if not len(points):
+            continue
         # Power over amplitude spread. At the symbol instant the amplitudes
         # take the constellation's own discrete levels; between symbols they
         # smear across the pulse shape, which widens the spread.
@@ -132,6 +165,25 @@ def recover_symbols(window, sps=SAMPLES_PER_SYMBOL):
         if score > best_score:
             best_phase, best_score, best_points = phase, score, points
     return best_points, offset, best_phase
+
+
+def _symbols_per_window(window_len, sps=SAMPLES_PER_SYMBOL):
+    """How many decimated symbol points recover_symbols actually returns for
+    a non-degenerate window of this length.
+
+    Not window_len // sps -- recover_symbols now drops edge symbols whose
+    matched-filter support runs past the window edge (see its docstring), so
+    the true count is smaller. The formula matches recover_symbols' own
+    index selection at phase 0; it comes out the same for every phase (see
+    the reasoning in recover_symbols), so phase never needs to be picked
+    here. Used by constellation_figure's caption so the printed symbol count
+    stays true after the edge trim, rather than quoting the un-trimmed
+    figure.
+    """
+    margin = len(rrc_taps(sps)) // 2
+    idx = np.arange(0, window_len, sps)
+    idx = idx[(idx >= margin) & (idx <= window_len - 1 - margin)]
+    return len(idx)
 
 
 def constellation_figure(session, smoothed=None, count=4):
@@ -229,7 +281,7 @@ def constellation_figure(session, smoothed=None, count=4):
     for ax in ax_bot:
         ax.set_xlabel("I (measured)")
 
-    symbols_per_window = session.result.window_len // SAMPLES_PER_SYMBOL
+    symbols_per_window = _symbols_per_window(session.result.window_len)
     chain_text = (f"{class_name} — unit-power scale → matched filter → "
                    f"de-rotate → decimate 1-in-{SAMPLES_PER_SYMBOL}")
     caveat_text = (f"cluster count is the modulation order — "

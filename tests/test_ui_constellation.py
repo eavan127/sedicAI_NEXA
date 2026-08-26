@@ -14,8 +14,9 @@ from src.config import CFG, CLASSES, resolve_multilabel_thresholds
 from src.timeline import TimelineResult
 from src.ui.pages.rf_replay import _render
 from src.ui.palette import INSTRUMENT, tier_color
-from src.ui.plots import (SAMPLES_PER_SYMBOL, carrier_offset,
-                          constellation_figure, recover_symbols, rrc_taps)
+from src.ui.plots import (RRC_SPAN_SYMBOLS, SAMPLES_PER_SYMBOL,
+                          carrier_offset, constellation_figure,
+                          recover_symbols, rrc_taps)
 from src.ui.session import CaptureSession
 
 
@@ -94,9 +95,16 @@ def test_recovery_picks_the_symbol_timing_phase():
     assert phase == 0
 
 
-def test_recovery_returns_one_point_per_symbol():
+def test_recovery_returns_one_point_per_symbol_minus_the_edges_the_filter_cannot_reach():
+    """64 symbols in, but recover_symbols now drops any symbol whose matched
+    -filter support runs off the edge of the window into mode="same"'s
+    implicit zero padding (see the recover_symbols docstring -- unfiltered,
+    edge symbols measured 46% and 12% low). With the default 65-tap RRC
+    filter (margin 32 samples = 4 symbols at sps=8) that trims 4 symbols off
+    each edge of a 512-sample window: 64 - 4 - 4 = 56. This count was moved
+    from 64 deliberately when the edge trim was added, not a regression."""
     points, _, _ = recover_symbols(_qpsk(n_symbols=64))
-    assert len(points) == 64
+    assert len(points) == 56
 
 
 def test_zero_power_window_returns_without_raising():
@@ -268,10 +276,12 @@ def test_figure_has_two_times_count_square_axes():
         plt.close(fig)
 
 
-def test_top_row_plots_512_points_bottom_row_plots_64():
+def test_top_row_plots_512_points_bottom_row_plots_56():
     """Top row is the exact (2, 512) array the model is fed; bottom row is
-    one point per symbol. If they ever plot the same count, decimation
-    silently stopped happening."""
+    one point per symbol, MINUS the edge symbols recover_symbols now drops
+    because their matched-filter support runs off the window edge (56, not
+    the naive 512 // 8 = 64 -- see recover_symbols' docstring). If the two
+    rows ever plot the same count, decimation silently stopped happening."""
     s = _session({"QPSK": [0.60, 0.60, 0.60, 0.95, 0.60, 0.60]})
     s.display_smoothed = False
     fig = constellation_figure(s)
@@ -280,8 +290,7 @@ def test_top_row_plots_512_points_bottom_row_plots_64():
         for ax in top_row:
             assert ax.collections[0].get_offsets().shape[0] == 512
         for ax in bottom_row:
-            assert (ax.collections[0].get_offsets().shape[0]
-                     == 512 // SAMPLES_PER_SYMBOL)
+            assert ax.collections[0].get_offsets().shape[0] == 56
     finally:
         plt.close(fig)
 
@@ -330,6 +339,13 @@ def test_captions_name_class_chain_caveat_and_selection_rule():
         assert "64QAM" in captions                  # cluster-count caveat
         assert "spaced evenly" in captions           # selection rule
         assert "seam" in captions                    # splice caveat
+        # The cluster-count caveat interpolates the per-window symbol count.
+        # It must quote what recover_symbols ACTUALLY returns (56, after the
+        # 10d edge trim) and not the naive window_len // sps (64) -- the top
+        # -row/bottom-row test above pins that 56 is what every column
+        # actually plots.
+        assert "56 symbols" in captions
+        assert "64 symbols" not in captions
     finally:
         plt.close(fig)
 
@@ -410,6 +426,68 @@ def test_rrc_taps_have_unit_energy_and_odd_length():
     assert float(np.sum(taps ** 2)) == pytest.approx(1.0, abs=1e-9)
 
 
+def test_rrc_taps_rejects_a_span_and_sps_that_are_both_odd():
+    """span * sps odd means an even-length filter with no centre tap -- the
+    t=0 branch never fires and the "adds no delay" claim in the docstring
+    silently stops being true. This must raise rather than produce that
+    filter silently."""
+    with pytest.raises(ValueError, match="span.*sps|sps.*span"):
+        rrc_taps(sps=7, span=7)
+
+
+def test_rrc_taps_are_symmetric_and_peak_at_the_centre_tap():
+    """A real RRC is an even function of time. Symmetry alone does not pin
+    the general branch's sign (a sign flip there is still even in t, see
+    test_rrc_self_convolution_is_nyquist_zero_isi below for the test that
+    catches that) -- but it is a real, independent property worth pinning."""
+    taps = rrc_taps(SAMPLES_PER_SYMBOL)
+    assert np.allclose(taps, taps[::-1])
+    assert np.argmax(np.abs(taps)) == len(taps) // 2
+
+
+def test_rrc_self_convolution_is_nyquist_zero_isi():
+    """Pins rrc_taps against a property of a REAL root-raised cosine, not
+    against this codebase's own pipeline output.
+
+    _rrc_qpsk (below) shapes its fixture with rrc_taps itself, so every test
+    built on it only proves the receive filter matches whatever rrc_taps
+    happens to produce -- correct or not. The reviewer demonstrated this by
+    flipping the sign of one term in the general branch
+    (`- 4*beta*ti*cos(...)` instead of `+`): all four pre-existing RRC/matched
+    -filter tests kept passing.
+
+    An RRC convolved with itself is a raised cosine, and a raised cosine is
+    the textbook Nyquist pulse: exactly zero at every non-zero integer
+    multiple of the symbol period (in samples, `sps`). That property comes
+    from the filter's definition, not from any code in this file, so it is
+    what actually pins rrc_taps.
+
+    Tolerance: measured on the real taps, the largest of these near-zero
+    samples (k=1..3, k=4 sits at the truncated edge of the 8-symbol span and
+    is excluded) is ~0.0026 of the peak. With the reviewer's sign flipped,
+    the same samples come out to ~0.0035-0.0047 of the peak -- so 0.003 sits
+    between the two and catches the corruption. This was verified by making
+    the flip, running this test, and confirming it fails (see the commit
+    message / PR notes for the captured failure output); the sign is
+    restored in the shipped code.
+    """
+    taps = rrc_taps(SAMPLES_PER_SYMBOL)
+    sps = SAMPLES_PER_SYMBOL
+    raised_cosine = np.convolve(taps, taps)
+    center = len(raised_cosine) // 2
+    peak = raised_cosine[center]
+    assert peak == pytest.approx(1.0, abs=1e-9)
+
+    # k=4 would land exactly on the truncated edge of the 8-symbol span,
+    # where finite-length truncation error dominates -- not a meaningful
+    # check of the Nyquist property. k=1..3 sit well inside the span.
+    for k in range(1, RRC_SPAN_SYMBOLS // 2):
+        isi = raised_cosine[center + k * sps] / peak
+        assert abs(isi) < 0.003, (
+            f"raised cosine at symbol offset {k} is {isi!r}, not ~0 -- "
+            f"rrc_taps is not producing a real root-raised cosine")
+
+
 def test_matched_filter_tightens_clusters_a_raw_decimation_leaves_smeared():
     """The measurement that justifies this filter existing: on the same noisy
     samples, filtering before decimating pulls the constellation together."""
@@ -433,9 +511,14 @@ def test_matched_filter_tightens_clusters_a_raw_decimation_leaves_smeared():
     assert _concentration(filtered) > best_unfiltered + 0.15
 
 
-def test_matched_filter_does_not_change_the_symbol_count():
+def test_matched_filter_leaves_the_symbol_count_the_edge_trim_predicts():
+    """Renamed from "does not change the symbol count": the edge-symbol trim
+    (10d) means the matched filter DOES change the count relative to the
+    naive window_len // sps, from 64 to 56 for this fixture. What this test
+    still pins is that the count is exactly what the trim's own accounting
+    predicts, not some other number."""
     points, _, _ = recover_symbols(_rrc_qpsk(n_symbols=64))
-    assert len(points) == 64
+    assert len(points) == 56
 
 
 def test_caption_names_the_matched_filter_step():
