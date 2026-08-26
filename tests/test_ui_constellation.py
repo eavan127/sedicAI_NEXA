@@ -10,7 +10,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-from src.ui.plots import SAMPLES_PER_SYMBOL, carrier_offset, recover_symbols
+from src.config import CLASSES, CFG, resolve_multilabel_thresholds
+from src.timeline import TimelineResult
+from src.ui.pages.rf_replay import _render
+from src.ui.palette import INSTRUMENT, tier_color
+from src.ui.plots import (SAMPLES_PER_SYMBOL, carrier_offset,
+                          constellation_figure, recover_symbols)
+from src.ui.session import CaptureSession
 
 
 def _qpsk(n_symbols=64, sps=SAMPLES_PER_SYMBOL, offset=0.0039, seed=0):
@@ -98,11 +104,6 @@ def test_window_shorter_than_one_symbol_is_returned_untouched():
     assert offset == 0.0
 
 
-from src.config import CFG, CLASSES, resolve_multilabel_thresholds
-from src.timeline import TimelineResult
-from src.ui.session import CaptureSession
-
-
 def _session(probs_by_class, n_windows=6):
     """A CaptureSession with hand-set probabilities.
 
@@ -168,10 +169,6 @@ def test_selector_handles_a_capture_with_no_windows():
     s.result.probs = s.result.probs[:0]
     s.result.starts = s.result.starts[:0]
     assert s.best_civilian_window() is None
-
-
-from src.ui.palette import INSTRUMENT, tier_color
-from src.ui.plots import constellation_figure
 
 
 def test_figure_is_none_when_there_is_no_civilian_window():
@@ -266,7 +263,6 @@ def test_figure_does_not_claim_recovery_on_a_window_with_no_power():
 
 
 def test_render_returns_a_visible_constellation_for_a_civilian_capture():
-    from src.ui.pages.rf_replay import _render
     s = _session({"QPSK": [0.30, 0.30, 0.30, 0.95, 0.30, 0.30]})
     out = _render(s, "Raw", "single")
     try:
@@ -281,7 +277,6 @@ def test_render_returns_a_visible_constellation_for_a_civilian_capture():
 def test_render_hides_the_constellation_when_no_civilian_is_present():
     """A radar-only capture must look exactly as it did before this panel
     existed -- no empty grey box below the console."""
-    from src.ui.pages.rf_replay import _render
     s = _session({"LFM_RADAR": [0.90] * 6})
     out = _render(s, "Raw", "single")
     try:
