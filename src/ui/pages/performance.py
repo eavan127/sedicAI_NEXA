@@ -113,6 +113,67 @@ def _build_dashboard(progress=gr.Progress()):
             str(EVALS_DIR / "accuracy_vs_snr.png"))
 
 
+def _build_breakdown(progress=gr.Progress()):
+    """Single- vs multi-signal recall across the SNR sweep.
+
+    Additive to the scorecard, not a competing one: same test split, same
+    per-class thresholds, same checkpoint. Ungated and unsmoothed like
+    everything else on this page.
+    """
+    from src.breakdown import single_vs_multi
+    from src.train import load_data, stratified_split
+    from src.ui.app_models import load_model, model_label
+
+    progress(0.1, desc="Loading test split...")
+    X, y, snr = load_data()
+    d = CFG["dataset"]
+    _, _, test = stratified_split(y, snr, d["val_frac"], d["test_frac"],
+                                   d["seed"])
+
+    progress(0.3, desc="Running the model over the test split...")
+    r = single_vs_multi(load_model("auto"), X[test], y[test], snr[test])
+
+    progress(0.85, desc="Building chart...")
+    fig, ax = plt.subplots(figsize=(8, 4))
+    for cls in r.classes:
+        colour = _TIER_COLOR[_TIER_OF[cls]]
+        for group, style, marker in (("single", "-", "o"), ("multi", "--", "s")):
+            xs = [s for s in r.snr_bins if r.recall[group][cls][s] is not None]
+            ys = [r.recall[group][cls][s] for s in xs]
+            if xs:
+                ax.plot(xs, ys, style, marker=marker, color=colour,
+                         linewidth=1.6, markersize=4,
+                         label=f"{cls} — {group}")
+    ax.axhline(CFG["benchmark_recall"] * 100, color="#e5484d", ls=":", lw=1.2)
+    ax.set_xlabel("SNR (dB)")
+    ax.set_ylabel("recall (%)")
+    ax.set_ylim(0, 102)
+    leg = ax.legend(fontsize=7, ncol=3, loc="lower right")
+    _style_light_axes(fig, ax)
+    leg.get_frame().set_facecolor(_PANEL)
+    plt.tight_layout()
+
+    head = (f"**{model_label('auto')}** &nbsp;·&nbsp; "
+            f"{r.n_windows['single']:,} single-signal / "
+            f"{r.n_windows['multi']:,} multi-signal windows in the test split\n\n"
+            f"Solid = one emitter in the window. Dashed = emitters overlapping. "
+            f"Dotted red line is the {CFG['benchmark_recall']:.0%} gate.\n\n")
+    head += "| class | " + " | ".join(f"{s:+d} dB" for s in r.snr_bins) + " | all |\n"
+    head += "|" + "---|" * (len(r.snr_bins) + 2) + "\n"
+    for group in ("single", "multi"):
+        for cls in r.classes:
+            cells = []
+            for sb in r.snr_bins:
+                v = r.recall[group][cls][sb]
+                cells.append("—" if v is None else f"{v:.0f}%")
+            tot = r.totals[group][cls]
+            head += (f"| {cls} ({group}) | " + " | ".join(cells) + " | "
+                      + ("—" if tot is None else f"**{tot:.0f}%**") + " |\n")
+
+    progress(1.0, desc="Done")
+    return head, fig
+
+
 def build():
     gr.Markdown("### Performance")
     gr.Markdown(
@@ -128,3 +189,15 @@ def build():
     snr = gr.Image(label="Accuracy vs SNR")
 
     run.click(_build_dashboard, inputs=None, outputs=[summary, bar, cm, snr])
+
+    gr.Markdown("---")
+    gr.Markdown("#### Single-signal vs multi-signal, across SNR")
+    gr.Markdown(
+        "The headline scorecard averages two different regimes together: "
+        "windows carrying one emitter, and windows where emitters overlap. "
+        "Same test split, same per-class thresholds, same checkpoint."
+    )
+    bd_run = gr.Button("Run breakdown", variant="primary")
+    bd_summary = gr.Markdown()
+    bd_plot = gr.Plot(label="Recall vs SNR — solid: single signal, dashed: overlapping")
+    bd_run.click(_build_breakdown, inputs=None, outputs=[bd_summary, bd_plot])
