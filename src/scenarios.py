@@ -26,6 +26,12 @@ GENERATORS = {
     "JAMMING": random_jamming_example,
 }
 
+# Civilian classes have no generator -- BPSK/QPSK/16QAM/64QAM in this project
+# are real RadioML captures, not synthesised. A scenario that wants civilian
+# traffic therefore has to draw from the dataset, which is what `library`
+# below is for.
+CIVILIAN = ("BPSK", "QPSK", "16QAM", "64QAM")
+
 
 @dataclass
 class ScenarioSegment:
@@ -99,7 +105,50 @@ CASES = {
     "Radar + FHSS": [("LFM_RADAR", 0.15, 0.70), ("FHSS", 0.40, 0.85)],
     "FHSS + Jamming": [("FHSS", 0.15, 0.70), ("JAMMING", 0.40, 0.85)],
     "All three": DEFAULT_SCRIPT,
+    # Civilian cases need a library (see load_scenario) -- they draw real
+    # RadioML captures from the dataset rather than a generator.
+    "Civilian only": [("QPSK", 0.25, 0.75)],
+    "Civilian + Jamming": [("QPSK", 0.15, 0.70), ("JAMMING", 0.40, 0.85)],
+    "Civilian + Radar": [("BPSK", 0.15, 0.70), ("LFM_RADAR", 0.35, 0.85)],
+    "Contested band": [("QPSK", 0.05, 0.60), ("LFM_RADAR", 0.20, 0.55),
+                        ("FHSS", 0.35, 0.80), ("JAMMING", 0.55, 0.95)],
 }
+
+
+def _from_library(class_name, length, library, rng):
+    """Assemble one emitter of `length` samples from real captured windows.
+
+    Used for civilian classes, which have no generator. The dataset stores
+    independent 512-sample captures, so a longer stretch has to be built by
+    concatenating several -- and consecutive captures are unrelated, so each
+    join is a phase discontinuity.
+
+    Joins are crossfaded over a raised-cosine ramp to keep that discontinuity
+    from radiating broadband splatter across the display. The signal is still
+    a concatenation of separate recordings rather than one continuous
+    transmission: honest for demonstrating civilian traffic in a scene, and
+    NOT a basis for measuring civilian detection performance. Use the held-out
+    test split for that.
+    """
+    pool = library.get(class_name)
+    if pool is None or not len(pool):
+        raise ValueError(
+            f"{class_name} has no generator and no library entry -- civilian "
+            f"classes must be supplied from the dataset")
+    win = pool.shape[-1]
+    fade = max(win // 16, 8)
+    out = np.zeros(length + win, dtype=np.complex128)
+    ramp = 0.5 * (1 - np.cos(np.linspace(0, np.pi, fade)))
+    pos = 0
+    while pos < length:
+        w = pool[rng.integers(len(pool))]
+        seg = (w[0] + 1j * w[1]).astype(np.complex128)
+        if pos:                       # crossfade into whatever is already there
+            seg[:fade] *= ramp
+            out[pos:pos + fade] *= ramp[::-1]
+        out[pos:pos + win] += seg
+        pos += win - fade
+    return out[:length]
 
 
 def _radiating_spans(emitter, offset, fs, rel_threshold=0.05, min_gap_s=2e-5):
@@ -138,7 +187,7 @@ def _radiating_spans(emitter, offset, fs, rel_threshold=0.05, min_gap_s=2e-5):
 
 
 def build_scenario(fs=None, total_duration=0.1, snr_db=-6, seed=0,
-                    script=None):
+                    script=None, library=None):
     """Build one continuous capture with known ground truth.
 
     Returns (iq, segments). The capture is NOT normalized: absolute amplitude
@@ -182,8 +231,11 @@ def build_scenario(fs=None, total_duration=0.1, snr_db=-6, seed=0,
             continue
         length = end - start
 
-        emitter = np.asarray(GENERATORS[class_name](
-            fs=fs, total_duration=length / fs, rng=rng))
+        if class_name in GENERATORS:
+            emitter = np.asarray(GENERATORS[class_name](
+                fs=fs, total_duration=length / fs, rng=rng))
+        else:
+            emitter = _from_library(class_name, length, library or {}, rng)
         if len(emitter) < length:
             emitter = np.pad(emitter, (0, length - len(emitter)))
         emitter = emitter[:length] * raised_cosine_ramp(length)

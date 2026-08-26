@@ -15,7 +15,48 @@ import numpy as np
 
 from src.config import CFG, CLASSES, resolve_multilabel_thresholds
 from src.measure import noise_floor_power
-from src.scenarios import CASES, build_scenario
+from src.scenarios import CASES, CIVILIAN, build_scenario
+
+_CIVILIAN_LIBRARY = None
+
+
+def civilian_library():
+    """Real RadioML captures per civilian class, drawn from the TRAIN split.
+
+    Train, not test: the console is a demonstration surface, and putting
+    held-out evaluation data on screen invites exactly the confusion this
+    project has been careful to avoid. The test split stays reserved for
+    measurement.
+
+    Loaded once and cached -- reading 320 MB per scenario would make the
+    console unusable.
+    """
+    global _CIVILIAN_LIBRARY
+    if _CIVILIAN_LIBRARY is None:
+        import numpy as _np
+        from src.train import load_data, stratified_split
+        X, y, snr = load_data()
+        d = CFG["dataset"]
+        train, _, _ = stratified_split(y, snr, d["val_frac"], d["test_frac"],
+                                        d["seed"])
+        # Draw from the HIGHEST SNR bin only. These windows already carry
+        # noise at their labelled SNR, and build_scenario adds its own on top
+        # -- so a -10 dB capture plus scenario noise is unrecoverable, and the
+        # scene's stated SNR would be a fiction. build_dataset solves the same
+        # problem for its composites via radioml_clean_min_snr_db: use the
+        # cleanest civilian available, then noise it once.
+        cleanest = max(CFG["snr_bins_db"])
+        lib = {}
+        for cls in CIVILIAN:
+            j = CLASSES.index(cls)
+            # standalone windows only -- a composite window would drag a
+            # second emitter into the scene unannounced
+            sel = train[(y[train][:, j] > 0.5) & (y[train].sum(axis=1) == 1)
+                         & (snr[train] == cleanest)]
+            if len(sel):
+                lib[cls] = _np.asarray(X[sel[:400]])
+        _CIVILIAN_LIBRARY = lib
+    return _CIVILIAN_LIBRARY
 from src.timeline import classify_capture, detections, smooth, tier_track
 
 MAX_WINDOWS = 4000
@@ -133,8 +174,10 @@ def load_scenario(model, total_duration=0.05, hop=None, snr_db=0, seed=None,
     """
     seed = np.random.randint(0, 100000) if seed is None else seed
     script = CASES.get(case) if case else None
-    iq, segments = build_scenario(total_duration=total_duration,
-                                   snr_db=snr_db, seed=seed, script=script)
+    needs_library = script and any(c in CIVILIAN for c, _, _ in script)
+    iq, segments = build_scenario(
+        total_duration=total_duration, snr_db=snr_db, seed=seed, script=script,
+        library=civilian_library() if needs_library else None)
     return analyze(iq, model, source="scenario", hop=hop, truth=segments,
                     true_snr_db=snr_db)
 
