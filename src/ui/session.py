@@ -15,7 +15,7 @@ import numpy as np
 
 from src.config import CFG, CLASSES, resolve_multilabel_thresholds
 from src.measure import noise_floor_power
-from src.scenarios import build_scenario
+from src.scenarios import CASES, build_scenario
 from src.timeline import classify_capture, detections, smooth, tier_track
 
 MAX_WINDOWS = 4000
@@ -124,10 +124,17 @@ def reanalyze(session, model, hop=None):
                     true_snr_db=session.true_snr_db)
 
 
-def load_scenario(model, total_duration=0.05, hop=None, snr_db=0, seed=None):
+def load_scenario(model, total_duration=0.05, hop=None, snr_db=0, seed=None,
+                   case=None):
+    """`case` names an entry in scenarios.CASES; None uses the default script.
+
+    snr_db is per-emitter, referenced to the first non-jamming emitter, so the
+    same value means the same thing whether the case has one emitter or three.
+    """
     seed = np.random.randint(0, 100000) if seed is None else seed
+    script = CASES.get(case) if case else None
     iq, segments = build_scenario(total_duration=total_duration,
-                                   snr_db=snr_db, seed=seed)
+                                   snr_db=snr_db, seed=seed, script=script)
     return analyze(iq, model, source="scenario", hop=hop, truth=segments,
                     true_snr_db=snr_db)
 

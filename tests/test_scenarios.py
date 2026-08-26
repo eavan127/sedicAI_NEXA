@@ -91,3 +91,23 @@ def test_per_emitter_snr_is_stable_as_emitters_are_added():
         f"noise floor moved when a second emitter was added: {n1:.4g} -> "
         f"{n2:.4g}; per-emitter SNR is not comparable across scenarios"
     )
+
+
+def test_named_cases_cover_single_through_contested():
+    from src.scenarios import CASES
+    assert set(CASES) == {"Radar only", "FHSS only", "Jamming only",
+                           "Radar + FHSS", "FHSS + Jamming", "All three"}
+    for name, script in CASES.items():
+        assert script, f"{name} has an empty script"
+        for cls, a, b in script:
+            assert cls in CLASSES
+            assert 0.0 <= a < b <= 1.0, f"{name}: bad span {a}-{b}"
+
+
+def test_every_named_case_builds_and_returns_matching_truth():
+    from src.scenarios import CASES
+    for name, script in CASES.items():
+        iq, segments = build_scenario(fs=3_200_000, total_duration=0.01,
+                                       snr_db=0, seed=5, script=script)
+        assert len(iq) == 32_000, name
+        assert {s.class_name for s in segments} == {c for c, _, _ in script}, name

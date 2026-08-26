@@ -14,7 +14,13 @@ import gradio as gr
 
 from src.ui import plots
 from src.ui.app_models import ensemble_available, load_model, model_label
+from src.config import CFG
+from src.scenarios import CASES
 from src.ui.session import load_scenario, load_upload, reanalyze
+
+# SNR choices are the training bins, not arbitrary round numbers -- asking the
+# model about an SNR it never saw in training conflates two questions.
+SNR_CHOICES = [(f"{int(s):+d} dB", int(s)) for s in CFG["snr_bins_db"]]
 
 HOP_CHOICES = [("no overlap — 512", 512), ("50% — 256", 256),
                 ("75% — 128", 128), ("87.5% — 64", 64)]
@@ -36,7 +42,7 @@ def _rows(session, smoothed):
     ]
 
 
-def _render(session, smoothing_choice, model_choice="auto"):
+def _render(session, smoothing_choice, model_choice="auto", case_note=""):
     smoothed = smoothing_choice == "Smoothed"
     rows = _rows(session, smoothed)
     snr_note = (f"SNR {session.true_snr_db:.1f} dB KNOWN &nbsp;·&nbsp; "
@@ -46,6 +52,7 @@ def _render(session, smoothing_choice, model_choice="auto"):
         f"**● REPLAY** &nbsp; source `{session.source}` &nbsp;·&nbsp; "
         f"BASEBAND · fs 3.2 MHz &nbsp;·&nbsp; {snr_note}"
         f"{model_choice} &nbsp;·&nbsp; "
+        + (f"{case_note} &nbsp;·&nbsp; " if case_note else "") +
         f"{session.duration_ms:.1f} ms &nbsp;·&nbsp; "
         f"{session.result.n_windows} windows @ hop {session.result.hop} "
         f"&nbsp;·&nbsp; **{len(rows)} events**"
@@ -74,6 +81,17 @@ def build(state, get_model):
                       ("Single — best_model.pt", "single")],
             value="ensemble" if ensemble_available() else "single",
             scale=2, min_width=170, label="Model")
+
+    with gr.Row(equal_height=True):
+        case_sel = gr.Dropdown(choices=list(CASES), value="All three",
+                                scale=3, min_width=190, label="Scenario case")
+        snr_sel = gr.Dropdown(choices=SNR_CHOICES, value=0 if 0 in [v for _, v in SNR_CHOICES] else SNR_CHOICES[len(SNR_CHOICES)//2][1],
+                               scale=2, min_width=140, label="SNR (per emitter)")
+        gr.Markdown(
+            "<div style='font-size:12px;color:#5F6B72;padding-top:22px;'>"
+            "Single emitter through fully contested band. SNR is per emitter, "
+            "so the same value means the same thing in every case."
+            "</div>")
 
     gr.Markdown(
         "<div style='font-size:12px;color:#5F6B72;margin:-6px 0 4px 0;'>"
@@ -111,10 +129,11 @@ def build(state, get_model):
     outputs = [state, header, console, events]
 
     scenario_btn.click(
-        lambda h, sm, mw: _render(
-            load_scenario(load_model(mw), total_duration=0.05, hop=h),
-            sm, model_label(mw)),
-        inputs=[hop, smoothing, model_sel], outputs=outputs)
+        lambda h, sm, mw, cs, sn: _render(
+            load_scenario(load_model(mw), total_duration=0.05, hop=h,
+                           snr_db=sn, case=cs),
+            sm, model_label(mw), f"case `{cs}`"),
+        inputs=[hop, smoothing, model_sel, case_sel, snr_sel], outputs=outputs)
 
     upload_btn.click(
         lambda f, h, sm, mw: _render(

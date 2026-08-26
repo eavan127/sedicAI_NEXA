@@ -63,6 +63,19 @@ DEFAULT_SCRIPT = [
     ("JAMMING", 0.55, 0.85),
 ]
 
+# Named cases, single emitter through fully contested band. Ordered so that
+# stepping down the list adds one emitter at a time, which is how the
+# behaviour is worth demonstrating: isolated emitters and overlapping ones
+# fail in different ways, and only one of the two improves with SNR.
+CASES = {
+    "Radar only": [("LFM_RADAR", 0.25, 0.75)],
+    "FHSS only": [("FHSS", 0.25, 0.75)],
+    "Jamming only": [("JAMMING", 0.25, 0.75)],
+    "Radar + FHSS": [("LFM_RADAR", 0.15, 0.70), ("FHSS", 0.40, 0.85)],
+    "FHSS + Jamming": [("FHSS", 0.15, 0.70), ("JAMMING", 0.40, 0.85)],
+    "All three": DEFAULT_SCRIPT,
+}
+
 
 def build_scenario(fs=None, total_duration=0.1, snr_db=-6, seed=0,
                     script=None):
