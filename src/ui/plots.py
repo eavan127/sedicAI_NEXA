@@ -127,6 +127,18 @@ def constellation_figure(session, smoothed=None):
     points, offset, phase = recover_symbols(window)
     raw = window / np.sqrt(np.mean(np.abs(window) ** 2) + 1e-20)
 
+    # recover_symbols hands a degenerate window back UNCHANGED -- no scaling,
+    # no de-rotation, no decimation -- rather than raising, because a silent
+    # stretch in a capture must still render. Decimation is the one operation
+    # that always shrinks the array, so "points is shorter than window" is the
+    # honest test for whether recovery actually ran. A window can still reach
+    # here with no power: the model classifies windows independently of this
+    # panel and can call a near-silent window civilian above threshold. This
+    # display exists to prove clusters came from real recovery, so it must
+    # never dress up 512 raw samples as symbol points -- that would be the one
+    # lie this console cannot afford.
+    recovered = len(points) < len(window)
+
     fig, (ax_raw, ax_sym) = plt.subplots(1, 2, figsize=(9.5, 5.0))
     ax_raw.scatter(raw.real, raw.imag, s=4, alpha=0.45, linewidths=0,
                     color=INSTRUMENT["color"])
@@ -134,8 +146,12 @@ def constellation_figure(session, smoothed=None):
                       fontsize=8, color=TEXT_DIM)
     ax_sym.scatter(points.real, points.imag, s=20, alpha=0.85, linewidths=0,
                     color=INSTRUMENT["color"])
-    ax_sym.set_title(f"recovered — {len(points)} symbol points",
-                      fontsize=8, color=TEXT_DIM)
+    if recovered:
+        ax_sym.set_title(f"recovered — {len(points)} symbol points",
+                          fontsize=8, color=TEXT_DIM)
+    else:
+        ax_sym.set_title("recovery skipped — no power in this window",
+                          fontsize=8, color=TEXT_DIM)
 
     for ax in (ax_raw, ax_sym):
         ax.set_xlabel("I (measured)")
@@ -146,17 +162,23 @@ def constellation_figure(session, smoothed=None):
 
     t_ms = start / CFG["signal"]["fs"] * 1e3
     snr_text = f"est. {estimate_snr_db(window, session.noise_power):.1f} dB"
-    fig.text(0.01, 0.055,
-              f"window {index} @ {t_ms:.2f} ms · {snr_text} · unit-power scale "
-              f"→ de-rotate {offset:+.4f} cyc/sample → decimate 1-in-"
-              f"{SAMPLES_PER_SYMBOL} at phase {phase}",
+    if recovered:
+        chain_text = (f"unit-power scale → de-rotate {offset:+.4f} cyc/sample "
+                       f"→ decimate 1-in-{SAMPLES_PER_SYMBOL} at phase {phase}")
+    else:
+        chain_text = "no power in this window — nothing to scale, rotate, or decimate"
+    fig.text(0.01, 0.055, f"window {index} @ {t_ms:.2f} ms · {snr_text} · "
+              f"{chain_text}",
               color=TEXT_DIM, fontsize=7)
     fig.text(0.01, 0.005, f"{class_name} {prob * 100:.0f}%",
               color=tier_color("Civilian"), fontsize=8, fontweight="bold")
-    fig.text(0.16, 0.005,
-              f"cluster count is the modulation order — {len(points)} symbols "
-              f"separates 2 clusters from 4, not enough to resolve 64QAM",
-              color=TEXT_DIM, fontsize=7)
+    if recovered:
+        caveat_text = (f"cluster count is the modulation order — {len(points)} "
+                        f"symbols separates 2 clusters from 4, not enough to "
+                        f"resolve 64QAM")
+    else:
+        caveat_text = "no power to recover — nothing here to cluster"
+    fig.text(0.16, 0.005, caveat_text, color=TEXT_DIM, fontsize=7)
 
     style_axes(fig, [ax_raw, ax_sym])
     fig.tight_layout(rect=[0, 0.09, 1, 1])

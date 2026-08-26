@@ -237,3 +237,29 @@ def test_caption_names_the_class_the_window_and_the_recovery_chain():
         assert any(t.get_color() == tier_color("Civilian") for t in model_text)
     finally:
         plt.close(fig)
+
+
+def test_figure_does_not_claim_recovery_on_a_window_with_no_power():
+    """A near-silent window that the model still classified as civilian above
+    threshold is not hypothetical for this project -- confident classification
+    on near-empty signal has bitten this console before. If the panel labels
+    512 raw samples "512 symbol points" and states a de-rotate that never
+    happened, it is not merely wrong, it is lying about the one thing this
+    display exists to prove: that the clusters it shows came from real
+    recovery. Claiming recovery that did not occur is the worst kind of error
+    here, worse than showing nothing."""
+    s = _session({"QPSK": [0.30, 0.30, 0.30, 0.95, 0.30, 0.30]})
+    s.display_smoothed = False
+    s.iq = s.iq.copy()
+    s.iq[3 * 512:4 * 512] = 0
+    fig = constellation_figure(s)
+    try:
+        captions = " ".join(t.get_text() for t in fig.texts)
+        titles = " ".join(ax.get_title() for ax in fig.axes)
+        combined = captions + " " + titles
+        assert "symbol points" not in combined
+        assert "64QAM" not in combined
+        assert "de-rotate" not in combined
+        assert "no power" in combined
+    finally:
+        plt.close(fig)
