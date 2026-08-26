@@ -42,6 +42,29 @@ def _rows(session, smoothed):
     ]
 
 
+def _channel_state(session, smoothed):
+    """How much of the capture the model reports as empty.
+
+    Without this the console has no way to SAY "nothing is transmitting". The
+    detections table lists emitters, and an empty channel has none -- so a
+    capture the model correctly reads as 118/119 windows of empty spectrum
+    displayed as "1 events: LFM_RADAR 28%", showing only the single false
+    positive and hiding the right answer entirely.
+
+    MODEL provenance: this is derived from classifications, not measured from
+    the samples. Deliberately not called occupancy -- Overview already uses
+    that name for the MEASURED figure, and the two must not be confused.
+    """
+    tiers = session.tiers(smoothed=smoothed)
+    if not tiers:
+        return ""
+    empty = tiers.count("Empty") / len(tiers) * 100
+    if empty >= 90:
+        return (f"<span style='color:#627143;font-weight:700;'>CHANNEL EMPTY "
+                f"— {empty:.0f}% of windows</span>")
+    return f"channel {empty:.0f}% empty"
+
+
 def _render(session, smoothing_choice, model_choice="auto", case_note=""):
     smoothed = smoothing_choice == "Smoothed"
     rows = _rows(session, smoothed)
@@ -55,7 +78,8 @@ def _render(session, smoothing_choice, model_choice="auto", case_note=""):
         + (f"{case_note} &nbsp;·&nbsp; " if case_note else "") +
         f"{session.duration_ms:.1f} ms &nbsp;·&nbsp; "
         f"{session.result.n_windows} windows @ hop {session.result.hop} "
-        f"&nbsp;·&nbsp; **{len(rows)} events**"
+        f"&nbsp;·&nbsp; **{len(rows)} emitter events** &nbsp;·&nbsp; "
+        + _channel_state(session, smoothed)
     )
     return (session, head, plots.console_figure(session, smoothed=smoothed),
             rows)

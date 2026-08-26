@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 import pytest
 
 from src.config import CLASSES
@@ -10,6 +11,14 @@ from src.ui.session import (CaptureSession, analyze, load_scenario,
 
 @pytest.fixture(scope="module")
 def model():
+    """Untrained model, but with FIXED weights.
+
+    AMC_CNN initialises randomly, so without a seed every test in this file
+    that runs the model gets different predictions on every run -- which made
+    assertions about event counts flaky, failing roughly one run in three for
+    no reason connected to the code under test.
+    """
+    torch.manual_seed(0)
     m = AMC_CNN(num_classes=len(CLASSES), input_len=512)
     m.eval()
     return m
@@ -129,9 +138,17 @@ def test_context_4_display_rules_never_mutate_the_raw_result(model):
 
 def test_raw_mode_bypasses_the_display_rules(model):
     """Raw mode must show what the model actually did, so the gate and hold
-    are off there."""
+    are off there.
+
+    Asserted on the RULES rather than on event counts. Counts depend on the
+    model's predictions, and an untrained model's are arbitrary -- the earlier
+    version compared raw vs smoothed counts and failed about one run in three.
+    What matters is that raw mode passes no gate and no hold.
+    """
     s = load_scenario(model, total_duration=0.02, hop=256, seed=0)
-    assert len(s.events(smoothed=False)) >= len(s.events(smoothed=True))
+    assert s._rules(smoothed=False) == {"noise_gate": None, "hold_us": 0.0}
+    assert s._rules(smoothed=True) == {"noise_gate": s.noise_gate,
+                                        "hold_us": s.hold_us}
 
 
 def test_alerts_never_include_noise_floor(model):
@@ -151,3 +168,48 @@ def test_scorecard_path_never_imports_smoothing():
             f"src/evaluate.py references {banned!r} -- benchmark numbers must "
             "stay per-window, ungated and unsmoothed"
         )
+
+
+class _StubSession:
+    """Minimal stand-in for CaptureSession.
+
+    _channel_state only asks for tiers, and testing it through a real model
+    would make the assertion depend on that model's predictions -- which, for
+    the untrained fixture in this file, are random weights and therefore a
+    different answer every run. A stub makes the formatting logic itself the
+    thing under test.
+    """
+
+    def __init__(self, tiers):
+        self._tiers = tiers
+
+    def tiers(self, smoothed=True):
+        return self._tiers
+
+
+def test_empty_channel_is_reported_positively():
+    """An empty capture must SAY so, not merely produce no emitter events.
+
+    emitter_events() filters NOISE_FLOOR out by design, so a capture the model
+    correctly reads as empty otherwise displays only whatever false positive
+    survived -- showing the one wrong answer and hiding the right ones. This
+    is the exact case observed on noise_floor.f32: 118 of 119 windows correct,
+    and the console said "1 events: LFM_RADAR 28%".
+    """
+    from src.ui.pages.rf_replay import _channel_state
+    state = _channel_state(_StubSession(["Empty"] * 118 + ["Military"]), True)
+    assert "CHANNEL EMPTY" in state
+    assert "99" in state
+
+
+def test_busy_channel_is_not_announced_as_empty():
+    from src.ui.pages.rf_replay import _channel_state
+    tiers = ["Military"] * 60 + ["Hostile"] * 30 + ["Empty"] * 10
+    state = _channel_state(_StubSession(tiers), True)
+    assert "CHANNEL EMPTY" not in state
+    assert "10% empty" in state
+
+
+def test_channel_state_handles_an_empty_timeline():
+    from src.ui.pages.rf_replay import _channel_state
+    assert _channel_state(_StubSession([]), True) == ""

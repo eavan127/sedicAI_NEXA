@@ -9,6 +9,14 @@ from src.models.amc_cnn import AMC_CNN
 
 @pytest.fixture(scope="module")
 def model():
+    """Untrained model, but with FIXED weights.
+
+    AMC_CNN initialises randomly, so without a seed every test in this file
+    that runs the model gets different predictions on every run -- which made
+    assertions about event counts flaky, failing roughly one run in three for
+    no reason connected to the code under test.
+    """
+    torch.manual_seed(0)
     m = AMC_CNN(num_classes=len(CLASSES), input_len=512)
     m.eval()
     return m
