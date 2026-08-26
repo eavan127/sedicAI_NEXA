@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-from src.config import CLASSES, CFG, resolve_multilabel_thresholds
+from src.config import CFG, CLASSES, resolve_multilabel_thresholds
 from src.timeline import TimelineResult
 from src.ui.pages.rf_replay import _render
 from src.ui.palette import INSTRUMENT, tier_color
