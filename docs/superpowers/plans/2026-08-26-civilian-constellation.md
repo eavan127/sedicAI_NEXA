@@ -1,5 +1,15 @@
 # Civilian Constellation Panel Implementation Plan
 
+> **Status: superseded in part.** Tasks 1-5 below shipped as written. What
+> they produced did not yet do its job -- see
+> `2026-08-27-civilian-constellation-addendum.md` (matched filter, and the
+> double-noising of civilian scenes) and
+> `2026-08-27-civilian-constellation-addendum-2.md` (four windows, and the
+> findings from the Task 6 and 7 reviews) for what changed and why.
+> `best_civilian_window` named here no longer exists; it is now
+> `civilian_windows(count=4)`.
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add an IQ constellation panel to the RF Replay page that appears only for captures containing civilian traffic, showing raw I/Q beside recovered symbol points for the strongest civilian window.

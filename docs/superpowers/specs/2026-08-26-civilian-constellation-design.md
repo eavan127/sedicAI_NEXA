@@ -1,5 +1,14 @@
 # Civilian constellation panel — RF Replay
 
+> **Status: partly superseded.** This records the design as approved on
+> 2026-08-26 and the reasoning behind it, including the alternatives rejected
+> at the time. Four decisions in it were changed during implementation, on
+> evidence gathered from the running console. Read
+> `../plans/2026-08-27-civilian-constellation-addendum.md` and
+> `../plans/2026-08-27-civilian-constellation-addendum-2.md` for what shipped.
+> The differences are listed at the end of this document.
+
+
 Design spec, 2026-08-26. Adds an IQ constellation view to the RF Replay page
 for captures containing civilian traffic, alongside the existing
 spectrum/waterfall console figure.
@@ -161,3 +170,47 @@ Figure-level: `constellation_figure` builds for `Civilian only` and returns
 - Any use of the constellation for measurement or scoring. It is a display.
   Civilian detection performance is measured on the held-out test split, as
   `_from_library` already states.
+
+
+## What changed after this spec was approved
+
+Four things, each forced by a measurement rather than a preference. The
+reasoning above still holds where it is not contradicted here.
+
+**One window became four.** The spec picks the strongest civilian window. On
+the running console that window scored 0.31 4th-power phase concentration
+while another window in the same capture scored 0.88 -- the panel drew a cloud
+and the operator had no way to know it was unlucky rather than unresolvable.
+Showing the tightest-clustering window instead was rejected as circular: it
+would pick the picture that most looks like the answer being displayed. The
+panel now shows four windows spaced evenly across the civilian span, chosen
+without reference to how they look, and the spread itself is the honest
+result. `best_civilian_window` was replaced by `civilian_windows(count=4)`.
+
+**The recovery chain gained a matched filter.** Sampling an RRC-shaped signal
+at the symbol instant without one keeps the noise of the whole 8x band while
+the signal occupies only the symbol bandwidth. Measured gain on library
+windows: 0.62 to 0.79 concentration at +10 dB, 0.20 to 0.61 at +2 dB. The
+chain is now four steps: unit-power scale, matched filter, de-rotate,
+decimate.
+
+**64 symbol points became 56.** `mode="same"` convolution runs the window
+edges against zero padding, which left the first recovered symbol about 46%
+low and the second about 12% low -- a small but real lie about the
+constellation. Symbols whose filter support extends past the window edge are
+now dropped, and the caption computes the count from the trim rather than
+stating a fixed number.
+
+**Civilian scenes stopped being noised twice.** Not a display change, but the
+dominant cause of the cloud. `civilian_library()` draws from the +10 dB bin,
+so those captures already carry noise at +10 dB, and `build_scenario` then
+added its own on top: a scene labelled "+10 dB" was really about +6.9 dB. The
+console had therefore been misstating the SNR of every civilian scene, which
+affects its detection numbers and not only this panel. `build_scenario` now
+counts the recording's own noise toward one uniform floor, and the header
+reports the SNR actually achieved.
+
+The tests are in `tests/test_ui_constellation.py`, not the
+`tests/test_ui_plots.py` this spec names: the selector, figure and page tests
+all share one fabricated-session helper, and splitting them across files would
+have duplicated it.
