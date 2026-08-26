@@ -263,3 +263,28 @@ def test_figure_does_not_claim_recovery_on_a_window_with_no_power():
         assert "no power" in combined
     finally:
         plt.close(fig)
+
+
+def test_render_returns_a_visible_constellation_for_a_civilian_capture():
+    from src.ui.pages.rf_replay import _render
+    s = _session({"QPSK": [0.30, 0.30, 0.30, 0.95, 0.30, 0.30]})
+    out = _render(s, "Raw", "single")
+    try:
+        assert len(out) == 5
+        update = out[4]
+        assert update["visible"] is True
+        assert update["value"] is not None
+    finally:
+        plt.close("all")
+
+
+def test_render_hides_the_constellation_when_no_civilian_is_present():
+    """A radar-only capture must look exactly as it did before this panel
+    existed -- no empty grey box below the console."""
+    from src.ui.pages.rf_replay import _render
+    s = _session({"LFM_RADAR": [0.90] * 6})
+    out = _render(s, "Raw", "single")
+    try:
+        assert out[4]["visible"] is False
+    finally:
+        plt.close("all")

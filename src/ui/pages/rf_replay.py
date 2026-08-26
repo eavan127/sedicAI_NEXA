@@ -85,8 +85,17 @@ def _render(session, smoothing_choice, model_choice="auto", case_note=""):
         f"&nbsp;·&nbsp; **{len(rows)} emitter events** &nbsp;·&nbsp; "
         + _channel_state(session, smoothed)
     )
+    # The constellation is a separate component, not another panel inside the
+    # console figure: that figure's whole premise is one shared time axis, and
+    # a constellation has no time axis at all. Hidden outright when the
+    # capture has no civilian window, so military-only cases look exactly as
+    # they did before this panel existed.
+    constellation = plots.constellation_figure(session, smoothed=smoothed)
+    constellation_update = (gr.update(value=constellation, visible=True)
+                             if constellation is not None
+                             else gr.update(visible=False))
     return (session, head, plots.console_figure(session, smoothed=smoothed),
-            rows)
+            rows, constellation_update)
 
 
 def build(state, get_model):
@@ -135,6 +144,12 @@ def build(state, get_model):
     # adjacent.
     console = gr.Plot(label="Spectrum · waterfall · detections · tier — shared time axis")
 
+    # Starts hidden: most cases are military-only, and an empty panel below
+    # the console would read as a broken plot rather than as "not applicable".
+    constellation = gr.Plot(
+        label="Civilian constellation — raw I/Q vs recovered symbols",
+        visible=False)
+
     # Kept plain: fixed column widths fought the content. A window with five
     # simultaneous classes puts "BPSK + QPSK + 16QAM + LFM_RADAR + FHSS +
     # JAMMING" in one cell and a five-way peak breakdown in the next, so the
@@ -154,7 +169,7 @@ def build(state, get_model):
         label="Detection events", interactive=False, wrap=True,
         max_height=520, column_widths=["5%", "12%", "14%", "69%"])
 
-    outputs = [state, header, console, events]
+    outputs = [state, header, console, events, constellation]
 
     scenario_btn.click(
         lambda h, sm, mw, cs, sn: _render(
@@ -173,10 +188,10 @@ def build(state, get_model):
     model_sel.change(
         lambda s, sm, mw: _render(reanalyze(s, load_model(mw)), sm,
                                    model_label(mw)) if s is not None
-        else (s, "Load a capture first.", None, []),
+        else (s, "Load a capture first.", None, [], gr.update(visible=False)),
         inputs=[state, smoothing, model_sel], outputs=outputs)
 
     smoothing.change(
         lambda s, sm, mw: _render(s, sm, model_label(mw)) if s is not None
-        else (s, "Load a capture first.", None, []),
+        else (s, "Load a capture first.", None, [], gr.update(visible=False)),
         inputs=[state, smoothing, model_sel], outputs=outputs)
