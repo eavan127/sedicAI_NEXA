@@ -196,12 +196,18 @@ def constellation_figure(session, smoothed=None, count=4):
         # Window index and time are MEASURED -- TEXT_DIM. The class
         # probability sits above it as a separate text so it alone can carry
         # the tier colour; set_title only takes one colour for the whole
-        # string, which cannot express that split.
+        # string, which cannot express that split. The two are placed at
+        # axes-fraction y = 1.02 and 1.16 -- far enough apart at this font
+        # size that the probability's bounding box clears the title's rather
+        # than sitting on top of it, which is what happened when the
+        # probability was drawn 0.02 above a title carrying its own `pad`
+        # (the pad added vertical space matplotlib does not report back to
+        # a sibling `ax.text` call, so the two crept into the same band).
         ax_r.set_title(f"win {index} @ {t_ms:.2f} ms", fontsize=7,
-                        color=TEXT_DIM, pad=14)
+                        color=TEXT_DIM, y=1.02)
         ax_r.text(0.5, 1.16, f"{cls} {prob * 100:.0f}%",
-                   transform=ax_r.transAxes, ha="center", fontsize=7,
-                   fontweight="bold", color=tier_color("Civilian"))
+                   transform=ax_r.transAxes, ha="center", va="bottom",
+                   fontsize=7, fontweight="bold", color=tier_color("Civilian"))
 
         if recovered:
             ax_s.set_title(f"{len(points)} symbol points", fontsize=7,
@@ -238,7 +244,11 @@ def constellation_figure(session, smoothed=None, count=4):
     fig.text(0.01, 0.015, selection_text, color=TEXT_DIM, fontsize=7)
 
     style_axes(fig, list(fig.axes))
-    fig.tight_layout(rect=[0, 0.12, 1, 0.90])
+    # Top of the rect sits just above the highest per-column text (the
+    # class-probability line at axes y=1.16) rather than at the figure's own
+    # edge -- tight_layout was otherwise reserving a full blank band above
+    # that text for a suptitle this figure does not have.
+    fig.tight_layout(rect=[0, 0.12, 1, 0.97])
     return fig
 
 

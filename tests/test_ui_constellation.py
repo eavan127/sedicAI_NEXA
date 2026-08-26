@@ -172,6 +172,19 @@ def test_civilian_windows_returns_all_qualifying_when_fewer_than_count():
     assert [p[2] for p in picks] == pytest.approx([0.60, 0.60, 0.70], abs=1e-6)
 
 
+def test_civilian_windows_returns_exactly_count_at_the_boundary():
+    """5 qualifying windows, count=4 -- one more than count, the tightest
+    case for the evenly-spaced positions to collide under rounding. Must
+    still come back as 4 distinct, ascending indices, never fewer."""
+    s = _session({"QPSK": [0.30, 0.40, 0.50, 0.60, 0.70]}, n_windows=5)
+    s.display_smoothed = False
+    picks = s.civilian_windows()
+    indices = [p[0] for p in picks]
+    assert len(indices) == 4
+    assert len(set(indices)) == 4
+    assert indices == sorted(indices)
+
+
 def test_civilian_windows_picks_the_strongest_class_not_the_first():
     """CIVILIAN is iterated in class order, so a selector that returned the
     first class over threshold would answer BPSK here and be wrong."""

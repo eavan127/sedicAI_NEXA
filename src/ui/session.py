@@ -202,14 +202,32 @@ class CaptureSession:
 
         column = probs[:, CLASSES.index(best_class)]
         qualifying = np.flatnonzero(column >= self.thresholds[best_class])
-        if len(qualifying) <= count:
+        n = len(qualifying)
+        if n <= count:
             chosen = qualifying
         else:
             # Evenly spaced POSITIONS in the qualifying list -- not evenly
             # spaced window indices -- so a span with gaps still returns
             # `count` windows rather than landing some picks in the gaps.
-            positions = np.round(np.linspace(0, len(qualifying) - 1, count))
-            chosen = qualifying[np.unique(positions.astype(int))]
+            #
+            # Only reached when n > count, which makes consecutive spacing
+            # (n - 1) / (count - 1) strictly greater than 1: rounding two
+            # points more than 1 apart to the nearest integer can move each
+            # by at most 0.5, so their rounded values cannot coincide. The
+            # dedupe-and-backfill below is therefore not expected to ever
+            # fire -- it exists so that if that argument is ever wrong (a
+            # different spacing formula, an unusual float edge case) the
+            # panel still shows exactly `count` windows rather than quietly
+            # shrinking to fewer. The backfill itself stays purely
+            # POSITIONAL -- nearest unused index in the qualifying list --
+            # never influenced by probability or how a window looks.
+            positions = np.round(np.linspace(0, n - 1, count)).astype(int)
+            positions = list(dict.fromkeys(positions.tolist()))  # dedupe, keep order
+            if len(positions) < count:
+                unused = [p for p in range(n) if p not in positions]
+                positions += unused[:count - len(positions)]
+            positions.sort()
+            chosen = qualifying[positions]
         return [(int(i), best_class, float(column[i])) for i in chosen]
 
 
