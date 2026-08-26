@@ -30,6 +30,43 @@ plt.rcParams["font.sans-serif"] = MPL_FONT
 # wrong.
 SAMPLES_PER_SYMBOL = 8
 
+# RadioML's transmitters pulse-shape with a root-raised cosine, so a receiver
+# matched to it is the standard front end -- and the one this panel was
+# missing. Without it a sample taken at the symbol instant carries the noise of
+# the whole 8x-oversampled band while the signal occupies only the symbol
+# bandwidth, which is most of why a +10 dB capture drew a cloud instead of four
+# clusters (measured: 0.62 -> 0.79 4th-power phase concentration at +10 dB,
+# 0.20 -> 0.61 at +2 dB).
+#
+# The roll-off is a guess at RadioML's, and deliberately a safe one: 0.20 and
+# 0.35 score the same on those measurements, so being wrong about it costs
+# nothing visible.
+RRC_ROLLOFF = 0.35
+RRC_SPAN_SYMBOLS = 8
+
+
+def rrc_taps(sps, beta=RRC_ROLLOFF, span=RRC_SPAN_SYMBOLS):
+    """Root-raised-cosine taps, unit energy, odd length so they add no delay.
+
+    The two singular points -- t = 0 and t = 1/(4*beta) -- are written out
+    separately because the general expression divides by zero at exactly those
+    samples. Both branches are the limit of the closed form.
+    """
+    t = np.arange(-span * sps / 2, span * sps / 2 + 1) / sps
+    taps = np.empty_like(t)
+    for i, ti in enumerate(t):
+        if abs(ti) < 1e-8:
+            taps[i] = 1 - beta + 4 * beta / np.pi
+        elif abs(abs(ti) - 1 / (4 * beta)) < 1e-8:
+            taps[i] = beta / np.sqrt(2) * (
+                (1 + 2 / np.pi) * np.sin(np.pi / (4 * beta))
+                + (1 - 2 / np.pi) * np.cos(np.pi / (4 * beta)))
+        else:
+            taps[i] = ((np.sin(np.pi * ti * (1 - beta))
+                         + 4 * beta * ti * np.cos(np.pi * ti * (1 + beta)))
+                        / (np.pi * ti * (1 - (4 * beta * ti) ** 2)))
+    return taps / np.sqrt(np.sum(taps ** 2))
+
 
 def carrier_offset(window, order=4):
     """Blind estimate of residual carrier offset, in cycles per sample.
@@ -78,6 +115,9 @@ def recover_symbols(window, sps=SAMPLES_PER_SYMBOL):
         return z, 0.0, 0
 
     z = z / np.sqrt(power)
+    # Matched filter first: the carrier estimate is a 4th-power FFT peak, and
+    # it finds that peak more reliably once the out-of-band noise is gone.
+    z = np.convolve(z, rrc_taps(sps), mode="same")
     offset = carrier_offset(z)
     z = z * np.exp(-2j * np.pi * offset * np.arange(len(z)))
 
@@ -163,7 +203,8 @@ def constellation_figure(session, smoothed=None):
     t_ms = start / CFG["signal"]["fs"] * 1e3
     snr_text = f"est. {estimate_snr_db(window, session.noise_power):.1f} dB"
     if recovered:
-        chain_text = (f"unit-power scale → de-rotate {offset:+.4f} cyc/sample "
+        chain_text = (f"unit-power scale → matched filter → "
+                       f"de-rotate {offset:+.4f} cyc/sample "
                        f"→ decimate 1-in-{SAMPLES_PER_SYMBOL} at phase {phase}")
     else:
         chain_text = "no power in this window — nothing to scale, rotate, or decimate"
