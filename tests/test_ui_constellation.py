@@ -51,6 +51,15 @@ def test_carrier_offset_finds_the_injected_rotation():
     assert carrier_offset(z) == pytest.approx(0.0039, abs=0.001)
 
 
+def test_carrier_offset_finds_a_negative_rotation():
+    """The direction of a residual carrier error is arbitrary -- a real 16QAM
+    capture measured -0.0098 cycles/sample -- and a negative offset lands the
+    4th-power peak in the upper half of the FFT, which is a distinct code
+    path (the wrap back to a negative bin) from the positive-offset case."""
+    z = _qpsk(offset=-0.0039)
+    assert carrier_offset(z) == pytest.approx(-0.0039, abs=0.001)
+
+
 def test_recovered_points_cluster_where_the_raw_samples_do_not():
     """The whole reason the panel shows two axes: raw I/Q of an oversampled,
     rotating capture is a ring, and the same samples de-rotated and decimated

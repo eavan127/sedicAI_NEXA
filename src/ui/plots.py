@@ -45,6 +45,10 @@ def carrier_offset(window, order=4):
     the samples do not contain.
     """
     z = np.asarray(window)
+    # An FFT over fewer than a couple of cycles' worth of samples has no
+    # meaningful peak to find, so the honest answer is no estimate rather
+    # than a spurious one. `order * 2` happens to equal SAMPLES_PER_SYMBOL
+    # when order=4, but that is a coincidence, not coupling between the two.
     if len(z) < order * 2:
         return 0.0
     spectrum = np.abs(np.fft.fft(z ** order))
