@@ -347,6 +347,56 @@ def cluster_score(points, order=4, seed=0, n_ref=15):
     return float(score / (score + 1))
 
 
+# Qualitative bands for the score printed beside the number, so an operator
+# does not have to hold the measured distribution table in their head. The
+# distribution behind these cut points: 186 windows per case, ensemble
+# model, 4th-order scoring, windows inside the civilian span (374 windows
+# for the radar-only case, which has no civilian span to restrict to).
+#
+#   case                        p25    median  p90    max
+#   Civilian only +10 dB        0.215  0.324   0.485  0.584
+#   Civilian only +6            0.181  0.283   0.445  0.532
+#   Civilian only +2            0.105  0.175   0.345  0.496
+#   Civilian only -2            0.043  0.074   0.200  0.351
+#   Civilian only -6            0.012  0.036   0.097  0.188
+#   Civilian only -10           0.000  0.021   0.078  0.150
+#   Civilian + Jamming +10      0.007  0.039   0.342  0.529
+#   Radar only +10 (no civilian)0.000  0.015   0.066  0.170
+#
+# Below CLUSTER_SCORE_WEAK_FLOOR: the radar-only capture's p90 (0.066) --
+# windows with no civilian emitter at all essentially never score above
+# this, and civilian windows at -6/-10 dB correctly sit here too (there is
+# nothing to see at those SNRs).
+CLUSTER_SCORE_WEAK_FLOOR = 0.07
+
+# From CLUSTER_SCORE_WEAK_FLOOR up to (excluding) CLUSTER_SCORE_CLEAR_FLOOR:
+# the overlap band. Radar-only tops out at 0.170 and civilian +2 dB has a
+# median of 0.175 -- this range genuinely cannot be called either way from
+# the score alone.
+#
+# At and above CLUSTER_SCORE_CLEAR_FLOOR: civilian +10 dB's p25 is 0.215,
+# and 86% of those windows beat every window of the radar-only capture
+# (whose max is 0.170).
+CLUSTER_SCORE_CLEAR_FLOOR = 0.20
+
+
+def cluster_score_band(score):
+    """Qualitative label for a cluster_score value: "no structure", "weak",
+    or "clear" -- see CLUSTER_SCORE_WEAK_FLOOR and CLUSTER_SCORE_CLEAR_FLOOR
+    for where the cut points come from and why.
+
+    Purely a presentation aid. The boundaries are inclusive on their lower
+    edge (score == a floor lands in the band that floor names), matching the
+    measurements the floors were drawn from (each floor is itself the first
+    value that belongs in the higher band).
+    """
+    if score < CLUSTER_SCORE_WEAK_FLOOR:
+        return "no structure"
+    if score < CLUSTER_SCORE_CLEAR_FLOOR:
+        return "weak"
+    return "clear"
+
+
 def _symbols_per_window(window_len, sps=SAMPLES_PER_SYMBOL):
     """How many decimated symbol points recover_symbols actually returns for
     a non-degenerate window of this length.
@@ -445,7 +495,9 @@ def constellation_figure(session, smoothed=None, count=4):
             order = CONSTELLATION_ORDER[cls]
             if len(points) >= order * MIN_POINTS_PER_CLUSTER:
                 score = cluster_score(points, order)
-                title = f"{len(points)} symbol points · clusters {score:.2f}"
+                band = cluster_score_band(score)
+                title = (f"{len(points)} symbol points · "
+                          f"clusters {score:.2f} {band}")
             else:
                 # Honest refusal, not a number: at this order there are too
                 # few points per cluster (see MIN_POINTS_PER_CLUSTER) for
@@ -485,8 +537,10 @@ def constellation_figure(session, smoothed=None, count=4):
     score_text = (
         "\"clusters\" is a measured cluster-separation score computed from "
         "this window's own recovered symbols, not the classifier — 0 means "
-        "no cluster structure at all, rising toward 1 for tighter, more "
-        "separated clusters")
+        "no cluster structure at all; on real captures a clean QPSK window "
+        "at +10 dB reads about 0.3 (best observed 0.58) and a capture with "
+        "no civilian emitter reads below 0.07 nine times in ten — 1.0 is "
+        "reachable only on synthetic ideal points, never a real capture")
     fig.text(0.01, 0.105, score_text, color=TEXT_DIM, fontsize=7)
     fig.text(0.01, 0.075, chain_text, color=TEXT_DIM, fontsize=7)
     fig.text(0.01, 0.045, caveat_text, color=TEXT_DIM, fontsize=7)

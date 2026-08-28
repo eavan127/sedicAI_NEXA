@@ -17,8 +17,10 @@ from src.scenarios import CIVILIAN
 from src.timeline import TimelineResult
 from src.ui.pages.rf_replay import _render
 from src.ui.palette import INSTRUMENT, tier_color
-from src.ui.plots import (CONSTELLATION_ORDER, RRC_SPAN_SYMBOLS,
-                          SAMPLES_PER_SYMBOL, carrier_offset, cluster_score,
+from src.ui.plots import (CLUSTER_SCORE_CLEAR_FLOOR,
+                          CLUSTER_SCORE_WEAK_FLOOR, CONSTELLATION_ORDER,
+                          RRC_SPAN_SYMBOLS, SAMPLES_PER_SYMBOL,
+                          carrier_offset, cluster_score, cluster_score_band,
                           constellation_figure, recover_symbols, rrc_taps)
 from src.ui.session import CaptureSession
 
@@ -694,6 +696,97 @@ def test_caption_explains_the_cluster_score():
         assert "matched filter" in captions
         assert "spaced evenly" in captions
         assert "seam" in captions
+    finally:
+        plt.close(fig)
+
+
+def test_cluster_score_band_boundaries_are_exact():
+    """Cut points come from the measured distribution (see cluster_score_band
+    and the constants beside it): below CLUSTER_SCORE_WEAK_FLOOR is "no
+    structure", the floor itself and up to (excluding)
+    CLUSTER_SCORE_CLEAR_FLOOR is "weak", and the clear floor itself and above
+    is "clear". Exercised exactly at both boundaries so an off-by-one in the
+    comparison direction (< vs <=) is caught, not just values comfortably
+    inside a band."""
+    assert CLUSTER_SCORE_WEAK_FLOOR == pytest.approx(0.07)
+    assert CLUSTER_SCORE_CLEAR_FLOOR == pytest.approx(0.20)
+
+    assert cluster_score_band(CLUSTER_SCORE_WEAK_FLOOR - 0.001) == "no structure"
+    assert cluster_score_band(CLUSTER_SCORE_WEAK_FLOOR) == "weak"
+    assert cluster_score_band(CLUSTER_SCORE_CLEAR_FLOOR - 0.001) == "weak"
+    assert cluster_score_band(CLUSTER_SCORE_CLEAR_FLOOR) == "clear"
+
+
+def test_cluster_score_band_no_structure_for_a_single_blob():
+    """Direct construction, per the task note: cluster_score's own
+    single-blob fixture measures ~0.0, deep inside "no structure"."""
+    rng = np.random.default_rng(4)
+    points = (0.2 - 2.7j) + 0.05 * (rng.normal(size=200)
+                                     + 1j * rng.normal(size=200))
+    assert cluster_score_band(cluster_score(points)) == "no structure"
+
+
+def test_cluster_score_band_weak_for_a_noisy_uniform_ring():
+    """The ring fixture measures ~0.060 -- also "no structure" -- but the
+    unfiltered-decimation-phase fixture from
+    test_matched_filter_tightens_clusters_a_raw_decimation_leaves_smeared
+    measures ~0.168, which lands inside the weak band (0.07-0.20): the
+    overlap zone where a radar-only capture and a genuine but noisy civilian
+    window cannot be told apart by the score alone."""
+    z = _rrc_qpsk(snr_db=3.0)
+    unfiltered = z / np.sqrt(np.mean(np.abs(z) ** 2))
+    best_unfiltered = max(
+        cluster_score(unfiltered[phase::SAMPLES_PER_SYMBOL])
+        for phase in range(SAMPLES_PER_SYMBOL))
+    assert CLUSTER_SCORE_WEAK_FLOOR <= best_unfiltered < CLUSTER_SCORE_CLEAR_FLOOR
+    assert cluster_score_band(best_unfiltered) == "weak"
+
+
+def test_cluster_score_band_clear_for_four_separated_blobs():
+    """Four tight, well-separated blobs -- the shape a clean constellation
+    actually has -- measure ~0.78, well inside "clear"."""
+    rng = np.random.default_rng(3)
+    centers = np.array([1 + 1j, 1 - 1j, -1 + 1j, -1 - 1j]) / np.sqrt(2)
+    points = np.concatenate([
+        c + 0.05 * (rng.normal(size=50) + 1j * rng.normal(size=50))
+        for c in centers])
+    assert cluster_score_band(cluster_score(points)) == "clear"
+
+
+def test_qpsk_column_title_carries_the_band_word_matching_its_score():
+    """A clean, high-SNR QPSK session (as used throughout this file) scores
+    in the "clear" band (measured ~0.33 elsewhere in this suite, comfortably
+    above CLUSTER_SCORE_CLEAR_FLOOR=0.20), and the column title must say so
+    next to the number, not just print the bare float."""
+    s = _session({"QPSK": [0.60, 0.60, 0.60, 0.95, 0.60, 0.60]})
+    s.display_smoothed = False
+    fig = constellation_figure(s)
+    try:
+        bottom_titles = [ax.get_title() for ax in fig.axes[4:]]
+        for t in bottom_titles:
+            m = re.search(r"clusters (\d\.\d\d) (\S+(?: \S+)?)", t)
+            assert m, t
+            score = float(m.group(1))
+            assert m.group(2) == cluster_score_band(score)
+            assert cluster_score_band(score) == "clear"
+    finally:
+        plt.close(fig)
+
+
+def test_caption_no_longer_claims_the_score_rises_toward_one():
+    """The old wording ("rising toward 1 for tighter, more separated
+    clusters") was calibrated on synthetic blobs and is misleading on real
+    captures, where 1.0 is unreachable -- see cluster_score_band and its
+    constants for the measured numbers this caption must reflect instead."""
+    s = _session({"QPSK": [0.60, 0.60, 0.60, 0.95, 0.60, 0.60]})
+    s.display_smoothed = False
+    fig = constellation_figure(s)
+    try:
+        captions = " ".join(t.get_text() for t in fig.texts)
+        assert "rising toward 1" not in captions
+        # States the real reference point instead: a clean QPSK window at
+        # +10 dB reads about 0.3.
+        assert "0.3" in captions
     finally:
         plt.close(fig)
 
