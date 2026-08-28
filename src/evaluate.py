@@ -122,6 +122,81 @@ def comms_vs_jamming(y_true, y_pred):
     }
 
 
+def recall_in_context(y_true, y_pred):
+    """Per-class recall split by what ELSE is present in the same window --
+    "alone", "with another emitter" (no jammer), and "with a jammer" -- instead
+    of one number that averages over all three.
+
+    That average is not a neutral summary, it is actively misleading. Roughly
+    a third of test windows are composites, and standalone recall is even
+    across every class -- the damage is entirely concentrated "in company",
+    and each class fails in a DIFFERENT way there: some survive a benign
+    second emitter and only collapse under a jammer, others collapse under
+    any company at all. A single per-class recall figure blends a class that
+    is actually fine alone with whatever is happening in company and reports
+    the blend as if it were one homogeneous number -- which has previously
+    made at least one class look like an off-trend anomaly in the overall
+    column when its standalone performance was unremarkable and the entire
+    story was "in company". This is reported for EVERY class, not just the
+    judged ones -- the judged classes have exactly the same alone/company
+    split hiding inside their single recall number, and nobody had looked.
+
+    Buckets (mutually exclusive, by presence in the true multi-hot row):
+      - "alone": exactly one positive label in the window (the class itself).
+      - "with_emitter": more than one positive label, and JAMMING is NOT one
+        of them -- company from another comms/military emitter.
+      - "with_jammer": JAMMING IS one of the positive labels, and the class
+        under test is not JAMMING itself.
+
+    JAMMING's own "with_jammer" bucket is meaningless (a jammer can't be "in
+    company with a jammer" relative to itself, since there is only one
+    JAMMING class) and reads as an empty bucket, not a folded-in zero --
+    JAMMING co-occurring with another emitter lands in "with_emitter" instead,
+    since from JAMMING's point of view that IS just "another emitter present".
+
+    A bucket can legitimately be empty (JAMMING's "with_jammer", and every
+    bucket but "alone" for NOISE_FLOOR, which by construction of the mixture
+    generator never co-occurs with anything). An empty bucket's recall is
+    None -- never 0.0 or NaN -- so a reader cannot mistake "this situation
+    does not occur in the data" for "the model failed at it every time".
+
+    The support count travels with every recall for the same reason: the
+    buckets are NOT equally sized (which classes end up "with a jammer" at
+    all, and how often, is purely a function of which mixture combinations
+    exist in configs/default.yaml), so two classes' "with_jammer" recall
+    numbers are not directly comparable difficulty-for-difficulty unless the
+    reader can also see how much evidence backs each one.
+    """
+    jam = CLASS_TO_IDX["JAMMING"]
+    has_jam = y_true[:, jam] == 1
+    n_pos = y_true.sum(axis=1)
+
+    def _bucket(mask, idx):
+        support = int(mask.sum())
+        recall = float(y_pred[mask, idx].mean()) if support else None
+        return {"recall": recall, "support": support}
+
+    out = {}
+    for cls in CLASSES:
+        idx = CLASS_TO_IDX[cls]
+        is_pos = y_true[:, idx] == 1
+        # For JAMMING itself there is no "other jammer" to be in company
+        # with -- its own presence bit IS the global jamming bit, so using
+        # `has_jam` unmodified would make "with_emitter" vacuously empty too.
+        jam_present_other = has_jam if cls != "JAMMING" else np.zeros(len(y_true), dtype=bool)
+
+        alone_mask = is_pos & (n_pos == 1)
+        with_emitter_mask = is_pos & (n_pos > 1) & (~jam_present_other)
+        with_jammer_mask = is_pos & jam_present_other
+
+        out[cls] = {
+            "alone": _bucket(alone_mask, idx),
+            "with_emitter": _bucket(with_emitter_mask, idx),
+            "with_jammer": _bucket(with_jammer_mask, idx),
+        }
+    return out
+
+
 def confusion_between(y_true, y_pred, class_a, class_b):
     """Among class_a's false positives (predicted present, truly absent), what
     fraction are windows where class_b is truly present?
@@ -225,6 +300,7 @@ def evaluate(ensemble=False, n_models=5):
 
     coarse = coarse_tier_metrics(y_test, preds)
     cvj = comms_vs_jamming(y_test, preds)
+    ric = recall_in_context(y_test, preds)
 
     # LFM_RADAR and FHSS are the two classes needing the most aggressive
     # threshold/loss-weight help (see configs/default.yaml) -- check whether
@@ -240,7 +316,8 @@ def evaluate(ensemble=False, n_models=5):
     with open(evals_dir / "scorecard.json", "w") as f:
         json.dump({"per_class": report, "benchmark": scorecard,
                     "coarse_tier": coarse, "comms_vs_jamming": cvj,
-                    "radar_fhss_confusion": radar_fhss_confusion}, f, indent=2)
+                    "radar_fhss_confusion": radar_fhss_confusion,
+                    "recall_in_context": ric}, f, indent=2)
 
     # Flat CSVs alongside the JSON/PNG artifacts — Power BI (and Excel) read
     # CSV directly via Get Data > Text/CSV, no JSON connector needed. Same
@@ -283,6 +360,18 @@ def evaluate(ensemble=False, n_models=5):
     for tier, rec in coarse["per_tier_recall"].items():
         print(f"    {tier:<10} recall={rec:.4f}" if rec is not None
               else f"    {tier:<10} recall=n/a")
+
+    # Per-class recall split by company -- see recall_in_context's docstring
+    # for why the overall column alone hides this. Every class, not just the
+    # judged ones.
+    def _cell(bucket):
+        return "n/a" if bucket["recall"] is None else f"{bucket['recall']:.3f} (n={bucket['support']})"
+
+    print("\n--- Recall by company: alone / with another emitter / with a jammer ---")
+    print(f"  {'class':<12}{'alone':<18}{'with emitter':<18}{'with jammer':<18}")
+    for cls, buckets in ric.items():
+        print(f"  {cls:<12}{_cell(buckets['alone']):<18}"
+              f"{_cell(buckets['with_emitter']):<18}{_cell(buckets['with_jammer']):<18}")
 
     # Confusion matrix — a single 8x8 no longer makes sense once more than one
     # class can be true in the same window (which of the 2 true classes would
