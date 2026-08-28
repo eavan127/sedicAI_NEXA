@@ -43,14 +43,184 @@ def _qpsk(n_symbols=64, sps=SAMPLES_PER_SYMBOL, offset=0.0039, seed=0):
     return shaped * np.exp(2j * np.pi * offset * np.arange(len(shaped)))
 
 
-def _concentration(points, order=4):
-    """How tightly points cluster on a 4-fold symmetric constellation.
+def _kmeans(xy, k, rng, n_init, n_iter):
+    """Deterministic, seeded Lloyd's-algorithm k-means.
 
-    1.0 means every point sits on the same 90-degree grid; 0.0 means the
-    phases are spread uniformly, which is what a rotating or noise-dominated
-    capture looks like.
+    Not scipy/sklearn's k-means: this project's tests don't otherwise need
+    either as a test-only dependency, and a dozen lines of Lloyd's algorithm
+    plus k-means++ seeding is easy to audit for the one property that
+    matters here -- given the same `rng` state, it always returns the same
+    partition. Multiple restarts (`n_init`) guard against a single unlucky
+    seeding landing in a bad local optimum; the lowest-inertia restart wins.
     """
-    return float(abs(np.mean(np.exp(1j * order * np.angle(points)))))
+    n = len(xy)
+    best_inertia, best_centers, best_labels = np.inf, None, None
+    for _ in range(n_init):
+        centers = np.empty((k, 2))
+        centers[0] = xy[rng.integers(0, n)]
+        d2 = np.sum((xy - centers[0]) ** 2, axis=1)
+        for c in range(1, k):
+            total = d2.sum()
+            probs = d2 / total if total > 0 else np.full(n, 1 / n)
+            centers[c] = xy[rng.choice(n, p=probs)]
+            d2 = np.minimum(d2, np.sum((xy - centers[c]) ** 2, axis=1))
+        for _ in range(n_iter):
+            labels = np.argmin(
+                np.sum((xy[:, None, :] - centers[None, :, :]) ** 2, axis=2),
+                axis=1)
+            new_centers = centers.copy()
+            for c in range(k):
+                mask = labels == c
+                if mask.any():
+                    new_centers[c] = xy[mask].mean(axis=0)
+            if np.allclose(new_centers, centers):
+                centers = new_centers
+                break
+            centers = new_centers
+        labels = np.argmin(
+            np.sum((xy[:, None, :] - centers[None, :, :]) ** 2, axis=2),
+            axis=1)
+        inertia = float(np.sum((xy - centers[labels]) ** 2))
+        if inertia < best_inertia:
+            best_inertia, best_centers, best_labels = inertia, centers, labels
+    return best_inertia, best_centers, best_labels
+
+
+def _concentration(points, order=4, seed=0, n_ref=15):
+    """Are there `order` distinct, roughly equally occupied clusters?
+
+    The metric this replaced -- abs(mean(exp(1j * order * angle(points))))
+    -- answers a different question than the one every call site actually
+    means. Raising each point's phase to the 4th power and averaging asks
+    "do the phases land on a 4-fold grid", which a SINGLE tight cluster
+    answers perfectly: one point at one phase, repeated, has zero phase
+    spread and saturates the metric at 1.0. That is exactly the failure a
+    jammed window exposed -- its recovered "constellation" is the jammer's
+    own carrier, one blob sitting off the origin, and it scored 0.90, higher
+    than genuinely clean QPSK windows from the same capture. One cluster is
+    not four clusters; the metric could not tell the difference because it
+    was never measuring cluster count in the first place.
+
+    This measures it directly: normalise for scale (divide by RMS
+    magnitude, so absolute amplitude cannot move the score), partition the
+    points into `order` groups with a fixed-seed k-means, then score
+
+        (mean pairwise distance between the `order` centroids)
+        / (RMS distance of each point from its own centroid)
+
+    against a reference: the same k-means run, the same number of times,
+    on synthetic points drawn from a single Gaussian fitted to the actual
+    data's own mean and covariance (also fixed-seed, so deterministic). The
+    reference matters because k-means will always "find" some separation
+    when asked to cut a continuous blob or ring into `order` pieces --
+    partitioning a single Gaussian into quadrants is not evidence of four
+    real clusters, it is what k-means does to anything. Comparing the
+    actual within-cluster tightness against what the SAME clustering
+    procedure achieves on a null hypothesis (one blob, same shape and
+    spread) is what actually asks "is there more structure here than one
+    blob would produce" -- this is the standard gap-statistic idea. A
+    single blob and a uniform ring are then not close to their own null:
+    they roughly *are* their own null, so the score collapses to ~0.
+
+    Multiplied by a balance term (smallest cluster's population / largest
+    cluster's population) so four clusters holding wildly unequal point
+    counts -- three real clusters and a sliver -- can't pass as `order`
+    clusters. An empty cluster forces the score to 0 outright.
+
+    Squashed into [0, 1] at the end (score / (score + 1)) so it reads the
+    same direction as the metric it replaces: near 0 for no real
+    structure, and rising for cleaner, more separated, more balanced
+    clusters. The absolute numbers are NOT comparable to the old metric's
+    -- they are a different measurement -- which is why every threshold
+    below was re-measured, not just relabelled.
+
+    `seed`/`n_ref` are exposed only so the calibration numbers in this
+    file's own comments can be reproduced; every call site uses the
+    defaults.
+    """
+    points = np.asarray(points)
+    if len(points) < order:
+        return 0.0
+    xy = np.column_stack([points.real, points.imag])
+    scale = np.sqrt(np.mean(np.abs(points) ** 2))
+    if scale == 0:
+        return 0.0
+    xy = xy / scale
+
+    rng = np.random.default_rng(seed)
+    actual_wcss, centers, labels = _kmeans(xy, order, rng, n_init=5, n_iter=30)
+    counts = np.array([np.sum(labels == c) for c in range(order)])
+    if (counts == 0).any():
+        return 0.0
+
+    mean, cov = xy.mean(axis=0), np.cov(xy.T)
+    ref_wcss = np.mean([
+        _kmeans(rng.multivariate_normal(mean, cov, size=len(xy)), order,
+                rng, n_init=2, n_iter=20)[0]
+        for _ in range(n_ref)])
+
+    gap = np.log(ref_wcss + 1e-9) - np.log(actual_wcss + 1e-9)
+    balance = counts.min() / counts.max()
+    score = max(gap, 0.0) * balance
+    return float(score / (score + 1))
+
+
+def test_cluster_score_is_high_for_four_separated_blobs():
+    """Four tight Gaussian blobs sitting exactly at the QPSK points -- the
+    shape a clean, well-separated constellation actually has. Measured
+    0.809; the floor below leaves >0.1 of margin."""
+    rng = np.random.default_rng(3)
+    centers = np.array([1 + 1j, 1 - 1j, -1 + 1j, -1 - 1j]) / np.sqrt(2)
+    points = np.concatenate([
+        c + 0.05 * (rng.normal(size=50) + 1j * rng.normal(size=50))
+        for c in centers])
+    assert _concentration(points) > 0.7
+
+
+def test_cluster_score_is_near_zero_for_a_single_blob():
+    """This is the regression that motivated replacing _concentration: one
+    tight blob sitting off the origin, the exact shape of the jammer window
+    that scored 0.90 on the old phase-concentration metric (see that
+    function's docstring). Measured here with the OLD one-liner
+    (`abs(mean(exp(1j*4*angle(points))))`) restored: 0.997 -- it thinks a
+    single blob is essentially a perfect 4-fold constellation, because a
+    single, consistent phase is indistinguishable from four points at a
+    consistent 90-degree spacing once you throw away which of the four
+    non-existent lobes each point is nearest to. Against the SAME points,
+    the new metric measures 0.0."""
+    rng = np.random.default_rng(4)
+    points = (0.2 - 2.7j) + 0.05 * (rng.normal(size=200)
+                                     + 1j * rng.normal(size=200))
+    assert _concentration(points) < 0.15
+
+
+def test_cluster_score_is_low_for_a_uniform_ring():
+    """A capture with a residual, un-de-rotated carrier looks like a ring of
+    phases at a roughly constant radius -- no preferred phase, but also no
+    real multi-modal structure a 4-cluster hypothesis should credit.
+    Measured 0.361; still comfortably below the 4-blob score of 0.809
+    above, with the 0.5 ceiling giving margin on both sides."""
+    rng = np.random.default_rng(5)
+    points = np.exp(1j * rng.uniform(0, 2 * np.pi, 200))
+    assert _concentration(points) < 0.5
+
+
+def test_cluster_score_is_scale_and_rotation_invariant():
+    """The constellation's absolute amplitude and absolute phase are both
+    arbitrary -- a receiver's AGC sets the first and a residual carrier
+    offset sets the second -- so neither may move the score. Measured
+    identical (0.8085660946095178 both times, to full float precision,
+    since normalising by RMS magnitude removes scale exactly and k-means'
+    partition is geometry-only) after scaling by 10x and rotating by an
+    arbitrary 1.23 rad."""
+    rng = np.random.default_rng(3)
+    centers = np.array([1 + 1j, 1 - 1j, -1 + 1j, -1 - 1j]) / np.sqrt(2)
+    points = np.concatenate([
+        c + 0.05 * (rng.normal(size=50) + 1j * rng.normal(size=50))
+        for c in centers])
+    base = _concentration(points)
+    transformed = points * 10 * np.exp(1j * 1.23)
+    assert _concentration(transformed) == pytest.approx(base, abs=1e-9)
 
 
 def test_carrier_offset_finds_the_injected_rotation():
@@ -72,20 +242,19 @@ def test_recovered_points_cluster_where_the_raw_samples_do_not():
     rotating capture is a ring, and the same samples de-rotated and decimated
     are four clusters.
 
-    Threshold moved from 0.9 to 0.85 when the matched filter was added:
-    _qpsk is deliberately triangular-pulsed (see its docstring -- a
-    rectangular pulse would make every timing phase correct and the phase
-    search untestable), and an RRC matched filter is by construction
-    mismatched to a triangular pulse. That mismatch costs about 0.10 of
-    concentration (0.9997 unfiltered-pipeline before this filter existed,
-    0.897 with it) -- expected ISI from a correctly-implemented filter, not a
-    symptom of a bug. The claim this test makes still holds enormously:
-    0.897 recovered versus the raw path's own < 0.5.
+    Thresholds re-measured after _concentration was replaced (see its
+    docstring for why: the old phase-concentration metric could not tell one
+    cluster from four, which is the whole property this test exists to
+    check). On this fixture the new metric measures 0.635 for the recovered
+    points and 0.299 for the raw samples. The floor below (0.55) sits 0.085
+    under the measured recovered score with the raw score's own ceiling
+    (0.45) nowhere near it; the raw-samples ceiling (0.45) sits 0.15 above
+    the measured 0.299, comfortable margin on both sides.
     """
     z = _qpsk()
     points, _, _ = recover_symbols(z)
-    assert _concentration(points) > 0.85
-    assert _concentration(z) < 0.5
+    assert _concentration(points) > 0.55
+    assert _concentration(z) < 0.45
 
 
 def test_recovery_picks_the_symbol_timing_phase():
@@ -515,18 +684,19 @@ def test_matched_filter_tightens_clusters_a_raw_decimation_leaves_smeared():
     best_unfiltered = max(
         _concentration(unfiltered[phase::SAMPLES_PER_SYMBOL])
         for phase in range(SAMPLES_PER_SYMBOL))
-    # The plan's 0.85 absolute floor was a prediction from real library
-    # windows at +10 dB; measured on this synthetic RRC+AWGN fixture at
-    # snr_db=3.0 (seed=1), the filtered path lands at ~0.7914 and the best
-    # unfiltered decimation phase at ~0.3753 -- so 0.85 does not hold here.
-    # The floor below is lowered to 0.75, comfortably under the measured
-    # 0.7914 with margin for reproducibility, and still far above the
-    # unfiltered best. The relative-margin assertion is the one that actually
-    # proves the filter earns its place: it requires the filtered path to
-    # beat the best unfiltered phase by 0.15, and the measured gap is ~0.416
-    # (0.7914 - 0.3753) -- nearly 3x that margin.
-    assert _concentration(filtered) > 0.75
-    assert _concentration(filtered) > best_unfiltered + 0.15
+    # Re-measured after _concentration was replaced (see its docstring): the
+    # thresholds below are no longer comparable to the phase-concentration
+    # numbers this comment used to cite. On this fixture (snr_db=3.0,
+    # seed=1) the new metric measures ~0.441 for the filtered path and
+    # ~0.270 for the best unfiltered decimation phase -- a gap of ~0.171.
+    # The floor below (0.35) sits ~0.09 under the measured 0.441. The
+    # relative-margin assertion is the one that actually proves the filter
+    # earns its place: it requires the filtered path to beat the best
+    # unfiltered phase by 0.08, under half the measured 0.171 gap, so
+    # reproducibility noise in the reference sampling has real room to move
+    # without flipping the assertion.
+    assert _concentration(filtered) > 0.35
+    assert _concentration(filtered) > best_unfiltered + 0.08
 
 
 def test_matched_filter_leaves_the_symbol_count_the_edge_trim_predicts():
