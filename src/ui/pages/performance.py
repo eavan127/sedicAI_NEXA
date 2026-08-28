@@ -23,7 +23,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from src.config import CFG, CLASSES, REPO_ROOT, TIERS
-from src.ui.palette import GRID, MPL_FONT, PANEL, TEXT, TEXT_DIM, TIER_COLOR
+from src.ui.palette import (CLASS_COLOR, GRID, MPL_FONT, PANEL, TEXT, TEXT_DIM,
+                             TIER_COLOR, lighten)
 
 CKPT_PATH = REPO_ROOT / CFG["paths"]["checkpoints"] / "best_model.pt"
 EVALS_DIR = REPO_ROOT / CFG["paths"]["evals"]
@@ -165,9 +166,21 @@ def _build_breakdown(progress=gr.Progress()):
 
     progress(0.85, desc="Building chart...")
     fig, ax = plt.subplots(figsize=(9, 4.5))
+    # Colour carries CLASS, lightness carries SINGLE vs MULTI.
+    #
+    # This chart draws eight classes twice over -- sixteen lines. Colouring by
+    # tier gave those sixteen lines only four colours, so the four civilian
+    # classes were indistinguishable from each other and a class's single- and
+    # multi-signal curves were the same colour as well: the only thing telling
+    # them apart was solid vs dashed, which is unreadable once lines cross.
+    #
+    # Per-class hues make every class identifiable, and the multi-signal curve
+    # is drawn in a lightened variant of its own class hue, so the two regimes
+    # separate by colour while a class stays recognisable across both.
     for cls in r.classes:
-        colour = _TIER_COLOR[_TIER_OF[cls]]
+        base = CLASS_COLOR.get(cls, _TIER_COLOR[_TIER_OF[cls]])
         for group, style, marker in (("single", "-", "o"), ("multi", "--", "s")):
+            colour = base if group == "single" else lighten(base, 0.45)
             xs = [s for s in r.snr_bins if r.recall[group][cls][s] is not None]
             ys = [r.recall[group][cls][s] for s in xs]
             if xs:
@@ -186,7 +199,8 @@ def _build_breakdown(progress=gr.Progress()):
     head = (f"**{model_label('auto')}** &nbsp;·&nbsp; "
             f"{r.n_windows['single']:,} single-signal / "
             f"{r.n_windows['multi']:,} multi-signal windows in the test split\n\n"
-            f"Solid = one emitter in the window. Dashed = emitters overlapping. "
+            f"Full colour + solid = one emitter in the window. Pale + dashed = "
+        f"emitters overlapping. Each class keeps its own hue across both. "
             f"Dotted red line is the {CFG['benchmark_recall']:.0%} gate.\n\n")
     head += ("| category | class | " + " | ".join(f"{s:+d} dB" for s in r.snr_bins)
               + " | all |\n")

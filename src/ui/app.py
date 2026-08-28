@@ -1,4 +1,7 @@
 """Assembles the six OMNI pages."""
+import os
+from pathlib import Path
+
 import gradio as gr
 import torch
 import torch.nn as nn
@@ -98,19 +101,66 @@ footer {{ display: none !important; }}
 }}
 """
 
-LOGO_PATH = REPO_ROOT / "assets" / "sedic_logo.png"
+LOGO_NAME = "sedic_logo.png"
+
+
+def _main_worktree_root():
+    """Root of the MAIN checkout, as seen from a linked git worktree.
+
+    In a linked worktree `.git` is a FILE containing `gitdir: <path>`, where
+    <path> is `<main>/.git/worktrees/<name>`. Two levels up from that is
+    `<main>/.git`, whose parent is the main checkout. Returns None when this
+    is the main checkout itself (where `.git` is a directory), or when the
+    file is missing or malformed -- callers treat None as "no extra place to
+    look", never as an error.
+    """
+    dotgit = REPO_ROOT / ".git"
+    if not dotgit.is_file():
+        return None
+    try:
+        line = dotgit.read_text(encoding="utf-8").strip()
+        if not line.startswith("gitdir:"):
+            return None
+        return Path(line.split(":", 1)[1].strip()).parents[1].parent
+    except (OSError, IndexError, ValueError):
+        return None
+
+
+def _logo_path():
+    """Locate the logo, which is gitignored and so exists in only one checkout.
+
+    REPO_ROOT is derived from this file's location, so running the app from a
+    linked worktree pointed it at `<worktree>/assets/` -- a directory that does
+    not exist there, because an ignored file is never materialised into a
+    worktree. The logo silently fell back to the typographic lockup for anyone
+    not running from the main checkout.
+
+    Candidates, in order: an explicit SEDIC_LOGO override, this checkout, then
+    the main checkout. Returns None if none exist, and the caller falls back to
+    type as before.
+    """
+    override = os.environ.get("SEDIC_LOGO")
+    candidates = [Path(override)] if override else []
+    candidates.append(REPO_ROOT / "assets" / LOGO_NAME)
+
+    main_root = _main_worktree_root()
+    if main_root is not None:
+        candidates.append(main_root / "assets" / LOGO_NAME)
+
+    return next((p for p in candidates if p.is_file()), None)
 
 
 def _logo_html():
-    """SEDIC 26 logo, if the file has been placed in assets/.
+    """SEDIC 26 logo, if the asset can be found -- see _logo_path().
 
     Falls back to a typographic lockup rather than a broken image, so the app
     still runs for anyone who has not copied the asset in -- it is not checked
     into git.
     """
-    if LOGO_PATH.exists():
+    path = _logo_path()
+    if path is not None:
         import base64
-        b64 = base64.b64encode(LOGO_PATH.read_bytes()).decode()
+        b64 = base64.b64encode(path.read_bytes()).decode()
         return (f'<img src="data:image/png;base64,{b64}" alt="SEDIC 26" '
                 f'style="height:52px;width:auto;display:block;">')
     return (f'<div style="font-size:26px;font-weight:800;letter-spacing:0.08em;'

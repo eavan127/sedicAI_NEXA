@@ -52,6 +52,37 @@ TIER_COLOR = {
     "Empty": "#6B7280",
 }
 
+# PER-CLASS hues, for charts that draw every class at once.
+#
+# TIER_COLOR above is right when the tier IS the message -- four categories,
+# four colours. It is wrong when eight classes are plotted together: four
+# civilian classes all render in the same teal, and the reader cannot tell
+# which line is which. Ordered within each tier family so the tier is still
+# readable at a glance (cool = civilian, warm = military, red = hostile,
+# grey = empty) while every class stays individually identifiable.
+CLASS_COLOR = {
+    "BPSK": "#1F6FB2",        # civilian -- blue
+    "QPSK": "#2AA3A3",        # civilian -- teal
+    "16QAM": "#7A5BC0",       # civilian -- violet
+    "64QAM": "#C2569A",       # civilian -- magenta
+    "LFM_RADAR": "#627143",   # military -- brand olive
+    "FHSS": "#B07D2B",        # military -- ochre
+    "JAMMING": "#C1121F",     # hostile  -- red
+    "NOISE_FLOOR": "#6B7280", # empty    -- grey
+}
+
+
+def lighten(hex_color, amount=0.45):
+    """Mix a hex colour toward white. Used to separate a secondary series from
+    its primary without spending a second hue on it -- the hue keeps carrying
+    class identity, lightness carries the series.
+    """
+    h = hex_color.lstrip("#")
+    r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    mix = lambda c: int(round(c + (255 - c) * amount))
+    return f"#{mix(r):02X}{mix(g):02X}{mix(b):02X}"
+
+
 # MEASURED provenance. Deliberately outside the tier hues AND outside the
 # brand olive, so a waterfall, spectrum trace or SNR readout can never be
 # mistaken for a detection or for page chrome.
