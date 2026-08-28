@@ -58,7 +58,7 @@ from src.ui.app_models import ensemble_paths  # noqa: E402
 JSR_POINTS = (None, 0, 5, 10, 15, 20)
 
 
-def _load_models(members=None):
+def _load_models(members=None, checkpoints=None):
     """Load the ensemble, or the first `members` of it.
 
     A hypothesis test does not need five models. The pre-registered bar for
@@ -68,8 +68,12 @@ def _load_models(members=None):
     instead of five, and the comparison stays like-for-like as long as the
     baseline is measured with the same number of members.
     """
+    if checkpoints:
+        paths = [Path(c) for c in checkpoints]
+    else:
+        paths = ensemble_paths()[:members] if members else ensemble_paths()
     models = []
-    for path in ensemble_paths()[:members] if members else ensemble_paths():
+    for path in paths:
         model = AMC_CNN(num_classes=len(CLASSES), input_len=CFG["signal"]["window_len"])
         model.load_state_dict(torch.load(path, map_location="cpu"))
         model.eval()
@@ -150,10 +154,23 @@ def main():
                     help="use only the first N ensemble members. Use 1 for a "
                           "single-model hypothesis test; the baseline must be "
                           "measured with the same value.")
+    ap.add_argument("--checkpoint", action="append", default=None,
+                    help="explicit checkpoint path(s) instead of the ensemble. "
+                          "Use this to probe an experimental model without "
+                          "touching results/ensemble_*.pt.")
+    ap.add_argument("--stft-freq-summary", action="store_true",
+                    help="build models with model.stft_freq_summary enabled. "
+                          "Required when probing a checkpoint trained with it, "
+                          "since the flag changes the fused tensor shape. Set "
+                          "in memory only -- configs/default.yaml is not touched.")
     ap.add_argument("--out", type=Path, default=None, help="write JSON here")
     args = ap.parse_args()
 
-    models = _load_models(args.members)
+    if args.stft_freq_summary:
+        CFG.setdefault("model", {})["stft_freq_summary"] = True
+    models = _load_models(args.members, args.checkpoint)
+    print(f"stft_freq_summary = "
+          f"{bool(CFG.get('model', {}).get('stft_freq_summary', False))}")
     print(f"{len(models)} ensemble members  ·  n={args.n} per condition  "
           f"·  SNR {args.snr_db:+.0f} dB  ·  seed {args.seed}\n")
 
