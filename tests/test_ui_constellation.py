@@ -108,19 +108,53 @@ def _concentration(points, order=4, seed=0, n_ref=15):
         (mean pairwise distance between the `order` centroids)
         / (RMS distance of each point from its own centroid)
 
-    against a reference: the same k-means run, the same number of times,
-    on synthetic points drawn from a single Gaussian fitted to the actual
-    data's own mean and covariance (also fixed-seed, so deterministic). The
-    reference matters because k-means will always "find" some separation
-    when asked to cut a continuous blob or ring into `order` pieces --
-    partitioning a single Gaussian into quadrants is not evidence of four
-    real clusters, it is what k-means does to anything. Comparing the
-    actual within-cluster tightness against what the SAME clustering
-    procedure achieves on a null hypothesis (one blob, same shape and
-    spread) is what actually asks "is there more structure here than one
-    blob would produce" -- this is the standard gap-statistic idea. A
-    single blob and a uniform ring are then not close to their own null:
-    they roughly *are* their own null, so the score collapses to ~0.
+    against a reference: the same k-means run, the same number of times, on
+    the points' own distance from the data's CENTROID paired with a
+    uniformly random phase about that centroid (also fixed-seed, so
+    deterministic). The reference matters because k-means will always
+    "find" some separation when asked to cut a continuous blob or ring
+    into `order` pieces -- partitioning a structureless cloud into
+    quadrants is not evidence of four real clusters, it is what k-means
+    does to anything. Comparing the actual within-cluster tightness
+    against what the SAME clustering procedure achieves on a null
+    hypothesis with no angular structure is what actually asks "is there
+    more ANGULAR structure here than chance" -- this is the standard
+    gap-statistic idea, with a null shaped to match what varies and what
+    doesn't in a constellation: distance from centre can carry real
+    information (kept exactly), phase about the centre is the axis a real
+    `order`-cluster constellation actually organises itself along (and so
+    the one thing worth destroying in the null).
+
+    Two earlier versions of this null were tried and rejected before this
+    one, and the reasoning is worth keeping:
+
+    - A single Gaussian fitted to the data's mean and covariance: correct
+      for a single blob (a blob dominates its own Gaussian fit almost by
+      definition, so its null looks like it and the score falls to ~0),
+      but wrong for a ring -- a Gaussian fit to a ring's mean/covariance is
+      a FILLED DISC, and a hollow ring partitions into `order` wedges more
+      tightly than a filled disc of the same spread does, so a ring scored
+      ~0.36 instead of near 0.
+    - Phase shuffled about the ORIGIN, radii from the origin kept exactly:
+      correct for a ring (whose own radii from the origin are already
+      close to constant, so shuffling its phase reproduces a ring and the
+      gap collapses), but wrong for an off-origin blob -- a tight blob
+      sitting away from the origin (the jammed window's actual shape) also
+      has near-constant radius FROM THE ORIGIN, so this null turns it into
+      a full ring at that radius: nothing like the tight blob it came
+      from, so the gap came out large instead of near zero (0.795, worse
+      than the metric this file replaced).
+
+    Centring on the data's own centroid before measuring radius fixes
+    both at once. An off-origin blob's radii from ITS OWN centroid are
+    small and isotropic, so its null (uniform phase about the centroid, at
+    those small radii) reproduces essentially the same blob -- gap ~0. A
+    ring's centroid is already close to the origin, so this changes
+    nothing there -- gap ~0, as it should be. A genuine `order`-cluster
+    constellation's centroid is also near the origin, but unlike the ring
+    its phases are strongly non-uniform about that centroid, so its null
+    (same near-constant radius, but phase-randomised) is nothing like the
+    real, lobed data -- the gap stays large.
 
     Multiplied by a balance term (smallest cluster's population / largest
     cluster's population) so four clusters holding wildly unequal point
@@ -153,10 +187,14 @@ def _concentration(points, order=4, seed=0, n_ref=15):
     if (counts == 0).any():
         return 0.0
 
-    mean, cov = xy.mean(axis=0), np.cov(xy.T)
+    centroid = xy.mean(axis=0)
+    centred = xy - centroid
+    radii = np.hypot(centred[:, 0], centred[:, 1])
     ref_wcss = np.mean([
-        _kmeans(rng.multivariate_normal(mean, cov, size=len(xy)), order,
-                rng, n_init=2, n_iter=20)[0]
+        _kmeans(centroid + radii[:, None] * np.column_stack([
+            np.cos(rng.uniform(0, 2 * np.pi, len(xy))),
+            np.sin(rng.uniform(0, 2 * np.pi, len(xy)))]),
+            order, rng, n_init=2, n_iter=20)[0]
         for _ in range(n_ref)])
 
     gap = np.log(ref_wcss + 1e-9) - np.log(actual_wcss + 1e-9)
@@ -168,13 +206,15 @@ def _concentration(points, order=4, seed=0, n_ref=15):
 def test_cluster_score_is_high_for_four_separated_blobs():
     """Four tight Gaussian blobs sitting exactly at the QPSK points -- the
     shape a clean, well-separated constellation actually has. Measured
-    0.809; the floor below leaves >0.1 of margin."""
+    0.7826 under the centroid-relative null (see _concentration's
+    docstring for why the null is centred on the data's own centroid, not
+    the origin); the floor below leaves >0.13 of margin."""
     rng = np.random.default_rng(3)
     centers = np.array([1 + 1j, 1 - 1j, -1 + 1j, -1 - 1j]) / np.sqrt(2)
     points = np.concatenate([
         c + 0.05 * (rng.normal(size=50) + 1j * rng.normal(size=50))
         for c in centers])
-    assert _concentration(points) > 0.7
+    assert _concentration(points) > 0.65
 
 
 def test_cluster_score_is_near_zero_for_a_single_blob():
@@ -187,7 +227,11 @@ def test_cluster_score_is_near_zero_for_a_single_blob():
     single, consistent phase is indistinguishable from four points at a
     consistent 90-degree spacing once you throw away which of the four
     non-existent lobes each point is nearest to. Against the SAME points,
-    the new metric measures 0.0."""
+    the new metric measures 0.0, using the centroid-relative null (an
+    earlier version of this null, phase-shuffled about the ORIGIN rather
+    than the data's own centroid, turned this off-origin blob's
+    near-constant radius-from-origin into a full ring and scored it 0.795
+    -- see _concentration's docstring)."""
     rng = np.random.default_rng(4)
     points = (0.2 - 2.7j) + 0.05 * (rng.normal(size=200)
                                      + 1j * rng.normal(size=200))
@@ -198,21 +242,26 @@ def test_cluster_score_is_low_for_a_uniform_ring():
     """A capture with a residual, un-de-rotated carrier looks like a ring of
     phases at a roughly constant radius -- no preferred phase, but also no
     real multi-modal structure a 4-cluster hypothesis should credit.
-    Measured 0.361; still comfortably below the 4-blob score of 0.809
-    above, with the 0.5 ceiling giving margin on both sides."""
+    Measured 0.060 under the centroid-relative null -- a ring's centroid
+    already sits near the origin, so centring changes nothing for this
+    case, and shuffling its phase about that centroid reproduces another
+    ring indistinguishable from the data (see _concentration's docstring;
+    an earlier Gaussian-fit null scored this same ring 0.361, because a
+    Gaussian fitted to a ring's own mean/covariance is a filled disc, not
+    a ring, and partitions less tightly than the ring itself does)."""
     rng = np.random.default_rng(5)
     points = np.exp(1j * rng.uniform(0, 2 * np.pi, 200))
-    assert _concentration(points) < 0.5
+    assert _concentration(points) < 0.15
 
 
 def test_cluster_score_is_scale_and_rotation_invariant():
     """The constellation's absolute amplitude and absolute phase are both
     arbitrary -- a receiver's AGC sets the first and a residual carrier
     offset sets the second -- so neither may move the score. Measured
-    identical (0.8085660946095178 both times, to full float precision,
-    since normalising by RMS magnitude removes scale exactly and k-means'
-    partition is geometry-only) after scaling by 10x and rotating by an
-    arbitrary 1.23 rad."""
+    identical (0.7825587667709502 both times, to full float precision,
+    since normalising by RMS magnitude removes scale exactly and both the
+    k-means partition and the centroid-relative null are geometry-only)
+    after scaling by 10x and rotating by an arbitrary 1.23 rad."""
     rng = np.random.default_rng(3)
     centers = np.array([1 + 1j, 1 - 1j, -1 + 1j, -1 - 1j]) / np.sqrt(2)
     points = np.concatenate([
@@ -242,19 +291,18 @@ def test_recovered_points_cluster_where_the_raw_samples_do_not():
     rotating capture is a ring, and the same samples de-rotated and decimated
     are four clusters.
 
-    Thresholds re-measured after _concentration was replaced (see its
-    docstring for why: the old phase-concentration metric could not tell one
-    cluster from four, which is the whole property this test exists to
-    check). On this fixture the new metric measures 0.635 for the recovered
-    points and 0.299 for the raw samples. The floor below (0.55) sits 0.085
-    under the measured recovered score with the raw score's own ceiling
-    (0.45) nowhere near it; the raw-samples ceiling (0.45) sits 0.15 above
-    the measured 0.299, comfortable margin on both sides.
+    Thresholds re-measured again after _concentration's null changed to be
+    centred on the data's own centroid rather than the origin or a
+    Gaussian fit (see _concentration's docstring for why). On this fixture
+    the metric now measures 0.580 for the recovered points and 0.124 for
+    the raw samples. The floor below (0.45) sits 0.13 under the measured
+    recovered score; the raw-samples ceiling (0.3) sits 0.176 above the
+    measured 0.124 -- comfortable margin on both sides.
     """
     z = _qpsk()
     points, _, _ = recover_symbols(z)
-    assert _concentration(points) > 0.55
-    assert _concentration(z) < 0.45
+    assert _concentration(points) > 0.45
+    assert _concentration(z) < 0.3
 
 
 def test_recovery_picks_the_symbol_timing_phase():
@@ -684,19 +732,17 @@ def test_matched_filter_tightens_clusters_a_raw_decimation_leaves_smeared():
     best_unfiltered = max(
         _concentration(unfiltered[phase::SAMPLES_PER_SYMBOL])
         for phase in range(SAMPLES_PER_SYMBOL))
-    # Re-measured after _concentration was replaced (see its docstring): the
-    # thresholds below are no longer comparable to the phase-concentration
-    # numbers this comment used to cite. On this fixture (snr_db=3.0,
-    # seed=1) the new metric measures ~0.441 for the filtered path and
-    # ~0.270 for the best unfiltered decimation phase -- a gap of ~0.171.
-    # The floor below (0.35) sits ~0.09 under the measured 0.441. The
-    # relative-margin assertion is the one that actually proves the filter
-    # earns its place: it requires the filtered path to beat the best
-    # unfiltered phase by 0.08, under half the measured 0.171 gap, so
-    # reproducibility noise in the reference sampling has real room to move
-    # without flipping the assertion.
-    assert _concentration(filtered) > 0.35
-    assert _concentration(filtered) > best_unfiltered + 0.08
+    # Re-measured again after _concentration's null moved from a Gaussian
+    # fit to a centroid-relative phase shuffle (see _concentration's
+    # docstring). On this fixture (snr_db=3.0, seed=1) the metric now
+    # measures ~0.368 for the filtered path and ~0.168 for the best
+    # unfiltered decimation phase -- a gap of ~0.20. The floor below (0.25)
+    # sits ~0.12 under the measured 0.368. The relative-margin assertion
+    # requires the filtered path to beat the best unfiltered phase by 0.10,
+    # half the measured 0.20 gap, so reproducibility noise in the reference
+    # sampling has real room to move without flipping the assertion.
+    assert _concentration(filtered) > 0.25
+    assert _concentration(filtered) > best_unfiltered + 0.10
 
 
 def test_matched_filter_leaves_the_symbol_count_the_edge_trim_predicts():
