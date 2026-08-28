@@ -319,16 +319,41 @@ def evaluate(ensemble=False, n_models=5):
             accs.append(preds[m, idx].mean() if m.any() else np.nan)
         return accs
 
+    def _class_mean_prob_by_snr(idx):
+        """Mean RAW sigmoid probability (not thresholded) at each SNR bin, of
+        windows where this class is truly present. Distinguishes two
+        different explanations for a recall drop at some SNR: if this also
+        drops, the model itself is less confident there (a training-data
+        problem); if this stays flat while recall still drops, the threshold
+        is wrong for that regime specifically (a calibration problem) --
+        very different fixes. Built for FHSS's SNR curve, which peaks at
+        -6dB and declines toward +10dB -- unexplained until this ran."""
+        vals = []
+        for s in unique_snrs:
+            m = (snr_test == s) & (y_test[:, idx] == 1)
+            vals.append(probs[m, idx].mean() if m.any() else np.nan)
+        return vals
+
     # Same grid feeds the plot below and the CSV — compute once.
     accs_by_class = {cls: _class_recall_by_snr(CLASS_TO_IDX[cls]) for cls in CLASSES}
+    probs_by_class = {cls: _class_mean_prob_by_snr(CLASS_TO_IDX[cls]) for cls in CLASSES}
     with open(csv_dir / "accuracy_by_class_snr.csv", "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["class", "snr_db", "recall", "is_judged_class"])
+        w.writerow(["class", "snr_db", "recall", "mean_probability", "is_judged_class"])
         for cls in CLASSES:
-            for s, acc in zip(unique_snrs, accs_by_class[cls]):
-                w.writerow([cls, s, acc, cls in CFG["judged_classes"]])
+            for s, acc, prob in zip(unique_snrs, accs_by_class[cls], probs_by_class[cls]):
+                w.writerow([cls, s, acc, prob, cls in CFG["judged_classes"]])
 
-    plt.figure()
+    print("\n--- Recall vs mean raw probability by SNR (judged classes) ---")
+    print("A recall drop with FLAT probability means the threshold is wrong for")
+    print("that SNR regime. A recall drop WITH probability also dropping means")
+    print("the model itself is less confident there -- a training-data issue.")
+    for cls in CFG["judged_classes"]:
+        print(f"  {cls}:")
+        for s, acc, prob in zip(unique_snrs, accs_by_class[cls], probs_by_class[cls]):
+            print(f"    SNR={s:>5}dB  recall={acc:.3f}  mean_prob={prob:.3f}")
+
+    plt.figure(figsize=(9, 6))
     plt.plot(unique_snrs, [(preds[snr_test == s] == y_test[snr_test == s]).mean()
                             for s in unique_snrs],
               marker="o", color="black",
@@ -350,7 +375,10 @@ def evaluate(ensemble=False, n_models=5):
     # negatives too). Different quantities, same 0-1 axis; see legend.
     plt.ylabel("Accuracy / Recall")
     plt.title("Accuracy vs. SNR — all classes")
-    plt.legend(fontsize=8)
+    # Outside the axes, not "best" auto-placement -- auto-placement put the
+    # legend box on top of data lines rising through the middle of the plot.
+    # Fixed outside-right position never overlaps data.
+    plt.legend(fontsize=8, loc="upper left", bbox_to_anchor=(1.02, 1), borderaxespad=0)
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
     plt.savefig(evals_dir / "accuracy_vs_snr.png", dpi=150)
