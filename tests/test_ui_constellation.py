@@ -791,6 +791,31 @@ def test_caption_no_longer_claims_the_score_rises_toward_one():
         plt.close(fig)
 
 
+def test_captions_do_not_run_off_the_right_edge_of_the_figure():
+    """Every fig.text() caption, including the cluster-score one, must render
+    fully inside the figure's own width. A caption wider than the figure
+    gets silently clipped at the canvas boundary -- matplotlib does not wrap
+    or warn, it just cuts the pixels, which previously ran the
+    cluster-score caption off the edge mid-word. Measured with the actual
+    Agg renderer's window extent, not by eyeballing the string length,
+    since fontsize/dpi/figure-width all factor into where text actually
+    lands."""
+    s = _session({"QPSK": [0.60, 0.60, 0.60, 0.95, 0.60, 0.60]})
+    s.display_smoothed = False
+    fig = constellation_figure(s)
+    try:
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+        fig_w_px = fig.get_size_inches()[0] * fig.dpi
+        for t in fig.texts:
+            right_edge = t.get_window_extent(renderer=renderer).x1
+            assert right_edge <= fig_w_px, (
+                f"caption runs off the figure edge ({right_edge:.1f}px > "
+                f"{fig_w_px:.1f}px): {t.get_text()!r}")
+    finally:
+        plt.close(fig)
+
+
 def test_civilian_windows_does_not_call_cluster_score(monkeypatch):
     """Selection stays quality-blind and quality-uncomputed: civilian_windows
     must not import or call cluster_score, even indirectly. Monkeypatching

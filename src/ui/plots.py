@@ -535,12 +535,10 @@ def constellation_figure(session, smoothed=None, count=4):
         "for how they look — a synthesized scene splices independent "
         "recordings, so some windows straddle a seam and will not cluster")
     score_text = (
-        "\"clusters\" is a measured cluster-separation score computed from "
-        "this window's own recovered symbols, not the classifier — 0 means "
-        "no cluster structure at all; on real captures a clean QPSK window "
-        "at +10 dB reads about 0.3 (best observed 0.58) and a capture with "
-        "no civilian emitter reads below 0.07 nine times in ten — 1.0 is "
-        "reachable only on synthetic ideal points, never a real capture")
+        "\"clusters\" is measured from this window's own recovered symbols, "
+        "not the classifier — 0 means no cluster structure; clean QPSK at "
+        "+10 dB reads ~0.3, below 0.07 means nothing is there, and 1.0 is "
+        "never reached on a real capture")
     fig.text(0.01, 0.105, score_text, color=TEXT_DIM, fontsize=7)
     fig.text(0.01, 0.075, chain_text, color=TEXT_DIM, fontsize=7)
     fig.text(0.01, 0.045, caveat_text, color=TEXT_DIM, fontsize=7)
