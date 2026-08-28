@@ -5,18 +5,21 @@ known injected carrier offset and a known symbol timing are the only way to
 assert that recovery found the RIGHT answer rather than merely a plausible
 one.
 """
+import re
+
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
 from src.config import CFG, CLASSES, resolve_multilabel_thresholds
+from src.scenarios import CIVILIAN
 from src.timeline import TimelineResult
 from src.ui.pages.rf_replay import _render
 from src.ui.palette import INSTRUMENT, tier_color
-from src.ui.plots import (RRC_SPAN_SYMBOLS, SAMPLES_PER_SYMBOL,
-                          carrier_offset, constellation_figure,
-                          recover_symbols, rrc_taps)
+from src.ui.plots import (CONSTELLATION_ORDER, RRC_SPAN_SYMBOLS,
+                          SAMPLES_PER_SYMBOL, carrier_offset, cluster_score,
+                          constellation_figure, recover_symbols, rrc_taps)
 from src.ui.session import CaptureSession
 
 
@@ -43,170 +46,17 @@ def _qpsk(n_symbols=64, sps=SAMPLES_PER_SYMBOL, offset=0.0039, seed=0):
     return shaped * np.exp(2j * np.pi * offset * np.arange(len(shaped)))
 
 
-def _kmeans(xy, k, rng, n_init, n_iter):
-    """Deterministic, seeded Lloyd's-algorithm k-means.
+# _kmeans and cluster_score (the k-means-based cluster-separation
+# statistic formerly called cluster_score here) now live in
+# src.ui.plots -- shipped code, not test-only -- so the panel can
+# display the same number this suite verifies. Imported above.
 
-    Not scipy/sklearn's k-means: this project's tests don't otherwise need
-    either as a test-only dependency, and a dozen lines of Lloyd's algorithm
-    plus k-means++ seeding is easy to audit for the one property that
-    matters here -- given the same `rng` state, it always returns the same
-    partition. Multiple restarts (`n_init`) guard against a single unlucky
-    seeding landing in a bad local optimum; the lowest-inertia restart wins.
-    """
-    n = len(xy)
-    best_inertia, best_centers, best_labels = np.inf, None, None
-    for _ in range(n_init):
-        centers = np.empty((k, 2))
-        centers[0] = xy[rng.integers(0, n)]
-        d2 = np.sum((xy - centers[0]) ** 2, axis=1)
-        for c in range(1, k):
-            total = d2.sum()
-            probs = d2 / total if total > 0 else np.full(n, 1 / n)
-            centers[c] = xy[rng.choice(n, p=probs)]
-            d2 = np.minimum(d2, np.sum((xy - centers[c]) ** 2, axis=1))
-        for _ in range(n_iter):
-            labels = np.argmin(
-                np.sum((xy[:, None, :] - centers[None, :, :]) ** 2, axis=2),
-                axis=1)
-            new_centers = centers.copy()
-            for c in range(k):
-                mask = labels == c
-                if mask.any():
-                    new_centers[c] = xy[mask].mean(axis=0)
-            if np.allclose(new_centers, centers):
-                centers = new_centers
-                break
-            centers = new_centers
-        labels = np.argmin(
-            np.sum((xy[:, None, :] - centers[None, :, :]) ** 2, axis=2),
-            axis=1)
-        inertia = float(np.sum((xy - centers[labels]) ** 2))
-        if inertia < best_inertia:
-            best_inertia, best_centers, best_labels = inertia, centers, labels
-    return best_inertia, best_centers, best_labels
-
-
-def _concentration(points, order=4, seed=0, n_ref=15):
-    """Are there `order` distinct, roughly equally occupied clusters?
-
-    The metric this replaced -- abs(mean(exp(1j * order * angle(points))))
-    -- answers a different question than the one every call site actually
-    means. Raising each point's phase to the 4th power and averaging asks
-    "do the phases land on a 4-fold grid", which a SINGLE tight cluster
-    answers perfectly: one point at one phase, repeated, has zero phase
-    spread and saturates the metric at 1.0. That is exactly the failure a
-    jammed window exposed -- its recovered "constellation" is the jammer's
-    own carrier, one blob sitting off the origin, and it scored 0.90, higher
-    than genuinely clean QPSK windows from the same capture. One cluster is
-    not four clusters; the metric could not tell the difference because it
-    was never measuring cluster count in the first place.
-
-    This measures it directly: normalise for scale (divide by RMS
-    magnitude, so absolute amplitude cannot move the score), partition the
-    points into `order` groups with a fixed-seed k-means, then score
-
-        (mean pairwise distance between the `order` centroids)
-        / (RMS distance of each point from its own centroid)
-
-    against a reference: the same k-means run, the same number of times, on
-    the points' own distance from the data's CENTROID paired with a
-    uniformly random phase about that centroid (also fixed-seed, so
-    deterministic). The reference matters because k-means will always
-    "find" some separation when asked to cut a continuous blob or ring
-    into `order` pieces -- partitioning a structureless cloud into
-    quadrants is not evidence of four real clusters, it is what k-means
-    does to anything. Comparing the actual within-cluster tightness
-    against what the SAME clustering procedure achieves on a null
-    hypothesis with no angular structure is what actually asks "is there
-    more ANGULAR structure here than chance" -- this is the standard
-    gap-statistic idea, with a null shaped to match what varies and what
-    doesn't in a constellation: distance from centre can carry real
-    information (kept exactly), phase about the centre is the axis a real
-    `order`-cluster constellation actually organises itself along (and so
-    the one thing worth destroying in the null).
-
-    Two earlier versions of this null were tried and rejected before this
-    one, and the reasoning is worth keeping:
-
-    - A single Gaussian fitted to the data's mean and covariance: correct
-      for a single blob (a blob dominates its own Gaussian fit almost by
-      definition, so its null looks like it and the score falls to ~0),
-      but wrong for a ring -- a Gaussian fit to a ring's mean/covariance is
-      a FILLED DISC, and a hollow ring partitions into `order` wedges more
-      tightly than a filled disc of the same spread does, so a ring scored
-      ~0.36 instead of near 0.
-    - Phase shuffled about the ORIGIN, radii from the origin kept exactly:
-      correct for a ring (whose own radii from the origin are already
-      close to constant, so shuffling its phase reproduces a ring and the
-      gap collapses), but wrong for an off-origin blob -- a tight blob
-      sitting away from the origin (the jammed window's actual shape) also
-      has near-constant radius FROM THE ORIGIN, so this null turns it into
-      a full ring at that radius: nothing like the tight blob it came
-      from, so the gap came out large instead of near zero (0.795, worse
-      than the metric this file replaced).
-
-    Centring on the data's own centroid before measuring radius fixes
-    both at once. An off-origin blob's radii from ITS OWN centroid are
-    small and isotropic, so its null (uniform phase about the centroid, at
-    those small radii) reproduces essentially the same blob -- gap ~0. A
-    ring's centroid is already close to the origin, so this changes
-    nothing there -- gap ~0, as it should be. A genuine `order`-cluster
-    constellation's centroid is also near the origin, but unlike the ring
-    its phases are strongly non-uniform about that centroid, so its null
-    (same near-constant radius, but phase-randomised) is nothing like the
-    real, lobed data -- the gap stays large.
-
-    Multiplied by a balance term (smallest cluster's population / largest
-    cluster's population) so four clusters holding wildly unequal point
-    counts -- three real clusters and a sliver -- can't pass as `order`
-    clusters. An empty cluster forces the score to 0 outright.
-
-    Squashed into [0, 1] at the end (score / (score + 1)) so it reads the
-    same direction as the metric it replaces: near 0 for no real
-    structure, and rising for cleaner, more separated, more balanced
-    clusters. The absolute numbers are NOT comparable to the old metric's
-    -- they are a different measurement -- which is why every threshold
-    below was re-measured, not just relabelled.
-
-    `seed`/`n_ref` are exposed only so the calibration numbers in this
-    file's own comments can be reproduced; every call site uses the
-    defaults.
-    """
-    points = np.asarray(points)
-    if len(points) < order:
-        return 0.0
-    xy = np.column_stack([points.real, points.imag])
-    scale = np.sqrt(np.mean(np.abs(points) ** 2))
-    if scale == 0:
-        return 0.0
-    xy = xy / scale
-
-    rng = np.random.default_rng(seed)
-    actual_wcss, centers, labels = _kmeans(xy, order, rng, n_init=5, n_iter=30)
-    counts = np.array([np.sum(labels == c) for c in range(order)])
-    if (counts == 0).any():
-        return 0.0
-
-    centroid = xy.mean(axis=0)
-    centred = xy - centroid
-    radii = np.hypot(centred[:, 0], centred[:, 1])
-    ref_wcss = np.mean([
-        _kmeans(centroid + radii[:, None] * np.column_stack([
-            np.cos(rng.uniform(0, 2 * np.pi, len(xy))),
-            np.sin(rng.uniform(0, 2 * np.pi, len(xy)))]),
-            order, rng, n_init=2, n_iter=20)[0]
-        for _ in range(n_ref)])
-
-    gap = np.log(ref_wcss + 1e-9) - np.log(actual_wcss + 1e-9)
-    balance = counts.min() / counts.max()
-    score = max(gap, 0.0) * balance
-    return float(score / (score + 1))
 
 
 def test_cluster_score_is_high_for_four_separated_blobs():
     """Four tight Gaussian blobs sitting exactly at the QPSK points -- the
     shape a clean, well-separated constellation actually has. Measured
-    0.7826 under the centroid-relative null (see _concentration's
+    0.7826 under the centroid-relative null (see cluster_score's
     docstring for why the null is centred on the data's own centroid, not
     the origin); the floor below leaves >0.13 of margin."""
     rng = np.random.default_rng(3)
@@ -214,11 +64,11 @@ def test_cluster_score_is_high_for_four_separated_blobs():
     points = np.concatenate([
         c + 0.05 * (rng.normal(size=50) + 1j * rng.normal(size=50))
         for c in centers])
-    assert _concentration(points) > 0.65
+    assert cluster_score(points) > 0.65
 
 
 def test_cluster_score_is_near_zero_for_a_single_blob():
-    """This is the regression that motivated replacing _concentration: one
+    """This is the regression that motivated replacing cluster_score: one
     tight blob sitting off the origin, the exact shape of the jammer window
     that scored 0.90 on the old phase-concentration metric (see that
     function's docstring). Measured here with the OLD one-liner
@@ -231,11 +81,11 @@ def test_cluster_score_is_near_zero_for_a_single_blob():
     earlier version of this null, phase-shuffled about the ORIGIN rather
     than the data's own centroid, turned this off-origin blob's
     near-constant radius-from-origin into a full ring and scored it 0.795
-    -- see _concentration's docstring)."""
+    -- see cluster_score's docstring)."""
     rng = np.random.default_rng(4)
     points = (0.2 - 2.7j) + 0.05 * (rng.normal(size=200)
                                      + 1j * rng.normal(size=200))
-    assert _concentration(points) < 0.15
+    assert cluster_score(points) < 0.15
 
 
 def test_cluster_score_is_low_for_a_uniform_ring():
@@ -245,13 +95,13 @@ def test_cluster_score_is_low_for_a_uniform_ring():
     Measured 0.060 under the centroid-relative null -- a ring's centroid
     already sits near the origin, so centring changes nothing for this
     case, and shuffling its phase about that centroid reproduces another
-    ring indistinguishable from the data (see _concentration's docstring;
+    ring indistinguishable from the data (see cluster_score's docstring;
     an earlier Gaussian-fit null scored this same ring 0.361, because a
     Gaussian fitted to a ring's own mean/covariance is a filled disc, not
     a ring, and partitions less tightly than the ring itself does)."""
     rng = np.random.default_rng(5)
     points = np.exp(1j * rng.uniform(0, 2 * np.pi, 200))
-    assert _concentration(points) < 0.15
+    assert cluster_score(points) < 0.15
 
 
 def test_cluster_score_is_scale_and_rotation_invariant():
@@ -267,9 +117,9 @@ def test_cluster_score_is_scale_and_rotation_invariant():
     points = np.concatenate([
         c + 0.05 * (rng.normal(size=50) + 1j * rng.normal(size=50))
         for c in centers])
-    base = _concentration(points)
+    base = cluster_score(points)
     transformed = points * 10 * np.exp(1j * 1.23)
-    assert _concentration(transformed) == pytest.approx(base, abs=1e-9)
+    assert cluster_score(transformed) == pytest.approx(base, abs=1e-9)
 
 
 def test_carrier_offset_finds_the_injected_rotation():
@@ -291,9 +141,9 @@ def test_recovered_points_cluster_where_the_raw_samples_do_not():
     rotating capture is a ring, and the same samples de-rotated and decimated
     are four clusters.
 
-    Thresholds re-measured again after _concentration's null changed to be
+    Thresholds re-measured again after cluster_score's null changed to be
     centred on the data's own centroid rather than the origin or a
-    Gaussian fit (see _concentration's docstring for why). On this fixture
+    Gaussian fit (see cluster_score's docstring for why). On this fixture
     the metric now measures 0.580 for the recovered points and 0.124 for
     the raw samples. The floor below (0.45) sits 0.13 under the measured
     recovered score; the raw-samples ceiling (0.3) sits 0.176 above the
@@ -301,8 +151,8 @@ def test_recovered_points_cluster_where_the_raw_samples_do_not():
     """
     z = _qpsk()
     points, _, _ = recover_symbols(z)
-    assert _concentration(points) > 0.45
-    assert _concentration(z) < 0.3
+    assert cluster_score(points) > 0.45
+    assert cluster_score(z) < 0.3
 
 
 def test_recovery_picks_the_symbol_timing_phase():
@@ -730,10 +580,10 @@ def test_matched_filter_tightens_clusters_a_raw_decimation_leaves_smeared():
     filtered, _, _ = recover_symbols(z)
     unfiltered = z / np.sqrt(np.mean(np.abs(z) ** 2))
     best_unfiltered = max(
-        _concentration(unfiltered[phase::SAMPLES_PER_SYMBOL])
+        cluster_score(unfiltered[phase::SAMPLES_PER_SYMBOL])
         for phase in range(SAMPLES_PER_SYMBOL))
-    # Re-measured again after _concentration's null moved from a Gaussian
-    # fit to a centroid-relative phase shuffle (see _concentration's
+    # Re-measured again after cluster_score's null moved from a Gaussian
+    # fit to a centroid-relative phase shuffle (see cluster_score's
     # docstring). On this fixture (snr_db=3.0, seed=1) the metric now
     # measures ~0.368 for the filtered path and ~0.168 for the best
     # unfiltered decimation phase -- a gap of ~0.20. The floor below (0.25)
@@ -741,8 +591,8 @@ def test_matched_filter_tightens_clusters_a_raw_decimation_leaves_smeared():
     # requires the filtered path to beat the best unfiltered phase by 0.10,
     # half the measured 0.20 gap, so reproducibility noise in the reference
     # sampling has real room to move without flipping the assertion.
-    assert _concentration(filtered) > 0.25
-    assert _concentration(filtered) > best_unfiltered + 0.10
+    assert cluster_score(filtered) > 0.25
+    assert cluster_score(filtered) > best_unfiltered + 0.10
 
 
 def test_matched_filter_leaves_the_symbol_count_the_edge_trim_predicts():
@@ -764,3 +614,109 @@ def test_caption_names_the_matched_filter_step():
         assert "matched filter" in captions
     finally:
         plt.close(fig)
+
+
+def test_constellation_order_covers_all_civilian_classes():
+    """The score asks "are there `order` distinct clusters", so every
+    civilian class must be scored at its own true constellation order --
+    BPSK 2, QPSK 4, 16QAM 16, 64QAM 64 -- never a single default. Measured:
+    asking order=4 of a genuinely 2-cluster BPSK set returns 0.67, a high
+    score for the wrong question."""
+    assert set(CONSTELLATION_ORDER) == set(CIVILIAN)
+    assert CONSTELLATION_ORDER == {"BPSK": 2, "QPSK": 4, "16QAM": 16,
+                                    "64QAM": 64}
+
+
+def test_qpsk_column_bottom_title_contains_a_cluster_score():
+    """56 recovered symbols at QPSK's order-4 is 14 per cluster, comfortably
+    over the 8-per-cluster floor, so the title must carry a real number."""
+    s = _session({"QPSK": [0.60, 0.60, 0.60, 0.95, 0.60, 0.60]})
+    s.display_smoothed = False
+    fig = constellation_figure(s)
+    try:
+        bottom_titles = [ax.get_title() for ax in fig.axes[4:]]
+        assert all(re.search(r"clusters \d\.\d\d", t) for t in bottom_titles)
+    finally:
+        plt.close(fig)
+
+
+def test_16qam_column_says_too_few_symbols_and_prints_no_score():
+    """56 symbols at 16QAM's order-16 is 3.5 per cluster -- under the
+    8-per-cluster floor -- so the title must say why it cannot score rather
+    than print a number dressed up as a measurement."""
+    s = _session({"16QAM": [0.60, 0.60, 0.60, 0.95, 0.60, 0.60]})
+    s.display_smoothed = False
+    fig = constellation_figure(s)
+    try:
+        bottom_titles = [ax.get_title() for ax in fig.axes[4:]]
+        assert all("too few" in t for t in bottom_titles)
+        assert all("16" in t for t in bottom_titles)   # names the order
+        # No number that could be read as a cluster score (a 0.xx figure).
+        assert not any(re.search(r"\d\.\d\d", t) for t in bottom_titles)
+    finally:
+        plt.close(fig)
+
+
+def test_no_power_column_gets_neither_score_nor_too_few_note():
+    """A degenerate window had nothing recovered, so its existing "recovery
+    skipped" title stands unchanged -- it earns neither a score nor the
+    too-few-symbols note, since both presuppose a real recovery happened."""
+    s = _session({"QPSK": [0.60, 0.60, 0.60, 0.95, 0.60, 0.60]})
+    s.display_smoothed = False
+    picks = s.civilian_windows()
+    zeroed_index = picks[1][0]
+    s.iq = s.iq.copy()
+    s.iq[zeroed_index * 512:(zeroed_index + 1) * 512] = 0
+    fig = constellation_figure(s)
+    try:
+        titles = [ax.get_title() for ax in fig.axes[4:]]
+        no_power_titles = [t for t in titles if "no power" in t]
+        assert len(no_power_titles) == 1
+        assert not any("clusters" in t or "too few" in t
+                        for t in no_power_titles)
+    finally:
+        plt.close(fig)
+
+
+def test_caption_explains_the_cluster_score():
+    """The panel must say, in plain language, what the number next to the
+    symbol count is: a measured statistic computed from the samples --
+    never from the classifier -- with 0 meaning no cluster structure."""
+    s = _session({"QPSK": [0.60, 0.60, 0.60, 0.95, 0.60, 0.60]})
+    s.display_smoothed = False
+    fig = constellation_figure(s)
+    try:
+        captions = " ".join(t.get_text() for t in fig.texts)
+        assert "cluster" in captions.lower()
+        assert "0" in captions and "no cluster structure" in captions
+        assert "classifier" in captions.lower()
+        # Existing caption lines must still be present.
+        assert "matched filter" in captions
+        assert "spaced evenly" in captions
+        assert "seam" in captions
+    finally:
+        plt.close(fig)
+
+
+def test_civilian_windows_does_not_call_cluster_score(monkeypatch):
+    """Selection stays quality-blind and quality-uncomputed: civilian_windows
+    must not import or call cluster_score, even indirectly. Monkeypatching
+    it to raise and confirming selection is unchanged is the strongest
+    available proof that no code path calls it."""
+    import src.ui.plots as plots_mod
+    import src.ui.session as session_mod
+
+    assert not hasattr(session_mod, "cluster_score")
+
+    def boom(*args, **kwargs):
+        raise AssertionError("civilian_windows must not call cluster_score")
+
+    monkeypatch.setattr(plots_mod, "cluster_score", boom)
+    s = _session({"QPSK": list(np.linspace(0.30, 0.90, 20))}, n_windows=20)
+    s.display_smoothed = False
+    picks = s.civilian_windows()
+    assert len(picks) == 4
+    indices = [p[0] for p in picks]
+    assert indices == sorted(indices)
+    assert indices[0] == 0
+    assert indices[-1] == 19

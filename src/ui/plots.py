@@ -167,6 +167,186 @@ def recover_symbols(window, sps=SAMPLES_PER_SYMBOL):
     return best_points, offset, best_phase
 
 
+# The score asks "are there `order` distinct clusters", so it must be run at
+# the modulation's ACTUAL constellation order, never a fixed default --
+# measured, asking order=4 of a genuinely 2-cluster BPSK set returns 0.67, a
+# high score for the wrong question. Named here, next to cluster_score,
+# rather than left implicit at each call site.
+CONSTELLATION_ORDER = {"BPSK": 2, "QPSK": 4, "16QAM": 16, "64QAM": 64}
+
+# cluster_score's null resamples the k-means fit `n_ref` times, so the
+# statistic needs enough points per cluster to say anything at all. Below
+# this, the gap statistic is measuring sampling noise, not structure --
+# 56 recovered symbols (see _symbols_per_window) is 14/cluster at QPSK's
+# order 4 and 28/cluster at BPSK's order 2 (both score), but only
+# 3.5/cluster at 16QAM's order 16 and under 1/cluster at 64QAM's order 64
+# (neither can).
+MIN_POINTS_PER_CLUSTER = 8
+
+
+def _kmeans(xy, k, rng, n_init, n_iter):
+    """Deterministic, seeded Lloyd's-algorithm k-means.
+
+    Not scipy/sklearn's k-means: this project doesn't otherwise need either
+    as a dependency, and a dozen lines of Lloyd's algorithm plus k-means++
+    seeding is easy to audit for the one property that matters here -- given
+    the same `rng` state, it always returns the same partition. Multiple
+    restarts (`n_init`) guard against a single unlucky seeding landing in a
+    bad local optimum; the lowest-inertia restart wins.
+    """
+    n = len(xy)
+    best_inertia, best_centers, best_labels = np.inf, None, None
+    for _ in range(n_init):
+        centers = np.empty((k, 2))
+        centers[0] = xy[rng.integers(0, n)]
+        d2 = np.sum((xy - centers[0]) ** 2, axis=1)
+        for c in range(1, k):
+            total = d2.sum()
+            probs = d2 / total if total > 0 else np.full(n, 1 / n)
+            centers[c] = xy[rng.choice(n, p=probs)]
+            d2 = np.minimum(d2, np.sum((xy - centers[c]) ** 2, axis=1))
+        for _ in range(n_iter):
+            labels = np.argmin(
+                np.sum((xy[:, None, :] - centers[None, :, :]) ** 2, axis=2),
+                axis=1)
+            new_centers = centers.copy()
+            for c in range(k):
+                mask = labels == c
+                if mask.any():
+                    new_centers[c] = xy[mask].mean(axis=0)
+            if np.allclose(new_centers, centers):
+                centers = new_centers
+                break
+            centers = new_centers
+        labels = np.argmin(
+            np.sum((xy[:, None, :] - centers[None, :, :]) ** 2, axis=2),
+            axis=1)
+        inertia = float(np.sum((xy - centers[labels]) ** 2))
+        if inertia < best_inertia:
+            best_inertia, best_centers, best_labels = inertia, centers, labels
+    return best_inertia, best_centers, best_labels
+
+
+def cluster_score(points, order=4, seed=0, n_ref=15):
+    """Are there `order` distinct, roughly equally occupied clusters?
+
+    MEASURED, not MODEL -- computed entirely from the capture's own
+    recovered samples, with no model involvement, so it takes INSTRUMENT /
+    TEXT_DIM styling on screen and never a tier colour.
+
+    The metric this replaced -- abs(mean(exp(1j * order * angle(points))))
+    -- answers a different question than the one every call site actually
+    means. Raising each point's phase to the 4th power and averaging asks
+    "do the phases land on a 4-fold grid", which a SINGLE tight cluster
+    answers perfectly: one point at one phase, repeated, has zero phase
+    spread and saturates the metric at 1.0. That is exactly the failure a
+    jammed window exposed -- its recovered "constellation" is the jammer's
+    own carrier, one blob sitting off the origin, and it scored 0.90, higher
+    than genuinely clean QPSK windows from the same capture. One cluster is
+    not four clusters; the metric could not tell the difference because it
+    was never measuring cluster count in the first place.
+
+    This measures it directly: normalise for scale (divide by RMS
+    magnitude, so absolute amplitude cannot move the score), partition the
+    points into `order` groups with a fixed-seed k-means, then score
+
+        (mean pairwise distance between the `order` centroids)
+        / (RMS distance of each point from its own centroid)
+
+    against a reference: the same k-means run, the same number of times, on
+    the points' own distance from the data's CENTROID paired with a
+    uniformly random phase about that centroid (also fixed-seed, so
+    deterministic). The reference matters because k-means will always
+    "find" some separation when asked to cut a continuous blob or ring
+    into `order` pieces -- partitioning a structureless cloud into
+    quadrants is not evidence of four real clusters, it is what k-means
+    does to anything. Comparing the actual within-cluster tightness
+    against what the SAME clustering procedure achieves on a null
+    hypothesis with no angular structure is what actually asks "is there
+    more ANGULAR structure here than chance" -- this is the standard
+    gap-statistic idea, with a null shaped to match what varies and what
+    doesn't in a constellation: distance from centre can carry real
+    information (kept exactly), phase about the centre is the axis a real
+    `order`-cluster constellation actually organises itself along (and so
+    the one thing worth destroying in the null).
+
+    Two earlier versions of this null were tried and rejected before this
+    one, and the reasoning is worth keeping:
+
+    - A single Gaussian fitted to the data's mean and covariance: correct
+      for a single blob (a blob dominates its own Gaussian fit almost by
+      definition, so its null looks like it and the score falls to ~0),
+      but wrong for a ring -- a Gaussian fit to a ring's mean/covariance is
+      a FILLED DISC, and a hollow ring partitions into `order` wedges more
+      tightly than a filled disc of the same spread does, so a ring scored
+      ~0.36 instead of near 0.
+    - Phase shuffled about the ORIGIN, radii from the origin kept exactly:
+      correct for a ring (whose own radii from the origin are already
+      close to constant, so shuffling its phase reproduces a ring and the
+      gap collapses), but wrong for an off-origin blob -- a tight blob
+      sitting away from the origin (the jammed window's actual shape) also
+      has near-constant radius FROM THE ORIGIN, so this null turns it into
+      a full ring at that radius: nothing like the tight blob it came
+      from, so the gap came out large instead of near zero (0.795, worse
+      than the metric this replaced).
+
+    Centring on the data's own centroid before measuring radius fixes
+    both at once. An off-origin blob's radii from ITS OWN centroid are
+    small and isotropic, so its null (uniform phase about the centroid, at
+    those small radii) reproduces essentially the same blob -- gap ~0. A
+    ring's centroid is already close to the origin, so this changes
+    nothing there -- gap ~0, as it should be. A genuine `order`-cluster
+    constellation's centroid is also near the origin, but unlike the ring
+    its phases are strongly non-uniform about that centroid, so its null
+    (same near-constant radius, but phase-randomised) is nothing like the
+    real, lobed data -- the gap stays large.
+
+    Multiplied by a balance term (smallest cluster's population / largest
+    cluster's population) so four clusters holding wildly unequal point
+    counts -- three real clusters and a sliver -- can't pass as `order`
+    clusters. An empty cluster forces the score to 0 outright.
+
+    Squashed into [0, 1] at the end (score / (score + 1)) so it reads the
+    same direction as the metric it replaces: near 0 for no real
+    structure, and rising for cleaner, more separated, more balanced
+    clusters. The absolute numbers are NOT comparable to the old metric's
+    -- they are a different measurement -- which is why every threshold
+    that uses this score was re-measured, not just relabelled.
+
+    `seed`/`n_ref` are exposed only so calibration numbers can be
+    reproduced; every call site on the panel uses the defaults.
+    """
+    points = np.asarray(points)
+    if len(points) < order:
+        return 0.0
+    xy = np.column_stack([points.real, points.imag])
+    scale = np.sqrt(np.mean(np.abs(points) ** 2))
+    if scale == 0:
+        return 0.0
+    xy = xy / scale
+
+    rng = np.random.default_rng(seed)
+    actual_wcss, centers, labels = _kmeans(xy, order, rng, n_init=5, n_iter=30)
+    counts = np.array([np.sum(labels == c) for c in range(order)])
+    if (counts == 0).any():
+        return 0.0
+
+    centroid = xy.mean(axis=0)
+    centred = xy - centroid
+    radii = np.hypot(centred[:, 0], centred[:, 1])
+    ref_wcss = np.mean([
+        _kmeans(centroid + radii[:, None] * np.column_stack([
+            np.cos(rng.uniform(0, 2 * np.pi, len(xy))),
+            np.sin(rng.uniform(0, 2 * np.pi, len(xy)))]),
+            order, rng, n_init=2, n_iter=20)[0]
+        for _ in range(n_ref)])
+
+    gap = np.log(ref_wcss + 1e-9) - np.log(actual_wcss + 1e-9)
+    balance = counts.min() / counts.max()
+    score = max(gap, 0.0) * balance
+    return float(score / (score + 1))
+
+
 def _symbols_per_window(window_len, sps=SAMPLES_PER_SYMBOL):
     """How many decimated symbol points recover_symbols actually returns for
     a non-degenerate window of this length.
@@ -262,8 +442,19 @@ def constellation_figure(session, smoothed=None, count=4):
                    fontsize=7, fontweight="bold", color=tier_color("Civilian"))
 
         if recovered:
-            ax_s.set_title(f"{len(points)} symbol points", fontsize=7,
-                            color=TEXT_DIM)
+            order = CONSTELLATION_ORDER[cls]
+            if len(points) >= order * MIN_POINTS_PER_CLUSTER:
+                score = cluster_score(points, order)
+                title = f"{len(points)} symbol points · clusters {score:.2f}"
+            else:
+                # Honest refusal, not a number: at this order there are too
+                # few points per cluster (see MIN_POINTS_PER_CLUSTER) for
+                # cluster_score's gap statistic to measure anything but
+                # sampling noise -- printing a figure here would dress that
+                # noise up as a measurement.
+                title = (f"{len(points)} symbol points · too few symbols "
+                          f"to score at order {order}")
+            ax_s.set_title(title, fontsize=7, color=TEXT_DIM)
         else:
             ax_s.set_title("no power in this window", fontsize=7,
                             color=TEXT_DIM)
@@ -291,6 +482,12 @@ def constellation_figure(session, smoothed=None, count=4):
         "four windows spaced evenly across the civilian span, not chosen "
         "for how they look — a synthesized scene splices independent "
         "recordings, so some windows straddle a seam and will not cluster")
+    score_text = (
+        "\"clusters\" is a measured cluster-separation score computed from "
+        "this window's own recovered symbols, not the classifier — 0 means "
+        "no cluster structure at all, rising toward 1 for tighter, more "
+        "separated clusters")
+    fig.text(0.01, 0.105, score_text, color=TEXT_DIM, fontsize=7)
     fig.text(0.01, 0.075, chain_text, color=TEXT_DIM, fontsize=7)
     fig.text(0.01, 0.045, caveat_text, color=TEXT_DIM, fontsize=7)
     fig.text(0.01, 0.015, selection_text, color=TEXT_DIM, fontsize=7)
@@ -299,8 +496,11 @@ def constellation_figure(session, smoothed=None, count=4):
     # Top of the rect sits just above the highest per-column text (the
     # class-probability line at axes y=1.16) rather than at the figure's own
     # edge -- tight_layout was otherwise reserving a full blank band above
-    # that text for a suptitle this figure does not have.
-    fig.tight_layout(rect=[0, 0.12, 1, 0.97])
+    # that text for a suptitle this figure does not have. Bottom of the rect
+    # sits above the fourth caption line now that the cluster-score caption
+    # was added (was 0.12 for three lines; a fourth line needs the extra
+    # margin or it collides with the bottom row's x-axis labels).
+    fig.tight_layout(rect=[0, 0.15, 1, 0.97])
     return fig
 
 
