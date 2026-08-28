@@ -117,54 +117,57 @@ def power_spectrum_db(iq, fs=None, nperseg=1024):
 # the model's output, its error is VARIANCE (finite-sample estimation noise
 # from a limited number of recovered symbols), not bias, so it averages down
 # over windows the way the model's guess never could.
-C42_THEORY = {"16QAM": 0.619, "64QAM": 0.5745}
+C42_THEORY = {"16QAM": 0.680, "64QAM": 0.619}
 
-# The decision boundary a caller compares one window's (or a pooled average
-# of many windows') |C42| against, to say "nearer 16QAM" or "nearer 64QAM".
-# This is the MIDPOINT OF THE TWO THEORY VALUES ABOVE, and nothing else --
-# in particular, it is NOT fit to this project's own measured means (0.617
-# +/- 0.093 for 16QAM, 0.569 +/- 0.104 for 64QAM, 450 windows/class at SNR
-# >= +2 dB, 56 recovered symbols/window). Those measured means independently
-# average to an empirical midpoint of 0.593, against this theoretical
-# midpoint of 0.597 -- close, but NOT identical, because they were never
-# forced to be. That agreement is the evidence the estimator is calibrated:
-# a boundary FITTED to the measured 0.593 would have destroyed exactly the
-# check that this agreement provides, by construction making the "boundary
-# matches the data" observation true by definition rather than by
-# measurement. Do not "improve" this by plugging in the measured means --
-# see test_constellation_order_boundary_is_the_theoretical_midpoint, which
-# pins the arithmetic so a well-meaning refactor cannot quietly do that.
-C42_BOUNDARY = (C42_THEORY["16QAM"] + C42_THEORY["64QAM"]) / 2
+# The decision boundary a caller compares one window's (or a pooled
+# average of many windows') |C42| against, to say "16QAM" or "64QAM".
+#
+# This is a CALIBRATED constant, not the midpoint of C42_THEORY -- that was
+# tried first and is wrong for this estimator. Loaded from
+# configs/default.yaml (constellation_order.c42_boundary) exactly the way
+# every other calibrated decision threshold in this project is loaded (see
+# resolve_multilabel_thresholds in src/config.py), so a recalibration is a
+# one-line config edit, not a source hunt. See that config entry's own
+# comment for the full validation/test numbers and for why a boundary
+# derived from the noiseless theory constants would misclassify almost
+# everything: channel noise pulls |C42| toward the Gaussian limit of zero,
+# so real recovered symbols sit BELOW their noiseless value, and at the SNR
+# this estimator operates at BOTH classes measure under the theoretical
+# midpoint of 0.6495 -- a theory-derived boundary would call everything
+# 64QAM. C42_THEORY above stays useful as a sanity check against physics
+# (see test_c42_theory_matches_noiseless_synthetic_constellations), it is
+# just not where the boundary comes from.
+C42_BOUNDARY = float(CFG["constellation_order"]["c42_boundary"])
 
 # Below this many pooled windows, constellation_order refuses to decide
 # rather than guess. 8 is not an arbitrary round number: measured accuracy
-# of the midpoint rule at exactly 8 pooled windows is 0.759 (SNR >= +2 dB,
+# of the boundary rule at exactly 8 pooled windows is 0.754 (SNR >= +2 dB,
 # see C42_POOLED_ACCURACY below) -- "only just useful". One window alone is
-# 0.595, barely better than the coin flip this estimator exists to replace;
+# 0.593, barely better than the coin flip this estimator exists to replace;
 # refusing below 8 keeps every decision this function returns backed by at
 # least the first pooling level that is actually worth reporting.
 MIN_WINDOWS_FOR_C42_DECISION = 8
 
-# Measured accuracy of the C42-midpoint decision rule after pooling N
-# windows' |C42| by simple averaging. 450 windows/class, 56 recovered
-# symbols/window, SNR >= +2 dB -- the regime this estimator is meant for.
-# Keyed by exact pooled-window counts that were actually measured;
-# _pooled_accuracy below reports the accuracy of the largest measured count
-# that does not exceed the number actually pooled, never extrapolating past
-# what was measured.
-C42_POOLED_ACCURACY = {
-    1: 0.595, 2: 0.641, 4: 0.698, 8: 0.759, 16: 0.845, 32: 0.914, 64: 0.975,
-}
+# C42_BOUNDARY was calibrated at SNR >= +2 dB (see its own comment and
+# configs/default.yaml) and is only valid there: measured directly, the
+# SAME boundary applied to windows spanning every SNR in the test split
+# (not just >= +2 dB) gets 0.548 accuracy pooling a single window and 0.815
+# even pooling 64 -- both far below the >= +2 dB numbers at the same
+# pooling level, because a low-SNR window's |C42| sits closer to 0 (the
+# Gaussian limit) than to either class. constellation_order refuses the
+# decision outright below this SNR rather than silently extrapolating past
+# what the boundary was ever validated against.
+C42_MIN_SNR_DB = 2.0
 
-# Same measurement, but over EVERY SNR in the test split rather than only
-# SNR >= +2 dB -- kept alongside the table above for a caller or reader who
-# wants the honest floor rather than the best case. Not used to compute
-# C42_POOLED_ACCURACY's values above; a low-SNR window's |C42| is closer to
-# 0 (noise dilutes the constellation's own moment toward the Gaussian value)
-# than to either theory constant, so pooling windows that span every SNR is
-# a strictly harder problem than pooling only the ones at SNR >= +2 dB.
-C42_POOLED_ACCURACY_ALL_SNR = {
-    1: 0.544, 2: 0.549, 4: 0.590, 8: 0.610, 16: 0.647, 32: 0.725, 64: 0.798,
+# Measured accuracy of the C42-boundary decision rule after pooling N
+# windows' |C42| by simple averaging. 450 windows/class, 56 recovered
+# symbols/window, SNR >= +2 dB -- the regime C42_BOUNDARY was calibrated
+# for and C42_MIN_SNR_DB gates on. Keyed by exact pooled-window counts that
+# were actually measured; _pooled_accuracy below reports the accuracy of
+# the largest measured count that does not exceed the number actually
+# pooled, never extrapolating past what was measured.
+C42_POOLED_ACCURACY = {
+    1: 0.593, 8: 0.754, 16: 0.843, 32: 0.921, 64: 0.980,
 }
 
 
@@ -173,8 +176,10 @@ class ConstellationOrderEstimate:
     """Result of constellation_order: enough for a caller to judge the
     answer, not just take it on faith.
 
-    decision:   "16QAM", "64QAM", or None (refused -- see
-                MIN_WINDOWS_FOR_C42_DECISION).
+    decision:   "16QAM", "64QAM", or None (refused -- either fewer than
+                MIN_WINDOWS_FOR_C42_DECISION windows pooled, or the pooled
+                estimated SNR is below C42_MIN_SNR_DB, the regime
+                C42_BOUNDARY was calibrated for).
     mean_c42:   the pooled |C42| average the decision (or refusal) was based
                 on. NaN when zero usable windows were pooled.
     n_windows:  how many windows actually contributed a usable |C42| --
@@ -185,15 +190,21 @@ class ConstellationOrderEstimate:
                 not a probability -- useful for telling a comfortable call
                 apart from one that landed a hair on the right side of the
                 line.
-    accuracy:   the measured accuracy of the midpoint rule at this many
+    accuracy:   the measured accuracy of the boundary rule at this many
                 pooled windows (C42_POOLED_ACCURACY, SNR >= +2 dB), or None
                 if n_windows is 0.
+    snr_db:     estimate_snr_db's estimate over every sample pooled into
+                this measurement (an ESTIMATE, like everywhere else that
+                function is used). None only when n_windows is 0. The
+                reason for a None decision when it sits below
+                C42_MIN_SNR_DB despite n_windows clearing the minimum.
     """
     decision: object
     mean_c42: float
     n_windows: int
     margin: float
     accuracy: object
+    snr_db: object
 
 
 def _normalized_c42(points):
@@ -221,13 +232,20 @@ def _pooled_accuracy(n_windows):
     return C42_POOLED_ACCURACY[max(measured)]
 
 
-def constellation_order(windows, min_windows=MIN_WINDOWS_FOR_C42_DECISION):
+def constellation_order(windows, noise_power,
+                          min_windows=MIN_WINDOWS_FOR_C42_DECISION,
+                          min_snr_db=C42_MIN_SNR_DB):
     """Resolve 16QAM vs 64QAM by pooling the fourth-order cumulant across
     `windows` -- a distinction the classifier cannot make at all (see the
     module-level comment above C42_THEORY for the measured numbers proving
     that: 51.4% single-window accuracy picking the larger probability,
     49.7% even after averaging 64 windows, and biased rather than noisy so
     averaging the model's own output cannot fix it).
+
+    `noise_power` is the capture's own noise floor (e.g.
+    CaptureSession.noise_power, or noise_floor_power(iq) for a raw
+    capture) -- required, not optional, because the SNR gate below cannot
+    be honest without it.
 
     For each window: recover symbols with the existing recover_symbols
     (src/ui/plots.py -- unit-power scale, matched filter, de-rotate,
@@ -242,30 +260,42 @@ def constellation_order(windows, min_windows=MIN_WINDOWS_FOR_C42_DECISION):
     The per-window |C42| values are then averaged (simple mean -- the whole
     point of pooling is that this estimator's error is VARIANCE, not the
     model's BIAS, so a plain average is exactly what should shrink that
-    error as more windows are added) and compared to C42_BOUNDARY, the
-    midpoint of the two THEORETICAL constants in C42_THEORY. See that
-    constant's own comment for why the boundary is theoretical and must
-    never be fit to this project's own measured means -- the empirical
-    midpoint of real measured data (0.593) landing close to but not
-    exactly on the theoretical one (0.597) is the calibration check a
-    fitted boundary would destroy.
+    error as more windows are added) and compared to C42_BOUNDARY: at or
+    above reads 16QAM (the larger-cumulant class), below reads 64QAM.
+    C42_BOUNDARY is CALIBRATED (see its own comment for the full story and
+    why a theory-derived boundary is wrong for this estimator), not
+    theoretical -- the theory constants in C42_THEORY are checked
+    separately, against physics, in
+    test_c42_theory_matches_noiseless_synthetic_constellations.
 
-    Refuses rather than guesses: below `min_windows` (default
-    MIN_WINDOWS_FOR_C42_DECISION, 8 -- see that constant's comment for why)
-    `decision` in the returned ConstellationOrderEstimate is None, even
-    though mean_c42/n_windows/margin/accuracy are still populated so the
-    caller can see what WAS measured. A caller must never be able to dress
-    up a 2-window guess (measured 64.1% accuracy -- barely better than the
-    64.1%-vs-59.5% gap over a single window) as an answer.
+    Refuses rather than guesses, in two independent ways:
+
+    1. Below `min_windows` (default MIN_WINDOWS_FOR_C42_DECISION, 8 -- see
+       that constant's comment for why) -- not enough pooling for the
+       estimator's own variance to have shrunk to something usable.
+    2. Below `min_snr_db` (default C42_MIN_SNR_DB, +2 dB) -- outside the
+       SNR regime C42_BOUNDARY was actually calibrated against (see
+       C42_MIN_SNR_DB's comment for the measured accuracy collapse outside
+       that regime).
+
+    Either way `decision` in the returned ConstellationOrderEstimate is
+    None, even though mean_c42/n_windows/margin/accuracy/snr_db are still
+    populated so the caller can see what WAS measured and why it refused. A
+    caller must never be able to dress up a 2-window guess, or a
+    confident-looking pooled average measured on a channel too noisy for
+    the boundary to mean anything, as an answer.
 
     MEASURED, not MODEL: every number this function touches comes from the
     capture's own recovered samples, with no model involvement anywhere in
-    the chain, and it fits nothing to an expected answer -- the boundary is
-    theory, not a fit. It must never take a tier colour on screen; TEXT_DIM
-    /INSTRUMENT styling only, exactly like everything else in src/measure.py.
+    the chain, and it fits nothing to an expected answer -- the boundary was
+    calibrated on VALIDATION and only ever reported on TEST, the same
+    discipline every other threshold in this project follows. It must never
+    take a tier colour on screen; TEXT_DIM/INSTRUMENT styling only, exactly
+    like everything else in src/measure.py.
     """
     from src.ui.plots import recover_symbols
 
+    windows = list(windows)
     per_window_c42 = []
     for window in windows:
         points, _, _ = recover_symbols(window)
@@ -277,18 +307,17 @@ def constellation_order(windows, min_windows=MIN_WINDOWS_FOR_C42_DECISION):
     if n == 0:
         return ConstellationOrderEstimate(
             decision=None, mean_c42=float("nan"), n_windows=0,
-            margin=float("nan"), accuracy=None)
+            margin=float("nan"), accuracy=None, snr_db=None)
 
     mean_c42 = float(np.mean(per_window_c42))
     margin = abs(mean_c42 - C42_BOUNDARY)
     accuracy = _pooled_accuracy(n)
+    snr_db = estimate_snr_db(np.concatenate(windows), noise_power)
 
     decision = None
-    if n >= min_windows:
-        dist_16 = abs(mean_c42 - C42_THEORY["16QAM"])
-        dist_64 = abs(mean_c42 - C42_THEORY["64QAM"])
-        decision = "16QAM" if dist_16 <= dist_64 else "64QAM"
+    if n >= min_windows and snr_db >= min_snr_db:
+        decision = "16QAM" if mean_c42 >= C42_BOUNDARY else "64QAM"
 
     return ConstellationOrderEstimate(
         decision=decision, mean_c42=mean_c42, n_windows=n, margin=margin,
-        accuracy=accuracy)
+        accuracy=accuracy, snr_db=snr_db)

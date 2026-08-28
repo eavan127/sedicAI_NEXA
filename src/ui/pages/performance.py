@@ -122,7 +122,7 @@ def _build_dashboard(progress=gr.Progress()):
     fig, ax = plt.subplots(figsize=(7, 3.5))
     names = [c for c in CLASSES if per_class[c]["support"] > 0]
     recalls = [per_class[c]["recall"] for c in names]
-    colors = [_TIER_COLOR[_TIER_OF[c]] for c in names]
+    colors = [CLASS_COLOR.get(c, _TIER_COLOR[_TIER_OF[c]]) for c in names]
     ax.bar(names, recalls, color=colors)
     ax.axhline(bench["benchmark_recall"], color="#e5484d", ls=":", lw=1.2,
                label=f"{bench['benchmark_recall']:.0%} benchmark")

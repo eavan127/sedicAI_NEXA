@@ -12,8 +12,9 @@ import numpy as np
 from scipy.signal import stft
 
 from src.config import CFG, CLASSES
-from src.measure import (MIN_WINDOWS_FOR_C42_DECISION, constellation_order,
-                          estimate_snr_db, power_spectrum_db)
+from src.measure import (C42_MIN_SNR_DB, MIN_WINDOWS_FOR_C42_DECISION,
+                          constellation_order, estimate_snr_db,
+                          power_spectrum_db)
 from src.timeline import tier_of_classes
 from src.ui.palette import (BG, GRID, INSTRUMENT, MPL_FONT, PANEL, TEXT_DIM,
                              TRUTH_STYLE, WATERFALL_CMAP, style_axes,
@@ -471,20 +472,32 @@ def constellation_figure(session, smoothed=None, count=4):
             start = int(session.result.starts[index])
             pooled_windows.append(
                 session.iq[start:start + session.result.window_len])
-        est = constellation_order(pooled_windows)
+        est = constellation_order(pooled_windows, session.noise_power)
         if est.decision is not None:
             qam_order_text = (
                 f"measured constellation order (|C42|, {est.n_windows} "
                 f"windows pooled, {est.accuracy:.0%} accuracy at this "
                 f"pooling): {est.decision} — the classifier called this "
                 f"span {class_name}")
-        else:
+        elif est.n_windows < MIN_WINDOWS_FOR_C42_DECISION:
             qam_order_text = (
                 f"measured constellation order: only {est.n_windows} "
                 f"qualifying window(s) pooled, below the "
                 f"{MIN_WINDOWS_FOR_C42_DECISION} needed for a reliable "
                 f"16QAM-vs-64QAM call — refusing rather than guessing "
                 f"(classifier called this span {class_name})")
+        else:
+            # Enough windows pooled, but the estimated SNR sits below the
+            # regime the C42_BOUNDARY calibration is actually valid for
+            # (see that constant's comment in src/measure.py) -- refusing
+            # here rather than extrapolating the boundary somewhere it was
+            # never checked.
+            qam_order_text = (
+                f"measured constellation order: {est.n_windows} windows "
+                f"pooled at an estimated {est.snr_db:.1f} dB, below the "
+                f"{C42_MIN_SNR_DB:.0f} dB this measurement is calibrated "
+                f"for — refusing rather than guessing (classifier called "
+                f"this span {class_name})")
 
     n = len(picks)
     fig, axes = plt.subplots(2, n, figsize=(3.2 * n, 6.4), squeeze=False)
