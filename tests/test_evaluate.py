@@ -20,7 +20,9 @@ import numpy as np
 import pytest
 
 from src.config import CLASSES, CLASS_TO_IDX
-from src.evaluate import coarse_tier_metrics, comms_vs_jamming, confusion_between, recall_in_context
+from src.evaluate import (coarse_tier_metrics, comms_vs_jamming,
+                           confusion_between, dense_qam_recall,
+                           recall_in_context)
 
 BPSK = CLASS_TO_IDX["BPSK"]
 QPSK = CLASS_TO_IDX["QPSK"]
@@ -171,6 +173,56 @@ class TestCoarseTierMetricsSanity:
         y_pred = mh(BPSK)  # jamming entirely missed
         out = coarse_tier_metrics(y_true, y_pred)
         assert out["per_tier_recall"]["Hostile"] == 0.0
+
+
+class TestDenseQamRecall:
+    def test_none_when_neither_class_present(self):
+        y_true = mh(RADAR, FHSS, JAM)
+        y_pred = mh(RADAR, FHSS, JAM)
+        assert dense_qam_recall(y_true, y_pred) is None
+
+    def test_per_class_split_is_wrong_but_combined_is_right(self):
+        """The exact failure mode this metric exists to fix: the model
+        always predicts the WRONG one of the two dense-QAM classes (16QAM
+        truth predicted as 64QAM and vice versa), so BOTH per-class
+        recalls read 0.0 -- yet on every single window, the model
+        correctly flagged that dense QAM traffic was present. A metric
+        that measures what it claims must read 1.0 here, not 0.0."""
+        y_true = mh(QAM16, QAM16, QAM64, QAM64)
+        y_pred = mh(QAM64, QAM64, QAM16, QAM16)  # always the other one
+
+        recall_16 = float((y_pred[y_true[:, QAM16] == 1, QAM16] == 1).mean())
+        recall_64 = float((y_pred[y_true[:, QAM64] == 1, QAM64] == 1).mean())
+        assert recall_16 == 0.0
+        assert recall_64 == 0.0
+
+        out = dense_qam_recall(y_true, y_pred)
+        assert out["recall"] == 1.0
+        assert out["n_evaluated"] == 4
+
+    def test_a_miss_of_both_classes_is_a_combined_miss(self):
+        y_true = mh(QAM16, QAM64)
+        y_pred = mh(RADAR, RADAR)  # neither dense-QAM bit predicted
+        out = dense_qam_recall(y_true, y_pred)
+        assert out["recall"] == 0.0
+        assert out["n_evaluated"] == 2
+
+    def test_support_counts_only_windows_where_a_dense_qam_class_is_true(self):
+        y_true = mh(QAM16, RADAR, FHSS, QAM64)
+        y_pred = mh(QAM16, QAM16, QAM16, QAM64)  # 3rd row: FP on non-dense-QAM row
+        out = dense_qam_recall(y_true, y_pred)
+        assert out["n_evaluated"] == 2  # rows 0 and 3 only
+        assert out["recall"] == 1.0
+
+    def test_composite_window_with_both_classes_counts_once(self):
+        """A window truly carrying BOTH 16QAM and 64QAM (a composite
+        example) is still ONE window for this metric -- catching either
+        bit is a hit, not two separate opportunities to score."""
+        y_true = mh([QAM16, QAM64])
+        y_pred = mh(QAM16)  # only the 16QAM bit predicted
+        out = dense_qam_recall(y_true, y_pred)
+        assert out["n_evaluated"] == 1
+        assert out["recall"] == 1.0
 
 
 class TestCommsVsJammingSanity:

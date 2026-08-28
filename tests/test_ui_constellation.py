@@ -13,16 +13,18 @@ import numpy as np
 import pytest
 
 from src.config import CFG, CLASSES, resolve_multilabel_thresholds
+from src.measure import MIN_WINDOWS_FOR_C42_DECISION
 from src.scenarios import CIVILIAN
 from src.timeline import TimelineResult
 from src.ui.pages.rf_replay import _render
-from src.ui.palette import INSTRUMENT, tier_color
+from src.ui.palette import INSTRUMENT, TEXT_DIM, tier_color
 from src.ui.plots import (CLUSTER_SCORE_CLEAR_FLOOR,
                           CLUSTER_SCORE_WEAK_FLOOR, CONSTELLATION_ORDER,
                           RRC_SPAN_SYMBOLS, SAMPLES_PER_SYMBOL,
                           carrier_offset, cluster_score, cluster_score_band,
                           constellation_figure, recover_symbols, rrc_taps)
 from src.ui.session import CaptureSession
+from tests.test_measure import _qam_window
 
 
 def _qpsk(n_symbols=64, sps=SAMPLES_PER_SYMBOL, offset=0.0039, seed=0):
@@ -812,6 +814,105 @@ def test_captions_do_not_run_off_the_right_edge_of_the_figure():
             assert right_edge <= fig_w_px, (
                 f"caption runs off the figure edge ({right_edge:.1f}px > "
                 f"{fig_w_px:.1f}px): {t.get_text()!r}")
+    finally:
+        plt.close(fig)
+
+
+def _qam_order_session(class_name, n_windows, order):
+    """A CaptureSession whose whole span is real, RRC-shaped, noisy
+    `order`-QAM (via _qam_window from tests/test_measure.py, snr_db=5.0 --
+    see that helper's docstring for why that SNR pools cleanly), all above
+    `class_name`'s threshold -- so constellation_figure's pooled
+    constellation_order call has real symbols to measure, not the plain
+    triangular-pulse _qpsk fixture the rest of this file uses (which is not
+    actually 16QAM or 64QAM and would make the pooled |C42| meaningless)."""
+    window_len = hop = 512
+    iq = np.concatenate([_qam_window(order, seed=i) for i in range(n_windows)])
+    probs = np.full((n_windows, len(CLASSES)), 0.01, dtype=np.float32)
+    probs[:, CLASSES.index(class_name)] = 0.90
+    result = TimelineResult(
+        probs=probs, starts=np.arange(n_windows) * hop,
+        attn=np.zeros((n_windows, window_len), dtype=np.float32),
+        hop=hop, window_len=window_len, fs=CFG["signal"]["fs"])
+    s = CaptureSession(
+        iq=iq, result=result, source="scenario", noise_power=0.01,
+        thresholds=dict(zip(CLASSES, resolve_multilabel_thresholds())))
+    s.display_smoothed = False
+    return s
+
+
+def test_constellation_figure_reports_measured_order_for_16qam():
+    s = _qam_order_session("16QAM", 40, 16)
+    fig = constellation_figure(s, count=4)
+    try:
+        captions = " ".join(t.get_text() for t in fig.texts)
+        assert "measured constellation order" in captions
+        assert "40 windows pooled" in captions
+        assert "16QAM" in captions
+        # Provenance: names the classifier's own call too, so a reader can
+        # see agreement or disagreement, not just one number in isolation.
+        assert "classifier called this span 16QAM" in captions
+    finally:
+        plt.close(fig)
+
+
+def test_constellation_figure_pools_every_qualifying_window_not_just_the_four_shown():
+    """The four displayed columns are a visual sample; the pooled |C42|
+    measurement must use every qualifying window, so a capture with far
+    more than `count` qualifying windows reports the true pooled count."""
+    s = _qam_order_session("64QAM", 25, 64)
+    fig = constellation_figure(s, count=4)
+    try:
+        captions = " ".join(t.get_text() for t in fig.texts)
+        assert "25 windows pooled" in captions
+        assert len(fig.axes) == 8  # still only 4 columns displayed
+    finally:
+        plt.close(fig)
+
+
+def test_constellation_figure_refuses_below_the_c42_minimum():
+    s = _qam_order_session("16QAM", MIN_WINDOWS_FOR_C42_DECISION - 1, 16)
+    fig = constellation_figure(s, count=4)
+    try:
+        captions = " ".join(t.get_text() for t in fig.texts)
+        assert "measured constellation order" in captions
+        assert "refusing rather than guessing" in captions
+        # No decision word standing alone as an answer -- the class name
+        # still appears (naming what the classifier called it), but not
+        # dressed up as this estimator's own call.
+        assert "windows pooled, " not in captions or "accuracy at this" not in captions
+    finally:
+        plt.close(fig)
+
+
+def test_constellation_figure_omits_the_order_line_for_qpsk():
+    """QPSK's cluster count already tells the operator the order (4 points
+    is unambiguous) -- the classifier isn't confused about QPSK vs anything
+    else the way it is about 16QAM vs 64QAM, so this line must not appear."""
+    s = _session({"QPSK": [0.60, 0.60, 0.60, 0.95, 0.60, 0.60]})
+    s.display_smoothed = False
+    fig = constellation_figure(s)
+    try:
+        captions = " ".join(t.get_text() for t in fig.texts)
+        assert "measured constellation order" not in captions
+    finally:
+        plt.close(fig)
+
+
+def test_constellation_order_caption_carries_text_dim_never_a_tier_colour():
+    """Provenance rule: this line is MEASURED (constellation_order fits
+    nothing to an expected answer), so it must never wear a tier colour,
+    even though it can directly contradict the classifier's own call."""
+    s = _qam_order_session("16QAM", 40, 16)
+    fig = constellation_figure(s, count=4)
+    try:
+        order_texts = [t for t in fig.texts
+                        if "measured constellation order" in t.get_text()]
+        assert order_texts
+        for t in order_texts:
+            assert t.get_color() == TEXT_DIM
+            for tier in ("Civilian", "Military", "Hostile"):
+                assert t.get_color() != tier_color(tier)
     finally:
         plt.close(fig)
 

@@ -12,7 +12,8 @@ import numpy as np
 from scipy.signal import stft
 
 from src.config import CFG, CLASSES
-from src.measure import estimate_snr_db, power_spectrum_db
+from src.measure import (MIN_WINDOWS_FOR_C42_DECISION, constellation_order,
+                          estimate_snr_db, power_spectrum_db)
 from src.timeline import tier_of_classes
 from src.ui.palette import (BG, GRID, INSTRUMENT, MPL_FONT, PANEL, TEXT_DIM,
                              TRUTH_STYLE, WATERFALL_CMAP, style_axes,
@@ -445,6 +446,46 @@ def constellation_figure(session, smoothed=None, count=4):
         return None
     class_name = picks[0][1]           # one class for the whole figure
 
+    # MEASURED constellation-order line: 16QAM vs 64QAM is a distinction the
+    # classifier cannot make at all (51.4% single-window accuracy picking
+    # the larger probability, 49.7% even pooled over 64 windows, and
+    # BIASED rather than noisy -- see src/measure.py's module comment above
+    # C42_THEORY), so for exactly these two classes this panel also prints
+    # what the capture's own recovered symbols say via the fourth-order
+    # cumulant. Pooled across EVERY window that clears this class's
+    # threshold -- not just the `count` windows shown above, which exist for
+    # a different reason (spreading the visual sample across the span) and
+    # would badly under-pool this estimator, whose whole value is averaging
+    # down the per-window measurement noise C42_POOLED_ACCURACY documents.
+    # session.civilian_windows(count=len(probs)) returns every qualifying
+    # window unpadded whenever the qualifying count is <= count (see that
+    # method's docstring), so passing a count that can never be exceeded is
+    # what "all of them" means here.
+    qam_order_text = None
+    if class_name in ("16QAM", "64QAM"):
+        n_probs = len(session.result.probs)
+        all_qualifying = session.civilian_windows(count=max(n_probs, 1),
+                                                    smoothed=smoothed)
+        pooled_windows = []
+        for index, _, _ in all_qualifying:
+            start = int(session.result.starts[index])
+            pooled_windows.append(
+                session.iq[start:start + session.result.window_len])
+        est = constellation_order(pooled_windows)
+        if est.decision is not None:
+            qam_order_text = (
+                f"measured constellation order (|C42|, {est.n_windows} "
+                f"windows pooled, {est.accuracy:.0%} accuracy at this "
+                f"pooling): {est.decision} — the classifier called this "
+                f"span {class_name}")
+        else:
+            qam_order_text = (
+                f"measured constellation order: only {est.n_windows} "
+                f"qualifying window(s) pooled, below the "
+                f"{MIN_WINDOWS_FOR_C42_DECISION} needed for a reliable "
+                f"16QAM-vs-64QAM call — refusing rather than guessing "
+                f"(classifier called this span {class_name})")
+
     n = len(picks)
     fig, axes = plt.subplots(2, n, figsize=(3.2 * n, 6.4), squeeze=False)
     ax_top, ax_bot = axes[0], axes[1]
@@ -539,20 +580,30 @@ def constellation_figure(session, smoothed=None, count=4):
         "not the classifier — 0 means no cluster structure; clean QPSK at "
         "+10 dB reads ~0.3, below 0.07 means nothing is there, and 1.0 is "
         "never reached on a real capture")
-    fig.text(0.01, 0.105, score_text, color=TEXT_DIM, fontsize=7)
-    fig.text(0.01, 0.075, chain_text, color=TEXT_DIM, fontsize=7)
-    fig.text(0.01, 0.045, caveat_text, color=TEXT_DIM, fontsize=7)
-    fig.text(0.01, 0.015, selection_text, color=TEXT_DIM, fontsize=7)
+    # qam_order_text (MEASURED, TEXT_DIM -- never a tier colour, see the
+    # provenance rule) is only present for a 16QAM/64QAM span; every other
+    # class keeps the original four-line caption unchanged. Printed FIRST,
+    # above the cluster-score line, since it is the caption most likely to
+    # disagree with the class-probability text at the top of each column --
+    # an operator scanning top-to-bottom should hit the measurement that
+    # can contradict the model before the ones that only elaborate on it.
+    caption_lines = ([qam_order_text] if qam_order_text else []) + [
+        score_text, chain_text, caveat_text, selection_text]
+    line_height = 0.03
+    for i, text in enumerate(reversed(caption_lines)):
+        fig.text(0.01, 0.015 + i * line_height, text, color=TEXT_DIM,
+                  fontsize=7)
 
     style_axes(fig, list(fig.axes))
     # Top of the rect sits just above the highest per-column text (the
     # class-probability line at axes y=1.16) rather than at the figure's own
     # edge -- tight_layout was otherwise reserving a full blank band above
     # that text for a suptitle this figure does not have. Bottom of the rect
-    # sits above the fourth caption line now that the cluster-score caption
-    # was added (was 0.12 for three lines; a fourth line needs the extra
-    # margin or it collides with the bottom row's x-axis labels).
-    fig.tight_layout(rect=[0, 0.15, 1, 0.97])
+    # sits above the LAST caption line -- 0.15 for the original four lines,
+    # plus one more line_height whenever qam_order_text adds a fifth, or the
+    # extra line collides with the bottom row's x-axis labels.
+    rect_bottom = 0.15 + (line_height if qam_order_text else 0.0)
+    fig.tight_layout(rect=[0, rect_bottom, 1, 0.97])
     return fig
 
 
