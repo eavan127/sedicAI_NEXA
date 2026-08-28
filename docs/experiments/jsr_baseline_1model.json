@@ -1,0 +1,51 @@
+{
+  "n": 600,
+  "seed": 0,
+  "snr_db": 10.0,
+  "stft_freq_summary": false,
+  "members": 1,
+  "rows": [
+    {
+      "jsr_db": null,
+      "fhss_recall": 0.9933333333333333,
+      "jamming_in_mixed": 0.005,
+      "jamming_recall_alone": 0.9933333333333333,
+      "jammer_called_fhss": 0.0033333333333333335
+    },
+    {
+      "jsr_db": 0,
+      "fhss_recall": 0.9316666666666666,
+      "jamming_in_mixed": 0.5433333333333333,
+      "jamming_recall_alone": 0.995,
+      "jammer_called_fhss": 0.016666666666666666
+    },
+    {
+      "jsr_db": 5,
+      "fhss_recall": 0.5333333333333333,
+      "jamming_in_mixed": 0.9716666666666667,
+      "jamming_recall_alone": 0.9966666666666667,
+      "jammer_called_fhss": 0.016666666666666666
+    },
+    {
+      "jsr_db": 10,
+      "fhss_recall": 0.04833333333333333,
+      "jamming_in_mixed": 0.995,
+      "jamming_recall_alone": 0.9916666666666667,
+      "jammer_called_fhss": 0.016666666666666666
+    },
+    {
+      "jsr_db": 15,
+      "fhss_recall": 0.02,
+      "jamming_in_mixed": 0.99,
+      "jamming_recall_alone": 0.9983333333333333,
+      "jammer_called_fhss": 0.01
+    },
+    {
+      "jsr_db": 20,
+      "fhss_recall": 0.028333333333333332,
+      "jamming_in_mixed": 0.995,
+      "jamming_recall_alone": 0.9983333333333333,
+      "jammer_called_fhss": 0.011666666666666667
+    }
+  ]
+}

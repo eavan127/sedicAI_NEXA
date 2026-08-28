@@ -58,9 +58,18 @@ from src.ui.app_models import ensemble_paths  # noqa: E402
 JSR_POINTS = (None, 0, 5, 10, 15, 20)
 
 
-def _load_models():
+def _load_models(members=None):
+    """Load the ensemble, or the first `members` of it.
+
+    A hypothesis test does not need five models. The pre-registered bar for
+    the frequency-summary experiment is FHSS recall at +10 dB JSR rising from
+    0.035 to above 0.25 -- an effect far larger than the 3-point seed spread
+    of a single model, so one member answers it. That is one 2.6-hour retrain
+    instead of five, and the comparison stays like-for-like as long as the
+    baseline is measured with the same number of members.
+    """
     models = []
-    for path in ensemble_paths():
+    for path in ensemble_paths()[:members] if members else ensemble_paths():
         model = AMC_CNN(num_classes=len(CLASSES), input_len=CFG["signal"]["window_len"])
         model.load_state_dict(torch.load(path, map_location="cpu"))
         model.eval()
@@ -137,10 +146,14 @@ def main():
                           "600 halves that to +/-4.")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--snr-db", type=float, default=10.0)
+    ap.add_argument("--members", type=int, default=None,
+                    help="use only the first N ensemble members. Use 1 for a "
+                          "single-model hypothesis test; the baseline must be "
+                          "measured with the same value.")
     ap.add_argument("--out", type=Path, default=None, help="write JSON here")
     args = ap.parse_args()
 
-    models = _load_models()
+    models = _load_models(args.members)
     print(f"{len(models)} ensemble members  ·  n={args.n} per condition  "
           f"·  SNR {args.snr_db:+.0f} dB  ·  seed {args.seed}\n")
 
@@ -166,6 +179,7 @@ def main():
         args.out.write_text(json.dumps({
             "n": args.n, "seed": args.seed, "snr_db": args.snr_db,
             "stft_freq_summary": bool(CFG.get("model", {}).get("stft_freq_summary", False)),
+            "members": len(models),
             "rows": rows,
         }, indent=2))
         print(f"\nwrote {args.out}")
