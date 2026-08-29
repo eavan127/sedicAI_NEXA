@@ -17,6 +17,9 @@ from src.ui.app_models import ensemble_available, load_model, model_label
 from src.config import CFG
 from src.scenarios import CASES
 from src.ui.session import load_scenario, load_upload, reanalyze
+from src.measure import occupancy
+from src.timeline import tier_of_classes
+from src.ui.palette import PANEL, TEXT, TEXT_DIM, BRAND_OLIVE, GRID, tier_color
 
 # SNR choices are the training bins, not arbitrary round numbers -- asking the
 # model about an SNR it never saw in training conflates two questions.
@@ -101,21 +104,88 @@ def _render(session, smoothing_choice, model_choice="auto", case_note=""):
     constellation_update = (gr.update(value=constellation, visible=True)
                              if constellation is not None
                              else gr.update(visible=False))
-    return (session, head, plots.console_figure(session, smoothed=smoothed),
+    # --- Overview Metrics ---
+    occ = occupancy(session.iq)
+    events = session.emitter_events(smoothed=smoothed)
+    tiers_list = session.tiers(smoothed=smoothed)
+    empty_pct_val = tiers_list.count("Empty") / max(len(tiers_list), 1) * 100
+    channel_empty = empty_pct_val >= 90
+    tier_counts = {}
+    for e in events:
+        t = tier_of_classes(e.classes)
+        tier_counts[t] = tier_counts.get(t, 0) + 1
+
+    status_html = (
+        f'<div style="font-family:monospace;background:{PANEL};padding:14px;'
+        f'border-radius:6px;color:{TEXT};line-height:1.8;">'
+        f'Occupancy   {occ * 100:5.1f}%   '
+        f'<span style="color:{TEXT_DIM};">measured — fraction of the '
+        f'spectrogram above the noise floor</span><br>'
+        f'Detections  {len(events):5d}   '
+        f'<span style="color:{TEXT_DIM};">model — grouped events, '
+        f'not windows</span><br>'
+        f'Windows     {session.result.n_windows:5d}   '
+        f'<span style="color:{TEXT_DIM};">hop {session.result.hop} · '
+        f'{session.duration_ms:.1f} ms capture</span><br>'
+        f'Channel     {empty_pct_val:5.0f}%   '
+        f'<span style="color:{TEXT_DIM};">model — windows reported as '
+        f'empty spectrum</span></div>')
+
+    chips = "".join(
+        f'<span style="display:inline-block;margin:4px 8px 0 0;padding:2px 10px;'
+        f'border-radius:9px;font-size:11px;font-weight:600;'
+        f'background:{tier_color(t)}22;color:{tier_color(t)};">'
+        f'{t} {n}</span>'
+        for t, n in sorted(tier_counts.items()))
+
+    if channel_empty:
+        extra = ""
+        if events:
+            e = events[-1]
+            extra = (
+                f'<div style="margin-top:12px;padding-top:10px;'
+                f'border-top:1px solid {GRID};color:{TEXT_DIM};'
+                f'font-size:12px;">Isolated detection, not sustained: '
+                f'<span style="color:{tier_color(tier_of_classes(e.classes))};'
+                f'font-weight:600;">{e.label}</span> at '
+                f'{e.start_us / 1000:.2f} ms for {e.duration_us / 1000:.2f} ms'
+                f'</div>')
+        latest_html = (
+            f'<div style="background:{PANEL};padding:16px;border-radius:6px;'
+            f'color:{TEXT};">'
+            f'<div style="color:{TEXT_DIM};font-size:11px;">CHANNEL STATE</div>'
+            f'<div style="font-size:22px;font-weight:700;color:{BRAND_OLIVE};'
+            f'margin:6px 0;">EMPTY</div>'
+            f'<div style="color:{TEXT_DIM};font-family:monospace;font-size:12px;">'
+            f'{empty_pct_val:.0f}% of windows report no emitter</div>'
+            f'{extra}</div>')
+    elif events:
+        e = events[-1]
+        color = tier_color(tier_of_classes(e.classes))
+        latest_html = (
+            f'<div style="background:{PANEL};padding:16px;border-radius:6px;'
+            f'color:{TEXT};">'
+            f'<div style="color:{TEXT_DIM};font-size:11px;">LATEST DETECTION</div>'
+            f'<div style="font-size:20px;font-weight:600;color:{color};'
+            f'margin:6px 0;">{e.label}</div>'
+            f'<div style="color:{TEXT_DIM};font-family:monospace;font-size:12px;">'
+            f'{e.start_us / 1000:.2f} ms · {e.duration_us / 1000:.2f} ms long<br>'
+            + " · ".join(f"{c} {e.peak[c] * 100:.0f}%" for c in e.classes)
+            + f'</div><div>{chips}</div></div>')
+    else:
+        latest_html = (
+            f'<div style="background:{PANEL};padding:16px;border-radius:6px;'
+            f'color:{TEXT_DIM};">No emitter detected in this capture.</div>')
+
+    return (session, head, status_html, latest_html, plots.console_figure(session, smoothed=smoothed),
             rows, constellation_update)
 
 
 def build(state, get_model):
     gr.Markdown("### RF Replay")
 
-    # --- compact control bar, one row, above everything -------------------
+    # --- Global Settings ---
     with gr.Row(equal_height=True):
-        scenario_btn = gr.Button("Synthesize scenario", variant="primary",
-                                  scale=2, min_width=170)
-        file_in = gr.File(label="Upload raw IQ (interleaved float32)",
-                           file_count="single", height=78, scale=3,
-                           min_width=200)
-        upload_btn = gr.Button("Analyze upload", scale=2, min_width=140)
         hop = gr.Dropdown(choices=HOP_CHOICES, value=256, scale=2,
                            min_width=150, label="Window hop")
         smoothing = gr.Radio(choices=["Smoothed", "Raw"], value="Smoothed",
@@ -126,24 +196,28 @@ def build(state, get_model):
             value="ensemble" if ensemble_available() else "single",
             scale=2, min_width=170, label="Model")
 
+    # --- Source Input ---
+    with gr.Row(equal_height=True):
+        file_in = gr.UploadButton("📁 Select & Analyze Source File", variant="primary", scale=1, min_width=300)
+
+    # --- Synthesize Scenario ---
     with gr.Row(equal_height=True):
         case_sel = gr.Dropdown(choices=list(CASES), value="All three",
                                 scale=3, min_width=190, label="Scenario case")
         snr_sel = gr.Dropdown(choices=SNR_CHOICES, value=0 if 0 in [v for _, v in SNR_CHOICES] else SNR_CHOICES[len(SNR_CHOICES)//2][1],
                                scale=2, min_width=140, label="SNR (per emitter)")
-        gr.Markdown(
-            "<div style='font-size:12px;color:#5F6B72;padding-top:22px;'>"
-            "Single emitter through fully contested band. SNR is per emitter, "
-            "so the same value means the same thing in every case."
-            "</div>")
+        scenario_btn = gr.Button("Synthesize Scenario", variant="secondary", scale=2, min_width=170)
 
     gr.Markdown(
-        "<div style='font-size:12px;color:#5F6B72;margin:-6px 0 4px 0;'>"
+        "<div style='font-size:12px;color:#5F6B72;margin:0px 0 4px 0;'>"
         "Smoothing, the NOISE_FLOOR gate and event hold are display-only. "
         "The Performance page is always per-window, ungated and unsmoothed."
         "</div>")
 
     header = gr.Markdown()
+    with gr.Row():
+        status_box = gr.HTML()
+        latest_box = gr.HTML()
     # One figure, not three. Spectrum, waterfall, detection lanes and the tier
     # ribbon share a single time axis, so a detection can be read straight down
     # against the signal that produced it and against ground truth. As
@@ -176,7 +250,7 @@ def build(state, get_model):
         label="Detection events", interactive=False, wrap=True,
         max_height=520, column_widths=["5%", "12%", "14%", "69%"])
 
-    outputs = [state, header, console, events, constellation]
+    outputs = [state, header, status_box, latest_box, console, events, constellation]
 
     scenario_btn.click(
         lambda h, sm, mw, cs, sn: _render(
@@ -185,7 +259,7 @@ def build(state, get_model):
             sm, model_label(mw), f"case `{cs}`"),
         inputs=[hop, smoothing, model_sel, case_sel, snr_sel], outputs=outputs)
 
-    upload_btn.click(
+    file_in.upload(
         lambda f, h, sm, mw: _render(
             load_upload(f.name if hasattr(f, "name") else f, load_model(mw),
                          hop=h),
@@ -195,10 +269,10 @@ def build(state, get_model):
     model_sel.change(
         lambda s, sm, mw: _render(reanalyze(s, load_model(mw)), sm,
                                    model_label(mw)) if s is not None
-        else (s, "Load a capture first.", None, [], gr.update(visible=False)),
+        else (s, "Load a capture first.", "", "", None, [], gr.update(visible=False)),
         inputs=[state, smoothing, model_sel], outputs=outputs)
 
     smoothing.change(
         lambda s, sm, mw: _render(s, sm, model_label(mw)) if s is not None
-        else (s, "Load a capture first.", None, [], gr.update(visible=False)),
+        else (s, "Load a capture first.", "", "", None, [], gr.update(visible=False)),
         inputs=[state, smoothing, model_sel], outputs=outputs)

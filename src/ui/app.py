@@ -9,7 +9,7 @@ import torch.nn as nn
 from src.config import CFG, CLASSES, REPO_ROOT
 from src.models.amc_cnn import AMC_CNN
 from src.ui.app_models import load_model, model_label  # noqa: F401
-from src.ui.pages import (alerts, model_page, overview, performance, rf_replay,
+from src.ui.pages import (model_page, performance, rf_replay,
                            signal_analysis)
 from src.ui.palette import (BG, BRAND_OLIVE, BRAND_OLIVE_DARK,
                              BRAND_OLIVE_TINT, BRAND_SLATE, FONT_STACK, GRID,
@@ -45,6 +45,8 @@ CUSTOM_CSS = f"""
   --table-even-background-fill: {PANEL};
   --table-odd-background-fill: {BG};
   --table-border-color: {GRID};
+  --table-row-focus-background-fill: {BRAND_OLIVE};
+  --table-row-focus-text-color: #ffffff;
   --button-secondary-background-fill: {PANEL};
   --button-secondary-text-color: {TEXT};
   --button-secondary-border-color: {GRID};
@@ -98,6 +100,21 @@ footer {{ display: none !important; }}
    string. Emphasis is carried by weight and colour instead. */
 .gradio-container em, .gradio-container i, .gradio-container * {{
   font-style: normal !important;
+}}
+/* Force table row selection to be readable */
+.gradio-container table tbody tr:hover td,
+.gradio-container table tbody tr:focus td,
+.gradio-container table tbody tr.focus-visible td,
+.gradio-container table tbody tr[aria-selected="true"] td,
+.gradio-container table tbody tr.selected td {{
+  background-color: {BRAND_OLIVE} !important;
+}}
+.gradio-container table tbody tr:hover *,
+.gradio-container table tbody tr:focus *,
+.gradio-container table tbody tr.focus-visible *,
+.gradio-container table tbody tr[aria-selected="true"] *,
+.gradio-container table tbody tr.selected * {{
+  color: #ffffff !important;
 }}
 """
 
@@ -187,19 +204,43 @@ def build_app():
 
         state = gr.State(None)
 
-        with gr.Tabs():
-            with gr.Tab("Overview"):
-                overview.build(state)
-            with gr.Tab("RF Replay"):
-                rf_replay.build(state, load_model)
-            with gr.Tab("Signal Analysis"):
-                signal_analysis.build(state)
-            with gr.Tab("Performance"):
-                performance.build()
-            with gr.Tab("Model"):
-                model_page.build(load_model)
-            with gr.Tab("Alerts"):
-                alerts.build(state)
+        with gr.Row():
+            # Navigation Sidebar
+            with gr.Column(scale=1, min_width=180):
+                gr.Markdown("### Menu")
+                nav_buttons = []
+                pages = [
+                    ("RF Replay", rf_replay.build, (state, load_model)),
+                    ("Signal Analysis", signal_analysis.build, (state,)),
+                    ("Performance", performance.build, ()),
+                    ("Model", model_page.build, (load_model,))
+                ]
+                
+                for idx, (name, _, _) in enumerate(pages):
+                    btn = gr.Button(name, variant="primary" if idx == 0 else "secondary")
+                    nav_buttons.append(btn)
+            
+            # Main Content Area
+            with gr.Column(scale=5):
+                page_containers = []
+                for idx, (_, build_fn, args) in enumerate(pages):
+                    with gr.Column(visible=(idx == 0)) as page:
+                        build_fn(*args)
+                    page_containers.append(page)
+        
+        def make_show_page(idx):
+            def show():
+                p_updates = [gr.update(visible=(i == idx)) for i in range(len(page_containers))]
+                b_updates = [gr.update(variant="primary" if i == idx else "secondary") for i in range(len(nav_buttons))]
+                return p_updates + b_updates
+            return show
+            
+        for idx, btn in enumerate(nav_buttons):
+            btn.click(
+                fn=make_show_page(idx),
+                inputs=None,
+                outputs=page_containers + nav_buttons
+            )
 
     return demo
 

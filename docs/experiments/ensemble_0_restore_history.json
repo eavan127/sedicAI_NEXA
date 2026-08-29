@@ -1,0 +1,16 @@
+{
+  "seed": 2000,
+  "epochs_planned": 30,
+  "best_epoch": 1,
+  "best_val_loss": 0.33968236122284606,
+  "stft_freq_summary": false,
+  "epochs": [
+    {
+      "epoch": 1,
+      "train_loss": 0.4073689360057706,
+      "val_loss": 0.33968236122284606,
+      "lr": 0.001,
+      "improved": true
+    }
+  ]
+}

@@ -451,8 +451,15 @@ def test_render_returns_a_visible_constellation_for_a_civilian_capture():
     s = _session({"QPSK": [0.30, 0.30, 0.30, 0.95, 0.30, 0.30]})
     out = _render(s, "Raw", "single")
     try:
-        assert len(out) == 5
-        update = out[4]
+        # The constellation is the LAST output, and the page's outputs list is
+        # the contract: [state, header, status_box, latest_box, console,
+        # events, constellation]. Asserted by position from the end rather
+        # than a fixed index, so adding another panel above it does not
+        # silently point this test at the wrong component -- which is exactly
+        # what happened when status_box and latest_box were added and these
+        # tests kept reading index 4.
+        assert len(out) == 7
+        update = out[-1]
         assert update["visible"] is True
         assert update["value"] is not None
     finally:
@@ -465,7 +472,7 @@ def test_render_hides_the_constellation_when_no_civilian_is_present():
     s = _session({"LFM_RADAR": [0.90] * 6})
     out = _render(s, "Raw", "single")
     try:
-        assert out[4]["visible"] is False
+        assert out[-1]["visible"] is False
     finally:
         plt.close("all")
 
