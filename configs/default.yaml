@@ -411,6 +411,44 @@ model:
   # before ever being turned on for a submission.
   stft_freq_summary: false
 
+  # EXPERIMENTAL, off by default. The classifier cannot tell 16QAM from
+  # 64QAM at all -- measured on the held-out test split with the 5-model
+  # ensemble: picking the larger of the two probabilities is right 51.4% of
+  # the time (chance), averaging 64 windows is 49.7% (still chance, because
+  # the error is a systematic BIAS, not noise -- pooling the model's own
+  # output cannot fix a bias), and on true 16QAM specifically it is right
+  # 47.0% of the time, WORSE than chance. On 16qam.f32 in the verification
+  # pack, 16QAM fires on 73% of windows and 64QAM on 68% of the SAME
+  # windows.
+  #
+  # The information is present in the samples -- the fourth-order cumulant
+  # separates the two classes even though the CNN's learned features do
+  # not (measured AUC between the classes at SNR >= +2 dB, 400 windows/
+  # class: 0.576 on the raw window, 0.609 after matched filtering, 0.633
+  # after full symbol recovery -- see src/measure.py's constellation_order,
+  # which already uses the fully-recovered-symbol version of this as a
+  # MEASURED, non-model decision rule). Matched filtering alone recovers
+  # most of that separation and is a fixed convolution, so it can live
+  # inside the model as an expert feature -- combining deep-learned and
+  # hand-built features for classes of the same family a CNN conflates is
+  # the standard AMC-literature answer to exactly this failure mode.
+  #
+  # When true: AMC_CNN's CumulantFeatures branch (src/models/amc_cnn.py)
+  # applies the RRC matched filter (src/dsp.py's rrc_taps, the SAME taps
+  # recover_symbols uses -- fixed, non-learned, requires_grad=False) to the
+  # raw IQ window as a depthwise Conv1d, computes three normalised cumulant
+  # magnitudes on the filtered complex signal (|C40|, |C42|, |C63| --
+  # src/cumulants.py, the same normalisation src/measure.py's
+  # constellation_order already relies on), and concatenates them onto the
+  # fused feature vector before fc1 -- fc1.in_features grows by exactly 3.
+  #
+  # Default false because the five checkpoints in results/ were trained
+  # against the flag-off architecture (fc1 sized without these 3 extra
+  # inputs) and must keep loading with strict=True; this is an
+  # experimental option to be evaluated (retrain + measure_variance.py)
+  # before ever being turned on for a submission.
+  cumulant_features: false
+
 training:
   epochs: 30
   batch_size: 64

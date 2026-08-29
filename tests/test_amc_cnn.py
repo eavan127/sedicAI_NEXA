@@ -17,17 +17,22 @@ These tests protect two things at once:
 """
 import numbers
 
+import numpy as np
 import pytest
 import torch
 
 from src.config import CFG, CLASSES
+from src.cumulants import normalized_c40, normalized_c42, normalized_c63
 from src.models.amc_cnn import (
     AMC_CNN,
+    CumulantFeatures,
     STFTBranch,
     _frequency_max,
     _peak_freq_delta,
     _spectral_flatness,
+    _torch_normalized_cumulants,
 )
+from tests.test_measure import _qam_constellation
 
 WINDOW_LEN = 512  # matches configs/default.yaml signal.window_len
 
@@ -226,3 +231,127 @@ def test_gradients_flow_through_flag_on_path():
             any_param_grad = True
             assert torch.isfinite(p.grad).all()
     assert any_param_grad
+
+
+# ---------------------------------------------------------------------------
+# `model.cumulant_features`: expert-feature branch (RRC matched filter +
+# |C40|/|C42|/|C63|) fixing the model's demonstrated inability to tell
+# 16QAM from 64QAM apart. See configs/default.yaml's `cumulant_features`
+# comment for the measured numbers motivating this (51.4% chance-level
+# single-window accuracy, 47.0% on true 16QAM -- worse than chance -- and
+# the AUC improvement matched filtering buys: 0.576 raw -> 0.609 filtered).
+# ---------------------------------------------------------------------------
+
+def test_cumulant_flag_default_is_off_in_config():
+    assert CFG.get("model", {}).get("cumulant_features") is False
+
+
+def test_cumulant_flag_off_fc1_unchanged_and_forward_shape_unchanged():
+    model = AMC_CNN(num_classes=len(CLASSES), input_len=WINDOW_LEN,
+                     cumulant_features=False)
+    assert model.fc1.in_features == 128 + 64
+    x = _random_iq_batch(batch=2)
+    assert model(x).shape == (2, len(CLASSES))
+
+
+def test_existing_checkpoint_still_loads_with_cumulant_flag_off():
+    """The guard that protects the submission: results/best_model.pt was
+    trained against today's architecture (no cumulant branch). Flag off
+    must keep AMC_CNN's state_dict shape-compatible with it -- the
+    CumulantFeatures branch must not even be constructed, let alone add
+    parameters/buffers, when the flag is off."""
+    model = AMC_CNN(num_classes=len(CLASSES), input_len=WINDOW_LEN,
+                     cumulant_features=False)
+    state_dict = torch.load("results/best_model.pt", map_location="cpu")
+    model.load_state_dict(state_dict, strict=True)  # must not raise
+
+
+def test_cumulant_flag_on_adds_exactly_three_fc1_inputs():
+    model_off = AMC_CNN(num_classes=len(CLASSES), input_len=WINDOW_LEN,
+                         cumulant_features=False)
+    model_on = AMC_CNN(num_classes=len(CLASSES), input_len=WINDOW_LEN,
+                        cumulant_features=True)
+    assert model_on.fc1.in_features == model_off.fc1.in_features + 3
+
+    x = _random_iq_batch(batch=2)
+    assert model_on(x).shape == (2, len(CLASSES))
+
+
+def test_torch_cumulants_match_numpy_cumulants():
+    """The test that matters: two independent implementations of the same
+    formula (numpy in src/cumulants.py, batched torch in
+    src/models/amc_cnn.py's _torch_normalized_cumulants) WILL drift apart
+    silently unless something checks them against each other directly."""
+    rng = np.random.default_rng(0)
+    batch = 5
+    n = 200
+    signals = (rng.normal(size=(batch, n)) + 1j * rng.normal(size=(batch, n))
+               ) * (1.0 + rng.uniform(0, 3, size=(batch, 1)))  # varied power
+
+    z = torch.tensor(signals, dtype=torch.complex64)
+    torch_feats = _torch_normalized_cumulants(z).numpy()  # (batch, 3): c40,c42,c63
+
+    for i in range(batch):
+        pts = signals[i]
+        expected = np.array([
+            normalized_c40(pts), normalized_c42(pts), normalized_c63(pts),
+        ])
+        np.testing.assert_allclose(torch_feats[i], expected, atol=1e-4, rtol=1e-4)
+
+
+def test_cumulant_feature_separates_16qam_from_64qam():
+    """The feature actually separates the classes it exists to separate.
+    Theoretical noiseless |C42|: 16QAM 0.680, 64QAM 0.619 (C42_THEORY,
+    src/measure.py) -- 16QAM's constellation is "spikier" (more low-amplitude
+    inner points relative to its power) so its normalised 4th moment sits
+    higher. The torch path must reproduce that ordering on bare
+    constellations (no matched filtering needed here -- these are already
+    symbol-rate points, not an oversampled window)."""
+    const_16 = _qam_constellation(16)
+    const_64 = _qam_constellation(64)
+
+    z16 = torch.tensor(const_16, dtype=torch.complex64).unsqueeze(0)
+    z64 = torch.tensor(const_64, dtype=torch.complex64).unsqueeze(0)
+
+    feats_16 = _torch_normalized_cumulants(z16)[0]
+    feats_64 = _torch_normalized_cumulants(z64)[0]
+
+    c42_16 = feats_16[1].item()
+    c42_64 = feats_64[1].item()
+    assert c42_16 > c42_64
+    assert c42_16 == pytest.approx(0.680, abs=1e-3)
+    assert c42_64 == pytest.approx(0.619, abs=1e-3)
+
+
+def test_cumulant_branch_gradients_finite_with_flag_on():
+    model = AMC_CNN(num_classes=len(CLASSES), input_len=WINDOW_LEN,
+                     cumulant_features=True)
+    x = _random_iq_batch(batch=3)
+    x.requires_grad_(True)
+
+    out = model(x)
+    loss = out.sum()
+    loss.backward()  # must not raise
+
+    assert x.grad is not None
+    assert torch.isfinite(x.grad).all()
+
+    any_param_grad = False
+    for p in model.parameters():
+        if p.grad is not None:
+            any_param_grad = True
+            assert torch.isfinite(p.grad).all()
+    assert any_param_grad
+
+    # The matched-filter kernel is fixed, not learned.
+    assert model.cumulant_branch.mf_kernel.requires_grad is False
+    for p in model.cumulant_branch.parameters():
+        pytest.fail(f"CumulantFeatures must have no learned parameters, got {p}")
+
+
+def test_cumulant_features_degenerate_all_zero_window_is_finite():
+    branch = CumulantFeatures()
+    x = torch.zeros(2, 2, WINDOW_LEN)
+    feats = branch(x)
+    assert torch.isfinite(feats).all()
+    assert feats.shape == (2, 3)

@@ -15,6 +15,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from src.dsp import SAMPLES_PER_SYMBOL, rrc_taps
+
 
 class AttentionPool1d(nn.Module):
     """Energy-gated attention pooling: learned weighted pooling over time,
@@ -213,12 +215,123 @@ class STFTBranch(nn.Module):
         return torch.cat([f, extra], dim=1)   # (batch, out_channels+3, time')
 
 
+def _torch_normalized_cumulants(z, eps=1e-12):
+    """Batched torch counterpart of src/cumulants.py's normalized_c40/
+    normalized_c42/normalized_c63, returning (batch, 3) = [|C40|, |C42|,
+    |C63|] for a (batch, time) complex tensor.
+
+    This is a SEPARATE implementation from src/cumulants.py's numpy one --
+    not a wrapper around it -- because it has to run batched, on a GPU, and
+    inside a no-grad block during a forward pass, none of which numpy does.
+    The two are checked against each other directly in
+    tests/test_amc_cnn.py's test_torch_cumulants_match_numpy_cumulants:
+    two implementations of the same formula WILL drift apart silently
+    otherwise, so that test -- not a shared code path -- is what keeps them
+    honest.
+
+    Same normalisation as normalized_c42: scale to unit average power
+    (`p`), then the reduced (approximate-circular-symmetry) cumulant
+    formulas. `eps` guards the degenerate all-zero window: dividing by
+    clamp_min(m2, eps) instead of raw m2 turns "0/0 -> NaN" into "0/eps ->
+    0", i.e. an all-zero window produces all-zero (finite) features rather
+    than crashing a batch that happens to contain one silent window.
+    """
+    m2 = (z.abs() ** 2).mean(dim=-1)                       # (batch,) real
+    scale = torch.sqrt(m2.clamp_min(eps))
+    p = z / scale.unsqueeze(-1).to(z.dtype)
+
+    m20 = (p ** 2).mean(dim=-1)                              # (batch,) complex
+    m40 = (p ** 4).mean(dim=-1)                               # (batch,) complex
+    c40 = (m40 - 3.0 * m20 ** 2).abs()
+
+    m21 = (p.abs() ** 2).mean(dim=-1)                          # (batch,) real
+    m42 = (p.abs() ** 4).mean(dim=-1)                           # (batch,) real
+    c42 = (m42 - 2.0 * m21 ** 2).abs()
+
+    m63 = (p.abs() ** 6).mean(dim=-1)                           # (batch,) real
+    c63 = (m63 - 9.0 * m21 * m42 + 12.0 * m21 ** 3).abs()
+
+    return torch.stack([c40, c42, c63], dim=1)   # (batch, 3)
+
+
+class CumulantFeatures(nn.Module):
+    """Expert-feature branch: a fixed RRC matched filter, then three
+    normalised cumulant magnitudes of the filtered complex signal --
+    |C40|, |C42|, |C63| -- concatenated onto the pooled feature vector
+    right before fc1.
+
+    EXPERIMENTAL, behind `model.cumulant_features` (configs/default.yaml,
+    default false -- see that flag's comment for the full measured story).
+    In short: the classifier cannot distinguish 16QAM from 64QAM at all --
+    51.4% single-window accuracy picking the larger class probability
+    (chance), 49.7% even averaging 64 windows (still chance, because the
+    error is a systematic BIAS the model's own output cannot average away),
+    47.0% on true 16QAM specifically (WORSE than chance). Yet the
+    information is measurably present in the samples: AUC between the two
+    classes at SNR >= +2 dB, 400 windows/class, goes 0.576 (raw window) ->
+    0.609 (matched-filtered window) -> 0.633 (fully recovered symbols).
+    Matched filtering alone recovers most of that separation and is a fixed
+    convolution -- no timing/carrier recovery needed, unlike full symbol
+    recovery -- so it is cheap enough to compute inside forward() on every
+    window in a batch.
+
+    Why matched-filter-and-cumulant rather than full symbol recovery
+    (src/ui/plots.py's recover_symbols) inside the model: recover_symbols
+    also estimates and de-rotates a carrier offset via an FFT peak search
+    and picks a timing phase by minimising amplitude spread -- both
+    data-dependent, branchy, and not naturally batchable/differentiable.
+    The matched filter alone buys most of the AUC (0.609 of the 0.633
+    ceiling) for a fraction of the complexity: one fixed convolution.
+
+    The matched filter is applied as a depthwise Conv1d -- groups=2, one
+    real-valued kernel shared by both the real and imaginary input
+    channels -- built from src.dsp.rrc_taps (SAMPLES_PER_SYMBOL), the SAME
+    tap definition src/ui/plots.py's recover_symbols uses (src/dsp.py is
+    the one place those taps are computed; see its module docstring). The
+    kernel is a registered buffer, not a Parameter: it never appears in
+    .parameters(), so it is never touched by an optimizer and adds nothing
+    to a checkpoint's trainable state.
+
+    No gradient flows through this branch at all -- the matched filter and
+    the cumulant math both run inside torch.no_grad() and the output is
+    .detach()-ed before being concatenated. Nothing here needs a gradient
+    (the filter is fixed and the cumulant formulas involve abs() of
+    near-zero complex values, which has an ill-defined/unstable
+    subgradient at exactly zero); wrapping the whole branch in no_grad
+    sidesteps that instead of hoping autograd handles it gracefully, while
+    leaving backprop through the rest of the model (iq_branch, stft_branch,
+    fc1/fc2) completely untouched.
+    """
+
+    def __init__(self):
+        super().__init__()
+        taps = rrc_taps(SAMPLES_PER_SYMBOL)   # numpy, unit energy, odd length
+        kernel = torch.tensor(taps, dtype=torch.float32).view(1, 1, -1)
+        kernel = kernel.repeat(2, 1, 1)          # one shared kernel, per-channel (groups=2)
+        kernel.requires_grad_(False)
+        self.register_buffer("mf_kernel", kernel)
+        self.pad = kernel.shape[-1] // 2           # odd kernel -> "same"-length output
+        self.out_channels = 3
+
+    def forward(self, x):
+        # x: (batch, 2, time) real/imag raw IQ.
+        with torch.no_grad():
+            filt = F.conv1d(x, self.mf_kernel, padding=self.pad, groups=2)
+            z = torch.complex(filt[:, 0, :], filt[:, 1, :])
+            feats = _torch_normalized_cumulants(z)   # (batch, 3): |C40|,|C42|,|C63|
+        return feats.detach()
+
+
 class AMC_CNN(nn.Module):
-    def __init__(self, num_classes, input_len=1024, stft_freq_summary=None):
+    def __init__(self, num_classes, input_len=1024, stft_freq_summary=None,
+                 cumulant_features=None):
         super().__init__()
         if stft_freq_summary is None:
             from src.config import CFG
             stft_freq_summary = CFG.get("model", {}).get("stft_freq_summary", False)
+        if cumulant_features is None:
+            from src.config import CFG
+            cumulant_features = CFG.get("model", {}).get("cumulant_features", False)
 
         iq_out_channels = 128
         self.iq_branch = IQBranch(out_channels=iq_out_channels)
@@ -230,12 +343,25 @@ class AMC_CNN(nn.Module):
         self.relu = nn.ReLU()
         self.dropout = nn.Dropout(0.5)
 
+        # EXPERIMENTAL, behind `model.cumulant_features` (configs/default.yaml,
+        # default false). Only constructed when the flag is on: with it off,
+        # this stays None and adds no parameters/buffers, so the state_dict
+        # of the five checkpoints in results/ keeps loading with strict=True
+        # (see CumulantFeatures' docstring for what this branch does and why).
+        self.cumulant_branch = CumulantFeatures() if cumulant_features else None
+
+        # Computed from what's actually being fused, not hardcoded -- fc1's
+        # input width is fused_channels alone with the flag off, plus the 3
+        # cumulant scalars (CumulantFeatures.out_channels) with it on.
+        fc1_in = fused_channels + (
+            self.cumulant_branch.out_channels if self.cumulant_branch is not None else 0)
+
         # No dummy forward pass needed -- attention pooling always outputs
         # exactly `fused_channels` values regardless of input_len. input_len
         # is kept as a parameter only so existing call sites
         # (AMC_CNN(num_classes=..., input_len=X.shape[-1])) still work
         # unchanged; it is otherwise unused.
-        self.fc1 = nn.Linear(fused_channels, 256)
+        self.fc1 = nn.Linear(fc1_in, 256)
         self.fc2 = nn.Linear(256, num_classes)
 
     def forward(self, x):
@@ -255,6 +381,10 @@ class AMC_CNN(nn.Module):
                                   mode="linear", align_corners=False)
         fused = torch.cat([iq_feats, tf_feats], dim=1)   # (batch, 128+64, time_full)
 
-        x = self.attn_pool(fused, raw_power)
-        x = self.dropout(self.relu(self.fc1(x)))
-        return self.fc2(x)
+        pooled = self.attn_pool(fused, raw_power)
+        if self.cumulant_branch is not None:
+            cum_feats = self.cumulant_branch(x)   # (batch, 3): |C40|,|C42|,|C63|
+            pooled = torch.cat([pooled, cum_feats], dim=1)
+
+        out = self.dropout(self.relu(self.fc1(pooled)))
+        return self.fc2(out)
