@@ -47,7 +47,9 @@ CFG.setdefault("model", {})["stft_freq_summary"] = True
 from src.train import load_data, stratified_split  # noqa: E402
 from scripts.train_ensemble import train_one  # noqa: E402
 
-OUT = Path(__file__).resolve().parents[1] / "results" / "experiment_stft_freq_summary.pt"
+ROOT = Path(__file__).resolve().parents[1]
+OUT = ROOT / "results" / "experiment_stft_freq_summary.pt"
+HISTORY = ROOT / "docs" / "experiments" / "stft_experiment_history.json"
 SEED = 2000       # member 0's seed -- the one the pinned baseline was measured on
 
 

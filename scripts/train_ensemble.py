@@ -41,8 +41,24 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 BENCHMARK = 0.80
 
 
-def train_one(X, y, snr_labels, tr, va, seed):
-    """Train a single member and return it at its best-validation state."""
+def train_one(X, y, snr_labels, tr, va, seed, history_path=None, ckpt_path=None):
+    """Train a single member and return it at its best-validation state.
+
+    `history_path` writes one JSON per epoch -- train loss, validation loss and
+    the current learning rate -- rewritten after every epoch rather than at the
+    end. Losses used to go to stdout and nowhere else, so for the five
+    checkpoints in results/ the train/validation gap cannot be inspected at all
+    without a 2.5-hour retrain. Rewriting each epoch also means a run killed
+    part-way still leaves everything it had reached.
+
+    `ckpt_path` saves the best-so-far weights every time validation improves.
+    A 2.5-hour run that dies at epoch 25 with nothing on disk is a total loss;
+    this makes it a partial one. Learned the hard way -- the first attempt at
+    the stft_freq_summary experiment was killed around epoch 8 and left no
+    checkpoint and, because stdout was being piped through tee, no log either.
+
+    Both default to None, so existing callers are unaffected.
+    """
     set_seed(seed)
     t = CFG["training"]
 
@@ -69,14 +85,19 @@ def train_one(X, y, snr_labels, tr, va, seed):
     opt = torch.optim.Adam(model.parameters(), lr=t["learning_rate"])
     sched = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, patience=t["scheduler_patience"])
 
-    best_loss, best_state = float("inf"), None
-    for _ in range(t["epochs"]):
+    best_loss, best_state, best_epoch = float("inf"), None, None
+    history = []
+    for epoch in range(t["epochs"]):
         model.train()
+        tloss = 0.0
         for xb, yb in train_loader:
             xb, yb = xb.to(DEVICE), yb.to(DEVICE)
             opt.zero_grad()
-            criterion(model(xb), yb).backward()
+            loss = criterion(model(xb), yb)
+            loss.backward()
             opt.step()
+            tloss += loss.item() * xb.size(0)
+        tloss /= len(train_loader.dataset)
 
         model.eval()
         vloss = 0.0
@@ -86,9 +107,30 @@ def train_one(X, y, snr_labels, tr, va, seed):
                 vloss += criterion(model(xb), yb).item() * xb.size(0)
         vloss /= len(val_loader.dataset)
         sched.step(vloss)
-        if vloss < best_loss:
+        improved = vloss < best_loss
+        if improved:
             best_loss = vloss
             best_state = {k: v.clone() for k, v in model.state_dict().items()}
+            best_epoch = epoch + 1
+            if ckpt_path is not None:
+                torch.save(best_state, ckpt_path)
+
+        lr = opt.param_groups[0]["lr"]
+        print(f"epoch {epoch+1}/{t['epochs']}  train_loss={tloss:.4f}  "
+              f"val_loss={vloss:.4f}  lr={lr:g}"
+              f"{'  <- best' if improved else ''}", flush=True)
+        if history_path is not None:
+            history.append({"epoch": epoch + 1, "train_loss": float(tloss),
+                             "val_loss": float(vloss), "lr": float(lr),
+                             "improved": bool(improved)})
+            # Rewritten every epoch, not appended at the end: a killed run
+            # still leaves a complete record of everything it reached.
+            Path(history_path).write_text(json.dumps(
+                {"seed": seed, "epochs_planned": t["epochs"],
+                 "best_epoch": best_epoch, "best_val_loss": float(best_loss),
+                 "stft_freq_summary": bool(
+                     CFG.get("model", {}).get("stft_freq_summary", False)),
+                 "epochs": history}, indent=2))
 
     model.load_state_dict(best_state)
     model.eval()
