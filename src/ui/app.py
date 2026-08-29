@@ -1,4 +1,7 @@
 """Assembles the six OMNI pages."""
+import os
+from pathlib import Path
+
 import gradio as gr
 import torch
 import torch.nn as nn
@@ -6,7 +9,7 @@ import torch.nn as nn
 from src.config import CFG, CLASSES, REPO_ROOT
 from src.models.amc_cnn import AMC_CNN
 from src.ui.app_models import load_model, model_label  # noqa: F401
-from src.ui.pages import (alerts, model_page, overview, performance, rf_replay,
+from src.ui.pages import (model_page, performance, rf_replay,
                            signal_analysis)
 from src.ui.palette import (BG, BRAND_OLIVE, BRAND_OLIVE_DARK,
                              BRAND_OLIVE_TINT, BRAND_SLATE, FONT_STACK, GRID,
@@ -42,6 +45,8 @@ CUSTOM_CSS = f"""
   --table-even-background-fill: {PANEL};
   --table-odd-background-fill: {BG};
   --table-border-color: {GRID};
+  --table-row-focus-background-fill: {BRAND_OLIVE};
+  --table-row-focus-text-color: #ffffff;
   --button-secondary-background-fill: {PANEL};
   --button-secondary-text-color: {TEXT};
   --button-secondary-border-color: {GRID};
@@ -96,21 +101,83 @@ footer {{ display: none !important; }}
 .gradio-container em, .gradio-container i, .gradio-container * {{
   font-style: normal !important;
 }}
+/* Force table row selection to be readable */
+.gradio-container table tbody tr:hover td,
+.gradio-container table tbody tr:focus td,
+.gradio-container table tbody tr.focus-visible td,
+.gradio-container table tbody tr[aria-selected="true"] td,
+.gradio-container table tbody tr.selected td {{
+  background-color: {BRAND_OLIVE} !important;
+}}
+.gradio-container table tbody tr:hover *,
+.gradio-container table tbody tr:focus *,
+.gradio-container table tbody tr.focus-visible *,
+.gradio-container table tbody tr[aria-selected="true"] *,
+.gradio-container table tbody tr.selected * {{
+  color: #ffffff !important;
+}}
 """
 
-LOGO_PATH = REPO_ROOT / "assets" / "sedic_logo.png"
+LOGO_NAME = "sedic_logo.png"
+
+
+def _main_worktree_root():
+    """Root of the MAIN checkout, as seen from a linked git worktree.
+
+    In a linked worktree `.git` is a FILE containing `gitdir: <path>`, where
+    <path> is `<main>/.git/worktrees/<name>`. Two levels up from that is
+    `<main>/.git`, whose parent is the main checkout. Returns None when this
+    is the main checkout itself (where `.git` is a directory), or when the
+    file is missing or malformed -- callers treat None as "no extra place to
+    look", never as an error.
+    """
+    dotgit = REPO_ROOT / ".git"
+    if not dotgit.is_file():
+        return None
+    try:
+        line = dotgit.read_text(encoding="utf-8").strip()
+        if not line.startswith("gitdir:"):
+            return None
+        return Path(line.split(":", 1)[1].strip()).parents[1].parent
+    except (OSError, IndexError, ValueError):
+        return None
+
+
+def _logo_path():
+    """Locate the logo, which is gitignored and so exists in only one checkout.
+
+    REPO_ROOT is derived from this file's location, so running the app from a
+    linked worktree pointed it at `<worktree>/assets/` -- a directory that does
+    not exist there, because an ignored file is never materialised into a
+    worktree. The logo silently fell back to the typographic lockup for anyone
+    not running from the main checkout.
+
+    Candidates, in order: an explicit SEDIC_LOGO override, this checkout, then
+    the main checkout. Returns None if none exist, and the caller falls back to
+    type as before.
+    """
+    override = os.environ.get("SEDIC_LOGO")
+    candidates = [Path(override)] if override else []
+    candidates.append(REPO_ROOT / "assets" / LOGO_NAME)
+
+    main_root = _main_worktree_root()
+    if main_root is not None:
+        candidates.append(main_root / "assets" / LOGO_NAME)
+
+    return next((p for p in candidates if p.is_file()), None)
 
 
 def _logo_html():
-    """SEDIC 26 logo, if the file has been placed in assets/.
+    """SEDIC 26 logo, if the asset can be found -- see _logo_path().
 
     Falls back to a typographic lockup rather than a broken image, so the app
     still runs for anyone who has not copied the asset in -- it is not checked
     into git.
     """
-    if LOGO_PATH.exists():
+    path = _logo_path()
+    if path is not None:
         import base64
-        b64 = base64.b64encode(LOGO_PATH.read_bytes()).decode()
+        b64 = base64.b64encode(path.read_bytes()).decode()
         return (f'<img src="data:image/png;base64,{b64}" alt="SEDIC 26" '
                 f'style="height:52px;width:auto;display:block;">')
     return (f'<div style="font-size:26px;font-weight:800;letter-spacing:0.08em;'
@@ -137,19 +204,43 @@ def build_app():
 
         state = gr.State(None)
 
-        with gr.Tabs():
-            with gr.Tab("Overview"):
-                overview.build(state)
-            with gr.Tab("RF Replay"):
-                rf_replay.build(state, load_model)
-            with gr.Tab("Signal Analysis"):
-                signal_analysis.build(state)
-            with gr.Tab("Performance"):
-                performance.build()
-            with gr.Tab("Model"):
-                model_page.build(load_model)
-            with gr.Tab("Alerts"):
-                alerts.build(state)
+        with gr.Row():
+            # Navigation Sidebar
+            with gr.Column(scale=1, min_width=180):
+                gr.Markdown("### Menu")
+                nav_buttons = []
+                pages = [
+                    ("RF Replay", rf_replay.build, (state, load_model)),
+                    ("Signal Analysis", signal_analysis.build, (state,)),
+                    ("Performance", performance.build, ()),
+                    ("Model", model_page.build, (load_model,))
+                ]
+                
+                for idx, (name, _, _) in enumerate(pages):
+                    btn = gr.Button(name, variant="primary" if idx == 0 else "secondary")
+                    nav_buttons.append(btn)
+            
+            # Main Content Area
+            with gr.Column(scale=5):
+                page_containers = []
+                for idx, (_, build_fn, args) in enumerate(pages):
+                    with gr.Column(visible=(idx == 0)) as page:
+                        build_fn(*args)
+                    page_containers.append(page)
+        
+        def make_show_page(idx):
+            def show():
+                p_updates = [gr.update(visible=(i == idx)) for i in range(len(page_containers))]
+                b_updates = [gr.update(variant="primary" if i == idx else "secondary") for i in range(len(nav_buttons))]
+                return p_updates + b_updates
+            return show
+            
+        for idx, btn in enumerate(nav_buttons):
+            btn.click(
+                fn=make_show_page(idx),
+                inputs=None,
+                outputs=page_containers + nav_buttons
+            )
 
     return demo
 

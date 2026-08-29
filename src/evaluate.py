@@ -122,6 +122,81 @@ def comms_vs_jamming(y_true, y_pred):
     }
 
 
+def recall_in_context(y_true, y_pred):
+    """Per-class recall split by what ELSE is present in the same window --
+    "alone", "with another emitter" (no jammer), and "with a jammer" -- instead
+    of one number that averages over all three.
+
+    That average is not a neutral summary, it is actively misleading. Roughly
+    a third of test windows are composites, and standalone recall is even
+    across every class -- the damage is entirely concentrated "in company",
+    and each class fails in a DIFFERENT way there: some survive a benign
+    second emitter and only collapse under a jammer, others collapse under
+    any company at all. A single per-class recall figure blends a class that
+    is actually fine alone with whatever is happening in company and reports
+    the blend as if it were one homogeneous number -- which has previously
+    made at least one class look like an off-trend anomaly in the overall
+    column when its standalone performance was unremarkable and the entire
+    story was "in company". This is reported for EVERY class, not just the
+    judged ones -- the judged classes have exactly the same alone/company
+    split hiding inside their single recall number, and nobody had looked.
+
+    Buckets (mutually exclusive, by presence in the true multi-hot row):
+      - "alone": exactly one positive label in the window (the class itself).
+      - "with_emitter": more than one positive label, and JAMMING is NOT one
+        of them -- company from another comms/military emitter.
+      - "with_jammer": JAMMING IS one of the positive labels, and the class
+        under test is not JAMMING itself.
+
+    JAMMING's own "with_jammer" bucket is meaningless (a jammer can't be "in
+    company with a jammer" relative to itself, since there is only one
+    JAMMING class) and reads as an empty bucket, not a folded-in zero --
+    JAMMING co-occurring with another emitter lands in "with_emitter" instead,
+    since from JAMMING's point of view that IS just "another emitter present".
+
+    A bucket can legitimately be empty (JAMMING's "with_jammer", and every
+    bucket but "alone" for NOISE_FLOOR, which by construction of the mixture
+    generator never co-occurs with anything). An empty bucket's recall is
+    None -- never 0.0 or NaN -- so a reader cannot mistake "this situation
+    does not occur in the data" for "the model failed at it every time".
+
+    The support count travels with every recall for the same reason: the
+    buckets are NOT equally sized (which classes end up "with a jammer" at
+    all, and how often, is purely a function of which mixture combinations
+    exist in configs/default.yaml), so two classes' "with_jammer" recall
+    numbers are not directly comparable difficulty-for-difficulty unless the
+    reader can also see how much evidence backs each one.
+    """
+    jam = CLASS_TO_IDX["JAMMING"]
+    has_jam = y_true[:, jam] == 1
+    n_pos = y_true.sum(axis=1)
+
+    def _bucket(mask, idx):
+        support = int(mask.sum())
+        recall = float(y_pred[mask, idx].mean()) if support else None
+        return {"recall": recall, "support": support}
+
+    out = {}
+    for cls in CLASSES:
+        idx = CLASS_TO_IDX[cls]
+        is_pos = y_true[:, idx] == 1
+        # For JAMMING itself there is no "other jammer" to be in company
+        # with -- its own presence bit IS the global jamming bit, so using
+        # `has_jam` unmodified would make "with_emitter" vacuously empty too.
+        jam_present_other = has_jam if cls != "JAMMING" else np.zeros(len(y_true), dtype=bool)
+
+        alone_mask = is_pos & (n_pos == 1)
+        with_emitter_mask = is_pos & (n_pos > 1) & (~jam_present_other)
+        with_jammer_mask = is_pos & jam_present_other
+
+        out[cls] = {
+            "alone": _bucket(alone_mask, idx),
+            "with_emitter": _bucket(with_emitter_mask, idx),
+            "with_jammer": _bucket(with_jammer_mask, idx),
+        }
+    return out
+
+
 def confusion_between(y_true, y_pred, class_a, class_b):
     """Among class_a's false positives (predicted present, truly absent), what
     fraction are windows where class_b is truly present?
@@ -141,6 +216,51 @@ def confusion_between(y_true, y_pred, class_a, class_b):
         return None
     overlap = int((y_true[fp_mask, b] == 1).sum())
     return {"false_positives": n_fp, "fraction_that_are_true_" + class_b: overlap / n_fp}
+
+
+DENSE_QAM_CLASSES = ("16QAM", "64QAM")
+
+
+def dense_qam_recall(y_true, y_pred):
+    """Combined "dense QAM" recall: a window counts as a hit if EITHER
+    16QAM or 64QAM is truly present and EITHER was predicted -- i.e. did
+    the model notice that some dense-QAM signal was there, independent of
+    which of the two it guessed.
+
+    Why this exists, and why it belongs next to the per-class 16QAM/64QAM
+    recalls rather than replacing them: measured directly (see
+    src/measure.py's constellation_order, built to resolve exactly this),
+    picking the larger of the model's own 16QAM/64QAM probabilities is
+    right only 51.4% of the time on a single window, and averaging over 64
+    windows barely moves that -- 49.7% at SNR >= +2 dB, still a coin flip.
+    Worse, the error is not noise but a BIAS: true 16QAM is called
+    correctly only 47.0% of the time (WORSE than chance) while true 64QAM
+    gets 56.9%, which is exactly why more windows cannot fix it. The
+    per-class recall numbers this scorecard already reports for 16QAM and
+    64QAM are therefore each measuring "dense QAM detected, split by a coin
+    flip" -- they overstate what the model can actually tell apart between
+    the two, in opposite directions (16QAM's true recall looks worse than
+    its real detection ability, 64QAM's looks better, and neither number on
+    its own says so). Their SUM does not have this problem: it only asks
+    whether SOME dense-QAM signal was caught, a question the coin flip
+    cannot corrupt, so it is the stable, meaningful number for anyone who
+    wants to know "can this model tell dense QAM traffic is on the air",
+    while the true 16-vs-64 order call is left to the measured, non-model
+    estimator in src/measure.py instead.
+
+    Returns None when no window in y_true carries either class, matching
+    every other None-when-nothing-to-measure convention in this module
+    (recall_in_context, comms_vs_jamming, confusion_between).
+    """
+    idx = np.array([CLASS_TO_IDX[c] for c in DENSE_QAM_CLASSES])
+    true_is_dense_qam = y_true[:, idx].any(axis=1)
+    if not true_is_dense_qam.any():
+        return None
+    pred_is_dense_qam = y_pred[:, idx].any(axis=1)
+    return {
+        "recall": float(pred_is_dense_qam[true_is_dense_qam].mean()),
+        "n_evaluated": int(true_is_dense_qam.sum()),
+    }
 
 
 EVAL_BATCH_SIZE = 256
@@ -225,6 +345,8 @@ def evaluate(ensemble=False, n_models=5):
 
     coarse = coarse_tier_metrics(y_test, preds)
     cvj = comms_vs_jamming(y_test, preds)
+    ric = recall_in_context(y_test, preds)
+    dense_qam = dense_qam_recall(y_test, preds)
 
     # LFM_RADAR and FHSS are the two classes needing the most aggressive
     # threshold/loss-weight help (see configs/default.yaml) -- check whether
@@ -240,7 +362,9 @@ def evaluate(ensemble=False, n_models=5):
     with open(evals_dir / "scorecard.json", "w") as f:
         json.dump({"per_class": report, "benchmark": scorecard,
                     "coarse_tier": coarse, "comms_vs_jamming": cvj,
-                    "radar_fhss_confusion": radar_fhss_confusion}, f, indent=2)
+                    "radar_fhss_confusion": radar_fhss_confusion,
+                    "recall_in_context": ric,
+                    "dense_qam_recall": dense_qam}, f, indent=2)
 
     # Flat CSVs alongside the JSON/PNG artifacts — Power BI (and Excel) read
     # CSV directly via Get Data > Text/CSV, no JSON connector needed. Same
@@ -270,6 +394,18 @@ def evaluate(ensemble=False, n_models=5):
             print(f"  false alarm rate        : {cvj['false_alarm_rate']:.4f}"
                   "   (civilian wrongly flagged as jamming)")
 
+    # 16QAM-vs-64QAM is a coin flip the model cannot win (see
+    # dense_qam_recall's docstring); the combined figure is the one that
+    # actually means something, and the measured, non-model resolver for
+    # the split itself lives in src/measure.py's constellation_order.
+    if dense_qam:
+        print("\n--- Dense QAM (16QAM + 64QAM combined recall) ---")
+        print(f"  recall       : {dense_qam['recall']:.4f}  "
+              f"(n={dense_qam['n_evaluated']})")
+        print(f"  16QAM recall : {report['16QAM']['recall']:.4f}   "
+              f"64QAM recall : {report['64QAM']['recall']:.4f}   "
+              "-- per-class figures split by a coin flip, see docstring")
+
     print("\n--- LFM_RADAR / FHSS cross-confusion ---")
     for label, r in radar_fhss_confusion.items():
         if r is None:
@@ -283,6 +419,18 @@ def evaluate(ensemble=False, n_models=5):
     for tier, rec in coarse["per_tier_recall"].items():
         print(f"    {tier:<10} recall={rec:.4f}" if rec is not None
               else f"    {tier:<10} recall=n/a")
+
+    # Per-class recall split by company -- see recall_in_context's docstring
+    # for why the overall column alone hides this. Every class, not just the
+    # judged ones.
+    def _cell(bucket):
+        return "n/a" if bucket["recall"] is None else f"{bucket['recall']:.3f} (n={bucket['support']})"
+
+    print("\n--- Recall by company: alone / with another emitter / with a jammer ---")
+    print(f"  {'class':<12}{'alone':<18}{'with emitter':<18}{'with jammer':<18}")
+    for cls, buckets in ric.items():
+        print(f"  {cls:<12}{_cell(buckets['alone']):<18}"
+              f"{_cell(buckets['with_emitter']):<18}{_cell(buckets['with_jammer']):<18}")
 
     # Confusion matrix — a single 8x8 no longer makes sense once more than one
     # class can be true in the same window (which of the 2 true classes would

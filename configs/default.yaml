@@ -145,6 +145,37 @@ multilabel_thresholds_per_class:
   # decides whether a window is REPORTED as empty.
   NOISE_FLOOR: 0.265
 
+# Decision boundary for src/measure.py's constellation_order -- a MEASURED
+# (not model) resolver for 16QAM vs 64QAM, the one distinction the trained
+# classifier gets no better than a coin flip on (see that function's own
+# docstring for the numbers). It thresholds the pooled, normalised
+# fourth-order cumulant |C42| of recovered symbols: at or above this value
+# reads 16QAM, below reads 64QAM.
+#
+# CALIBRATED on the VALIDATION split at SNR >= +2 dB, exactly like every
+# other threshold in this file (multilabel_thresholds_per_class above) --
+# NOT the midpoint of the theoretical noiseless constants (16QAM 0.680,
+# 64QAM 0.619, computed directly from the ideal unit-power constellations;
+# see C42_THEORY in src/measure.py). That theory-midpoint boundary (0.6495)
+# was tried first and is wrong for this estimator: channel noise pulls
+# |C42| toward the Gaussian limit of zero, so real recovered symbols sit
+# BELOW their noiseless value, and at SNR >= +2 dB BOTH classes measure
+# under 0.6495 -- a theory-derived boundary would call everything 64QAM.
+#
+# Validation means (450 windows/class): 16QAM 0.6223, 64QAM 0.5660 ->
+# boundary (their midpoint) 0.5942. Confirmed on TEST -- no leakage, the
+# boundary was picked on val and only ever scored here on test: means
+# 16QAM 0.6166, 64QAM 0.5686; pooled-window accuracy .593 / .754 / .843 /
+# .921 / .980 at 1 / 8 / 16 / 32 / 64 windows. This matches (does not even
+# need to beat) the accuracy an earlier TEST-fitted midpoint gave (.914 @
+# 32 windows) -- calibrating on val instead of test cost nothing here.
+#
+# Do NOT "fix" this back toward 0.6495 or either raw theory constant --
+# that reasoning is exactly what produced the wrong first version of this
+# value, which classified real 64QAM as 16QAM at every realistic SNR.
+constellation_order:
+  c42_boundary: 0.5942
+
 # Per-class multiplier on compute_class_weights' inverse-frequency pos_weight
 # (src/train.py), applied in BCEWithLogitsLoss. >1 boosts a class (missing it
 # is penalised harder, pushing the model toward more confident positives);
@@ -356,6 +387,29 @@ jamming:
   # with 35/200 predicted as LFM_RADAR). A band-limited jammer has a defined
   # spectral shape; white noise has none.
   barrage_bandwidth_hz: [200000, 1200000]
+
+model:
+  # EXPERIMENTAL, off by default. STFTBranch (src/models/amc_cnn.py) ends
+  # with `f.mean(dim=2)`, which averages the frequency axis away -- "peak at
+  # bin 2 then bin 6" (FHSS hopping) and "peak at bin 4 then bin 4" (tone
+  # jamming) become identical features. Measured consequences: FHSS recall
+  # 0.960 -> 0.040 as jammer-to-signal ratio goes 0dB -> +10dB, 46.5% of
+  # held-out jamming predicted as FHSS, jamming's seed spread 10.8 points
+  # against FHSS's 1.1.
+  #
+  # When true: STFTBranch pools time only (frequency resolution stays at
+  # 200 kHz/bin instead of being halved to 400 kHz by the old 2x2 pool -- an
+  # FHSS hop between adjacent channels is 10-48 kHz, a twentieth of a bin,
+  # so frequency pooling was throwing away resolution this branch cannot
+  # spare) and adds three explicit per-frame features computed from the STFT
+  # magnitude directly (frequency max, spectral flatness, peak-frequency
+  # delta) rather than only the pooled conv features.
+  #
+  # Default false because the five checkpoints in results/ were trained
+  # against the flag-off architecture and must keep loading; this is an
+  # experimental option to be evaluated (retrain + measure_variance.py)
+  # before ever being turned on for a submission.
+  stft_freq_summary: false
 
 training:
   epochs: 30

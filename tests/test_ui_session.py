@@ -243,3 +243,69 @@ def test_display_mode_survives_a_model_switch(model):
                        case="All three")
     s.display_smoothed = False
     assert reanalyze(s, model).display_smoothed is False
+
+
+def test_a_civilian_scene_reports_the_snr_it_actually_achieved(model):
+    """You can add noise to a recording but never remove it, so a civilian
+    scene cannot be cleaner than the library bin it was drawn from. Claiming
+    the requested figure would put a number on screen that is not true of the
+    capture."""
+    from src.config import CFG
+    s = load_scenario(model, total_duration=0.01, hop=512, snr_db=10,
+                       case="Civilian only")
+    assert s.snr_known is True
+    assert s.true_snr_db <= max(CFG["snr_bins_db"])
+
+
+def test_snr_capped_flag_set_only_when_a_civilian_request_exceeds_the_library_bin(model):
+    """snr_capped tells the page the on-screen SNR number was reduced from
+    what the operator actually requested. It must be True for a civilian
+    scene requested above the library's cleanest bin, and False for a
+    synthetic-only scene, which never touches the library at all."""
+    from src.config import CFG
+    cleanest = max(CFG["snr_bins_db"])
+    s = load_scenario(model, total_duration=0.01, hop=512,
+                       snr_db=cleanest + 20, case="Civilian only")
+    assert s.snr_capped is True
+
+    s2 = load_scenario(model, total_duration=0.01, hop=512,
+                        snr_db=cleanest + 20, case="All three")
+    assert s2.snr_capped is False
+
+
+def test_requested_snr_db_carries_what_the_operator_actually_asked_for(model):
+    """10f: the header needs both the requested and achieved SNR to say
+    "capped from X dB" rather than the achieved figure alone plus a word
+    ("library") that names an implementation detail. requested_snr_db must
+    equal the dropdown value the operator picked, not the achieved
+    true_snr_db it got capped down to -- and must stay None when nothing was
+    capped, so an uncapped session's header keeps its old phrasing."""
+    from src.config import CFG
+    cleanest = max(CFG["snr_bins_db"])
+    requested = cleanest + 20
+    s = load_scenario(model, total_duration=0.01, hop=512,
+                       snr_db=requested, case="Civilian only")
+    assert s.snr_capped is True
+    assert s.requested_snr_db == requested
+    assert s.requested_snr_db != s.true_snr_db
+
+    s2 = load_scenario(model, total_duration=0.01, hop=512,
+                        snr_db=requested, case="All three")
+    assert s2.snr_capped is False
+    assert s2.requested_snr_db is None
+
+
+def test_capped_header_says_what_was_requested_and_delivered(model):
+    """The RF Replay header must say what the operator asked for AND what
+    the capture actually delivered -- "capped from 20 dB" -- rather than the
+    achieved figure alone dressed up with a word ("library") that names an
+    implementation detail no other line in this UI uses."""
+    from src.config import CFG
+    from src.ui.pages.rf_replay import _render
+    cleanest = max(CFG["snr_bins_db"])
+    requested = cleanest + 20
+    s = load_scenario(model, total_duration=0.01, hop=512,
+                       snr_db=requested, case="Civilian only")
+    head = _render(s, "Raw", "single")[1]
+    assert f"capped from {requested:.0f} dB" in head
+    assert "library" not in head.lower()

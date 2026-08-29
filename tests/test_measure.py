@@ -1,8 +1,12 @@
 import numpy as np
 import pytest
 
-from src.measure import (estimate_snr_db, noise_floor_power, occupancy,
-                          power_spectrum_db)
+from src.measure import (C42_BOUNDARY, C42_POOLED_ACCURACY, C42_THEORY,
+                          MIN_WINDOWS_FOR_C42_DECISION,
+                          ConstellationOrderEstimate, _normalized_c42,
+                          constellation_order, estimate_snr_db,
+                          noise_floor_power, occupancy, power_spectrum_db)
+from src.ui.plots import SAMPLES_PER_SYMBOL, rrc_taps
 
 
 def _noise(n, sigma=1.0, seed=0):
@@ -70,3 +74,162 @@ def test_power_spectrum_covers_full_complex_band():
     freqs, _ = power_spectrum_db(_noise(8192), 3_200_000)
     assert freqs.min() < -1_500_000
     assert freqs.max() > 1_500_000
+
+
+# --- constellation_order --------------------------------------------------
+
+def _qam_constellation(order):
+    """The ideal, unit-average-power square M-QAM constellation -- built
+    directly (no pulse shaping, no windowing, no recover_symbols), so this
+    is exactly the abstract set of points the theory constants in
+    C42_THEORY are meant to describe."""
+    m = int(np.sqrt(order))
+    levels = np.arange(-(m - 1), m, 2).astype(float)
+    pts = np.array([complex(i, q) for i in levels for q in levels])
+    return pts / np.sqrt(np.mean(np.abs(pts) ** 2))
+
+
+def _qam_window(order, n_symbols=64, sps=SAMPLES_PER_SYMBOL, snr_db=5.0,
+                 seed=0, offset=0.003):
+    """One RRC-shaped, carrier-offset, noisy IQ window of synthetic M-QAM --
+    built to go through the real recover_symbols/constellation_order path,
+    not the bare-constellation shortcut _qam_constellation is for.
+
+    snr_db=5.0 sits comfortably inside the SNR >= +2 dB regime this
+    estimator targets (see C42_POOLED_ACCURACY) -- clean enough that
+    pooling several dozen windows separates 16QAM from 64QAM with a
+    comfortable margin either side of C42_BOUNDARY (measured directly while
+    building this test: pooled means land around 0.62-0.64 for 16QAM and
+    0.57-0.585 for 64QAM against a boundary of 0.597, a bigger gap on both
+    sides than the ~0.003 SNR-to-SNR jitter), while still being noisy
+    enough that a single window is nowhere near definitive -- exactly the
+    operating point the MIN_WINDOWS_FOR_C42_DECISION refusal exists for.
+    """
+    rng = np.random.default_rng(seed)
+    const = _qam_constellation(order)
+    symbols = const[rng.integers(0, len(const), n_symbols + 8)]
+    train = np.zeros(len(symbols) * sps, dtype=complex)
+    train[::sps] = symbols
+    taps = rrc_taps(sps)
+    shaped = np.convolve(train, taps)[len(taps) // 2:][:n_symbols * sps]
+    shaped = shaped / np.sqrt(np.mean(np.abs(shaped) ** 2))
+    shaped = shaped * np.exp(2j * np.pi * offset * np.arange(len(shaped)))
+    noise = (rng.normal(0, 1, len(shaped)) + 1j * rng.normal(0, 1, len(shaped))
+              ) * np.sqrt(10 ** (-snr_db / 10) / 2)
+    return shaped + noise
+
+
+def test_constellation_order_boundary_is_calibrated_and_sits_below_theory():
+    """The boundary is NOT the midpoint of C42_THEORY, and pinning that here
+    is the point of this test.
+
+    Noise pulls |C42| toward zero -- a Gaussian has C42 = 0 exactly -- so
+    real windows measure BELOW their noiseless values. The theoretical
+    midpoint of 0.6495 sits above both classes' real measurements, and a
+    boundary placed there would call every capture 64QAM. The shipped value
+    was calibrated on the VALIDATION split at SNR >= +2 dB (16QAM 0.6223,
+    64QAM 0.5660) exactly the way this project calibrates its per-class
+    thresholds, and confirmed on test without leakage.
+
+    So the invariant worth defending is not "boundary == midpoint of theory"
+    but "boundary sits below both theoretical values, because noise only
+    ever pulls the estimate down". A future refactor that "fixes" the
+    boundary back to theory fails here.
+    """
+    assert C42_THEORY == {"16QAM": 0.680, "64QAM": 0.619}
+    assert C42_BOUNDARY == pytest.approx(0.5942)
+    assert C42_BOUNDARY < C42_THEORY["64QAM"] < C42_THEORY["16QAM"]
+
+
+def test_c42_theory_matches_noiseless_synthetic_constellations():
+    """Pins _normalized_c42 against physics rather than against itself.
+
+    An ideal unit-power square constellation has a closed-form fourth-order
+    cumulant: E|z|^4 is 1.3200 for 16QAM and 1.3810 for 64QAM, and
+    C42 = E|z|^4 - |E z^2|^2 - 2(E|z|^2)^2 gives -0.680 and -0.619. No
+    recovery pipeline and no noise are involved here, so the agreement
+    should be near-exact and the tolerance is tight on purpose: a loose one
+    would accept the other class's constant and miss precisely the mix-up
+    this test exists to catch.
+    """
+    c16 = _normalized_c42(_qam_constellation(16))
+    c64 = _normalized_c42(_qam_constellation(64))
+    assert c16 == pytest.approx(C42_THEORY["16QAM"], abs=1e-3)
+    assert c64 == pytest.approx(C42_THEORY["64QAM"], abs=1e-3)
+    assert c16 > c64                     # ordering, which the boundary relies on
+
+
+# The noise floor matching _qam_window's default snr_db=5.0. Passed
+# explicitly at every call site because constellation_order requires it: its
+# SNR gate cannot be honest without knowing the capture's own noise power.
+QAM_WINDOW_NOISE_POWER = 10 ** (-5.0 / 10)
+
+
+def test_constellation_order_returns_16qam_for_synthetic_16qam():
+    windows = [_qam_window(16, seed=i) for i in range(80)]
+    est = constellation_order(windows, QAM_WINDOW_NOISE_POWER)
+    assert est.decision == "16QAM"
+    assert est.n_windows == 80
+    assert est.mean_c42 > C42_BOUNDARY
+
+
+def test_constellation_order_returns_64qam_for_synthetic_64qam():
+    windows = [_qam_window(64, seed=1000 + i) for i in range(80)]
+    est = constellation_order(windows, QAM_WINDOW_NOISE_POWER)
+    assert est.decision == "64QAM"
+    assert est.n_windows == 80
+    assert est.mean_c42 < C42_BOUNDARY
+
+
+def test_constellation_order_refuses_below_the_minimum_window_count():
+    """Fewer than MIN_WINDOWS_FOR_C42_DECISION pooled windows: decision must
+    be None, but mean_c42/n_windows/accuracy are still reported -- a caller
+    can see what was measured even though the estimator won't call it."""
+    windows = [_qam_window(16, seed=i) for i in range(3)]
+    est = constellation_order(windows, QAM_WINDOW_NOISE_POWER)
+    assert est.decision is None
+    assert est.n_windows == 3
+    assert np.isfinite(est.mean_c42)
+    # The corrected accuracy table is keyed 1/8/16/32/64, so three pooled
+    # windows fall back to the single-window figure -- the estimator must
+    # not interpolate an accuracy it never measured.
+    assert est.accuracy == C42_POOLED_ACCURACY[1]
+
+
+def test_constellation_order_decides_at_exactly_the_minimum():
+    windows = [_qam_window(16, seed=i) for i in range(MIN_WINDOWS_FOR_C42_DECISION)]
+    est = constellation_order(windows, QAM_WINDOW_NOISE_POWER)
+    assert est.n_windows == MIN_WINDOWS_FOR_C42_DECISION
+    assert est.decision is not None
+
+
+def test_constellation_order_reports_zero_windows_honestly():
+    est = constellation_order([], QAM_WINDOW_NOISE_POWER)
+    assert est.decision is None
+    assert est.n_windows == 0
+    assert est.accuracy is None
+    assert np.isnan(est.mean_c42)
+
+
+def test_constellation_order_skips_degenerate_windows_rather_than_scoring_them_zero():
+    """A zero-power window comes back from recover_symbols unchanged (see
+    its docstring) -- constellation_order must exclude it from the pool
+    entirely, not silently count it as a |C42| of 0.0, which would bias a
+    pooled average toward "noise-like" for reasons that have nothing to do
+    with the actual modulation."""
+    good = [_qam_window(16, seed=i) for i in range(10)]
+    windows = good + [np.zeros(512, dtype=complex)] * 5
+    est = constellation_order(windows, QAM_WINDOW_NOISE_POWER)
+    assert est.n_windows == 10           # the 5 dead windows contributed nothing
+    only_good = constellation_order(good, QAM_WINDOW_NOISE_POWER)
+    assert est.mean_c42 == pytest.approx(only_good.mean_c42)
+
+
+def test_constellation_order_returns_a_dataclass_with_the_documented_fields():
+    est = constellation_order([_qam_window(16, seed=i) for i in range(10)], QAM_WINDOW_NOISE_POWER)
+    assert isinstance(est, ConstellationOrderEstimate)
+    assert hasattr(est, "decision")
+    assert hasattr(est, "mean_c42")
+    assert hasattr(est, "n_windows")
+    assert hasattr(est, "margin")
+    assert hasattr(est, "accuracy")

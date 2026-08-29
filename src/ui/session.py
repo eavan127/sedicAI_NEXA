@@ -19,6 +19,13 @@ from src.scenarios import CASES, CIVILIAN, build_scenario
 
 _CIVILIAN_LIBRARY = None
 
+# The SNR bin civilian_library() draws from -- the cleanest available, so a
+# civilian recording carries as little of its own noise as possible before
+# build_scenario adds more. Exposed as a module constant so load_scenario
+# passes the exact same value build_scenario uses to compute the achieved
+# SNR, rather than recomputing it (and risking the two drifting apart).
+CLEANEST_LIBRARY_SNR_DB = max(CFG["snr_bins_db"])
+
 
 def civilian_library():
     """Real RadioML captures per civilian class, drawn from the TRAIN split.
@@ -45,7 +52,7 @@ def civilian_library():
         # scene's stated SNR would be a fiction. build_dataset solves the same
         # problem for its composites via radioml_clean_min_snr_db: use the
         # cleanest civilian available, then noise it once.
-        cleanest = max(CFG["snr_bins_db"])
+        cleanest = CLEANEST_LIBRARY_SNR_DB
         lib = {}
         for cls in CIVILIAN:
             j = CLASSES.index(cls)
@@ -87,6 +94,20 @@ class CaptureSession:
     # and 7 on another -- with nothing on screen explaining the difference --
     # is worse than either number alone.
     display_smoothed: bool = True
+    # True when the requested SNR was above what the capture could actually
+    # achieve -- currently only possible for a civilian scene, whose library
+    # recording already carries noise at its own labelled SNR and so cannot
+    # be made cleaner than that bin. Lives on the session so the page can say
+    # so in the header, rather than silently showing a number that disagrees
+    # with the dropdown the operator picked.
+    snr_capped: bool = False
+    # What the operator actually asked for, in dB. Only meaningful alongside
+    # snr_capped: the header needs BOTH figures to say what was requested and
+    # what was delivered -- "capped from 20 dB" -- rather than the achieved
+    # number alone plus a word ("library") that names an implementation
+    # detail no other line in this UI uses. None for every non-capped
+    # session, so the header falls back to its old, uncapped phrasing.
+    requested_snr_db: float = None
 
     @property
     def duration_ms(self):
@@ -126,6 +147,95 @@ class CaptureSession:
         purpose of both the Alerts page and the class."""
         judged = set(CFG["judged_classes"])
         return [e for e in self.events(smoothed) if judged & set(e.classes)]
+
+    def civilian_windows(self, count=4, smoothed=None):
+        """`count` windows spread evenly across the strongest civilian class's
+        span, in time order.
+
+        Two stages, and they must not be conflated:
+
+        1. WHICH CLASS -- of BPSK/QPSK/16QAM/64QAM, whichever's PEAK
+           probability across the capture is highest, and only if that peak
+           clears the class's own threshold. This is the model's own answer
+           to "what modulation is this" (unchanged from the selector this
+           replaces), not a quality judgement -- it never looks at how any
+           window's samples actually cluster.
+        2. WHICH WINDOWS -- every window where that class clears threshold,
+           in time order, then `count` of them at evenly spaced POSITIONS in
+           that list: first, last, and evenly between. If fewer than `count`
+           qualify, all of them come back, unpadded.
+
+        The spacing is even rather than best-first on purpose. A panel that
+        showed the tightest-clustering windows would be choosing the picture
+        that most looks like the answer it displays -- the same fabrication
+        the old single-window, confidence-ranked selector committed, just
+        moved from "best class" to "best window". An operator could not then
+        tell a genuinely clean emitter from a lucky window pulled out of a
+        noisy span. Even spacing carries no opinion about how a window
+        looks, so what reaches the screen is the real spread, seams and all.
+
+        Returns a list of (index, class_name, probability), or [] when no
+        window clears any civilian class's threshold -- which is what a
+        radar-only or empty capture looks like, and what tells the page to
+        hide the constellation panel entirely rather than plot a noise floor
+        as a constellation.
+        """
+        smoothed = self.display_smoothed if smoothed is None else smoothed
+        if not len(self.result.probs):
+            # smooth() indexes probs[0] to seed its accumulator, so an empty
+            # capture must be caught here rather than after resolving.
+            return []
+        probs = self._resolved(smoothed).probs
+
+        # No .get(cls, 0.5) fallback: 0.5 is not a safe default here, it is
+        # the specific bug per-class calibration replaced. configs/default.yaml
+        # documents 16QAM recall at 1.3% under a flat 0.5 threshold versus
+        # 73.0% at its calibrated 0.265, and every civilian threshold sits
+        # below 0.5. A missing key means the thresholds dict was built wrong,
+        # and that should raise, not silently score against the known-wrong
+        # value.
+        best_class, best_peak = None, -np.inf
+        for cls in CIVILIAN:
+            column = probs[:, CLASSES.index(cls)]
+            peak = float(np.max(column))
+            if peak < self.thresholds[cls]:
+                continue
+            # Strict >, so an exact tie between two civilian classes keeps
+            # whichever comes first in CIVILIAN order.
+            if peak > best_peak:
+                best_class, best_peak = cls, peak
+        if best_class is None:
+            return []
+
+        column = probs[:, CLASSES.index(best_class)]
+        qualifying = np.flatnonzero(column >= self.thresholds[best_class])
+        n = len(qualifying)
+        if n <= count:
+            chosen = qualifying
+        else:
+            # Evenly spaced POSITIONS in the qualifying list -- not evenly
+            # spaced window indices -- so a span with gaps still returns
+            # `count` windows rather than landing some picks in the gaps.
+            #
+            # Only reached when n > count, which makes consecutive spacing
+            # (n - 1) / (count - 1) strictly greater than 1: rounding two
+            # points more than 1 apart to the nearest integer can move each
+            # by at most 0.5, so their rounded values cannot coincide. The
+            # dedupe-and-backfill below is therefore not expected to ever
+            # fire -- it exists so that if that argument is ever wrong (a
+            # different spacing formula, an unusual float edge case) the
+            # panel still shows exactly `count` windows rather than quietly
+            # shrinking to fewer. The backfill itself stays purely
+            # POSITIONAL -- nearest unused index in the qualifying list --
+            # never influenced by probability or how a window looks.
+            positions = np.round(np.linspace(0, n - 1, count)).astype(int)
+            positions = list(dict.fromkeys(positions.tolist()))  # dedupe, keep order
+            if len(positions) < count:
+                unused = [p for p in range(n) if p not in positions]
+                positions += unused[:count - len(positions)]
+            positions.sort()
+            chosen = qualifying[positions]
+        return [(int(i), best_class, float(column[i])) for i in chosen]
 
 
 def analyze(iq, model, source, hop=None, truth=None, true_snr_db=None,
@@ -185,11 +295,22 @@ def load_scenario(model, total_duration=0.05, hop=None, snr_db=0, seed=None,
     seed = np.random.randint(0, 100000) if seed is None else seed
     script = CASES.get(case) if case else None
     needs_library = script and any(c in CIVILIAN for c, _, _ in script)
+    library_snr_db = CLEANEST_LIBRARY_SNR_DB if needs_library else None
     iq, segments = build_scenario(
         total_duration=total_duration, snr_db=snr_db, seed=seed, script=script,
-        library=civilian_library() if needs_library else None)
-    return analyze(iq, model, source="scenario", hop=hop, truth=segments,
-                    true_snr_db=snr_db)
+        library=civilian_library() if needs_library else None,
+        library_snr_db=library_snr_db)
+
+    # A civilian recording already carries noise at library_snr_db, so a
+    # requested SNR above that bin is not achievable -- the achieved figure
+    # is whichever is worse (lower).
+    true_snr_db = (min(snr_db, library_snr_db) if needs_library else snr_db)
+    session = analyze(iq, model, source="scenario", hop=hop, truth=segments,
+                       true_snr_db=true_snr_db)
+    session.snr_capped = bool(needs_library and snr_db > library_snr_db)
+    if session.snr_capped:
+        session.requested_snr_db = snr_db
+    return session
 
 
 def load_upload(path, model, hop=None):
