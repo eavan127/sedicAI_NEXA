@@ -1,0 +1,32 @@
+{
+  "cumulant_features": false,
+  "if_features": false,
+  "n_models": 5,
+  "qam_discrimination": {
+    "16QAM": {
+      "accuracy": 0.47,
+      "n": 900
+    },
+    "64QAM": {
+      "accuracy": 0.5688888888888889,
+      "n": 900
+    },
+    "combined": {
+      "accuracy": 0.5194444444444445,
+      "n": 1800
+    }
+  },
+  "radar_fp_really_fhss": {
+    "fraction": 0.5067294751009421,
+    "n_false_positives": 1486
+  },
+  "fhss_fp_really_radar": {
+    "fraction": 0.3552123552123552,
+    "n_false_positives": 1554
+  },
+  "judged_recall": {
+    "LFM_RADAR": 0.8297385620915033,
+    "FHSS": 0.8316993464052288,
+    "JAMMING": 0.8441176470588235
+  }
+}
