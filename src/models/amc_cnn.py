@@ -322,9 +322,150 @@ class CumulantFeatures(nn.Module):
         return feats.detach()
 
 
+def _torch_unwrap(phase, dim=-1):
+    """Batched torch counterpart of numpy.unwrap: corrects a phase sequence
+    so that jumps greater than pi (wraparound at the +/-pi branch cut) are
+    replaced by their 2*pi-complement equivalent, matching numpy's default
+    `discont=pi` behaviour exactly.
+
+    torch (as of the torch 2.13 this repo pins) has no `torch.unwrap` --
+    unlike numpy, which has had one for years -- so this is a hand-rolled
+    cumulative-correction implementation of the identical algorithm: take
+    the first difference, wrap each difference into (-pi, pi], accumulate
+    the correction that wrapping introduced, and add that running
+    correction back onto the original phase from the second sample on.
+    This is checked directly against `numpy.unwrap` on a fast-wrapping
+    chirp in tests/test_amc_cnn.py's test_torch_unwrap_matches_numpy_unwrap
+    -- two independent implementations of the same algorithm will drift
+    apart silently otherwise, so that test, not a shared code path, is what
+    keeps them honest.
+
+    Operates along `dim` (default: the last/time axis), batched over all
+    other dims, matching numpy.unwrap(..., axis=-1) applied per-row.
+    """
+    d = phase.diff(dim=dim)
+    two_pi = 2 * torch.pi
+    d_mod = torch.remainder(d + torch.pi, two_pi) - torch.pi
+    # numpy's edge case: a difference of exactly -pi that wrapped from a
+    # positive raw difference is pushed to +pi instead, so a real jump of
+    # exactly pi is not folded back on itself.
+    edge_mask = (d_mod == -torch.pi) & (d > 0)
+    d_mod = torch.where(edge_mask, torch.full_like(d_mod, torch.pi), d_mod)
+    correction = torch.cumsum(d_mod - d, dim=dim)
+
+    pad_shape = list(correction.shape)
+    pad_shape[dim] = 1
+    zero_pad = torch.zeros(pad_shape, dtype=correction.dtype, device=correction.device)
+    full_correction = torch.cat([zero_pad, correction], dim=dim)
+    return phase + full_correction
+
+
+def _if_spikiness_ratio(z, eps=1e-12):
+    """The core `model.if_features` feature: ratio of the max absolute
+    second difference of unwrapped phase to its median absolute value, for
+    a (batch, time) complex tensor -> (batch,) real.
+
+    Physical motivation (see configs/default.yaml's `if_features` comment
+    and IFFeatures' docstring for the full measured story): instantaneous
+    frequency is the first derivative of unwrapped phase. An LFM chirp's
+    instantaneous frequency changes at a near-constant RATE (linear sweep),
+    so its first derivative is smooth and its SECOND derivative is small
+    and roughly uniform across the window. A frequency hopper's
+    instantaneous frequency is piecewise constant with abrupt jumps, so its
+    second derivative of phase is near-zero everywhere except a handful of
+    spikes at the hop boundaries. The ratio of the largest such spike to
+    the typical (median) value is large for a hopper and small for a
+    chirp -- exactly the max-vs-median contrast that makes the ratio, not
+    the raw second difference, the discriminating statistic (a few tall
+    spikes barely move a median the way they dominate a max).
+
+    `eps` guards the denominator: clamp_min(median, eps) turns a degenerate
+    all-zero or perfectly-constant window (median second-difference exactly
+    0) into a large-but-finite ratio instead of inf/NaN, without needing a
+    branch.
+    """
+    phase = torch.angle(z)
+    unwrapped = _torch_unwrap(phase, dim=-1)
+    d1 = unwrapped.diff(dim=-1)
+    d2 = d1.diff(dim=-1)
+    abs_d2 = d2.abs()
+    med = abs_d2.median(dim=-1).values
+    mx = abs_d2.max(dim=-1).values
+    return mx / med.clamp_min(eps)
+
+
+class IFFeatures(nn.Module):
+    """Expert-feature branch: a single scalar per window -- the
+    instantaneous-frequency "spikiness" ratio (see `_if_spikiness_ratio`
+    above) -- concatenated onto the pooled feature vector right before
+    fc1, alongside CumulantFeatures if that flag is also on.
+
+    EXPERIMENTAL, behind `model.if_features` (configs/default.yaml, default
+    false -- see that flag's comment for the full measured story). In
+    short: half of LFM_RADAR's false positives are genuinely FHSS (50.7%)
+    and 35.5% of FHSS's false positives are genuinely radar -- the two
+    classes share a decision boundary and trade against each other across
+    fix iterations (FHSS recall rose 82.5 -> 89.7 -> 92.2 across three
+    fixes while JAMMING fell 80.0 -> 73.3 -> 67.5 in the same runs). They
+    differ physically in how they move through frequency: an LFM chirp
+    sweeps linearly and continuously (near-constant-rate instantaneous
+    frequency), while a frequency hopper holds a channel then jumps
+    (piecewise-constant instantaneous frequency with abrupt spikes). The
+    second derivative of unwrapped phase captures exactly that difference.
+
+    Measured on the held-out test split, standalone windows, as the ratio
+    max|d2phase| / median|d2phase|:
+
+        SNR      radar          FHSS           AUC
+        -10   3.33 +/- 0.20   3.40 +/- 0.19   0.611
+         -6   3.46 +/- 0.22   3.54 +/- 0.22   0.603
+         -2   3.70 +/- 0.26   4.01 +/- 0.28   0.796
+         +2   4.20 +/- 0.35   5.27 +/- 0.50   0.971
+         +6   4.73 +/- 0.74   6.82 +/- 1.08   0.952
+        +10   5.27 +/- 1.18   9.17 +/- 1.91   0.964
+
+    Near-perfect separation from +2 dB up, collapsing at low SNR where the
+    phase derivative is noise-dominated. Pooled across all SNR the AUC is
+    0.887 -- considerably stronger than CumulantFeatures' 0.609 for the
+    QAM problem it addresses.
+
+    A caution recorded here deliberately: a sibling candidate feature,
+    "fraction of samples below the median", measured an AUC of exactly
+    1.000 and was DISCARDED -- the fraction below a median is 0.5 by
+    construction, so both classes read 0.500 +/- 0.000 and the apparent
+    perfect score was a tie-breaking artifact in the ranking pipeline, not
+    a real signal. Only the spikiness ratio above survived scrutiny. Two
+    other candidates that WERE measured and did not ship: IF standard
+    deviation, and a linear-trend correlation of instantaneous frequency
+    (the latter measured a weak 0.637 AUC, and in the wrong direction) --
+    neither is implemented here; shipping an unmeasured feature is exactly
+    how the discarded artifact above nearly got through.
+
+    No gradient flows through this branch: `torch.angle`'s subgradient is
+    ill-defined at exactly z=0, and `.median()`/`.max()` have discontinuous
+    (non-useful) gradients w.r.t. which index was selected. The whole
+    branch runs inside torch.no_grad() and the output is .detach()-ed
+    before concatenation, exactly like CumulantFeatures -- nothing here
+    needs a gradient, and this sidesteps the ill-defined cases instead of
+    hoping autograd handles them gracefully, while leaving backprop through
+    the rest of the model (iq_branch, stft_branch, fc1/fc2) untouched.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.out_channels = 1
+
+    def forward(self, x):
+        # x: (batch, 2, time) real/imag raw IQ.
+        with torch.no_grad():
+            z = torch.complex(x[:, 0, :], x[:, 1, :])
+            ratio = _if_spikiness_ratio(z)   # (batch,)
+        return ratio.unsqueeze(1).detach()   # (batch, 1)
+
+
 class AMC_CNN(nn.Module):
     def __init__(self, num_classes, input_len=1024, stft_freq_summary=None,
-                 cumulant_features=None):
+                 cumulant_features=None, if_features=None):
         super().__init__()
         if stft_freq_summary is None:
             from src.config import CFG
@@ -332,6 +473,9 @@ class AMC_CNN(nn.Module):
         if cumulant_features is None:
             from src.config import CFG
             cumulant_features = CFG.get("model", {}).get("cumulant_features", False)
+        if if_features is None:
+            from src.config import CFG
+            if_features = CFG.get("model", {}).get("if_features", False)
 
         iq_out_channels = 128
         self.iq_branch = IQBranch(out_channels=iq_out_channels)
@@ -350,11 +494,24 @@ class AMC_CNN(nn.Module):
         # (see CumulantFeatures' docstring for what this branch does and why).
         self.cumulant_branch = CumulantFeatures() if cumulant_features else None
 
+        # EXPERIMENTAL, behind `model.if_features` (configs/default.yaml,
+        # default false). Same pattern as cumulant_branch above: only
+        # constructed when the flag is on, so with it off this stays None
+        # and adds no parameters/buffers -- the five checkpoints in
+        # results/ keep loading with strict=True (see IFFeatures' docstring
+        # for what this branch does and why). Independent of and composes
+        # with cumulant_branch: either, both, or neither may be on.
+        self.if_branch = IFFeatures() if if_features else None
+
         # Computed from what's actually being fused, not hardcoded -- fc1's
-        # input width is fused_channels alone with the flag off, plus the 3
-        # cumulant scalars (CumulantFeatures.out_channels) with it on.
-        fc1_in = fused_channels + (
-            self.cumulant_branch.out_channels if self.cumulant_branch is not None else 0)
+        # input width is fused_channels alone with both flags off, plus the
+        # 3 cumulant scalars (CumulantFeatures.out_channels) and/or the 1 IF
+        # scalar (IFFeatures.out_channels) with each respective flag on.
+        fc1_in = fused_channels
+        if self.cumulant_branch is not None:
+            fc1_in += self.cumulant_branch.out_channels
+        if self.if_branch is not None:
+            fc1_in += self.if_branch.out_channels
 
         # No dummy forward pass needed -- attention pooling always outputs
         # exactly `fused_channels` values regardless of input_len. input_len
@@ -385,6 +542,9 @@ class AMC_CNN(nn.Module):
         if self.cumulant_branch is not None:
             cum_feats = self.cumulant_branch(x)   # (batch, 3): |C40|,|C42|,|C63|
             pooled = torch.cat([pooled, cum_feats], dim=1)
+        if self.if_branch is not None:
+            if_feats = self.if_branch(x)   # (batch, 1): IF spikiness ratio
+            pooled = torch.cat([pooled, if_feats], dim=1)
 
         out = self.dropout(self.relu(self.fc1(pooled)))
         return self.fc2(out)

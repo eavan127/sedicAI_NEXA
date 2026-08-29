@@ -26,11 +26,14 @@ from src.cumulants import normalized_c40, normalized_c42, normalized_c63
 from src.models.amc_cnn import (
     AMC_CNN,
     CumulantFeatures,
+    IFFeatures,
     STFTBranch,
     _frequency_max,
+    _if_spikiness_ratio,
     _peak_freq_delta,
     _spectral_flatness,
     _torch_normalized_cumulants,
+    _torch_unwrap,
 )
 from tests.test_measure import _qam_constellation
 
@@ -355,3 +358,188 @@ def test_cumulant_features_degenerate_all_zero_window_is_finite():
     feats = branch(x)
     assert torch.isfinite(feats).all()
     assert feats.shape == (2, 3)
+
+
+# ---------------------------------------------------------------------------
+# `model.if_features`: expert-feature branch (instantaneous-frequency
+# spikiness ratio) targeting the measured LFM_RADAR <-> FHSS confusion. See
+# configs/default.yaml's `if_features` comment for the full measured story:
+# half of LFM_RADAR's false positives are genuinely FHSS (50.7%) and 35.5%
+# of FHSS's are genuinely radar, and the two classes trade against each
+# other across fix iterations (FHSS recall 82.5 -> 89.7 -> 92.2 while
+# JAMMING fell 80.0 -> 73.3 -> 67.5 in the same runs). A chirp sweeps
+# frequency linearly and continuously; a hopper holds a channel then jumps.
+# The second derivative of unwrapped phase -- ratio of its max absolute
+# value to its median absolute value -- captures exactly that difference:
+# measured pooled AUC 0.887 (0.611 at -10dB rising to 0.964 at +10dB, see
+# the module-level docstring on IFFeatures for the full per-SNR table).
+# ---------------------------------------------------------------------------
+
+def _synthetic_chirp(window_len=WINDOW_LEN, f0=0.02, f1=0.15):
+    """A linear chirp: phase quadratic in time (instantaneous frequency
+    sweeps linearly from f0 to f1, both in cycles/sample). This is the
+    textbook model of an LFM pulse -- constant-rate frequency sweep, no
+    holds and no jumps."""
+    t = np.arange(window_len)
+    k = (f1 - f0) / window_len   # chirp rate, cycles/sample^2
+    phase = 2 * np.pi * (f0 * t + 0.5 * k * t ** 2)
+    z = np.exp(1j * phase)
+    return torch.tensor(np.stack([z.real, z.imag]), dtype=torch.float32)
+
+
+def _synthetic_hopper(window_len=WINDOW_LEN, n_hops=8, freqs=(0.05, 0.35, 0.15, 0.42)):
+    """A frequency hopper: piecewise-CONSTANT instantaneous frequency,
+    holding each channel for a dwell then jumping (phase discontinuous in
+    slope, not in value -- each segment's phase starts where the last one's
+    left off, so there's no amplitude glitch, only a kink in frequency)."""
+    dwell = window_len // n_hops
+    phase = np.zeros(window_len)
+    t_local = np.arange(dwell)
+    running_phase = 0.0
+    for i in range(n_hops):
+        start = i * dwell
+        end = window_len if i == n_hops - 1 else start + dwell
+        seg_len = end - start
+        f = freqs[i % len(freqs)]
+        seg_t = np.arange(seg_len)
+        seg_phase = running_phase + 2 * np.pi * f * seg_t
+        phase[start:end] = seg_phase
+        running_phase = seg_phase[-1] + 2 * np.pi * f   # continue phase across the jump
+    z = np.exp(1j * phase)
+    return torch.tensor(np.stack([z.real, z.imag]), dtype=torch.float32)
+
+
+def test_if_flag_default_is_off_in_config():
+    assert CFG.get("model", {}).get("if_features") is False
+
+
+def test_if_flag_off_fc1_unchanged_and_forward_shape_unchanged():
+    model = AMC_CNN(num_classes=len(CLASSES), input_len=WINDOW_LEN,
+                     if_features=False)
+    assert model.fc1.in_features == 128 + 64
+    x = _random_iq_batch(batch=2)
+    assert model(x).shape == (2, len(CLASSES))
+
+
+def test_existing_checkpoint_still_loads_with_if_flag_off():
+    """The guard that protects the submission: results/best_model.pt was
+    trained against today's architecture (no IF branch). Flag off must
+    keep AMC_CNN's state_dict shape-compatible with it -- the IFFeatures
+    branch must not even be constructed, let alone add parameters/buffers,
+    when the flag is off."""
+    model = AMC_CNN(num_classes=len(CLASSES), input_len=WINDOW_LEN,
+                     if_features=False)
+    state_dict = torch.load("results/best_model.pt", map_location="cpu")
+    model.load_state_dict(state_dict, strict=True)  # must not raise
+
+
+def test_if_flag_on_adds_exactly_one_fc1_input():
+    model_off = AMC_CNN(num_classes=len(CLASSES), input_len=WINDOW_LEN,
+                         if_features=False)
+    model_on = AMC_CNN(num_classes=len(CLASSES), input_len=WINDOW_LEN,
+                        if_features=True)
+    assert model_on.fc1.in_features == model_off.fc1.in_features + 1
+
+    x = _random_iq_batch(batch=2)
+    assert model_on(x).shape == (2, len(CLASSES))
+
+
+def test_both_expert_flags_compose_fc1_in_features_all_four_combinations():
+    base = 128 + 64
+    combos = {
+        (False, False): base,
+        (True, False): base + 3,
+        (False, True): base + 1,
+        (True, True): base + 4,
+    }
+    for (cum, ifb), expected in combos.items():
+        model = AMC_CNN(num_classes=len(CLASSES), input_len=WINDOW_LEN,
+                         cumulant_features=cum, if_features=ifb)
+        assert model.fc1.in_features == expected, (cum, ifb, model.fc1.in_features)
+        x = _random_iq_batch(batch=2)
+        assert model(x).shape == (2, len(CLASSES))
+
+
+def test_torch_unwrap_matches_numpy_unwrap_on_wrapping_signal():
+    """The test that matters most for correctness: torch has no built-in
+    unwrap on this version (torch 2.13 -- see IFFeatures' docstring), so
+    _torch_unwrap is a hand-rolled cumulative-correction implementation.
+    Two independent implementations of the same algorithm WILL drift apart
+    silently unless something checks them directly against numpy.unwrap,
+    the reference. A fast chirp wraps the raw angle several times over the
+    window, which is exactly the regime where a broken unwrap shows up."""
+    rng = np.random.default_rng(0)
+    t = np.arange(WINDOW_LEN)
+    # Fast sweep so raw phase wraps many times over the window.
+    phase = 2 * np.pi * (0.01 * t + 0.0008 * t ** 2) + rng.normal(0, 0.05, WINDOW_LEN)
+
+    expected = np.unwrap(phase)
+    got = _torch_unwrap(torch.tensor(phase, dtype=torch.float64)).numpy()
+
+    np.testing.assert_allclose(got, expected, atol=1e-6, rtol=1e-6)
+
+
+def test_if_spikiness_ratio_separates_chirp_from_hopper():
+    """The feature actually separates the classes it exists to separate.
+    Measured at +2dB SNR (the report's reference table): radar 4.20 +/-
+    0.35, FHSS 5.27 +/- 0.50 -- the hopper's ratio is clearly higher
+    because its instantaneous frequency sits still then spikes, while the
+    chirp's changes at a near-constant rate. The synthetic case here is
+    noiseless, so the absolute numbers won't match, but the DIRECTION
+    (hopper > chirp) must."""
+    chirp = _synthetic_chirp().unsqueeze(0)
+    hopper = _synthetic_hopper().unsqueeze(0)
+
+    z_chirp = torch.complex(chirp[:, 0, :], chirp[:, 1, :])
+    z_hopper = torch.complex(hopper[:, 0, :], hopper[:, 1, :])
+
+    ratio_chirp = _if_spikiness_ratio(z_chirp).item()
+    ratio_hopper = _if_spikiness_ratio(z_hopper).item()
+
+    assert ratio_hopper > ratio_chirp
+
+
+def test_if_spikiness_ratio_degenerate_inputs_are_finite():
+    zero = torch.zeros(2, WINDOW_LEN, dtype=torch.complex64)
+    tone_t = torch.arange(WINDOW_LEN, dtype=torch.float32)
+    tone_phase = 2 * torch.pi * 0.1 * tone_t
+    tone = torch.polar(torch.ones(WINDOW_LEN), tone_phase).unsqueeze(0).repeat(2, 1)
+
+    ratio_zero = _if_spikiness_ratio(zero)
+    ratio_tone = _if_spikiness_ratio(tone)
+
+    assert torch.isfinite(ratio_zero).all()
+    assert torch.isfinite(ratio_tone).all()
+
+
+def test_if_features_module_output_shape_and_finite():
+    branch = IFFeatures()
+    x = _random_iq_batch(batch=4)
+    feats = branch(x)
+    assert feats.shape == (4, 1)
+    assert torch.isfinite(feats).all()
+
+
+def test_if_branch_gradients_finite_with_flag_on():
+    model = AMC_CNN(num_classes=len(CLASSES), input_len=WINDOW_LEN,
+                     if_features=True)
+    x = _random_iq_batch(batch=3)
+    x.requires_grad_(True)
+
+    out = model(x)
+    loss = out.sum()
+    loss.backward()  # must not raise
+
+    assert x.grad is not None
+    assert torch.isfinite(x.grad).all()
+
+    any_param_grad = False
+    for p in model.parameters():
+        if p.grad is not None:
+            any_param_grad = True
+            assert torch.isfinite(p.grad).all()
+    assert any_param_grad
+
+    # IFFeatures has no learned parameters at all.
+    for p in model.if_branch.parameters():
+        pytest.fail(f"IFFeatures must have no learned parameters, got {p}")

@@ -449,6 +449,41 @@ model:
   # before ever being turned on for a submission.
   cumulant_features: false
 
+  # EXPERIMENTAL, off by default. Half of LFM_RADAR's false positives are
+  # genuinely FHSS (50.7%) and 35.5% of FHSS's are genuinely radar -- the
+  # two classes share a decision boundary and trade against each other:
+  # the FHSS pipeline doc records recall rising 82.5 -> 89.7 -> 92.2 across
+  # three fixes while JAMMING fell 80.0 -> 73.3 -> 67.5 in the same runs.
+  #
+  # They differ physically in how they move through frequency. An LFM
+  # chirp sweeps linearly and continuously, so its instantaneous frequency
+  # changes at a near-constant rate. A frequency hopper HOLDS a channel
+  # then JUMPS, so its instantaneous frequency sits still and then spikes.
+  # The second derivative of unwrapped phase captures exactly that
+  # difference: measured on the held-out test split, standalone windows,
+  # as the ratio max|d2phase| / median|d2phase| -- radar 4.20 +/- 0.35 vs
+  # FHSS 5.27 +/- 0.50 at +2dB, AUC 0.971 at +2dB rising toward 0.964 at
+  # +10dB and collapsing to ~0.6 below -6dB where the phase derivative is
+  # noise-dominated. Pooled across all SNR the AUC is 0.887 -- see
+  # src/models/amc_cnn.py's IFFeatures docstring for the full per-SNR
+  # table and a caution about a sibling candidate feature ("fraction of
+  # samples below the median") that measured a perfect but bogus AUC of
+  # 1.000 and was discarded as a tie-breaking artifact.
+  #
+  # When true: AMC_CNN's IFFeatures branch (src/models/amc_cnn.py) unwraps
+  # the phase of the raw complex IQ window, takes its second difference,
+  # and concatenates the single scalar ratio of that difference's max
+  # absolute value to its median absolute value onto the fused feature
+  # vector before fc1 -- fc1.in_features grows by exactly 1. Composes with
+  # `cumulant_features` above: either, both, or neither may be on.
+  #
+  # Default false because the five checkpoints in results/ were trained
+  # against the flag-off architecture (fc1 sized without this extra input)
+  # and must keep loading with strict=True; this is an experimental option
+  # to be evaluated (retrain + measure_variance.py) before ever being
+  # turned on for a submission.
+  if_features: false
+
 training:
   epochs: 30
   batch_size: 64
