@@ -45,8 +45,15 @@ CUSTOM_CSS = f"""
   --table-even-background-fill: {PANEL};
   --table-odd-background-fill: {BG};
   --table-border-color: {GRID};
-  --table-row-focus-background-fill: {BRAND_OLIVE};
-  --table-row-focus-text-color: #ffffff;
+  /* Gradio reads --table-row-focus for the hovered row
+     (.virtual-row:hover in its own stylesheet). The name used here before was
+     --table-row-focus-background-fill, which does not exist in Gradio 6 and
+     therefore never applied -- the row fell back to Gradio's default dark
+     navy, and with body cells that had no surface of their own that navy
+     showed through under this file's dark ink. A light tint keeps the hovered
+     row readable with the same dark text as every other row, instead of
+     needing a white-text override that would also repaint the tier colours. */
+  --table-row-focus: {BRAND_OLIVE_TINT};
   --button-secondary-background-fill: {PANEL};
   --button-secondary-text-color: {TEXT};
   --button-secondary-border-color: {GRID};
@@ -101,20 +108,50 @@ footer {{ display: none !important; }}
 .gradio-container em, .gradio-container i, .gradio-container * {{
   font-style: normal !important;
 }}
-/* Force table row selection to be readable */
-.gradio-container table tbody tr:hover td,
-.gradio-container table tbody tr:focus td,
-.gradio-container table tbody tr.focus-visible td,
-.gradio-container table tbody tr[aria-selected="true"] td,
-.gradio-container table tbody tr.selected td {{
-  background-color: {BRAND_OLIVE} !important;
+/* The detections table's BODY cells had no background of their own -- only
+   thead was given one -- so they computed to rgba(0,0,0,0) and inherited
+   whatever surface sat behind them, which put this file's dark ink (#121C27)
+   on a dark ground and made the table unreadable.
+
+   Targeting Gradio 6's own class names rather than guessing: it stripes with
+   .row-odd (not nth-child, which an earlier attempt used and which fights it),
+   and marks selection with .body-cell.cell-selected -- which sets only a
+   box-shadow ring, never a background. So the dark row was never Gradio's
+   selection styling; it was cells with no surface of their own showing the
+   ground through. Every state below therefore sets background AND colour as a
+   pair, so no combination can leave dark text on a dark surface. */
+.gradio-container table tbody td,
+.gradio-container table tbody th,
+.gradio-container table tbody td .cell-wrap {{
+  background-color: {PANEL} !important;
+  color: {TEXT} !important;
 }}
-.gradio-container table tbody tr:hover *,
-.gradio-container table tbody tr:focus *,
-.gradio-container table tbody tr.focus-visible *,
-.gradio-container table tbody tr[aria-selected="true"] *,
-.gradio-container table tbody tr.selected * {{
-  color: #ffffff !important;
+.gradio-container table tbody tr.row-odd td,
+.gradio-container table tbody tr.row-odd td .cell-wrap {{
+  background-color: {BG} !important;
+  color: {TEXT} !important;
+}}
+/* Selection keeps Gradio's ring; we only guarantee the surface under it. */
+.gradio-container table tbody td.cell-selected,
+.gradio-container table tbody td.cell-selected .cell-wrap {{
+  background-color: {BRAND_OLIVE_TINT} !important;
+  color: {BRAND_OLIVE_DARK} !important;
+}}
+/* A transparent scroll container shows the host surface through the gap
+   beside a short table. */
+.gradio-container .table-wrap,
+.gradio-container [class*="dataframe"] {{
+  background-color: {PANEL} !important;
+}}
+/* Hover and selection, stated as a background+colour PAIR on every element
+   that paints: the row, the cell, and the .cell-wrap div the text actually
+   lives in. Setting only one of them is what produced dark-on-dark before. */
+.gradio-container table tbody tr:hover td,
+.gradio-container table tbody tr:hover td .cell-wrap,
+.gradio-container tr.virtual-row:hover td,
+.gradio-container tr.virtual-row:hover td .cell-wrap {{
+  background-color: {BRAND_OLIVE_TINT} !important;
+  color: {TEXT} !important;
 }}
 """
 

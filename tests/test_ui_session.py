@@ -309,3 +309,136 @@ def test_capped_header_says_what_was_requested_and_delivered(model):
     head = _render(s, "Raw", "single")[1]
     assert f"capped from {requested:.0f} dB" in head
     assert "library" not in head.lower()
+
+
+class _StubEvent:
+    """Minimal stand-in for a detection event.
+
+    _headline_event only reads classes, duration and peak confidence, and
+    building real ones would mean running a model whose predictions are the
+    thing under test elsewhere. A stub makes the SELECTION rule the subject.
+    """
+
+    def __init__(self, classes, duration_us, peak=None, label="", start_us=0):
+        self.classes = tuple(classes)
+        self.duration_us = duration_us
+        self.start_us = start_us
+        self.peak = peak or {c: 0.9 for c in classes}
+        self.label = label or " · ".join(classes)
+
+
+def test_headline_event_prefers_the_worst_tier_not_the_last_event():
+    """The bug this replaces: a capture ending on civilian traffic after a
+    jammer headlined QPSK in civilian teal while the finding was Hostile."""
+    from src.ui.pages.rf_replay import _headline_event
+    events = [_StubEvent(["JAMMING"], 5000), _StubEvent(["QPSK"], 9000)]
+    assert _headline_event(events).classes == ("JAMMING",)
+
+
+def test_headline_event_prefers_military_over_civilian():
+    from src.ui.pages.rf_replay import _headline_event
+    events = [_StubEvent(["LFM_RADAR"], 1000), _StubEvent(["16QAM"], 20000)]
+    assert _headline_event(events).classes == ("LFM_RADAR",)
+
+
+def test_headline_event_takes_the_longest_within_a_tier():
+    """A sustained emitter is the finding; a blip beside it is not."""
+    from src.ui.pages.rf_replay import _headline_event
+    events = [_StubEvent(["FHSS"], 160), _StubEvent(["LFM_RADAR"], 24000)]
+    assert _headline_event(events).classes == ("LFM_RADAR",)
+
+
+def test_headline_event_breaks_a_duration_tie_on_confidence():
+    from src.ui.pages.rf_replay import _headline_event
+    weak = _StubEvent(["FHSS"], 5000, peak={"FHSS": 0.31})
+    strong = _StubEvent(["LFM_RADAR"], 5000, peak={"LFM_RADAR": 0.98})
+    assert _headline_event([weak, strong]).classes == ("LFM_RADAR",)
+
+
+def test_headline_event_returns_none_for_an_empty_capture():
+    from src.ui.pages.rf_replay import _headline_event
+    assert _headline_event([]) is None
+
+
+def test_events_by_priority_orders_worst_tier_first():
+    from src.ui.pages.rf_replay import _events_by_priority
+    events = [_StubEvent(["QPSK"], 9000), _StubEvent(["JAMMING"], 500),
+              _StubEvent(["LFM_RADAR"], 3000)]
+    order = [e.classes[0] for e in _events_by_priority(events)]
+    assert order == ["JAMMING", "LFM_RADAR", "QPSK"]
+
+
+def test_events_by_priority_orders_by_duration_within_a_tier():
+    from src.ui.pages.rf_replay import _events_by_priority
+    events = [_StubEvent(["FHSS"], 500), _StubEvent(["LFM_RADAR"], 24000),
+              _StubEvent(["FHSS"], 3000)]
+    assert [e.duration_us for e in _events_by_priority(events)] == [24000, 3000, 500]
+
+
+def test_events_by_priority_keeps_every_event():
+    """The list is a reordering, never a filter -- an operator must be able to
+    count the detections table against it."""
+    from src.ui.pages.rf_replay import _events_by_priority
+    events = [_StubEvent(["QPSK"], i * 100) for i in range(1, 12)]
+    assert len(_events_by_priority(events)) == 11
+
+
+def test_detection_list_caps_and_says_how_many_it_hid():
+    """Truncating silently would let a capture look quieter than it is."""
+    from src.ui.pages.rf_replay import (MAX_LISTED_DETECTIONS,
+                                          _detection_list_html)
+    events = [_StubEvent(["QPSK"], (i + 1) * 100)
+              for i in range(MAX_LISTED_DETECTIONS + 5)]
+    html = _detection_list_html(events)
+    assert "+5 more" in html
+    assert html.count("ms ·") == MAX_LISTED_DETECTIONS
+
+
+def test_detection_list_leads_with_the_headline_event():
+    """The list and the headline must not disagree about what matters most."""
+    from src.ui.pages.rf_replay import (_detection_list_html, _headline_event)
+    events = [_StubEvent(["QPSK"], 9000), _StubEvent(["JAMMING"], 500)]
+    html = _detection_list_html(events)
+    head = _headline_event(events)
+    assert html.index("JAMMING") < html.index("QPSK")
+    assert head.classes == ("JAMMING",)
+
+
+def test_headline_ignores_a_weak_high_tier_detection():
+    """The bug this fixes: a pure 64QAM capture headlined LFM_RADAR + FHSS,
+    because ~1 window in 5 of a civilian file fires a military class at
+    0.37-0.47 confidence and tier was an absolute gate."""
+    from src.ui.pages.rf_replay import _headline_event
+    weak_mil = _StubEvent(["LFM_RADAR"], 240, peak={"LFM_RADAR": 0.27})
+    strong_civ = _StubEvent(["64QAM"], 3120, peak={"64QAM": 0.99})
+    assert _headline_event([weak_mil, strong_civ]).classes == ("64QAM",)
+
+
+def test_headline_still_prefers_a_confident_high_tier_detection():
+    """The floor must not defeat tier priority for real threats -- the 0.16 ms
+    jammer burst in mixed_sequence.f32 is genuine at 97%."""
+    from src.ui.pages.rf_replay import _headline_event
+    short_jam = _StubEvent(["JAMMING"], 160, peak={"JAMMING": 0.97})
+    long_civ = _StubEvent(["QPSK"], 9000, peak={"QPSK": 0.99})
+    assert _headline_event([short_jam, long_civ]).classes == ("JAMMING",)
+
+
+def test_tier_confidence_uses_the_class_that_sets_the_tier():
+    """'16QAM 27% - FHSS 26%' claims Military on 26%, not on its 27%."""
+    from src.ui.pages.rf_replay import _tier_confidence
+    e = _StubEvent(["16QAM", "FHSS"], 160, peak={"16QAM": 0.27, "FHSS": 0.26})
+    assert _tier_confidence(e) == 0.26
+
+
+def test_headline_falls_back_when_nothing_is_confident():
+    """A capture with detections must never show an empty panel."""
+    from src.ui.pages.rf_replay import _headline_event, _headline_is_confident
+    events = [_StubEvent(["FHSS"], 160, peak={"FHSS": 0.30}),
+              _StubEvent(["QPSK"], 800, peak={"QPSK": 0.35})]
+    assert _headline_event(events) is not None
+    assert _headline_is_confident(events) is False
+
+
+def test_headline_is_confident_when_something_clears_the_bar():
+    from src.ui.pages.rf_replay import _headline_is_confident
+    assert _headline_is_confident([_StubEvent(["QPSK"], 800, peak={"QPSK": 0.9})])
