@@ -49,3 +49,4 @@ verification_pack/
 # Local experiment and UI run logs -- transient, per-machine.
 docs/experiments/*.log
 ui_output*.log
+panel_preview.html

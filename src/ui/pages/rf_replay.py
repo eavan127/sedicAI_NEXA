@@ -18,7 +18,7 @@ from src.config import CFG
 from src.scenarios import CASES
 from src.ui.session import load_scenario, load_upload, reanalyze
 from src.measure import occupancy
-from src.timeline import tier_of_classes
+from src.timeline import TIER_PRIORITY, tier_of_classes
 from src.ui.palette import PANEL, TEXT, TEXT_DIM, BRAND_OLIVE, GRID, tier_color
 
 # SNR choices are the training bins, not arbitrary round numbers -- asking the
@@ -66,6 +66,122 @@ def _channel_state(session, smoothed):
         return (f"<span style='color:#627143;font-weight:700;'>CHANNEL EMPTY "
                 f"— {empty:.0f}% of windows</span>")
     return f"channel {empty:.0f}% empty"
+
+
+# A detection only headlines if the class that SETS its tier is this confident.
+#
+# Measured on the verification pack: on pure civilian files the military
+# classes fire on roughly one window in five -- LFM_RADAR 11/60 on 16qam.f32,
+# FHSS 10/60 on 64qam.f32 -- at mean probability 0.37-0.47 against thresholds
+# of 0.26-0.27. Just over the line, exactly as the scorecard's LFM_RADAR
+# precision of 0.631 predicts. Real detections in the same files sit at
+# 93-100%. So confidence separates the two populations cleanly where duration
+# does not: the jammer burst at 0.16 ms in mixed_sequence.f32 is genuine at
+# 97%, and a duration floor would have thrown it away.
+MIN_HEADLINE_CONFIDENCE = 0.5
+
+
+def _tier_confidence(event):
+    """How strongly the event supports the tier it is claiming.
+
+    The worst class present sets the tier, so that class's confidence is what
+    the claim rests on -- not the event's highest confidence overall. An event
+    reading "16QAM 27% - FHSS 26%" is claiming Military on 26%, and reporting
+    its 27% civilian figure instead would dress up a weak military claim in a
+    number that has nothing to do with it.
+    """
+    tier = tier_of_classes(event.classes)
+    return max(event.peak[c] for c in event.classes
+               if tier_of_classes((c,)) == tier)
+
+
+def _priority_key(event):
+    """Sort key: worst tier first, then longest, then most confident.
+
+    Worst tier first uses the same TIER_PRIORITY the ribbon and the detection
+    boxes already use, so this panel cannot disagree with the colours beside
+    it. Within a tier the longest event wins -- a sustained emitter is the
+    finding, a 0.16 ms blip beside it is not, and duration says that more
+    honestly than peak confidence, which one lucky window can spike.
+    Confidence only breaks a duration tie.
+    """
+    return (TIER_PRIORITY.index(tier_of_classes(event.classes)),
+            -event.duration_us,
+            -max(event.peak[c] for c in event.classes))
+
+
+def _events_by_priority(events):
+    """Every detection in the capture, worst first."""
+    return sorted(events, key=_priority_key)
+
+
+def _headline_event(events):
+    """The event worth putting at the top of the panel, or None.
+
+    NOT the last event, which is what this used to show. "Latest" is a
+    live-monitoring idea: on a stream the newest detection is the urgent one.
+    On an uploaded capture every event is equally historical and the last one
+    is simply whatever the recording happened to end on.
+
+    And not simply the worst tier either, which is what it did next. Tier as
+    an absolute gate let a 0.24 ms military false positive at 27% outrank a
+    3.12 ms civilian detection at 99% -- so a pure 64QAM capture headlined
+    "LFM_RADAR + FHSS". Weak, isolated detections do not get to headline; they
+    are still listed below, where the operator can see them in context.
+
+    Falls back to the strongest available event when nothing clears the bar,
+    because a capture with detections must not show an empty panel. The caller
+    can tell the two apart with _headline_is_confident.
+    """
+    if not events:
+        return None
+    confident = [e for e in events
+                 if _tier_confidence(e) >= MIN_HEADLINE_CONFIDENCE]
+    return min(confident or events, key=_priority_key)
+
+
+def _headline_is_confident(events):
+    """Did anything clear MIN_HEADLINE_CONFIDENCE? Drives the caveat line."""
+    return any(_tier_confidence(e) >= MIN_HEADLINE_CONFIDENCE for e in events)
+
+
+MAX_LISTED_DETECTIONS = 8
+
+
+def _detection_list_html(events):
+    """All detections, worst tier first, as a compact ordered list.
+
+    Capped, because a 50 ms scenario at hop 256 can produce dozens of events
+    and an unbounded list would push the console figure off the screen. The
+    cap keeps the ones that matter -- the ordering already put them first --
+    and says plainly how many were not shown rather than truncating silently.
+    """
+    ordered = _events_by_priority(events)
+    rows = []
+    for e in ordered[:MAX_LISTED_DETECTIONS]:
+        tier = tier_of_classes(e.classes)
+        conf = " · ".join(f"{c} {e.peak[c] * 100:.0f}%" for c in e.classes)
+        rows.append(
+            f'<div style="display:flex;align-items:baseline;gap:8px;'
+            f'padding:3px 0;border-bottom:1px solid {GRID};">'
+            f'<span style="width:8px;height:8px;border-radius:50%;'
+            f'background:{tier_color(tier)};display:inline-block;'
+            f'flex:0 0 auto;"></span>'
+            f'<span style="color:{tier_color(tier)};font-weight:600;'
+            f'font-size:12px;min-width:120px;">{conf}</span>'
+            f'<span style="color:{TEXT_DIM};font-family:monospace;'
+            f'font-size:11px;">{e.start_us / 1000:.2f} ms · '
+            f'{e.duration_us / 1000:.2f} ms</span></div>')
+    hidden = len(ordered) - len(rows)
+    if hidden > 0:
+        rows.append(
+            f'<div style="color:{TEXT_DIM};font-size:11px;padding-top:6px;">'
+            f'+{hidden} more, lower priority</div>')
+    return (f'<div style="margin-top:12px;padding-top:10px;'
+            f'border-top:1px solid {GRID};">'
+            f'<div style="color:{TEXT_DIM};font-size:11px;margin-bottom:4px;">'
+            f'ALL DETECTIONS · worst tier first</div>'
+            + "".join(rows) + '</div>')
 
 
 def _render(session, smoothing_choice, model_choice="auto", case_note=""):
@@ -140,8 +256,9 @@ def _render(session, smoothing_choice, model_choice="auto", case_note=""):
 
     if channel_empty:
         extra = ""
-        if events:
-            e = events[-1]
+        headline = _headline_event(events)
+        if headline is not None:
+            e = headline
             extra = (
                 f'<div style="margin-top:12px;padding-top:10px;'
                 f'border-top:1px solid {GRID};color:{TEXT_DIM};'
@@ -160,18 +277,26 @@ def _render(session, smoothing_choice, model_choice="auto", case_note=""):
             f'{empty_pct_val:.0f}% of windows report no emitter</div>'
             f'{extra}</div>')
     elif events:
-        e = events[-1]
+        e = _headline_event(events)
         color = tier_color(tier_of_classes(e.classes))
         latest_html = (
             f'<div style="background:{PANEL};padding:16px;border-radius:6px;'
             f'color:{TEXT};">'
-            f'<div style="color:{TEXT_DIM};font-size:11px;">LATEST DETECTION</div>'
+            f'<div style="color:{TEXT_DIM};font-size:11px;">PRIMARY DETECTION</div>'
             f'<div style="font-size:20px;font-weight:600;color:{color};'
             f'margin:6px 0;">{e.label}</div>'
             f'<div style="color:{TEXT_DIM};font-family:monospace;font-size:12px;">'
             f'{e.start_us / 1000:.2f} ms · {e.duration_us / 1000:.2f} ms long<br>'
             + " · ".join(f"{c} {e.peak[c] * 100:.0f}%" for c in e.classes)
-            + f'</div><div>{chips}</div></div>')
+            + f'</div>'
+            + ('' if _headline_is_confident(events) else
+               f'<div style="color:{TEXT_DIM};font-size:11px;margin-top:6px;">'
+               f'nothing in this capture cleared '
+               f'{MIN_HEADLINE_CONFIDENCE:.0%} on the class setting its tier — '
+               f'showing the strongest available</div>')
+            + f'<div>{chips}</div>'
+            + _detection_list_html(events)
+            + '</div>')
     else:
         latest_html = (
             f'<div style="background:{PANEL};padding:16px;border-radius:6px;'
