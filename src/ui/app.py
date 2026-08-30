@@ -226,7 +226,7 @@ THEME = gr.themes.Base(primary_hue="teal", neutral_hue="slate")
 
 
 def build_app():
-    with gr.Blocks(title="OMNI — RF Spectrum Intelligence") as demo:
+    with gr.Blocks(title="OMNI: RF Spectrum Intelligence") as demo:
         gr.HTML(
             f'<div style="display:flex;align-items:center;gap:22px;'
             f'padding:16px 0 12px 0;border-bottom:2px solid {BRAND_OLIVE};'
