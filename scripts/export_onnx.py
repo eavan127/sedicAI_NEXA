@@ -60,9 +60,9 @@ def export_and_verify(ckpt_path: Path, out_path: Path) -> bool:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     torch.onnx.export(
         wrapper, (trace_iq, trace_mag), str(out_path),
-        input_names=["iq", "stft_mag"], output_names=["logits"],
+        input_names=["iq", "stft_mag"], output_names=["logits", "attention"],
         dynamic_axes={"iq": {0: "batch"}, "stft_mag": {0: "batch"},
-                       "logits": {0: "batch"}},
+                       "logits": {0: "batch"}, "attention": {0: "batch"}},
         opset_version=18,  # torch 2.13's exporter targets 18 regardless;
                            # asking for 17 makes it noisily fail a downgrade
                            # attempt first, then fall back to 18 anyway.
@@ -77,18 +77,32 @@ def export_and_verify(ckpt_path: Path, out_path: Path) -> bool:
         iq = _sample_inputs(batch, seed)
         mag = compute_stft_mag(iq, N_FFT, HOP, window)
 
-        with torch.no_grad():
-            expected = model(iq).numpy()
+        # Reference attention comes from the SAME forward hook
+        # src/timeline.py:classify_capture uses, so this checks the inlined
+        # copy in AMC_CNN_ONNX against the path the scorecard actually ran.
+        captured = {}
+        handle = model.attn_pool.score.register_forward_hook(
+            lambda m, i, o: captured.__setitem__("scores", o.detach()))
+        try:
+            with torch.no_grad():
+                expected = model(iq).numpy()
+                expected_attn = torch.softmax(
+                    captured["scores"], dim=2)[:, 0, :].numpy()
+        finally:
+            handle.remove()
 
-        actual, = sess.run(["logits"], {
+        actual, actual_attn = sess.run(["logits", "attention"], {
             "iq": iq.numpy(), "stft_mag": mag.numpy(),
         })
 
         diff = np.abs(actual - expected).max()
-        passed = np.allclose(actual, expected, atol=ATOL)
+        attn_diff = np.abs(actual_attn - expected_attn).max()
+        passed = (np.allclose(actual, expected, atol=ATOL)
+                   and np.allclose(actual_attn, expected_attn, atol=ATOL))
         ok = ok and passed
         status = "OK" if passed else "MISMATCH"
-        print(f"  batch={batch} seed={seed}: max|diff|={diff:.2e}  [{status}]")
+        print(f"  batch={batch} seed={seed}: max|diff| logits={diff:.2e} "
+              f"attn={attn_diff:.2e}  [{status}]")
 
     return ok
 

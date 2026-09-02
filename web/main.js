@@ -1,10 +1,14 @@
-import { CASES, buildScenario, CFG } from "./generators.js";
+import { CASES, buildScenario, caseNeedsLibrary, loadCivilianLibrary } from "./generators.js";
 import { classifyCapture, loadModel, FS, WINDOW_LEN } from "./model.js";
 import {
   noiseFloorPower, occupancy, powerSpectrumDb, resolveSession, scipyStft,
 } from "./analysis.js";
 import { drawConsole } from "./console.js";
 import { eventRows, headerLine, latestBlock, statusBlock } from "./panels.js";
+import {
+  drawAttention, drawBreakdown, modelCardHtml, probabilityHtml,
+  provenanceHtml, scorecardHtml, windowMetadataHtml,
+} from "./pages.js";
 
 const el = id => document.getElementById(id);
 const statusEl = el("status"), headlineEl = el("headline");
@@ -72,7 +76,8 @@ function modelLabel(which) {
  * rule, so switching it must NOT re-run inference -- same as the Gradio page,
  * where smoothing.change only re-renders. */
 function render() {
-  const { capture, result, source, caseNote, truth, snrDb, which } = session;
+  const { capture, result, source, caseNote, truth, snrDb, which,
+           snrCapped, requestedSnrDb } = session;
   const smoothed = smoothingChoice === "Smoothed";
   const resolved = resolveSession(result, smoothed);
   const events = resolved.emitterEvents;
@@ -82,6 +87,7 @@ function render() {
 
   headlineEl.innerHTML = headerLine({
     source, snrKnown: source === "scenario", trueSnrDb: snrDb,
+    snrCapped, requestedSnrDb,
     modelLabel: modelLabel(which), caseNote, durationMs,
     nWindows: result.nWindows, hop: result.hop, nEvents: events.length, tiers,
   });
@@ -123,7 +129,8 @@ function measureCapture(re, im) {
   };
 }
 
-async function analyze(re, im, { source, caseNote = "", truth = null, snrDb = null }) {
+async function analyze(re, im, { source, caseNote = "", truth = null, snrDb = null,
+                                  snrCapped = false, requestedSnrDb = null }) {
   synthBtn.disabled = uploadBtn.disabled = true;
   try {
     const which = modelSel.value;
@@ -141,7 +148,8 @@ async function analyze(re, im, { source, caseNote = "", truth = null, snrDb = nu
     });
     const elapsed = ((performance.now() - t0) / 1000).toFixed(2);
 
-    session = { capture, result, source, caseNote, truth, snrDb, which };
+    session = { capture, result, source, caseNote, truth, snrDb, which,
+                 snrCapped, requestedSnrDb };
     render();
     statusEl.textContent = `${result.nWindows} windows classified in ${elapsed}s.`;
   } catch (e) {
@@ -155,15 +163,32 @@ async function analyze(re, im, { source, caseNote = "", truth = null, snrDb = nu
 synthBtn.addEventListener("click", async () => {
   const caseName = caseSel.value;
   const snrDb = Number(snrSel.value);
-  statusEl.textContent = "Synthesizing IQ…";
-  await new Promise(r => setTimeout(r, 0));
-  const { re, im, segments } = buildScenario({
-    totalDuration: 0.05, snrDb, seed: Math.floor(Math.random() * 1e9),
-    script: CASES[caseName],
-  });
-  await analyze(re, im, {
-    source: "scenario", caseNote: `case \`${caseName}\``, truth: segments, snrDb,
-  });
+  const script = CASES[caseName];
+  try {
+    // Civilian cases need the exported RadioML window library; fetched once
+    // and cached, so only the first civilian case pays for it.
+    let library = null, librarySnrDb = null;
+    if (caseNeedsLibrary(script)) {
+      statusEl.textContent = "Loading civilian capture library…";
+      await new Promise(r => setTimeout(r, 0));
+      library = await loadCivilianLibrary("./data");
+      librarySnrDb = library.snrDb;
+    }
+    statusEl.textContent = "Synthesizing IQ…";
+    await new Promise(r => setTimeout(r, 0));
+    const scenario = buildScenario({
+      totalDuration: 0.05, snrDb, seed: Math.floor(Math.random() * 1e9),
+      script, library, librarySnrDb,
+    });
+    await analyze(scenario.re, scenario.im, {
+      source: "scenario", caseNote: `case \`${caseName}\``,
+      truth: scenario.segments, snrDb: scenario.trueSnrDb,
+      snrCapped: scenario.snrCapped, requestedSnrDb: scenario.requestedSnrDb,
+    });
+  } catch (e) {
+    statusEl.textContent = `Error: ${e.message}`;
+    console.error(e);
+  }
 });
 
 uploadBtn.addEventListener("click", () => fileInput.click());
@@ -220,5 +245,81 @@ new ResizeObserver(() => {
   const w = consoleCanvas.clientWidth;
   if (session && w && w !== lastDrawnWidth) render();
 }).observe(consoleCanvas);
+
+// ---------------------------------------------------------------------------
+// Page switching + the other three pages
+// ---------------------------------------------------------------------------
+
+const winSlider = el("winSlider"), winReadout = el("winReadout");
+const probsBox = el("probsBox"), winMetaBox = el("winMetaBox");
+const attnCanvas = el("attnCanvas"), breakdownCanvas = el("breakdownCanvas");
+let currentPage = "replay";
+let perfData = null, modelCard = null;
+
+function showPage(page) {
+  currentPage = page;
+  for (const btn of document.querySelectorAll("nav button")) {
+    btn.classList.toggle("active", btn.dataset.page === page);
+  }
+  for (const sec of document.querySelectorAll("main section")) {
+    sec.hidden = sec.id !== `page-${page}`;
+  }
+  // Canvases cannot be sized while hidden, so each page draws on entry.
+  if (page === "signal") renderSignal();
+  if (page === "performance") renderPerformance();
+  if (page === "model") renderModel();
+  if (page === "replay" && session) render();
+}
+
+for (const btn of document.querySelectorAll("nav button")) {
+  btn.addEventListener("click", () => showPage(btn.dataset.page));
+}
+
+function renderSignal() {
+  if (!session) {
+    probsBox.innerHTML = `<div class="note">Load a capture on RF Replay first.</div>`;
+    winMetaBox.innerHTML = "";
+    return;
+  }
+  const n = session.result.nWindows;
+  winSlider.max = String(n);
+  const idx = Math.max(0, Math.min(Number(winSlider.value) - 1, n - 1));
+  winReadout.textContent = `#${idx + 1} / ${n}`;
+  probsBox.innerHTML = probabilityHtml(session.result, idx);
+  winMetaBox.innerHTML = windowMetadataHtml(session, idx);
+  drawAttention(attnCanvas, session, idx);
+}
+
+winSlider.addEventListener("input", () => { if (currentPage === "signal") renderSignal(); });
+
+async function renderPerformance() {
+  const box = el("scorecardBox"), prov = el("perfProvenance");
+  if (!perfData) {
+    prov.innerHTML = `<div class="note">Loading…</div>`;
+    try {
+      perfData = await (await fetch("./data/performance.json")).json();
+    } catch (e) {
+      prov.innerHTML = `<div class="note">Could not load performance data: ${e.message}</div>`;
+      return;
+    }
+  }
+  prov.innerHTML = provenanceHtml(perfData);
+  box.innerHTML = scorecardHtml(perfData);
+  drawBreakdown(breakdownCanvas, perfData);
+}
+
+async function renderModel() {
+  const box = el("modelCardBox");
+  if (!modelCard) {
+    box.innerHTML = `<div class="note">Loading…</div>`;
+    try {
+      modelCard = await (await fetch("./data/model_card.json")).json();
+    } catch (e) {
+      box.innerHTML = `<div class="note">Could not load model card: ${e.message}</div>`;
+      return;
+    }
+  }
+  box.innerHTML = modelCardHtml(modelCard, modelSel.value);
+}
 
 init();

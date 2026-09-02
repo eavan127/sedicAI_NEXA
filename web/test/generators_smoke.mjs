@@ -3,11 +3,32 @@
 // finite, non-degenerate (nonzero power) output. Does NOT check numeric
 // agreement with the Python generators -- see generators.js's module
 // docstring for why that isn't the bar here.
-import { CASES, GENERATORS, buildScenario } from "../generators.js";
+import { readFileSync } from "fs";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
+import { CASES, GENERATORS, buildScenario, caseNeedsLibrary } from "../generators.js";
 import { makeRng } from "../dsp.js";
 
 const fs = 3200000;
 let failures = 0;
+
+// The civilian cases need the exported window library. loadCivilianLibrary()
+// uses fetch(), which has no relative base in Node, so the same files are
+// read from disk here and passed in directly -- civilian_check.mjs is what
+// verifies those files match civilian_library().
+const here = dirname(fileURLToPath(import.meta.url));
+const dataDir = join(here, "..", "data");
+const manifest = JSON.parse(readFileSync(join(dataDir, "civilian_library.json"), "utf8"));
+const library = { snrDb: manifest.snr_db, classes: {} };
+for (const [cls, meta] of Object.entries(manifest.classes)) {
+  const buf = readFileSync(join(dataDir, meta.file));
+  const raw = new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4);
+  const wl = manifest.window_len;
+  library.classes[cls] = Array.from({ length: meta.n }, (_, i) => ({
+    re: Float64Array.from(raw.subarray(i * 2 * wl, i * 2 * wl + wl)),
+    im: Float64Array.from(raw.subarray(i * 2 * wl + wl, (i + 1) * 2 * wl)),
+  }));
+}
 
 function checkFinitePower(name, re, im, expectLen) {
   if (expectLen !== undefined && re.length !== expectLen) {
@@ -51,7 +72,12 @@ console.log("\n== full scenario builder, every generator-backed CASE ==");
 for (const [caseName, script] of Object.entries(CASES)) {
   for (const snrDb of [-10, -6, -2, 2, 6, 10]) {
     try {
-      const { re, im, segments } = buildScenario({ fs, totalDuration: 0.05, snrDb, seed: 123, script });
+      const needs = caseNeedsLibrary(script);
+      const { re, im, segments } = buildScenario({
+        fs, totalDuration: 0.05, snrDb, seed: 123, script,
+        library: needs ? library : null,
+        librarySnrDb: needs ? library.snrDb : null,
+      });
       checkFinitePower(`${caseName} @ ${snrDb}dB`, re, im, Math.round(0.05 * fs));
       if (segments.length !== script.length) {
         console.error(`FAIL ${caseName}: ${segments.length} segments, expected ${script.length}`);

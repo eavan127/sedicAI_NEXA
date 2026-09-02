@@ -112,13 +112,14 @@
   <div class="layout">
     <nav>
       <div class="menu-label">Menu</div>
-      <button class="active">RF Replay</button>
-      <button disabled title="Not in the static build">Signal Analysis</button>
-      <button disabled title="Not in the static build">Performance</button>
-      <button disabled title="Not in the static build">Model</button>
+      <button class="active" data-page="replay">RF Replay</button>
+      <button data-page="signal">Signal Analysis</button>
+      <button data-page="performance">Performance</button>
+      <button data-page="model">Model</button>
     </nav>
 
     <main>
+    <section id="page-replay">
       <h3 class="page-title">RF Replay</h3>
 
       <!-- Global settings, matching rf_replay.py's first Row -->
@@ -173,9 +174,7 @@
       </div>
       <div class="note">
         Static build — runs entirely in this browser tab via ONNX, no Python and no
-        server-side inference. Civilian scenario cases need the RadioML dataset, which
-        a static site has no server to serve from, so only the generator-backed cases
-        are offered.
+        server-side inference.
       </div>
 
       <div id="status">Loading onnxruntime-web and the 5-model ensemble…</div>
@@ -201,6 +200,59 @@
           </table>
         </div>
       </div>
+    </section>
+
+    <section id="page-signal" hidden>
+      <h3 class="page-title">Signal Analysis</h3>
+      <div class="note" style="margin-bottom:12px;">
+        One 512-sample window — 160 µs — exactly as the classifier sees it.
+        Load a capture on RF Replay first, then pick a window.
+      </div>
+      <div class="grow">
+        <div class="field" style="flex:1;min-width:260px;">
+          <label for="winSlider">Window</label>
+          <input type="range" id="winSlider" min="1" max="1" value="1" step="1" style="width:100%;">
+        </div>
+        <div class="field"><label>&nbsp;</label>
+          <span id="winReadout" style="font-family:var(--mono);font-size:13px;color:var(--text-dim);min-height:38px;display:flex;align-items:center;">—</span>
+        </div>
+      </div>
+      <div class="panels" style="align-items:stretch;">
+        <div style="flex:1;border:none;">
+          <div id="probsBox"></div>
+          <div id="winMetaBox"></div>
+        </div>
+        <div style="flex:2;border:none;">
+          <div class="block">
+            <div class="block-label">Amplitude (measured) + attention (model)</div>
+            <canvas id="attnCanvas"></canvas>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="page-performance" hidden>
+      <h3 class="page-title">Performance</h3>
+      <div id="perfProvenance" style="margin-bottom:12px;"></div>
+      <div class="block">
+        <div class="block-label">Scorecard — per class, per window, ungated and unsmoothed</div>
+        <div id="scorecardBox"></div>
+      </div>
+      <div class="block">
+        <div class="block-label">Single- vs multi-signal recall across the SNR sweep</div>
+        <canvas id="breakdownCanvas"></canvas>
+        <div class="note" style="margin-top:8px;">
+          Additive to the scorecard, not a competing one: same test split, same per-class
+          thresholds, same checkpoint. Solid = single-signal windows, dashed = windows where
+          emitters overlap. The red line is the benchmark pass mark.
+        </div>
+      </div>
+    </section>
+
+    <section id="page-model" hidden>
+      <h3 class="page-title">Model</h3>
+      <div id="modelCardBox"></div>
+    </section>
     </main>
   </div>
 

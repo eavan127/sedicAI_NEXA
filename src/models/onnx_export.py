@@ -66,10 +66,18 @@ class STFTBranchONNX(nn.Module):
 class AMC_CNN_ONNX(nn.Module):
     """AMC_CNN with the STFT magnitude taken as a second input.
 
-    forward(iq, stft_mag) -- iq is (batch, 2, window_len), stft_mag is
-    compute_stft_mag(iq, ...)'s output. Wraps an already-trained AMC_CNN
-    in place; does not copy weights, so put the source model in eval() mode
-    before exporting (or after -- this wrapper shares the same Parameters).
+    forward(iq, stft_mag) -> (logits, attention) -- iq is
+    (batch, 2, window_len), stft_mag is compute_stft_mag(iq, ...)'s output.
+    Wraps an already-trained AMC_CNN in place; does not copy weights, so put
+    the source model in eval() mode before exporting (or after -- this
+    wrapper shares the same Parameters).
+
+    Attention is returned as a SECOND OUTPUT rather than captured by a
+    forward hook. src/timeline.py:classify_capture hooks attn_pool.score and
+    softmaxes the raw scores itself; a hook has no equivalent in an exported
+    graph, so the same computation is inlined here and exposed as an output.
+    The Signal Analysis page plots it, and without it that page cannot exist
+    outside Python.
     """
 
     def __init__(self, model: AMC_CNN):
@@ -91,9 +99,16 @@ class AMC_CNN_ONNX(nn.Module):
                                   mode="linear", align_corners=False)
         fused = torch.cat([iq_feats, tf_feats], dim=1)
 
-        x = self.attn_pool(fused, raw_power)
-        x = self.dropout(self.relu(self.fc1(x)))
-        return self.fc2(x)
+        # AttentionPool1d.forward, inlined so the softmaxed weights can be
+        # returned alongside the pooled output. Identical arithmetic --
+        # verified against the hook-based path in scripts/export_onnx.py.
+        energy = F.adaptive_avg_pool1d(raw_power, fused.shape[-1])
+        combined = torch.cat([fused, energy], dim=1)
+        weights = torch.softmax(self.attn_pool.score(combined), dim=2)
+        pooled = (fused * weights).sum(dim=2)
+
+        x = self.dropout(self.relu(self.fc1(pooled)))
+        return self.fc2(x), weights[:, 0, :]
 
 
 def compute_stft_mag(iq: torch.Tensor, n_fft: int, hop_length: int,

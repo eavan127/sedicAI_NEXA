@@ -1,10 +1,12 @@
 // Ports of src/generators/{radar,fhss,jamming}.py and the scenario-building
-// logic in src/scenarios.py. Only the three GENERATOR classes are supported
-// here (LFM_RADAR, FHSS, JAMMING) -- civilian classes (BPSK/QPSK/16QAM/64QAM)
-// have no generator in the Python version either; they're drawn from real
-// RadioML recordings on disk, which a static site has no server to serve
-// from, so "Civilian only" / "Civilian + Jamming" / "Civilian + Radar" /
-// "Contested band" are intentionally not offered here.
+// logic in src/scenarios.py, including the civilian cases.
+//
+// Civilian classes (BPSK/QPSK/16QAM/64QAM) have no generator in the Python
+// version either -- they are real RadioML recordings. src/ui/session.py
+// reads them from data/processed at request time; here the same fixed slice
+// is exported by web/build.py to web/data/civilian_*.bin and fetched once
+// (see loadCivilianLibrary), which is why the civilian cases work on a
+// static host.
 //
 // RNG note: uses a local seedable PRNG (dsp.js:makeRng), NOT numpy's PCG64.
 // Every call site in the Python UI also draws a fresh random seed per click
@@ -193,6 +195,8 @@ export const GENERATORS = {
 
 // ---- scenarios.py (generator-backed cases only) ----
 
+export const CIVILIAN = ["BPSK", "QPSK", "16QAM", "64QAM"];
+
 export const CASES = {
   "Radar only": [["LFM_RADAR", 0.25, 0.75]],
   "FHSS only": [["FHSS", 0.25, 0.75]],
@@ -200,7 +204,90 @@ export const CASES = {
   "Radar + FHSS": [["LFM_RADAR", 0.15, 0.70], ["FHSS", 0.40, 0.85]],
   "FHSS + Jamming": [["FHSS", 0.15, 0.70], ["JAMMING", 0.40, 0.85]],
   "All three": [["LFM_RADAR", 0.10, 0.45], ["FHSS", 0.30, 0.70], ["JAMMING", 0.55, 0.85]],
+  // Civilian cases draw real RadioML captures from the exported library
+  // rather than a generator -- see loadCivilianLibrary.
+  "Civilian only": [["QPSK", 0.25, 0.75]],
+  "Civilian + Jamming": [["QPSK", 0.15, 0.70], ["JAMMING", 0.40, 0.85]],
+  "Civilian + Radar": [["BPSK", 0.15, 0.70], ["LFM_RADAR", 0.35, 0.85]],
+  "Contested band": [["QPSK", 0.05, 0.60], ["LFM_RADAR", 0.20, 0.55],
+                      ["FHSS", 0.35, 0.80], ["JAMMING", 0.55, 0.95]],
 };
+
+export function caseNeedsLibrary(script) {
+  return script.some(([cls]) => CIVILIAN.includes(cls));
+}
+
+let _library = null;
+
+/** Fetches the civilian window library web/build.py exported from
+ * src/ui/session.py:civilian_library() -- the same fixed slice: standalone
+ * windows of each civilian class, drawn from the TRAIN split at the
+ * cleanest SNR bin. Cached after the first call.
+ *
+ * Returns { snrDb, classes: { BPSK: [{re, im}, ...], ... } }. */
+export async function loadCivilianLibrary(baseUrl = "./data") {
+  if (_library) return _library;
+  const manifest = await (await fetch(`${baseUrl}/civilian_library.json`)).json();
+  const classes = {};
+  for (const [cls, meta] of Object.entries(manifest.classes)) {
+    const buf = await (await fetch(`${baseUrl}/${meta.file}`)).arrayBuffer();
+    const raw = new Float32Array(buf);
+    const wl = manifest.window_len;
+    // stored as (n, 2, window_len): channel 0 is I, channel 1 is Q
+    const windows = [];
+    for (let i = 0; i < meta.n; i++) {
+      const base = i * 2 * wl;
+      windows.push({
+        re: Float64Array.from(raw.subarray(base, base + wl)),
+        im: Float64Array.from(raw.subarray(base + wl, base + 2 * wl)),
+      });
+    }
+    classes[cls] = windows;
+  }
+  _library = { snrDb: manifest.snr_db, classes };
+  return _library;
+}
+
+/** src/scenarios.py:_from_library -- assemble one emitter of `length`
+ * samples by concatenating real captured windows.
+ *
+ * The dataset stores independent 512-sample captures, so a longer stretch
+ * has to be built by concatenating several, and consecutive captures are
+ * unrelated -- every join is a phase discontinuity. Joins are crossfaded
+ * over a raised-cosine ramp so that discontinuity does not radiate
+ * broadband splatter across the display. The result is still a
+ * concatenation of separate recordings, honest for DEMONSTRATING civilian
+ * traffic in a scene and NOT a basis for measuring civilian detection
+ * performance. */
+function fromLibrary(className, length, library, rng) {
+  const pool = library?.classes?.[className];
+  if (!pool || !pool.length) {
+    throw new Error(
+      `${className} has no generator and no library entry — civilian classes ` +
+      `must be supplied from the dataset`);
+  }
+  const win = pool[0].re.length;
+  const fade = Math.max(Math.floor(win / 16), 8);
+  const outRe = new Float64Array(length + win), outIm = new Float64Array(length + win);
+  const ramp = new Float64Array(fade);
+  for (let i = 0; i < fade; i++) ramp[i] = 0.5 * (1 - Math.cos((Math.PI * i) / (fade - 1)));
+
+  let pos = 0;
+  while (pos < length) {
+    const w = pool[Math.floor(rng() * pool.length)];
+    const segRe = Float64Array.from(w.re), segIm = Float64Array.from(w.im);
+    if (pos) {                       // crossfade into whatever is already there
+      for (let i = 0; i < fade; i++) {
+        segRe[i] *= ramp[i]; segIm[i] *= ramp[i];
+        outRe[pos + i] *= ramp[fade - 1 - i];
+        outIm[pos + i] *= ramp[fade - 1 - i];
+      }
+    }
+    for (let i = 0; i < win; i++) { outRe[pos + i] += segRe[i]; outIm[pos + i] += segIm[i]; }
+    pos += win - fade;
+  }
+  return { re: outRe.subarray(0, length), im: outIm.subarray(0, length) };
+}
 
 function raisedCosineRamp(nSamples, rampLen = 256) {
   const env = new Float64Array(nSamples).fill(1);
@@ -237,12 +324,14 @@ function unitPower(re, im) {
  * is [{ className, startS, endS }] -- start/end only (no radiating_spans /
  * duty-cycle ground truth; that's display-only detail the Python UI uses
  * that isn't needed to prove the model pipeline works end to end). */
-export function buildScenario({ fs = CFG.fs, totalDuration = 0.05, snrDb = 0, seed = 0, script }) {
+export function buildScenario({ fs = CFG.fs, totalDuration = 0.05, snrDb = 0, seed = 0, script,
+                                 library = null, librarySnrDb = null }) {
   const rng = makeRng(seed);
   const nTotal = Math.round(totalDuration * fs);
   const re = new Float64Array(nTotal), im = new Float64Array(nTotal);
   const segments = [];
   const emitterPowers = [];
+  const civilianSpans = [];
 
   for (const [className, startFrac, endFrac] of script) {
     const start = Math.round(startFrac * nTotal);
@@ -250,7 +339,10 @@ export function buildScenario({ fs = CFG.fs, totalDuration = 0.05, snrDb = 0, se
     if (end - start < 2) continue;
     const length = end - start;
 
-    let emitter = GENERATORS[className](rng, fs, length / fs);
+    const isCivilian = !(className in GENERATORS);
+    let emitter = isCivilian
+      ? fromLibrary(className, length, library, rng)
+      : GENERATORS[className](rng, fs, length / fs);
     if (emitter.re.length < length) {
       const padRe = new Float64Array(length), padIm = new Float64Array(length);
       padRe.set(emitter.re); padIm.set(emitter.im);
@@ -276,18 +368,62 @@ export function buildScenario({ fs = CFG.fs, totalDuration = 0.05, snrDb = 0, se
     for (let i = 0; i < length; i++) power += uRe[i] * uRe[i] + uIm[i] * uIm[i];
     power /= length;
     emitterPowers.push([className, power]);
+    // Recorded AFTER the unit-power/SIR scaling, so this is the span's own
+    // ACTUAL placed power -- the noise section below needs each civilian
+    // span's own power to compute that span's own carried noise, not the
+    // first non-jamming emitter's.
+    if (isCivilian) civilianSpans.push({ start, end, power });
     segments.push({ className, startS: start / fs, endS: end / fs });
   }
 
+  // Noise references the FIRST NON-JAMMING emitter, exactly as
+  // mix_components does. Averaging over all emitters instead would let a
+  // jammer -- deliberately 0-20 dB hot -- drag the reference up and raise
+  // the noise floor, so adding a jammer would quietly make the victim
+  // harder to see.
   const nonJam = emitterPowers.filter(([n]) => n !== "JAMMING");
   const referencePower = nonJam.length ? nonJam[0][1] : (emitterPowers.length ? emitterPowers[0][1] : 1.0);
   const target = referencePower / Math.pow(10, snrDb / 10);
 
-  const noiseAmp = Math.sqrt(target / 2);
-  for (let i = 0; i < nTotal; i++) {
-    re[i] += gaussian(rng) * noiseAmp;
-    im[i] += gaussian(rng) * noiseAmp;
+  const noiseRe = new Float64Array(nTotal), noiseIm = new Float64Array(nTotal);
+  for (let i = 0; i < nTotal; i++) { noiseRe[i] = gaussian(rng); noiseIm[i] = gaussian(rng); }
+
+  if (librarySnrDb === null || !civilianSpans.length) {
+    const amp = Math.sqrt(target / 2);
+    for (let i = 0; i < nTotal; i++) { re[i] += noiseRe[i] * amp; im[i] += noiseIm[i] * amp; }
+  } else {
+    // A civilian recording already carries noise at librarySnrDb, so a
+    // target SNR better than that bin is not achievable -- you can add
+    // noise to a recording but never remove it. Noising it again on top of
+    // the scenario noise would double-count.
+    const carried = civilianSpans.map(s => ({
+      ...s, carried: s.power / Math.pow(10, librarySnrDb / 10),
+    }));
+    const floor = Math.max(target, ...carried.map(c => c.carried));
+    // Everywhere gets `floor`, except inside a civilian span, which already
+    // has its own `carried` baked into the recording and only needs
+    // `floor - carried` on top. Noise POWERS add, so the added component's
+    // amplitude is sqrt(floor - carried), not sqrt(floor) - sqrt(carried).
+    const addedPower = new Float64Array(nTotal).fill(floor);
+    for (const c of carried) {
+      addedPower.fill(Math.max(floor - c.carried, 0), c.start, c.end);
+    }
+    for (let i = 0; i < nTotal; i++) {
+      const amp = Math.sqrt(addedPower[i] / 2);
+      re[i] += noiseRe[i] * amp; im[i] += noiseIm[i] * amp;
+    }
   }
 
-  return { re, im, segments, fs, totalDuration };
+  // The achieved SNR is whichever is worse (lower) once a civilian
+  // recording's own carried noise is accounted for -- load_scenario's
+  // snr_capped / requested_snr_db, which the header reports.
+  const needsLibrary = civilianSpans.length > 0;
+  const trueSnrDb = (needsLibrary && librarySnrDb !== null)
+    ? Math.min(snrDb, librarySnrDb) : snrDb;
+
+  return {
+    re, im, segments, fs, totalDuration, trueSnrDb,
+    snrCapped: needsLibrary && librarySnrDb !== null && snrDb > librarySnrDb,
+    requestedSnrDb: snrDb,
+  };
 }

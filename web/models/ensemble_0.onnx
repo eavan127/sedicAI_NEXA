@@ -1,6 +1,6 @@
 
 pytorch
-2.13.0+cpu:…¥'
+2.13.0+cpu:»≠'
 ﬁ
 iq
 val_16
@@ -11,7 +11,7 @@
 pkg.torch.onnx.class_hierarchy<['src.models.onnx_export.AMC_CNN_ONNX', 'aten.slice.Tensor']Jè
 pkg.torch.onnx.fx_nodeu%slice_2 : [num_users=1] = call_function[target=torch.ops.aten.slice.Tensor](args = (%slice_1, 1, 0, 1), kwargs = {})J-
 pkg.torch.onnx.name_scopes['', 'slice_2']J©
-pkg.torch.onnx.stack_traceäFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 86, in forward
+pkg.torch.onnx.stack_traceäFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 94, in forward
     raw_power = iq[:, 0:1, :] ** 2 + iq[:, 1:2, :] ** 2
 »
 slice_2
@@ -21,7 +21,7 @@ node_pow_1"PowJP
 pkg.torch.onnx.class_hierarchyA['src.models.onnx_export.AMC_CNN_ONNX', 'aten.pow.Tensor_Scalar']Jå
 pkg.torch.onnx.fx_noder%pow_1 : [num_users=1] = call_function[target=torch.ops.aten.pow.Tensor_Scalar](args = (%slice_2, 2), kwargs = {})J+
 pkg.torch.onnx.name_scopes['', 'pow_1']J©
-pkg.torch.onnx.stack_traceäFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 86, in forward
+pkg.torch.onnx.stack_traceäFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 94, in forward
     raw_power = iq[:, 0:1, :] ** 2 + iq[:, 1:2, :] ** 2
 ﬁ
 iq
@@ -33,7 +33,7 @@ node_pow_1"PowJP
 pkg.torch.onnx.class_hierarchy<['src.models.onnx_export.AMC_CNN_ONNX', 'aten.slice.Tensor']Jè
 pkg.torch.onnx.fx_nodeu%slice_4 : [num_users=1] = call_function[target=torch.ops.aten.slice.Tensor](args = (%slice_3, 1, 1, 2), kwargs = {})J-
 pkg.torch.onnx.name_scopes['', 'slice_4']J©
-pkg.torch.onnx.stack_traceäFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 86, in forward
+pkg.torch.onnx.stack_traceäFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 94, in forward
     raw_power = iq[:, 0:1, :] ** 2 + iq[:, 1:2, :] ** 2
 »
 slice_4
@@ -43,7 +43,7 @@ node_pow_2"PowJP
 pkg.torch.onnx.class_hierarchyA['src.models.onnx_export.AMC_CNN_ONNX', 'aten.pow.Tensor_Scalar']Jå
 pkg.torch.onnx.fx_noder%pow_2 : [num_users=1] = call_function[target=torch.ops.aten.pow.Tensor_Scalar](args = (%slice_4, 2), kwargs = {})J+
 pkg.torch.onnx.name_scopes['', 'pow_2']J©
-pkg.torch.onnx.stack_traceäFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 86, in forward
+pkg.torch.onnx.stack_traceäFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 94, in forward
     raw_power = iq[:, 0:1, :] ** 2 + iq[:, 1:2, :] ** 2
 ∏
 pow_1
@@ -52,12 +52,12 @@ node_pow_2"PowJP
 pkg.torch.onnx.class_hierarchy:['src.models.onnx_export.AMC_CNN_ONNX', 'aten.add.Tensor']Jâ
 pkg.torch.onnx.fx_nodeo%add_24 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%pow_1, %pow_2), kwargs = {})J,
 pkg.torch.onnx.name_scopes['', 'add_24']J©
-pkg.torch.onnx.stack_traceäFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 86, in forward
+pkg.torch.onnx.stack_traceäFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 94, in forward
     raw_power = iq[:, 0:1, :] ** 2 + iq[:, 1:2, :] ** 2
 ﬁ
 iq
 iq_branch.conv1.weight
-iq_branch.conv1.biasgetitemnode_Conv_142"Conv*
+iq_branch.conv1.biasgetitemnode_Conv_155"Conv*
 group†*
 auto_pad"NOTSET†*
 	dilations@†*
@@ -68,7 +68,7 @@ node_pow_2"PowJP
 pkg.torch.onnx.class_hierarchy•['src.models.onnx_export.AMC_CNN_ONNX', 'src.models.amc_cnn.IQBranch', 'torch.nn.modules.batchnorm.BatchNorm1d', 'aten._native_batch_norm_legit_no_training.default']Jº
 pkg.torch.onnx.fx_node°%_native_batch_norm_legit_no_training : [num_users=1] = call_function[target=torch.ops.aten._native_batch_norm_legit_no_training.default](args = (%conv1d, %p_iq_branch_bn1_weight, %p_iq_branch_bn1_bias, %b_iq_branch_bn1_running_mean, %b_iq_branch_bn1_running_var, 0.1, 1e-05), kwargs = {})Jh
 pkg.torch.onnx.name_scopesJ['', 'iq_branch', 'iq_branch.bn1', '_native_batch_norm_legit_no_training']Jö
-pkg.torch.onnx.stack_trace˚File "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 88, in forward
+pkg.torch.onnx.stack_trace˚File "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 96, in forward
     iq_feats = self.iq_branch(iq)
   File "D:\github clone\sedicAI_NEXA\src\models\amc_cnn.py", line 70, in forward
     x = self.relu(self.bn1(self.conv1(x)))
@@ -80,7 +80,7 @@ node_pow_2"PowJP
 pkg.torch.onnx.class_hierarchy['src.models.onnx_export.AMC_CNN_ONNX', 'src.models.amc_cnn.IQBranch', 'torch.nn.modules.activation.ReLU', 'aten.relu.default']JÑ
 pkg.torch.onnx.fx_nodej%relu : [num_users=1] = call_function[target=torch.ops.aten.relu.default](args = (%getitem,), kwargs = {})JI
 pkg.torch.onnx.name_scopes+['', 'iq_branch', 'iq_branch.relu', 'relu']J±
-pkg.torch.onnx.stack_traceíFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 88, in forward
+pkg.torch.onnx.stack_traceíFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 96, in forward
     iq_feats = self.iq_branch(iq)
   File "D:\github clone\sedicAI_NEXA\src\models\amc_cnn.py", line 70, in forward
     x = self.relu(self.bn1(self.conv1(x)))
@@ -89,7 +89,7 @@ node_pow_2"PowJP
 Û
 relu
 iq_branch.dilated1.weight
-iq_branch.dilated1.bias	getitem_3node_Conv_143"Conv*
+iq_branch.dilated1.bias	getitem_3node_Conv_156"Conv*
 group†*
 auto_pad"NOTSET†*
 	dilations@†*
@@ -100,7 +100,7 @@ node_pow_2"PowJP
 pkg.torch.onnx.class_hierarchy•['src.models.onnx_export.AMC_CNN_ONNX', 'src.models.amc_cnn.IQBranch', 'torch.nn.modules.batchnorm.BatchNorm1d', 'aten._native_batch_norm_legit_no_training.default']J¿
 pkg.torch.onnx.fx_node•%_native_batch_norm_legit_no_training_1 : [num_users=1] = call_function[target=torch.ops.aten._native_batch_norm_legit_no_training.default](args = (%conv1d_1, %p_iq_branch_bn2_weight, %p_iq_branch_bn2_bias, %b_iq_branch_bn2_running_mean, %b_iq_branch_bn2_running_var, 0.1, 1e-05), kwargs = {})Jj
 pkg.torch.onnx.name_scopesL['', 'iq_branch', 'iq_branch.bn2', '_native_batch_norm_legit_no_training_1']Jù
-pkg.torch.onnx.stack_trace˛File "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 88, in forward
+pkg.torch.onnx.stack_trace˛File "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 96, in forward
     iq_feats = self.iq_branch(iq)
   File "D:\github clone\sedicAI_NEXA\src\models\amc_cnn.py", line 71, in forward
     x = self.relu(self.bn2(self.dilated1(x)))
@@ -112,7 +112,7 @@ node_pow_2"PowJP
 pkg.torch.onnx.class_hierarchy['src.models.onnx_export.AMC_CNN_ONNX', 'src.models.amc_cnn.IQBranch', 'torch.nn.modules.activation.ReLU', 'aten.relu.default']Jà
 pkg.torch.onnx.fx_noden%relu_1 : [num_users=1] = call_function[target=torch.ops.aten.relu.default](args = (%getitem_3,), kwargs = {})JK
 pkg.torch.onnx.name_scopes-['', 'iq_branch', 'iq_branch.relu', 'relu_1']J¥
-pkg.torch.onnx.stack_traceïFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 88, in forward
+pkg.torch.onnx.stack_traceïFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 96, in forward
     iq_feats = self.iq_branch(iq)
   File "D:\github clone\sedicAI_NEXA\src\models\amc_cnn.py", line 71, in forward
     x = self.relu(self.bn2(self.dilated1(x)))
@@ -121,7 +121,7 @@ node_pow_2"PowJP
 ı
 relu_1
 iq_branch.dilated2.weight
-iq_branch.dilated2.bias	getitem_6node_Conv_144"Conv*
+iq_branch.dilated2.bias	getitem_6node_Conv_157"Conv*
 group†*
 auto_pad"NOTSET†*
 	dilations@†*
@@ -132,7 +132,7 @@ node_pow_2"PowJP
 pkg.torch.onnx.class_hierarchy•['src.models.onnx_export.AMC_CNN_ONNX', 'src.models.amc_cnn.IQBranch', 'torch.nn.modules.batchnorm.BatchNorm1d', 'aten._native_batch_norm_legit_no_training.default']J¿
 pkg.torch.onnx.fx_node•%_native_batch_norm_legit_no_training_2 : [num_users=1] = call_function[target=torch.ops.aten._native_batch_norm_legit_no_training.default](args = (%conv1d_2, %p_iq_branch_bn3_weight, %p_iq_branch_bn3_bias, %b_iq_branch_bn3_running_mean, %b_iq_branch_bn3_running_var, 0.1, 1e-05), kwargs = {})Jj
 pkg.torch.onnx.name_scopesL['', 'iq_branch', 'iq_branch.bn3', '_native_batch_norm_legit_no_training_2']Jù
-pkg.torch.onnx.stack_trace˛File "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 88, in forward
+pkg.torch.onnx.stack_trace˛File "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 96, in forward
     iq_feats = self.iq_branch(iq)
   File "D:\github clone\sedicAI_NEXA\src\models\amc_cnn.py", line 72, in forward
     x = self.relu(self.bn3(self.dilated2(x)))
@@ -144,7 +144,7 @@ node_pow_2"PowJP
 pkg.torch.onnx.class_hierarchy['src.models.onnx_export.AMC_CNN_ONNX', 'src.models.amc_cnn.IQBranch', 'torch.nn.modules.activation.ReLU', 'aten.relu.default']Jà
 pkg.torch.onnx.fx_noden%relu_2 : [num_users=1] = call_function[target=torch.ops.aten.relu.default](args = (%getitem_6,), kwargs = {})JK
 pkg.torch.onnx.name_scopes-['', 'iq_branch', 'iq_branch.relu', 'relu_2']J¥
-pkg.torch.onnx.stack_traceïFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 88, in forward
+pkg.torch.onnx.stack_traceïFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 96, in forward
     iq_feats = self.iq_branch(iq)
   File "D:\github clone\sedicAI_NEXA\src\models\amc_cnn.py", line 72, in forward
     x = self.relu(self.bn3(self.dilated2(x)))
@@ -153,7 +153,7 @@ node_pow_2"PowJP
 µ
 stft_mag
 stft_branch.conv1.weight
-stft_branch.conv1.bias	getitem_9node_Conv_145"Conv*
+stft_branch.conv1.bias	getitem_9node_Conv_158"Conv*
 group†*
 auto_pad"NOTSET†*
 	dilations@@†*
@@ -164,7 +164,7 @@ node_pow_2"PowJP
 pkg.torch.onnx.class_hierarchyØ['src.models.onnx_export.AMC_CNN_ONNX', 'src.models.onnx_export.STFTBranchONNX', 'torch.nn.modules.batchnorm.BatchNorm2d', 'aten._native_batch_norm_legit_no_training.default']J∆
 pkg.torch.onnx.fx_node´%_native_batch_norm_legit_no_training_3 : [num_users=1] = call_function[target=torch.ops.aten._native_batch_norm_legit_no_training.default](args = (%conv2d, %p_stft_branch_bn1_weight, %p_stft_branch_bn1_bias, %b_stft_branch_bn1_running_mean, %b_stft_branch_bn1_running_var, 0.1, 1e-05), kwargs = {})Jn
 pkg.torch.onnx.name_scopesP['', 'stft_branch', 'stft_branch.bn1', '_native_batch_norm_legit_no_training_3']J≥
-pkg.torch.onnx.stack_traceîFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 89, in forward
+pkg.torch.onnx.stack_traceîFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 97, in forward
     tf_feats = self.stft_branch(stft_mag)
   File "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 48, in forward
     f = self.pool(self.relu(self.bn1(self.conv1(mag))))
@@ -176,7 +176,7 @@ node_pow_2"PowJP
 pkg.torch.onnx.class_hierarchyâ['src.models.onnx_export.AMC_CNN_ONNX', 'src.models.onnx_export.STFTBranchONNX', 'torch.nn.modules.activation.ReLU', 'aten.relu.default']Jà
 pkg.torch.onnx.fx_noden%relu_3 : [num_users=1] = call_function[target=torch.ops.aten.relu.default](args = (%getitem_9,), kwargs = {})JO
 pkg.torch.onnx.name_scopes1['', 'stft_branch', 'stft_branch.relu', 'relu_3']J 
-pkg.torch.onnx.stack_trace´File "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 89, in forward
+pkg.torch.onnx.stack_trace´File "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 97, in forward
     tf_feats = self.stft_branch(stft_mag)
   File "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 48, in forward
     f = self.pool(self.relu(self.bn1(self.conv1(mag))))
@@ -196,7 +196,7 @@ max_pool2dnode_max_pool2d"MaxPool*
 pkg.torch.onnx.class_hierarchyë['src.models.onnx_export.AMC_CNN_ONNX', 'src.models.onnx_export.STFTBranchONNX', 'torch.nn.modules.pooling.MaxPool2d', 'aten.max_pool2d.default']Jü
 pkg.torch.onnx.fx_nodeÑ%max_pool2d : [num_users=1] = call_function[target=torch.ops.aten.max_pool2d.default](args = (%relu_3, [2, 2], [2, 2]), kwargs = {})JS
 pkg.torch.onnx.name_scopes5['', 'stft_branch', 'stft_branch.pool', 'max_pool2d']J±
-pkg.torch.onnx.stack_traceíFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 89, in forward
+pkg.torch.onnx.stack_traceíFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 97, in forward
     tf_feats = self.stft_branch(stft_mag)
   File "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 48, in forward
     f = self.pool(self.relu(self.bn1(self.conv1(mag))))
@@ -207,7 +207,7 @@ max_pool2dnode_max_pool2d"MaxPool*
 max_pool2d
 stft_branch.conv2.weight
 stft_branch.conv2.bias
-getitem_12node_Conv_146"Conv*
+getitem_12node_Conv_159"Conv*
 group†*
 auto_pad"NOTSET†*
 	dilations@@†*
@@ -218,7 +218,7 @@ getitem_12node_Conv_146"Conv*
 pkg.torch.onnx.class_hierarchyØ['src.models.onnx_export.AMC_CNN_ONNX', 'src.models.onnx_export.STFTBranchONNX', 'torch.nn.modules.batchnorm.BatchNorm2d', 'aten._native_batch_norm_legit_no_training.default']J»
 pkg.torch.onnx.fx_node≠%_native_batch_norm_legit_no_training_4 : [num_users=1] = call_function[target=torch.ops.aten._native_batch_norm_legit_no_training.default](args = (%conv2d_1, %p_stft_branch_bn2_weight, %p_stft_branch_bn2_bias, %b_stft_branch_bn2_running_mean, %b_stft_branch_bn2_running_var, 0.1, 1e-05), kwargs = {})Jn
 pkg.torch.onnx.name_scopesP['', 'stft_branch', 'stft_branch.bn2', '_native_batch_norm_legit_no_training_4']J¶
-pkg.torch.onnx.stack_traceáFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 89, in forward
+pkg.torch.onnx.stack_traceáFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 97, in forward
     tf_feats = self.stft_branch(stft_mag)
   File "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 49, in forward
     f = self.relu(self.bn2(self.conv2(f)))
@@ -231,7 +231,7 @@ getitem_12relu_4node_relu_4"ReluJ≥
 pkg.torch.onnx.class_hierarchyâ['src.models.onnx_export.AMC_CNN_ONNX', 'src.models.onnx_export.STFTBranchONNX', 'torch.nn.modules.activation.ReLU', 'aten.relu.default']Jâ
 pkg.torch.onnx.fx_nodeo%relu_4 : [num_users=1] = call_function[target=torch.ops.aten.relu.default](args = (%getitem_12,), kwargs = {})JO
 pkg.torch.onnx.name_scopes1['', 'stft_branch', 'stft_branch.relu', 'relu_4']JΩ
-pkg.torch.onnx.stack_traceûFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 89, in forward
+pkg.torch.onnx.stack_traceûFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 97, in forward
     tf_feats = self.stft_branch(stft_mag)
   File "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 49, in forward
     f = self.relu(self.bn2(self.conv2(f)))
@@ -247,7 +247,7 @@ ReduceMean*
 pkg.torch.onnx.class_hierarchya['src.models.onnx_export.AMC_CNN_ONNX', 'src.models.onnx_export.STFTBranchONNX', 'aten.mean.dim']JÉ
 pkg.torch.onnx.fx_nodei%mean : [num_users=2] = call_function[target=torch.ops.aten.mean.dim](args = (%relu_4, [2]), kwargs = {})J9
 pkg.torch.onnx.name_scopes['', 'stft_branch', 'mean']JÜ
-pkg.torch.onnx.stack_traceÁFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 89, in forward
+pkg.torch.onnx.stack_traceÁFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 97, in forward
     tf_feats = self.stft_branch(stft_mag)
   File "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 50, in forward
     f = f.mean(dim=2)
@@ -258,7 +258,7 @@ ReduceMean*
 pkg.torch.onnx.class_hierarchyD['src.models.onnx_export.AMC_CNN_ONNX', 'aten._unsafe_index.Tensor']J≠
 pkg.torch.onnx.fx_nodeí%_unsafe_index : [num_users=2] = call_function[target=torch.ops.aten._unsafe_index.Tensor](args = (%mean, [None, None, %_to_copy_1]), kwargs = {})J3
 pkg.torch.onnx.name_scopes['', '_unsafe_index']J±
-pkg.torch.onnx.stack_traceíFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 90, in forward
+pkg.torch.onnx.stack_traceíFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 98, in forward
     tf_feats = F.interpolate(tf_feats, size=iq_feats.shape[-1],
 ®
 val_96
@@ -269,7 +269,7 @@ batch_dims †J[
 pkg.torch.onnx.class_hierarchyD['src.models.onnx_export.AMC_CNN_ONNX', 'aten._unsafe_index.Tensor']J≠
 pkg.torch.onnx.fx_nodeí%_unsafe_index : [num_users=2] = call_function[target=torch.ops.aten._unsafe_index.Tensor](args = (%mean, [None, None, %_to_copy_1]), kwargs = {})J3
 pkg.torch.onnx.name_scopes['', '_unsafe_index']J±
-pkg.torch.onnx.stack_traceíFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 90, in forward
+pkg.torch.onnx.stack_traceíFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 98, in forward
     tf_feats = F.interpolate(tf_feats, size=iq_feats.shape[-1],
 ¶
 val_103_unsafe_indexnode__unsafe_index"	Transpose*
@@ -278,7 +278,7 @@ batch_dims †J[
 pkg.torch.onnx.class_hierarchyD['src.models.onnx_export.AMC_CNN_ONNX', 'aten._unsafe_index.Tensor']J≠
 pkg.torch.onnx.fx_nodeí%_unsafe_index : [num_users=2] = call_function[target=torch.ops.aten._unsafe_index.Tensor](args = (%mean, [None, None, %_to_copy_1]), kwargs = {})J3
 pkg.torch.onnx.name_scopes['', '_unsafe_index']J±
-pkg.torch.onnx.stack_traceíFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 90, in forward
+pkg.torch.onnx.stack_traceíFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 98, in forward
     tf_feats = F.interpolate(tf_feats, size=iq_feats.shape[-1],
 ´
 val_96
@@ -289,7 +289,7 @@ batch_dims †J]
 pkg.torch.onnx.class_hierarchyD['src.models.onnx_export.AMC_CNN_ONNX', 'aten._unsafe_index.Tensor']J¨
 pkg.torch.onnx.fx_nodeë%_unsafe_index_1 : [num_users=1] = call_function[target=torch.ops.aten._unsafe_index.Tensor](args = (%mean, [None, None, %clamp_1]), kwargs = {})J5
 pkg.torch.onnx.name_scopes['', '_unsafe_index_1']J±
-pkg.torch.onnx.stack_traceíFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 90, in forward
+pkg.torch.onnx.stack_traceíFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 98, in forward
     tf_feats = F.interpolate(tf_feats, size=iq_feats.shape[-1],
 ≠
 val_110_unsafe_index_1node__unsafe_index_1"	Transpose*
@@ -298,7 +298,7 @@ batch_dims †J]
 pkg.torch.onnx.class_hierarchyD['src.models.onnx_export.AMC_CNN_ONNX', 'aten._unsafe_index.Tensor']J¨
 pkg.torch.onnx.fx_nodeë%_unsafe_index_1 : [num_users=1] = call_function[target=torch.ops.aten._unsafe_index.Tensor](args = (%mean, [None, None, %clamp_1]), kwargs = {})J5
 pkg.torch.onnx.name_scopes['', '_unsafe_index_1']J±
-pkg.torch.onnx.stack_traceíFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 90, in forward
+pkg.torch.onnx.stack_traceíFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 98, in forward
     tf_feats = F.interpolate(tf_feats, size=iq_feats.shape[-1],
 Â
 _unsafe_index_1
@@ -307,7 +307,7 @@ batch_dims †J]
 pkg.torch.onnx.class_hierarchy:['src.models.onnx_export.AMC_CNN_ONNX', 'aten.sub.Tensor']Jú
 pkg.torch.onnx.fx_nodeÅ%sub_28 : [num_users=1] = call_function[target=torch.ops.aten.sub.Tensor](args = (%_unsafe_index_1, %_unsafe_index), kwargs = {})J,
 pkg.torch.onnx.name_scopes['', 'sub_28']J±
-pkg.torch.onnx.stack_traceíFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 90, in forward
+pkg.torch.onnx.stack_traceíFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 98, in forward
     tf_feats = F.interpolate(tf_feats, size=iq_feats.shape[-1],
 ∆
 sub_28
@@ -316,7 +316,7 @@ batch_dims †J]
 pkg.torch.onnx.class_hierarchy:['src.models.onnx_export.AMC_CNN_ONNX', 'aten.mul.Tensor']Jå
 pkg.torch.onnx.fx_noder%mul_67 : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%sub_28, %clamp_2), kwargs = {})J,
 pkg.torch.onnx.name_scopes['', 'mul_67']J±
-pkg.torch.onnx.stack_traceíFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 90, in forward
+pkg.torch.onnx.stack_traceíFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 98, in forward
     tf_feats = F.interpolate(tf_feats, size=iq_feats.shape[-1],
 ◊
 _unsafe_index
@@ -325,30 +325,28 @@ batch_dims †J]
 pkg.torch.onnx.class_hierarchy:['src.models.onnx_export.AMC_CNN_ONNX', 'aten.add.Tensor']Jì
 pkg.torch.onnx.fx_nodey%add_122 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%_unsafe_index, %mul_67), kwargs = {})J-
 pkg.torch.onnx.name_scopes['', 'add_122']J±
-pkg.torch.onnx.stack_traceíFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 90, in forward
+pkg.torch.onnx.stack_traceíFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 98, in forward
     tf_feats = F.interpolate(tf_feats, size=iq_feats.shape[-1],
-¬
+√
 relu_2
 add_122catnode_cat"Concat*
 axis†JH
 	namespace;: src.models.onnx_export.AMC_CNN_ONNX/cat: aten.cat.defaultJ]
 pkg.torch.onnx.class_hierarchy;['src.models.onnx_export.AMC_CNN_ONNX', 'aten.cat.default']Jè
 pkg.torch.onnx.fx_nodeu%cat : [num_users=2] = call_function[target=torch.ops.aten.cat.default](args = ([%relu_2, %add_122], 1), kwargs = {})J)
-pkg.torch.onnx.name_scopes['', 'cat']J§
-pkg.torch.onnx.stack_traceÖFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 92, in forward
+pkg.torch.onnx.name_scopes['', 'cat']J•
+pkg.torch.onnx.stack_traceÜFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 100, in forward
     fused = torch.cat([iq_feats, tf_feats], dim=1)
-¬
+Í
 add_24
-val_113	unsqueezenode_unsqueeze"	UnsqueezeJÇ
-	namespaceu: src.models.onnx_export.AMC_CNN_ONNX/attn_pool: src.models.amc_cnn.AttentionPool1d/unsqueeze: aten.unsqueeze.defaultJâ
-pkg.torch.onnx.class_hierarchyg['src.models.onnx_export.AMC_CNN_ONNX', 'src.models.amc_cnn.AttentionPool1d', 'aten.unsqueeze.default']Jê
-pkg.torch.onnx.fx_nodev%unsqueeze : [num_users=1] = call_function[target=torch.ops.aten.unsqueeze.default](args = (%add_24, -2), kwargs = {})J<
-pkg.torch.onnx.name_scopes['', 'attn_pool', 'unsqueeze']J¶
-pkg.torch.onnx.stack_traceáFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 94, in forward
-    x = self.attn_pool(fused, raw_power)
-  File "D:\github clone\sedicAI_NEXA\src\models\amc_cnn.py", line 33, in forward
-    energy = F.adaptive_avg_pool1d(raw_power, x.shape[-1])
-’
+val_113	unsqueezenode_unsqueeze"	UnsqueezeJT
+	namespaceG: src.models.onnx_export.AMC_CNN_ONNX/unsqueeze: aten.unsqueeze.defaultJc
+pkg.torch.onnx.class_hierarchyA['src.models.onnx_export.AMC_CNN_ONNX', 'aten.unsqueeze.default']Jê
+pkg.torch.onnx.fx_nodev%unsqueeze : [num_users=1] = call_function[target=torch.ops.aten.unsqueeze.default](args = (%add_24, -2), kwargs = {})J/
+pkg.torch.onnx.name_scopes['', 'unsqueeze']J±
+pkg.torch.onnx.stack_traceíFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 105, in forward
+    energy = F.adaptive_avg_pool1d(raw_power, fused.shape[-1])
+˝
 	unsqueeze
 avg_pool2dnode_avg_pool2d"AveragePool*
 kernel_shape@@†*
@@ -356,41 +354,35 @@ avg_pool2dnode_avg_pool2d"AveragePool*
 strides@@†*
 auto_pad"NOTSET†*
 pads@ @ @ @ †*
-	ceil_mode †JÑ
-	namespacew: src.models.onnx_export.AMC_CNN_ONNX/attn_pool: src.models.amc_cnn.AttentionPool1d/avg_pool2d: aten.avg_pool2d.defaultJä
-pkg.torch.onnx.class_hierarchyh['src.models.onnx_export.AMC_CNN_ONNX', 'src.models.amc_cnn.AttentionPool1d', 'aten.avg_pool2d.default']J¢
-pkg.torch.onnx.fx_nodeá%avg_pool2d : [num_users=1] = call_function[target=torch.ops.aten.avg_pool2d.default](args = (%unsqueeze, [1, 1], [1, 1]), kwargs = {})J=
-pkg.torch.onnx.name_scopes['', 'attn_pool', 'avg_pool2d']J¶
-pkg.torch.onnx.stack_traceáFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 94, in forward
-    x = self.attn_pool(fused, raw_power)
-  File "D:\github clone\sedicAI_NEXA\src\models\amc_cnn.py", line 33, in forward
-    energy = F.adaptive_avg_pool1d(raw_power, x.shape[-1])
-´
+	ceil_mode †JV
+	namespaceI: src.models.onnx_export.AMC_CNN_ONNX/avg_pool2d: aten.avg_pool2d.defaultJd
+pkg.torch.onnx.class_hierarchyB['src.models.onnx_export.AMC_CNN_ONNX', 'aten.avg_pool2d.default']J¢
+pkg.torch.onnx.fx_nodeá%avg_pool2d : [num_users=1] = call_function[target=torch.ops.aten.avg_pool2d.default](args = (%unsqueeze, [1, 1], [1, 1]), kwargs = {})J0
+pkg.torch.onnx.name_scopes['', 'avg_pool2d']J±
+pkg.torch.onnx.stack_traceíFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 105, in forward
+    energy = F.adaptive_avg_pool1d(raw_power, fused.shape[-1])
+‘
 
 avg_pool2d
-val_113squeezenode_squeeze"SqueezeJz
-	namespacem: src.models.onnx_export.AMC_CNN_ONNX/attn_pool: src.models.amc_cnn.AttentionPool1d/squeeze: aten.squeeze.dimJÉ
-pkg.torch.onnx.class_hierarchya['src.models.onnx_export.AMC_CNN_ONNX', 'src.models.amc_cnn.AttentionPool1d', 'aten.squeeze.dim']Jå
-pkg.torch.onnx.fx_noder%squeeze : [num_users=1] = call_function[target=torch.ops.aten.squeeze.dim](args = (%avg_pool2d, -2), kwargs = {})J:
-pkg.torch.onnx.name_scopes['', 'attn_pool', 'squeeze']J¶
-pkg.torch.onnx.stack_traceáFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 94, in forward
-    x = self.attn_pool(fused, raw_power)
-  File "D:\github clone\sedicAI_NEXA\src\models\amc_cnn.py", line 33, in forward
-    energy = F.adaptive_avg_pool1d(raw_power, x.shape[-1])
-ú
+val_113squeezenode_squeeze"SqueezeJL
+	namespace?: src.models.onnx_export.AMC_CNN_ONNX/squeeze: aten.squeeze.dimJ]
+pkg.torch.onnx.class_hierarchy;['src.models.onnx_export.AMC_CNN_ONNX', 'aten.squeeze.dim']Jå
+pkg.torch.onnx.fx_noder%squeeze : [num_users=1] = call_function[target=torch.ops.aten.squeeze.dim](args = (%avg_pool2d, -2), kwargs = {})J-
+pkg.torch.onnx.name_scopes['', 'squeeze']J±
+pkg.torch.onnx.stack_traceíFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 105, in forward
+    energy = F.adaptive_avg_pool1d(raw_power, fused.shape[-1])
+≈
 cat
 squeezecat_1
 node_cat_1"Concat*
-axis†Jx
-	namespacek: src.models.onnx_export.AMC_CNN_ONNX/attn_pool: src.models.amc_cnn.AttentionPool1d/cat_1: aten.cat.defaultJÉ
-pkg.torch.onnx.class_hierarchya['src.models.onnx_export.AMC_CNN_ONNX', 'src.models.amc_cnn.AttentionPool1d', 'aten.cat.default']Jé
-pkg.torch.onnx.fx_nodet%cat_1 : [num_users=1] = call_function[target=torch.ops.aten.cat.default](args = ([%cat, %squeeze], 1), kwargs = {})J8
-pkg.torch.onnx.name_scopes['', 'attn_pool', 'cat_1']Jò
-pkg.torch.onnx.stack_trace˘File "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 94, in forward
-    x = self.attn_pool(fused, raw_power)
-  File "D:\github clone\sedicAI_NEXA\src\models\amc_cnn.py", line 34, in forward
-    combined = torch.cat([x, energy], dim=1)
-‰	
+axis†JJ
+	namespace=: src.models.onnx_export.AMC_CNN_ONNX/cat_1: aten.cat.defaultJ]
+pkg.torch.onnx.class_hierarchy;['src.models.onnx_export.AMC_CNN_ONNX', 'aten.cat.default']Jé
+pkg.torch.onnx.fx_nodet%cat_1 : [num_users=1] = call_function[target=torch.ops.aten.cat.default](args = ([%cat, %squeeze], 1), kwargs = {})J+
+pkg.torch.onnx.name_scopes['', 'cat_1']J£
+pkg.torch.onnx.stack_traceÑFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 106, in forward
+    combined = torch.cat([fused, energy], dim=1)
+ë
 cat_1
 attn_pool.score.weight
 attn_pool.score.biasconv1d_3node_conv1d_3"Conv*
@@ -398,54 +390,46 @@ node_cat_1"Concat*
 auto_pad"NOTSET†*
 	dilations@†*
 strides@†*
-pads@ @ †J≠
-	namespaceü: src.models.onnx_export.AMC_CNN_ONNX/attn_pool: src.models.amc_cnn.AttentionPool1d/attn_pool.score: torch.nn.modules.conv.Conv1d/conv1d_3: aten.conv1d.defaultJß
-pkg.torch.onnx.class_hierarchyÑ['src.models.onnx_export.AMC_CNN_ONNX', 'src.models.amc_cnn.AttentionPool1d', 'torch.nn.modules.conv.Conv1d', 'aten.conv1d.default']Jº
-pkg.torch.onnx.fx_node°%conv1d_3 : [num_users=1] = call_function[target=torch.ops.aten.conv1d.default](args = (%cat_1, %p_attn_pool_score_weight, %p_attn_pool_score_bias), kwargs = {})JN
-pkg.torch.onnx.name_scopes0['', 'attn_pool', 'attn_pool.score', 'conv1d_3']JŒ
-pkg.torch.onnx.stack_traceØFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 94, in forward
-    x = self.attn_pool(fused, raw_power)
-  File "D:\github clone\sedicAI_NEXA\src\models\amc_cnn.py", line 35, in forward
-    weights = torch.softmax(self.score(combined), dim=2)
+pads@ @ †J~
+	namespaceq: src.models.onnx_export.AMC_CNN_ONNX/attn_pool.score: torch.nn.modules.conv.Conv1d/conv1d_3: aten.conv1d.defaultJÄ
+pkg.torch.onnx.class_hierarchy^['src.models.onnx_export.AMC_CNN_ONNX', 'torch.nn.modules.conv.Conv1d', 'aten.conv1d.default']Jº
+pkg.torch.onnx.fx_node°%conv1d_3 : [num_users=1] = call_function[target=torch.ops.aten.conv1d.default](args = (%cat_1, %p_attn_pool_score_weight, %p_attn_pool_score_bias), kwargs = {})JA
+pkg.torch.onnx.name_scopes#['', 'attn_pool.score', 'conv1d_3']Jﬂ
+pkg.torch.onnx.stack_trace¿File "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 107, in forward
+    weights = torch.softmax(self.attn_pool.score(combined), dim=2)
   File "D:\github clone\sedicAI_NEXA\.venv\Lib\site-packages\torch\nn\modules\conv.py", line 385, in forward
     return self._conv_forward(input, self.weight, self.bias)
-®
+◊
 conv1d_3softmaxnode_softmax"Softmax*
-axis†Jz
-	namespacem: src.models.onnx_export.AMC_CNN_ONNX/attn_pool: src.models.amc_cnn.AttentionPool1d/softmax: aten.softmax.intJÉ
-pkg.torch.onnx.class_hierarchya['src.models.onnx_export.AMC_CNN_ONNX', 'src.models.amc_cnn.AttentionPool1d', 'aten.softmax.int']Jâ
-pkg.torch.onnx.fx_nodeo%softmax : [num_users=1] = call_function[target=torch.ops.aten.softmax.int](args = (%conv1d_3, 2), kwargs = {})J:
-pkg.torch.onnx.name_scopes['', 'attn_pool', 'softmax']J§
-pkg.torch.onnx.stack_traceÖFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 94, in forward
-    x = self.attn_pool(fused, raw_power)
-  File "D:\github clone\sedicAI_NEXA\src\models\amc_cnn.py", line 35, in forward
-    weights = torch.softmax(self.score(combined), dim=2)
-Ä
+axis†JL
+	namespace?: src.models.onnx_export.AMC_CNN_ONNX/softmax: aten.softmax.intJ]
+pkg.torch.onnx.class_hierarchy;['src.models.onnx_export.AMC_CNN_ONNX', 'aten.softmax.int']Jâ
+pkg.torch.onnx.fx_nodeo%softmax : [num_users=2] = call_function[target=torch.ops.aten.softmax.int](args = (%conv1d_3, 2), kwargs = {})J-
+pkg.torch.onnx.name_scopes['', 'softmax']Jµ
+pkg.torch.onnx.stack_traceñFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 107, in forward
+    weights = torch.softmax(self.attn_pool.score(combined), dim=2)
+™
 cat
-softmaxmul_91node_mul_91"MulJx
-	namespacek: src.models.onnx_export.AMC_CNN_ONNX/attn_pool: src.models.amc_cnn.AttentionPool1d/mul_91: aten.mul.TensorJÇ
-pkg.torch.onnx.class_hierarchy`['src.models.onnx_export.AMC_CNN_ONNX', 'src.models.amc_cnn.AttentionPool1d', 'aten.mul.Tensor']Jâ
-pkg.torch.onnx.fx_nodeo%mul_91 : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%cat, %softmax), kwargs = {})J9
-pkg.torch.onnx.name_scopes['', 'attn_pool', 'mul_91']Jè
-pkg.torch.onnx.stack_traceFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 94, in forward
-    x = self.attn_pool(fused, raw_power)
-  File "D:\github clone\sedicAI_NEXA\src\models\amc_cnn.py", line 36, in forward
-    return (x * weights).sum(dim=2)
-æ
+softmaxmul_91node_mul_91"MulJJ
+	namespace=: src.models.onnx_export.AMC_CNN_ONNX/mul_91: aten.mul.TensorJ\
+pkg.torch.onnx.class_hierarchy:['src.models.onnx_export.AMC_CNN_ONNX', 'aten.mul.Tensor']Jâ
+pkg.torch.onnx.fx_nodeo%mul_91 : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%cat, %softmax), kwargs = {})J,
+pkg.torch.onnx.name_scopes['', 'mul_91']Jõ
+pkg.torch.onnx.stack_trace}File "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 108, in forward
+    pooled = (fused * weights).sum(dim=2)
+Ë
 mul_91
 val_42sum_1
 node_sum_1"	ReduceSum*
 keepdims †*
-noop_with_empty_axes †J|
-	namespaceo: src.models.onnx_export.AMC_CNN_ONNX/attn_pool: src.models.amc_cnn.AttentionPool1d/sum_1: aten.sum.dim_IntListJá
-pkg.torch.onnx.class_hierarchye['src.models.onnx_export.AMC_CNN_ONNX', 'src.models.amc_cnn.AttentionPool1d', 'aten.sum.dim_IntList']Jã
-pkg.torch.onnx.fx_nodeq%sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.dim_IntList](args = (%mul_91, [2]), kwargs = {})J8
-pkg.torch.onnx.name_scopes['', 'attn_pool', 'sum_1']Jè
-pkg.torch.onnx.stack_traceFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 94, in forward
-    x = self.attn_pool(fused, raw_power)
-  File "D:\github clone\sedicAI_NEXA\src\models\amc_cnn.py", line 36, in forward
-    return (x * weights).sum(dim=2)
-ç
+noop_with_empty_axes †JN
+	namespaceA: src.models.onnx_export.AMC_CNN_ONNX/sum_1: aten.sum.dim_IntListJa
+pkg.torch.onnx.class_hierarchy?['src.models.onnx_export.AMC_CNN_ONNX', 'aten.sum.dim_IntList']Jã
+pkg.torch.onnx.fx_nodeq%sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.dim_IntList](args = (%mul_91, [2]), kwargs = {})J+
+pkg.torch.onnx.name_scopes['', 'sum_1']Jõ
+pkg.torch.onnx.stack_trace}File "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 108, in forward
+    pooled = (fused * weights).sum(dim=2)
+ì
 sum_1
 
 fc1.weight
@@ -457,22 +441,22 @@ fc1.weight
 	namespacee: src.models.onnx_export.AMC_CNN_ONNX/fc1: torch.nn.modules.linear.Linear/linear: aten.linear.defaultJÇ
 pkg.torch.onnx.class_hierarchy`['src.models.onnx_export.AMC_CNN_ONNX', 'torch.nn.modules.linear.Linear', 'aten.linear.default']J¢
 pkg.torch.onnx.fx_nodeá%linear : [num_users=1] = call_function[target=torch.ops.aten.linear.default](args = (%sum_1, %p_fc1_weight, %p_fc1_bias), kwargs = {})J3
-pkg.torch.onnx.name_scopes['', 'fc1', 'linear']J¿
-pkg.torch.onnx.stack_trace°File "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 95, in forward
-    x = self.dropout(self.relu(self.fc1(x)))
+pkg.torch.onnx.name_scopes['', 'fc1', 'linear']J∆
+pkg.torch.onnx.stack_traceßFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 110, in forward
+    x = self.dropout(self.relu(self.fc1(pooled)))
   File "D:\github clone\sedicAI_NEXA\.venv\Lib\site-packages\torch\nn\modules\linear.py", line 134, in forward
     return F.linear(input, self.weight, self.bias)
-û
+§
 linearrelu_5node_relu_5"ReluJs
 	namespacef: src.models.onnx_export.AMC_CNN_ONNX/relu: torch.nn.modules.activation.ReLU/relu_5: aten.relu.defaultJÇ
 pkg.torch.onnx.class_hierarchy`['src.models.onnx_export.AMC_CNN_ONNX', 'torch.nn.modules.activation.ReLU', 'aten.relu.default']JÖ
 pkg.torch.onnx.fx_nodek%relu_5 : [num_users=1] = call_function[target=torch.ops.aten.relu.default](args = (%linear,), kwargs = {})J4
-pkg.torch.onnx.name_scopes['', 'relu', 'relu_5']J¿
-pkg.torch.onnx.stack_trace°File "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 95, in forward
-    x = self.dropout(self.relu(self.fc1(x)))
+pkg.torch.onnx.name_scopes['', 'relu', 'relu_5']J∆
+pkg.torch.onnx.stack_traceßFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 110, in forward
+    x = self.dropout(self.relu(self.fc1(pooled)))
   File "D:\github clone\sedicAI_NEXA\.venv\Lib\site-packages\torch\nn\modules\activation.py", line 143, in forward
     return F.relu(input, inplace=self.inplace)
-Ä
+ì
 relu_5
 
 fc2.weight
@@ -484,11 +468,21 @@ fc2.weight
 	namespaceg: src.models.onnx_export.AMC_CNN_ONNX/fc2: torch.nn.modules.linear.Linear/linear_1: aten.linear.defaultJÇ
 pkg.torch.onnx.class_hierarchy`['src.models.onnx_export.AMC_CNN_ONNX', 'torch.nn.modules.linear.Linear', 'aten.linear.default']J§
 pkg.torch.onnx.fx_nodeâ%linear_1 : [num_users=1] = call_function[target=torch.ops.aten.linear.default](args = (%clone, %p_fc2_weight, %p_fc2_bias), kwargs = {})J5
-pkg.torch.onnx.name_scopes['', 'fc2', 'linear_1']J™
-pkg.torch.onnx.stack_traceãFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 96, in forward
-    return self.fc2(x)
+pkg.torch.onnx.name_scopes['', 'fc2', 'linear_1']JΩ
+pkg.torch.onnx.stack_traceûFile "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 111, in forward
+    return self.fc2(x), weights[:, 0, :]
   File "D:\github clone\sedicAI_NEXA\.venv\Lib\site-packages\torch\nn\modules\linear.py", line 134, in forward
-    return F.linear(input, self.weight, self.bias)
+    return F.linear(input, self.weight, self.bias)
+æ
+softmax
+val_2	attentionnode_select"Gather*
+axis†JJ
+	namespace=: src.models.onnx_export.AMC_CNN_ONNX/select: aten.select.intJ\
+pkg.torch.onnx.class_hierarchy:['src.models.onnx_export.AMC_CNN_ONNX', 'aten.select.int']Jâ
+pkg.torch.onnx.fx_nodeo%select : [num_users=1] = call_function[target=torch.ops.aten.select.int](args = (%slice_5, 1, 0), kwargs = {})J,
+pkg.torch.onnx.name_scopes['', 'select']Jö
+pkg.torch.onnx.stack_trace|File "D:\github clone\sedicAI_NEXA\src\models\onnx_export.py", line 111, in forward
+    return self.fc2(x), weights[:, 0, :]
 main_graph*•@Biq_branch.conv1.weightJÄqKPæC†∆æEc>¸±∑æcçæ—µ*æx<∞æ¿/>>%ÑÑΩ„æ˙*Hæl<€çΩ	ä	=≥EY>lp™>ÆÃ1>Ô`™>Ü∏Äæk˘ºRò¬>]z<ΩîJ˘=¯©Q>P
 ê>8KMΩ@äs>`)Q>pL≤>s’>˘YNæÑa®>¨Dg>ABû=£Ÿ™Ωä‹HΩyªæfaæ§fæÈÿªéßæƒK…=√·î>Â°ø(á—>r±æìªó=.˝”ææc>)Èæ Ü/æ˛cñ=Õ–òæÀË»=ò©¥æ"Ùç>âÎëæÃÇgæ√¢ç>Ãƒ»>ƒƒs>á ÊΩƒÎü=j(_æIÈæâhæÊwµ=åÿ®=SóŸ>⁄∆ >AÀæùô<4˙˙>«KT>UjÚæGpæ˝÷7æ8QÛæçÊææÖËa>Sâ >2Î1æËØﬁª&ÚO>¸*π>äB»æg¬PΩVÓæsùùæŒ§ò>ÆÊ=^m∑æe„Ù;+OG>yÚóºÖÍøæW ¶Ωn„L>?q=æÇ8√>vûÓæ._?GRfæ ‡Ó=2O=ö)?] øæ¨>≤º—Ω\ó =*l> IÇæXü>LI~>ñ»ΩÉ⁄¶>™`ç>’næ&ræÃJU>€èÑ>@I^æ¡aãæÍıû<Äuîæπ æµ~æL6É=#Ÿ>Ùê>ÃGj=˜¯á>Ê?4Ø>∂¸·æ*uæ€Ê9æå$∂æ{≤∫=∞≥>±ãæLí>vzñæm¶˝=tHtΩ@?Ì≠p>≤Üæ^4ê>5Hö>™Ò
 >fz1ΩNfæiåÆΩ#ØÁæÀ´=-$⁄>-a>Â6®>Î¯æHΩíΩ€ô–Ω{Õ?—ÖÜ>-ÓΩa0Ïæ/h=æ,ùw> 41æ\ÔÓ<ª?æDüîæ√ æàR”æÜ%gΩÂ√®>Aâ¸=äÎ>,∏Ÿ∫oË*=A	æ*ía>ì>Üæpæßª¯9 >˘ß•>áÕUæ[ÆÕæ∞öæAÇΩa7∫æ†_=$jõ> 0>(	Wæö0øÁ≤æ.è∞>±èáæz`‹=‘Næ‘€>ÑÎºáù>æ´ ‰>æH(øÛ˚?'…æ;Á= E!æÁ∆ô=?)aºÈˇ¢>ä[,=ÜUù>âwπ>iõ°æòÁ=p»êΩ„X“=tµWæ]Tüæ˝'´=]k4>ïÚ?Ë∆âæÊ¿=L3êæÇ ?±ìæöDæÏáâ><7æò∆ÕæãÕâ>®å>¡*5æD$~>%æì5¬æ€ßæ°«º>Hå
@@ -2500,7 +2494,7 @@ Méæ?ø<
 >  É>  ¡>  ˇ> Ä? Ä=? Ä\? Ä{?  ‘=  f>  ±>  Ô> Ä? Ä5? ÄT? Äs?  î=  F>  °>  ﬂ> Ä? Ä-? ÄL? Äk?  (=  &>  ë>  œ> Ä? Ä%? ÄD? Äc?   <  >  Å>  ø>  ˝> Ä? Ä<? Ä[? Äz?  Ã=  b>  Ø>  Ì> Ä? Ä4? ÄS? Är?  å=  B>  ü>  ›> Ä? Ä,? ÄK? Äj?  =  ">  è>  Õ> Ä? Ä$? ÄC? Äb?  ¿;  >  ~>  Ω>  ˚> Ä? Ä;? ÄZ? Äy?  ƒ=  ^>  ≠>  Î> Ä? Ä3? ÄR? Äq?  Ñ=  >>  ù>  €> Ä? Ä+? ÄJ? Äi?  =  >  ç>  À> Ä? Ä#? ÄB? Äa?   ;  ¸=  z>  ª>  ˘> Ä? Ä:? ÄY? Äx?  º=  Z>  ´>  È> Ä? Ä2? ÄQ? Äp?  x=  :>  õ>  Ÿ> Ä? Ä*? ÄI? Äh?  <  >  ã>  …> Ä? Ä"? ÄA? Ä`? Ä?  Ù=  v>  π>  ˜> Ä? Ä9? ÄX? Äw?  ¥=  V>  ©>  Á> Ä? Ä1? ÄP? Äo?  h=  6>  ô>  ◊> Ä
 ? Ä)? ÄH? Äg?  –<  >  â>  «> Ä? Ä!? Ä@? Ä_? Ä~?  Ï=  r>  ∑>  ı> Ä? Ä8? ÄW? Äv?  ¨=  R>  ß>  Â> Ä? Ä0? ÄO? Än?  X=  2>  ó>  ’> Ä	? Ä(? ÄG? Äf?  ∞<  >  á>  ≈> Ä? Ä ? Ä?? Ä^? Ä}?  ‰=  n>  µ>  Û> Ä? Ä7? ÄV? Äu?  §=  N>  •>  „> Ä? Ä/? ÄN? Äm?  H=  .>  ï>  ”> Ä? Ä'? ÄF? Äe?  ê<  >  Ö>  √> Ä ? Ä? Ä>? Ä]? Ä|?  ‹=  j>  ≥>  Ò> Ä? Ä6? ÄU? Ät?  ú=  J>  £>  ·> Ä? Ä.? ÄM? Äl?  8=  *>  ì>  —> Ä? Ä&? ÄE? Äd?  `<  
 >  É>  ¡>  ˇ> Ä? Ä=? Ä\? Ä{?  ‘=  f>  ±>  Ô> Ä? Ä5? ÄT? Äs?  î=  F>  °>  ﬂ> Ä? Ä-? ÄL? Äk?  (=  &>  ë>  œ> Ä? Ä%? ÄD? Äc?   <  >  Å>  ø>  ˝> Ä? Ä<? Ä[? Äz?  Ã=  b>  Ø>  Ì> Ä? Ä4? ÄS? Är?  å=  B>  ü>  ›> Ä? Ä,? ÄK? Äj?  =  ">  è>  Õ> Ä? Ä$? ÄC? Äb?  ¿;  >  ~>  Ω>  ˚> Ä? Ä;? ÄZ? Äy?  ƒ=  ^>  ≠>  Î> Ä? Ä3? ÄR? Äq?  Ñ=  >>  ù>  €> Ä? Ä+? ÄJ? Äi?  =  >  ç>  À> Ä? Ä#? ÄB? Äa?   ;  ¸=  z>  ª>  ˘> Ä? Ä:? ÄY? Äx?  º=  Z>  ´>  È> Ä? Ä2? ÄQ? Äp?  x=  :>  õ>  Ÿ> Ä? Ä*? ÄI? Äh?  <  >  ã>  …> Ä? Ä"? ÄA? Ä`? Ä?  Ù=  v>  π>  ˜> Ä? Ä9? ÄX? Äw?  ¥=  V>  ©>  Á> Ä? Ä1? ÄP? Äo?  h=  6>  ô>  ◊> Ä
-? Ä)? ÄH? Äg?  –<  >  â>  «> Ä? Ä!? Ä@? Ä_? Ä~?  Ï=  r>  ∑>  ı> Ä? Ä8? ÄW? Äv?  ¨=  R>  ß>  Â> Ä? Ä0? ÄO? Än?  X=  2>  ó>  ’> Ä	? Ä(? ÄG? Äf?  ∞<  >  á>  ≈> Ä? Ä ? Ä?? Ä^? Ä}?  ‰=  n>  µ>  Û> Ä? Ä7? ÄV? Äu?  §=  N>  •>  „> Ä? Ä/? ÄN? Äm?  H=  .>  ï>  ”> Ä? Ä'? ÄF? Äe?  ê<  >  Ö>  √> Ä ? Ä? Ä>? Ä]? Ä|?  ‹=  j>  ≥>  Ò> Ä? Ä6? ÄU? Ät?  ú=  J>  £>  ·>p *Bval_25J   @*Bval_113J˛ˇˇˇˇˇˇˇZ≈
+? Ä)? ÄH? Äg?  –<  >  â>  «> Ä? Ä!? Ä@? Ä_? Ä~?  Ï=  r>  ∑>  ı> Ä? Ä8? ÄW? Äv?  ¨=  R>  ß>  Â> Ä? Ä0? ÄO? Än?  X=  2>  ó>  ’> Ä	? Ä(? ÄG? Äf?  ∞<  >  á>  ≈> Ä? Ä ? Ä?? Ä^? Ä}?  ‰=  n>  µ>  Û> Ä? Ä7? ÄV? Äu?  §=  N>  •>  „> Ä? Ä/? ÄN? Äm?  H=  .>  ï>  ”> Ä? Ä'? ÄF? Äe?  ê<  >  Ö>  √> Ä ? Ä? Ä>? Ä]? Ä|?  ‹=  j>  ≥>  Ò> Ä? Ä6? ÄU? Ät?  ú=  J>  £>  ·>p *Bval_2J        *Bval_25J   @*Bval_113J˛ˇˇˇˇˇˇˇZ≈
 iq
 
 batch
@@ -2525,7 +2519,13 @@ USER_INPUT"=
 batch
 "?
 0pkg.torch.export.graph_signature.OutputSpec.kindUSER_OUTPUT"-
-!pkg.torch.onnx.original_node_namelinear_1j,
+!pkg.torch.onnx.original_node_namelinear_1bè
+	attention
+
+batch
+Ä"?
+0pkg.torch.export.graph_signature.OutputSpec.kindUSER_OUTPUT"+
+!pkg.torch.onnx.original_node_nameselectj,
 iq_branch.conv1.weight
 
 @
@@ -2647,7 +2647,9 @@ $pkg.onnxscript.optimizer.folded_from˘['_to_copy', '_to_copy_1', 'add_104', 'a
 clamp_2
 	
 Ä"ç
-$pkg.onnxscript.optimizer.folded_from‰['_to_copy', '_to_copy_1', 'add_104', 'arange', 'clamp', 'convert_element_type_default', 'mul_60', 'sub_24', 'sub_27', 'val_111', 'val_112', 'val_52', 'val_84', 'val_85', 'val_86', 'val_87', 'val_88', 'val_89', 'val_90', 'view']j
+$pkg.onnxscript.optimizer.folded_from‰['_to_copy', '_to_copy_1', 'add_104', 'arange', 'clamp', 'convert_element_type_default', 'mul_60', 'sub_24', 'sub_27', 'val_111', 'val_112', 'val_52', 'val_84', 'val_85', 'val_86', 'val_87', 'val_88', 'val_89', 'val_90', 'view']j
+val_2
+ j
 val_25
  j
 val_113
@@ -2840,8 +2842,8 @@ avg_pool2d
 relu_5
 
 batch
-ÄÇÛ
-0pkg.torch.export.ExportedProgram.graph_signatureæ
+ÄÇá
+0pkg.torch.export.ExportedProgram.graph_signature“
 # inputs
 p_iq_branch_conv1_weight: PARAMETER target='iq_branch.conv1.weight'
 p_iq_branch_conv1_bias: PARAMETER target='iq_branch.conv1.bias'
@@ -2889,6 +2891,7 @@ stft_mag: USER_INPUT
 
 # outputs
 linear_1: USER_OUTPUT
+select: USER_OUTPUT
 ÇÜ
 2pkg.torch.export.ExportedProgram.range_constraintsP{s30: VR[0, int_oo], s78: VR[0, int_oo], s44: VR[0, int_oo], s57: VR[0, int_oo]}B
  

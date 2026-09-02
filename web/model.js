@@ -82,6 +82,11 @@ export async function classifyCapture(sessions, iqRe, iqIm, { hop = WINDOW_LEN, 
 
   const nClasses = CLASSES.length;
   const probs = new Float32Array(nWindows * nClasses);
+  // Member 0's attention, NOT an average across the ensemble: attention
+  // weights are a per-model internal, and averaging five models' attention
+  // would produce a curve no model actually computed. EnsembleModel does the
+  // same (src/ui/app_models.py) and the UI labels it as member 0's.
+  const attn = new Float32Array(nWindows * WINDOW_LEN);
 
   const normRe = new Float64Array(WINDOW_LEN), normIm = new Float64Array(WINDOW_LEN);
 
@@ -110,12 +115,13 @@ export async function classifyCapture(sessions, iqRe, iqIm, { hop = WINDOW_LEN, 
     const magTensor = new ort.Tensor("float32", magData, [batchN, 1, N_FFT, N_STFT_FRAMES]);
 
     const memberProbs = [];
-    for (const sess of sessions) {
-      const out = await sess.run({ iq: iqTensor, stft_mag: magTensor });
+    for (let m = 0; m < sessions.length; m++) {
+      const out = await sessions[m].run({ iq: iqTensor, stft_mag: magTensor });
       const logits = out.logits.data;
       const p = new Float32Array(logits.length);
       for (let i = 0; i < logits.length; i++) p[i] = sigmoid(logits[i]);
       memberProbs.push(p);
+      if (m === 0) attn.set(out.attention.data, b0 * WINDOW_LEN);
     }
     for (let bi = 0; bi < batchN; bi++) {
       for (let c = 0; c < nClasses; c++) {
@@ -127,5 +133,5 @@ export async function classifyCapture(sessions, iqRe, iqIm, { hop = WINDOW_LEN, 
     if (onProgress) onProgress(b1, nWindows);
   }
 
-  return { starts, probs, nWindows, nClasses, hop, windowLen: WINDOW_LEN, fs: FS };
+  return { starts, probs, attn, nWindows, nClasses, hop, windowLen: WINDOW_LEN, fs: FS };
 }

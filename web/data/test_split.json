@@ -1,0 +1,1 @@
+{"n": 82, "window_len": 512, "classes": ["BPSK", "QPSK", "16QAM", "64QAM", "LFM_RADAR", "FHSS", "JAMMING", "NOISE_FLOOR"], "snr_bins": [-10, -6, -2, 2, 6, 10], "total_windows_in_dataset": 642}
