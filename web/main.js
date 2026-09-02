@@ -9,11 +9,14 @@ import {
   drawAttention, drawBreakdown, modelCardHtml, probabilityHtml,
   provenanceHtml, scorecardHtml, windowMetadataHtml,
 } from "./pages.js";
+import { civilianWindows, drawConstellation } from "./constellation.js";
+import { THRESHOLDS } from "./analysis.js";
 
 const el = id => document.getElementById(id);
 const statusEl = el("status"), headlineEl = el("headline");
 const statusBox = el("statusBox"), latestBox = el("latestBox");
 const consoleCanvas = el("console"), tbody = document.querySelector("#eventsTable tbody");
+const constellationCanvas = el("constellationCanvas"), constellationBlock = el("constellationBlock");
 const synthBtn = el("synthBtn"), uploadBtn = el("uploadBtn"), fileInput = el("fileInput");
 const caseSel = el("caseSel"), snrSel = el("snrSel"), hopSel = el("hopSel"), modelSel = el("modelSel");
 const smoothingRadio = el("smoothingRadio");
@@ -58,6 +61,9 @@ async function getModel(which) {
 async function init() {
   try {
     ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/";
+    // The constellation panel needs the C42 calibration constants, so the
+    // card is loaded up front rather than lazily on the Model page.
+    modelCard = await (await fetch("./data/model_card.json")).json();
     await getModel("ensemble");
     statusEl.textContent = "Ready. Synthesize a scenario, or select a capture file.";
     synthBtn.disabled = false;
@@ -104,6 +110,22 @@ function render() {
     starts: result.starts, hop: result.hop, fs: FS,
   });
   lastDrawnWidth = consoleCanvas.clientWidth;
+
+  // The constellation is a SEPARATE component, not another panel inside the
+  // console figure: that figure's whole premise is one shared time axis, and
+  // a constellation has no time axis at all. Hidden outright when the capture
+  // has no civilian window, so military-only cases look exactly as they did
+  // before this panel existed.
+  //
+  // Selected on the RESOLVED probabilities, matching
+  // CaptureSession.civilian_windows(smoothed=...).
+  const picks = civilianWindows(resolved.probs, result.nWindows, result.nClasses,
+                                 THRESHOLDS, 4);
+  const drew = modelCard && picks.length && drawConstellation(constellationCanvas, {
+    picks, capture, starts: result.starts, windowLen: result.windowLen,
+    fs: FS, noisePower: capture.noisePower, c42cfg: modelCard.c42,
+  });
+  constellationBlock.hidden = !drew;
 
   tbody.innerHTML = "";
   for (const row of eventRows(events)) {
