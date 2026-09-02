@@ -67,26 +67,41 @@ def _load_one(path):
     return model
 
 
+_MODEL_CACHE = {}
+
+
 def load_model(which="auto"):
-    """Read from disk on every call -- no caching, so dropping a freshly
-    trained checkpoint into results/ takes effect without a restart.
+    """Build each model once per process and reuse it after that.
+
+    Every UI callback (scenario synthesis, upload, reanalyze) calls this on
+    every click. Rebuilding the 5-member ensemble from disk each time held
+    the outgoing and incoming ensembles in memory at once and was enough to
+    push Render's instance over its RAM limit. Caching by resolved kind
+    means "auto" and "ensemble" share one entry.
 
     "auto" prefers the ensemble when all five members are present, because
     that is what the team submits; the single checkpoint is what a lone
-    training run produces.
+    training run produces. Restart the process to pick up a freshly trained
+    checkpoint dropped into results/.
     """
     if which == "auto":
         which = "ensemble" if ensemble_available() else "single"
+
+    if which in _MODEL_CACHE:
+        return _MODEL_CACHE[which]
 
     if which == "ensemble":
         missing = [p.name for p in ensemble_paths() if not p.exists()]
         if missing:
             raise gr.Error(f"Missing ensemble checkpoints: {missing}")
-        return EnsembleModel([_load_one(p) for p in ensemble_paths()]).to(DEVICE)
+        model = EnsembleModel([_load_one(p) for p in ensemble_paths()]).to(DEVICE)
+    else:
+        if not CKPT_PATH.exists():
+            raise gr.Error(f"No checkpoint at {CKPT_PATH}. Train one first.")
+        model = _load_one(CKPT_PATH)
 
-    if not CKPT_PATH.exists():
-        raise gr.Error(f"No checkpoint at {CKPT_PATH}. Train one first.")
-    return _load_one(CKPT_PATH)
+    _MODEL_CACHE[which] = model
+    return model
 
 
 def model_label(which="auto"):
