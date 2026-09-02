@@ -104,9 +104,9 @@ multilabel_threshold: 0.5 # fallback for any class not listed below
 # Re-run calibrate_thresholds.py --ensemble after any retrain -- these are
 # tied to this specific set of 5 checkpoints' calibration.
 multilabel_thresholds_per_class:
-  LFM_RADAR: 0.26
-  FHSS: 0.27
-  JAMMING: 0.77
+  LFM_RADAR: 0.22
+  FHSS: 0.25
+  JAMMING: 0.87
   # Civilian classes were never calibrated -- they sat on the 0.5 fallback
   # while the judged three were tuned, which is why 16QAM read 1.3% recall
   # and looked like a model that had learned nothing about it. It had: 96% of
