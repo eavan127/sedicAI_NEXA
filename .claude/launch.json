@@ -6,6 +6,12 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["scripts/inference_ui.py"],
       "port": 7860
+    },
+    {
+      "name": "omni-static-poc",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8099", "--directory", "web"],
+      "port": 8099
     }
   ]
 }

@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>OMNI: RF Spectrum Intelligence</title>
+<style>
+  /* Palette and type from src/ui/palette.py; the rules below mirror
+     src/ui/app.py's CUSTOM_CSS, including the no-italics rule and the
+     table striping/hover pairs (background and colour always set together,
+     which is what stopped dark-on-dark in the Gradio build). */
+  :root {
+    --brand-olive: #627143;
+    --brand-olive-dark: #4A552F;
+    --brand-olive-tint: #EFF1EA;
+    --brand-slate: #121C27;
+    --bg: #F7F8F5;
+    --panel: #FFFFFF;
+    --grid: #DFE3D9;
+    --text: #121C27;
+    --text-dim: #5F6B72;
+    --font: "Inter", "Segoe UI", "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+    --mono: "JetBrains Mono", "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace;
+  }
+  * { box-sizing: border-box; font-style: normal !important; }
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    margin: 0;
+    padding: 0 26px 40px;
+  }
+  header {
+    display: flex; align-items: center; gap: 22px;
+    padding: 16px 0 12px; border-bottom: 2px solid var(--brand-olive);
+    margin-bottom: 14px;
+  }
+  header img { height: 52px; width: auto; display: block; }
+  .lockup { border-left: 1px solid var(--grid); padding-left: 22px; }
+  .lockup .name { font-size: 24px; font-weight: 700; letter-spacing: 0.16em; color: var(--brand-slate); line-height: 1.1; }
+  .lockup .tag { font-size: 13px; color: var(--text-dim); letter-spacing: 0.02em; margin-top: 4px; }
+
+  .layout { display: flex; gap: 22px; align-items: flex-start; }
+  nav { width: 180px; flex-shrink: 0; display: flex; flex-direction: column; gap: 8px; }
+  nav .menu-label { font-size: 15px; font-weight: 700; margin: 4px 0; }
+  nav button {
+    font-family: var(--font); font-size: 14px; font-weight: 600;
+    border-radius: 6px; border: 1px solid var(--grid); padding: 10px 12px;
+    text-align: left; cursor: pointer; background: var(--panel); color: var(--text);
+  }
+  nav button.active { background: var(--brand-olive); border-color: var(--brand-olive-dark); color: #fff; }
+  nav button:disabled { color: var(--text-dim); cursor: not-allowed; opacity: 0.75; }
+
+  main { flex: 1; min-width: 0; }
+  h3.page-title { font-size: 18px; font-weight: 700; margin: 2px 0 14px; }
+
+  /* Gradio Row/Column analogues */
+  .grow { display: flex; gap: 12px; align-items: flex-end; margin-bottom: 12px; flex-wrap: wrap; }
+  .field { display: flex; flex-direction: column; gap: 5px; }
+  .field > label { font-size: 12px; font-weight: 500; color: var(--text-dim); }
+  select {
+    font-family: var(--font); font-size: 13px; background: var(--panel);
+    color: var(--text); border: 1px solid var(--grid); border-radius: 6px;
+    padding: 8px 10px; min-height: 38px;
+  }
+  .radio { display: flex; gap: 6px; }
+  .radio button {
+    font-family: var(--font); font-size: 13px; padding: 8px 14px; min-height: 38px;
+    border: 1px solid var(--grid); border-radius: 6px; background: var(--panel);
+    color: var(--text); cursor: pointer;
+  }
+  .radio button.on { background: var(--brand-olive-tint); border-color: var(--brand-olive); color: var(--brand-olive-dark); font-weight: 600; }
+  button.primary, button.secondary {
+    font-family: var(--font); font-size: 13px; font-weight: 600; min-height: 38px;
+    border-radius: 6px; padding: 8px 16px; cursor: pointer;
+  }
+  button.primary { background: var(--brand-olive); border: 1px solid var(--brand-olive-dark); color: #fff; }
+  button.primary:hover:not(:disabled) { background: var(--brand-olive-dark); }
+  button.secondary { background: var(--panel); border: 1px solid var(--grid); color: var(--text); }
+  button.secondary:hover:not(:disabled) { background: var(--brand-olive-tint); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .full { width: 100%; justify-content: center; }
+
+  .note { font-size: 12px; color: var(--text-dim); margin: 0 0 4px; }
+  #status { font-size: 13px; color: var(--text-dim); margin: 6px 0 10px; min-height: 18px; }
+  #headline { font-size: 14px; line-height: 1.7; margin: 6px 0 12px; }
+  #headline code { background: var(--brand-olive-tint); color: var(--brand-olive-dark); font-family: var(--mono); padding: 1px 5px; border-radius: 3px; }
+
+  .panels { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 12px; }
+  .panels > div { flex: 1; min-width: 0; border: 1px solid var(--grid); border-radius: 6px; }
+
+  .block { border: 1px solid var(--grid); border-radius: 6px; background: var(--panel); padding: 12px; margin-bottom: 12px; }
+  .block-label { font-size: 12px; color: var(--text-dim); margin-bottom: 8px; }
+  canvas { width: 100%; display: block; }
+
+  .table-wrap { max-height: 520px; overflow-y: auto; background: var(--panel); }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
+  thead th { background: var(--brand-olive-tint); color: var(--text); text-align: left; padding: 7px 10px; font-weight: 600; position: sticky; top: 0; }
+  tbody td { padding: 6px 10px; border-bottom: 1px solid var(--grid); background: var(--panel); color: var(--text); word-wrap: break-word; }
+  tbody tr:nth-child(odd) td { background: var(--bg); color: var(--text); }
+  tbody tr:hover td { background: var(--brand-olive-tint); color: var(--text); }
+</style>
+</head>
+<body>
+  <header>
+    <img src="__LOGO_BASE64__" alt="SEDIC 26">
+    <div class="lockup">
+      <div class="name">OMNI</div>
+      <div class="tag">AI-Powered RF Spectrum Intelligence</div>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav>
+      <div class="menu-label">Menu</div>
+      <button class="active">RF Replay</button>
+      <button disabled title="Not in the static build">Signal Analysis</button>
+      <button disabled title="Not in the static build">Performance</button>
+      <button disabled title="Not in the static build">Model</button>
+    </nav>
+
+    <main>
+      <h3 class="page-title">RF Replay</h3>
+
+      <!-- Global settings, matching rf_replay.py's first Row -->
+      <div class="grow">
+        <div class="field" style="flex:2;min-width:150px;">
+          <label for="hopSel">Window hop</label>
+          <select id="hopSel">
+            <option value="512">no overlap — 512</option>
+            <option value="256" selected>50% — 256</option>
+            <option value="128">75% — 128</option>
+            <option value="64">87.5% — 64</option>
+          </select>
+        </div>
+        <div class="field" style="flex:2;min-width:150px;">
+          <label>Display</label>
+          <div class="radio" id="smoothingRadio">
+            <button data-value="Smoothed" class="on">Smoothed</button>
+            <button data-value="Raw">Raw</button>
+          </div>
+        </div>
+        <div class="field" style="flex:2;min-width:170px;">
+          <label for="modelSel">Model</label>
+          <select id="modelSel">
+            <option value="ensemble" selected>Ensemble (5 models)</option>
+            <option value="single">Single — best_model.pt</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Source input -->
+      <div class="grow">
+        <button class="primary full" id="uploadBtn" disabled>📁 Select &amp; Analyze Source File</button>
+        <input type="file" id="fileInput" style="display:none">
+      </div>
+
+      <!-- Synthesize scenario -->
+      <div class="grow">
+        <div class="field" style="flex:3;min-width:190px;">
+          <label for="caseSel">Scenario case</label>
+          <select id="caseSel"></select>
+        </div>
+        <div class="field" style="flex:2;min-width:140px;">
+          <label for="snrSel">SNR (per emitter)</label>
+          <select id="snrSel"></select>
+        </div>
+        <button class="secondary" id="synthBtn" style="flex:2;min-width:170px;" disabled>Synthesize Scenario</button>
+      </div>
+
+      <div class="note">
+        Smoothing, the NOISE_FLOOR gate and event hold are display-only.
+        The Performance page is always per-window, ungated and unsmoothed.
+      </div>
+      <div class="note">
+        Static build — runs entirely in this browser tab via ONNX, no Python and no
+        server-side inference. Civilian scenario cases need the RadioML dataset, which
+        a static site has no server to serve from, so only the generator-backed cases
+        are offered.
+      </div>
+
+      <div id="status">Loading onnxruntime-web and the 5-model ensemble…</div>
+      <div id="headline"></div>
+
+      <div class="panels">
+        <div id="statusBox"></div>
+        <div id="latestBox"></div>
+      </div>
+
+      <div class="block">
+        <div class="block-label">Spectrum · waterfall · detections · tier — shared time axis</div>
+        <canvas id="console"></canvas>
+      </div>
+
+      <div class="block" style="padding:0;">
+        <div class="block-label" style="padding:12px 12px 0;">Detection events</div>
+        <div class="table-wrap">
+          <table id="eventsTable">
+            <colgroup><col style="width:5%"><col style="width:12%"><col style="width:14%"><col style="width:69%"></colgroup>
+            <thead><tr><th>#</th><th>Start (ms)</th><th>Duration (ms)</th><th>Detected (peak confidence)</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

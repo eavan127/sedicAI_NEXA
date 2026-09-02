@@ -1,0 +1,224 @@
+import { CASES, buildScenario, CFG } from "./generators.js";
+import { classifyCapture, loadModel, FS, WINDOW_LEN } from "./model.js";
+import {
+  noiseFloorPower, occupancy, powerSpectrumDb, resolveSession, scipyStft,
+} from "./analysis.js";
+import { drawConsole } from "./console.js";
+import { eventRows, headerLine, latestBlock, statusBlock } from "./panels.js";
+
+const el = id => document.getElementById(id);
+const statusEl = el("status"), headlineEl = el("headline");
+const statusBox = el("statusBox"), latestBox = el("latestBox");
+const consoleCanvas = el("console"), tbody = document.querySelector("#eventsTable tbody");
+const synthBtn = el("synthBtn"), uploadBtn = el("uploadBtn"), fileInput = el("fileInput");
+const caseSel = el("caseSel"), snrSel = el("snrSel"), hopSel = el("hopSel"), modelSel = el("modelSel");
+const smoothingRadio = el("smoothingRadio");
+
+for (const name of Object.keys(CASES)) {
+  caseSel.add(new Option(name, name));
+}
+caseSel.value = "All three";
+
+// configs/default.yaml:snr_bins_db -- the training bins, not arbitrary round
+// numbers: asking the model about an SNR it never saw conflates two questions.
+const SNR_BINS = [-10, -6, -2, 2, 6, 10];
+for (const snr of SNR_BINS) {
+  snrSel.add(new Option(`${snr >= 0 ? "+" : ""}${snr} dB`, String(snr)));
+}
+// rf_replay.py picks 0 if present, else the middle bin.
+snrSel.value = "2";
+
+let smoothingChoice = "Smoothed";
+smoothingRadio.addEventListener("click", e => {
+  const btn = e.target.closest("button");
+  if (!btn) return;
+  smoothingChoice = btn.dataset.value;
+  for (const b of smoothingRadio.querySelectorAll("button")) b.classList.toggle("on", b === btn);
+  if (session) render();          // re-render only; no re-inference needed
+});
+
+// Cached per model choice, so switching back doesn't reload from the network.
+const modelCache = new Map();
+let session = null;               // { capture, result, source, caseNote, truth, snrDb }
+let lastDrawnWidth = 0;           // guards the ResizeObserver against redraw loops
+
+async function getModel(which) {
+  if (!modelCache.has(which)) {
+    modelCache.set(which, await loadModel(which, "./models", (d, t) => {
+      statusEl.textContent = `Loading ${which} model ${d}/${t}…`;
+    }));
+  }
+  return modelCache.get(which);
+}
+
+async function init() {
+  try {
+    ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/";
+    await getModel("ensemble");
+    statusEl.textContent = "Ready. Synthesize a scenario, or select a capture file.";
+    synthBtn.disabled = false;
+    uploadBtn.disabled = false;
+  } catch (e) {
+    statusEl.textContent = `Failed to load model: ${e.message}`;
+    console.error(e);
+  }
+}
+
+function modelLabel(which) {
+  return which === "ensemble" ? "5-model ensemble average" : "single checkpoint — best_model.pt";
+}
+
+/** Re-derives every panel from the cached raw result. Smoothing is a display
+ * rule, so switching it must NOT re-run inference -- same as the Gradio page,
+ * where smoothing.change only re-renders. */
+function render() {
+  const { capture, result, source, caseNote, truth, snrDb, which } = session;
+  const smoothed = smoothingChoice === "Smoothed";
+  const resolved = resolveSession(result, smoothed);
+  const events = resolved.emitterEvents;
+  const tiers = resolved.tiers;
+  const emptyPct = tiers.length ? tiers.filter(t => t === "Empty").length / tiers.length * 100 : 0;
+  const durationMs = capture.re.length / FS * 1000;
+
+  headlineEl.innerHTML = headerLine({
+    source, snrKnown: source === "scenario", trueSnrDb: snrDb,
+    modelLabel: modelLabel(which), caseNote, durationMs,
+    nWindows: result.nWindows, hop: result.hop, nEvents: events.length, tiers,
+  });
+
+  statusBox.innerHTML = statusBlock({
+    occupancyValue: capture.occupancy, nEvents: events.length,
+    nWindows: result.nWindows, hop: result.hop, durationMs, emptyPct,
+  });
+  latestBox.innerHTML = latestBlock(events, emptyPct, capture);
+
+  drawConsole(consoleCanvas, {
+    spectro: capture.spectro, spectrum: capture.spectrum,
+    events, tiers, truth, durationMs,
+    starts: result.starts, hop: result.hop, fs: FS,
+  });
+  lastDrawnWidth = consoleCanvas.clientWidth;
+
+  tbody.innerHTML = "";
+  for (const row of eventRows(events)) {
+    const tr = document.createElement("tr");
+    for (const cell of row) {
+      const td = document.createElement("td");
+      td.textContent = cell;
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+}
+
+/** Everything a capture needs that does NOT depend on the model or the
+ * display rules -- computed once per capture, reused on every re-render. */
+function measureCapture(re, im) {
+  return {
+    re, im,
+    occupancy: occupancy(re, im, FS),
+    noisePower: noiseFloorPower(re, im),
+    spectro: scipyStft(re, im, 256, FS),
+    spectrum: powerSpectrumDb(re, im, FS),
+  };
+}
+
+async function analyze(re, im, { source, caseNote = "", truth = null, snrDb = null }) {
+  synthBtn.disabled = uploadBtn.disabled = true;
+  try {
+    const which = modelSel.value;
+    const hop = Number(hopSel.value);
+    const sessions = await getModel(which);
+
+    statusEl.textContent = "Measuring capture…";
+    await new Promise(r => setTimeout(r, 0));
+    const capture = measureCapture(re, im);
+
+    const t0 = performance.now();
+    const result = await classifyCapture(sessions, re, im, {
+      hop,
+      onProgress: (d, t) => { statusEl.textContent = `Running inference… ${d}/${t} windows`; },
+    });
+    const elapsed = ((performance.now() - t0) / 1000).toFixed(2);
+
+    session = { capture, result, source, caseNote, truth, snrDb, which };
+    render();
+    statusEl.textContent = `${result.nWindows} windows classified in ${elapsed}s.`;
+  } catch (e) {
+    statusEl.textContent = `Error: ${e.message}`;
+    console.error(e);
+  } finally {
+    synthBtn.disabled = uploadBtn.disabled = false;
+  }
+}
+
+synthBtn.addEventListener("click", async () => {
+  const caseName = caseSel.value;
+  const snrDb = Number(snrSel.value);
+  statusEl.textContent = "Synthesizing IQ…";
+  await new Promise(r => setTimeout(r, 0));
+  const { re, im, segments } = buildScenario({
+    totalDuration: 0.05, snrDb, seed: Math.floor(Math.random() * 1e9),
+    script: CASES[caseName],
+  });
+  await analyze(re, im, {
+    source: "scenario", caseNote: `case \`${caseName}\``, truth: segments, snrDb,
+  });
+});
+
+uploadBtn.addEventListener("click", () => fileInput.click());
+
+fileInput.addEventListener("change", async () => {
+  const file = fileInput.files?.[0];
+  if (!file) return;
+  statusEl.textContent = `Reading ${file.name}…`;
+  try {
+    // Interleaved float32 I,Q,I,Q,... -- the same contract as
+    // src/infer.py and src/ui/session.py:load_upload.
+    const buf = await file.arrayBuffer();
+    let raw = new Float32Array(buf);
+    if (raw.length < 2) throw new Error(
+      "File contains no complex samples. Expected interleaved float32 I,Q,I,Q,... — at least 2 values.");
+    if (raw.length % 2) raw = raw.subarray(0, raw.length - 1);
+    const n = raw.length / 2;
+    if (n < WINDOW_LEN) throw new Error(
+      `Capture is ${n} complex samples; at least ${WINDOW_LEN} are needed for one window.`);
+    const re = new Float64Array(n), im = new Float64Array(n);
+    for (let i = 0; i < n; i++) { re[i] = raw[2 * i]; im[i] = raw[2 * i + 1]; }
+    // truth is scenario-only: never render a TRUTH overlay over data we do
+    // not actually have ground truth for (session.py:analyze).
+    await analyze(re, im, { source: "upload" });
+  } catch (e) {
+    statusEl.textContent = `Error: ${e.message}`;
+    console.error(e);
+  } finally {
+    fileInput.value = "";
+  }
+});
+
+modelSel.addEventListener("change", async () => {
+  if (!session) return;
+  await analyze(session.capture.re, session.capture.im, {
+    source: session.source, caseNote: session.caseNote,
+    truth: session.truth, snrDb: session.snrDb,
+  });
+});
+
+hopSel.addEventListener("change", async () => {
+  if (!session) return;
+  await analyze(session.capture.re, session.capture.im, {
+    source: session.source, caseNote: session.caseNote,
+    truth: session.truth, snrDb: session.snrDb,
+  });
+});
+
+// ResizeObserver rather than window's resize event: the canvas can also go
+// from zero-width to laid-out without the window changing size -- a hidden
+// pane being revealed, a font loading and reflowing the column -- and the
+// figure is sized from the canvas's own width, not the window's.
+new ResizeObserver(() => {
+  const w = consoleCanvas.clientWidth;
+  if (session && w && w !== lastDrawnWidth) render();
+}).observe(consoleCanvas);
+
+init();
