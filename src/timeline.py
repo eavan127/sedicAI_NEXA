@@ -105,12 +105,20 @@ def classify_capture(iq, model, hop=None, window_len=None, fs=None,
     def _hook(module, inputs, output):
         captured["scores"] = output.detach()
 
+    # Follow the MODEL's device rather than the module-level DEVICE. `model`
+    # is a parameter here, so this function cannot assume the caller already
+    # moved it: on a GPU machine the old code put the input on cuda while a
+    # caller-constructed model sat on the CPU, which raises "Input type
+    # (torch.cuda.FloatTensor) and weight type (torch.FloatTensor) should be
+    # the same". Invisible on a CPU-only box, where both resolve to cpu.
+    device = next(model.parameters()).device
+
     handle = model.attn_pool.score.register_forward_hook(_hook)
     probs_batches, attn_batches = [], []
     try:
         with torch.no_grad():
             for i in range(0, len(windows), batch_size):
-                xb = torch.tensor(windows[i:i + batch_size]).to(DEVICE)
+                xb = torch.tensor(windows[i:i + batch_size]).to(device)
                 logits = model(xb)
                 probs_batches.append(torch.sigmoid(logits).cpu().numpy())
                 scores = captured["scores"]           # (batch, 1, time)

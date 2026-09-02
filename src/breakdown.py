@@ -40,10 +40,14 @@ class BreakdownResult:
 
 def predict_probs(model, X, batch_size=1024):
     """Sigmoid probabilities for every row of X, batched."""
+    # The model's own device, not the module-level DEVICE -- see the same
+    # note in src/timeline.py:classify_capture. `model` is a parameter, so
+    # this cannot assume the caller moved it to DEVICE first.
+    device = next(model.parameters()).device
     out = []
     with torch.no_grad():
         for i in range(0, len(X), batch_size):
-            xb = torch.tensor(np.array(X[i:i + batch_size])).to(DEVICE)
+            xb = torch.tensor(np.array(X[i:i + batch_size])).to(device)
             out.append(torch.sigmoid(model(xb)).cpu().numpy())
     return np.concatenate(out)
 
