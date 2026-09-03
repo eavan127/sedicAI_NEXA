@@ -303,6 +303,18 @@
         <div class="block-label">Scorecard — per class, per window, ungated and unsmoothed</div>
         <div id="scorecardBox"></div>
       </div>
+      <div class="block" id="figConfusion" hidden>
+        <div class="block-label">Confusion matrix — true vs predicted, per window</div>
+        <img id="imgConfusion" alt="Confusion matrix" style="width:100%;max-width:760px;display:block;">
+        <div class="note" id="capConfusion" style="margin-top:6px;"></div>
+      </div>
+
+      <div class="block" id="figSnr" hidden>
+        <div class="block-label">Recall vs SNR, per class</div>
+        <img id="imgSnr" alt="Accuracy versus SNR" style="width:100%;max-width:760px;display:block;">
+        <div class="note" id="capSnr" style="margin-top:6px;"></div>
+      </div>
+
       <div class="block">
         <div class="block-label">Single- vs multi-signal recall across the SNR sweep</div>
         <canvas id="breakdownCanvas"></canvas>

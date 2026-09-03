@@ -347,6 +347,37 @@ async function renderPerformance() {
   prov.innerHTML = provenanceHtml(perfData);
   box.innerHTML = scorecardHtml(perfData);
   drawBreakdown(breakdownCanvas, perfData);
+
+  // The two figures src/evaluate.py wrote, shown as-is and captioned with
+  // when they were produced.
+  //
+  // Deliberately NOT flagged as stale by comparing their mtime against the
+  // config's: file timestamps do not survive this project's workflow. A git
+  // checkout or merge rewrites configs/default.yaml's mtime, and evals
+  // downloaded from Colab carry the download time rather than the time the
+  // evaluation ran. Tested here, that comparison claimed the figures
+  // predated the thresholds when the numbers in them demonstrably match the
+  // current calibration -- a confident, wrong warning is worse than none.
+  // The production time is stated so a reader can judge; the authoritative
+  // check is whether the scorecard's recalls match the configured
+  // thresholds, which is what the parity tests cover.
+  const figs = perfData.figures ?? {};
+  for (const [key, block, img, cap, what] of [
+    ["confusion_matrix.png", "figConfusion", "imgConfusion", "capConfusion",
+     "Counts of true versus predicted class per window, so a false positive is the off-diagonal cell in that class's column."],
+    ["accuracy_vs_snr.png", "figSnr", "imgSnr", "capSnr",
+     "Per-class recall across the SNR sweep, as written by the evaluation."],
+  ]) {
+    const meta = figs[key];
+    const blockEl = el(block);
+    if (!meta) { blockEl.hidden = true; continue; }
+    blockEl.hidden = false;
+    el(img).src = `./data/${meta.file}`;
+    el(cap).innerHTML = `${what} Produced ${meta.mtime.replace("T", " ")} by ` +
+      `<code>python -m src.evaluate</code>, and copied here unmodified. ` +
+      `Re-run that command and <code>python web/build.py</code> after any ` +
+      `retrain or recalibration.`;
+  }
 }
 
 async function renderModel() {

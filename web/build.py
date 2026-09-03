@@ -160,6 +160,29 @@ def build_data():
         if same_as_ensemble else
         "evals/scorecard.json — differs from the ensemble scorecard, so this is "
         "src.evaluate's default: the single checkpoint (best_model.pt)")
+    # The figures src/evaluate.py writes. Copied rather than redrawn: they are
+    # the evaluation's own output, and a chart the browser drew from the same
+    # numbers would be a second rendering that could disagree with the one the
+    # team circulates. src/ui/pages/performance.py embeds them as-is for the
+    # same reason, and says restyling them is not that package's call.
+    figures = {}
+    for name in ("confusion_matrix.png", "accuracy_vs_snr.png"):
+        src = REPO / "evals" / name
+        if not src.is_file():
+            print(f"  warning: evals/{name} missing — run python -m src.evaluate")
+            continue
+        shutil.copyfile(src, data_out / name)
+        figures[name] = {
+            "file": name,
+            # Lets the page flag a figure that predates the thresholds it is
+            # displayed under: evaluate.py writes the PNGs and scorecard.json
+            # in the same call, so a figure older than the config was produced
+            # under different thresholds.
+            "mtime": datetime.datetime.fromtimestamp(
+                src.stat().st_mtime).isoformat(timespec="seconds"),
+        }
+        print(f"  data/{name}  ({src.stat().st_size / 1024:.0f} KB)")
+
     (data_out / "performance.json").write_text(json.dumps({
         # Two DIFFERENT models are represented on this page and conflating
         # them would be a provenance error of exactly the kind
@@ -171,6 +194,11 @@ def build_data():
         #     i.e. the ensemble whenever all five members are present.
         "scorecard_source": scorecard_source,
         "breakdown_model": model_label("auto"),
+        "figures": figures,
+        # The config's own mtime, so the page can warn if a figure predates
+        # the thresholds it is displayed under.
+        "config_mtime": datetime.datetime.fromtimestamp(
+            (REPO / "configs" / "default.yaml").stat().st_mtime).isoformat(timespec="seconds"),
         # Suppressed when the table above is already the same run -- showing
         # one model's numbers twice under two headings invites the reader to
         # treat them as independent corroboration.
@@ -198,6 +226,12 @@ def build_data():
     }))
     print(f"  data/performance.json  ({len(test)} test windows, "
           f"{breakdown.n_windows} single/multi)")
+
+    # The figures src/evaluate.py writes. Copied rather than redrawn: they are
+    # the evaluation's own output, and a chart the browser drew from the same
+    # numbers would be a second rendering that could disagree with the one the
+    # team circulates. src/ui/pages/performance.py embeds them as-is for the
+    # same reason and says restyling them is not that package's call.
 
     # --- constants + model card -------------------------------------------
     from src.models.amc_cnn import AMC_CNN
