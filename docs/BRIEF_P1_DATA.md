@@ -161,7 +161,7 @@ Naming our own limits is more credible than being asked about them.
    separates them — the information is not present in the signal. We report
    accuracy-vs-SNR per class rather than a single headline number for this
    reason. The civilian classes are mandatory to classify under the rules but are
-   not part of the >90% judged benchmark.
+   not part of the >80% judged benchmark.
 
 2. **16QAM/64QAM confusion is expected, and it is benign operationally.**
    Mistaking one QAM order for another still yields the correct coarse call —

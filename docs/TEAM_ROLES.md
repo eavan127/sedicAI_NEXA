@@ -2,7 +2,8 @@
 
 ## The standard we build to
 
-The rules require **>90% recall on Military/CEMA and Jamming**. Treat that as the
+The rules require **>80% recall on Military/CEMA and Jamming** (confirmed 2026-08-14,
+down from the original >90% announcement). Treat that as the
 **minimum to qualify**, not the target.
 
 Here is why the distinction matters for us specifically: **none of our judged
@@ -18,7 +19,7 @@ signals we did not generate?**
 
 | Metric | Minimum | Our target |
 |---|---|---|
-| Recall on LFM_RADAR, FHSS, JAMMING | 90% | **95%, with margin across SNR** |
+| Recall on LFM_RADAR, FHSS, JAMMING | 80% | **95%, with margin across SNR** |
 | Coarse-tier accuracy (Civilian / Military / Hostile) | — | **95%+** |
 | Comms vs hostile CEMA discrimination | — | reported as its own number |
 | Civilian classes | mandatory to classify | **90%+ at high SNR**, degradation documented |
@@ -72,7 +73,7 @@ the categories still needs owners.
 These are the ordinary modulations of civilian spectrum — phones, WiFi, data
 links. They encode bits by moving a point around a 2D constellation: BPSK uses 2
 positions, QPSK 4, 16QAM 16, 64QAM 64. More positions means more bits per symbol
-but less noise tolerance. They are **not** scored at 90%, but the rules mandate
+but less noise tolerance. They are **not** scored at 80%, but the rules mandate
 classifying them, and they are the contrast that makes threat classes detectable.
 
 ### What you learn
@@ -104,7 +105,7 @@ Brief section: datasets, licences, attribution, class counts, SNR coverage.
 
 ## P2 — Radar + Model & Training
 
-**Signal category:** LFM_RADAR (judged at >90%)
+**Signal category:** LFM_RADAR (judged at >80%)
 **Owns:** `src/generators/radar.py`, `src/models/`, `src/train.py`
 
 ### Your signal, in one paragraph
@@ -129,7 +130,7 @@ HDF5 internals, hop sequences, jamming types.
 | 0 | Start the RadChar download (Tiny or Small variant) |
 | 1 | Extract RadChar LFM pulses. Plot spectrograms, confirm the diagonal. Run the smoke training config end to end so you are ready before real data lands |
 | 2 | First real training run the moment P1 delivers. Report per-class recall to the team |
-| 3 | Tune until the three judged classes clear 90%. **Data fixes before model changes** |
+| 3 | Tune until the three judged classes clear 80%. **Data fixes before model changes** |
 | 4 | Final run, export checkpoint + training curves |
 
 ### Your advantage
@@ -144,7 +145,7 @@ Brief sections: radar signal characterisation, architecture, training setup.
 
 ## P3 — FHSS + Evaluation
 
-**Signal category:** FHSS (judged at >90%)
+**Signal category:** FHSS (judged at >80%)
 **Owns:** `src/generators/fhss.py`, `src/evaluate.py`
 
 ### Your signal, in one paragraph
@@ -189,7 +190,7 @@ Brief sections: FHSS generation methodology and its honest limitation
 
 ## P4 — Jamming + Inference & Submission
 
-**Signal category:** JAMMING (judged at >90%)
+**Signal category:** JAMMING (judged at >80%)
 **Owns:** `src/generators/jamming.py`, `src/infer.py`, brief assembly, video
 
 ### Your signal, in one paragraph
@@ -257,7 +258,7 @@ final assembly of everyone's sections.
 
 Only start each once the previous is solid.
 
-1. **Clear the gate** — >90% on all three judged classes
+1. **Clear the gate** — >80% on all three judged classes
 2. **Widen parameter randomisation** and retrain *(largest robustness gain)*
 3. **Held-out parameter generalisation test** *(largest credibility gain)*
 4. **Ablation table** *(brief quality)*
