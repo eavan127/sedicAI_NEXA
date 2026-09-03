@@ -139,6 +139,27 @@ def build_data():
     ens_path = REPO / "evals" / "ensemble_scorecard.json"
     ensemble_scorecard = (json.loads(ens_path.read_text())
                            if ens_path.is_file() else None)
+
+    # scorecard.json records nothing about WHICH model wrote it -- src.evaluate
+    # writes the same filename whether run plain (single checkpoint) or with
+    # --ensemble. Rather than guess, compare it against the ensemble's own
+    # judged-class recalls: if they agree to the last digit it was the same
+    # model, because two different models do not produce identical recalls on
+    # 3060 windows by chance.
+    same_as_ensemble = False
+    if scorecard and ensemble_scorecard and ensemble_scorecard.get("ensemble"):
+        per_class = scorecard.get("per_class", {})
+        same_as_ensemble = all(
+            cls in per_class
+            and abs(per_class[cls]["recall"] - recall) < 1e-9
+            for cls, recall in ensemble_scorecard["ensemble"].items())
+    scorecard_source = (
+        "evals/scorecard.json — recalls match evals/ensemble_scorecard.json, "
+        f"so this is the {ensemble_scorecard['n_models']}-model ensemble "
+        "(src.evaluate --ensemble)"
+        if same_as_ensemble else
+        "evals/scorecard.json — differs from the ensemble scorecard, so this is "
+        "src.evaluate's default: the single checkpoint (best_model.pt)")
     (data_out / "performance.json").write_text(json.dumps({
         # Two DIFFERENT models are represented on this page and conflating
         # them would be a provenance error of exactly the kind
@@ -148,9 +169,12 @@ def build_data():
         #     and records nothing in the file about which it was;
         #   - the breakdown chart is computed above with load_model("auto"),
         #     i.e. the ensemble whenever all five members are present.
-        "scorecard_source": "evals/scorecard.json — src.evaluate (single checkpoint unless run with --ensemble)",
+        "scorecard_source": scorecard_source,
         "breakdown_model": model_label("auto"),
-        "ensemble_scorecard": ensemble_scorecard,
+        # Suppressed when the table above is already the same run -- showing
+        # one model's numbers twice under two headings invites the reader to
+        # treat them as independent corroboration.
+        "ensemble_scorecard": None if same_as_ensemble else ensemble_scorecard,
         "model_label": model_label("auto"),
         "generated": datetime.datetime.now().isoformat(timespec="seconds"),
         "dataset": {
