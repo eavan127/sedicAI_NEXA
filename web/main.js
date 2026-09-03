@@ -7,7 +7,7 @@ import { drawConsole } from "./console.js";
 import { eventRows, headerLine, latestBlock, printHeaderHtml, statusBlock } from "./panels.js";
 import {
   breakdownTableHtml, drawAttention, drawBreakdown, drawPerClassRecall,
-  modelCardHtml, probabilityHtml, provenanceHtml, scorecardHtml, summaryHtml,
+  denseQamHtml, modelCardHtml, probabilityHtml, provenanceHtml, scorecardHtml, summaryHtml,
   windowMetadataHtml,
 } from "./pages.js";
 import { civilianWindows, drawConstellation } from "./constellation.js";
@@ -351,6 +351,7 @@ async function renderPerformance() {
   drawPerClassRecall(el("recallBarCanvas"), perfData);
   drawBreakdown(breakdownCanvas, perfData);
   el("breakdownTable").innerHTML = breakdownTableHtml(perfData);
+  el("denseQamBox").innerHTML = denseQamHtml(perfData);
 
   // The two figures src/evaluate.py wrote, shown as-is and captioned with
   // when they were produced.

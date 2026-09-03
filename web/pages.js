@@ -320,6 +320,62 @@ export function scorecardHtml(perf) {
     `judged classes.</div>`;
 }
 
+/** Dense-QAM order resolution: the ONE place on this page where a figure is
+ * event-level rather than per-window, so it is fenced off and labelled.
+ *
+ * Why it exists: the scorecard's 16QAM and 64QAM rows are each measuring
+ * "dense QAM detected, split by a coin flip". A single 512-sample window
+ * carries ~56 symbols, and the |C42| separation between the two
+ * constellations (0.680 vs 0.619) is smaller than the estimator's own spread
+ * at that count -- so the split is not something a better model fixes. The
+ * resolver pools |C42| ACROSS windows instead, which is why accuracy climbs
+ * with the window count below.
+ *
+ * DISPLAYS what src/measure.py measured (C42_POOLED_ACCURACY), the same way
+ * the rest of this page displays src.evaluate's output. Nothing recomputed. */
+export function denseQamHtml(perf) {
+  const dq = perf.dense_qam;
+  if (!dq || !dq.pooled_accuracy) return "";
+  const perWindow = perf.scorecard?.dense_qam_recall;
+
+  const counts = Object.keys(dq.pooled_accuracy).map(Number).sort((a, b) => a - b);
+  const rows = counts.map((n) => {
+    const acc = dq.pooled_accuracy[String(n)] * 100;
+    const usable = n >= dq.min_windows;
+    return `<tr>` +
+      `<td style="font-family:${MONO};color:${usable ? TEXT : TEXT_DIM};">${n} window${n === 1 ? "" : "s"}` +
+      `${usable ? "" : ' <span style="font-size:10px;">below minimum — refused</span>'}</td>` +
+      `<td style="text-align:right;font-family:${MONO};font-weight:${usable ? 600 : 400};` +
+      `color:${usable ? TEXT : TEXT_DIM};">${acc.toFixed(1)}%</td></tr>`;
+  }).join("");
+
+  const combined = perWindow
+    ? `<div style="color:${TEXT_DIM};font-size:11px;margin-bottom:8px;">` +
+      `Per-window, the model's combined dense-QAM recall — did it notice SOME dense QAM was ` +
+      `present, regardless of which it named — is ` +
+      `<span style="font-family:${MONO};color:${TEXT};">${(perWindow.recall * 100).toFixed(1)}%</span> ` +
+      `over ${perWindow.n_evaluated.toLocaleString()} windows. Naming which of the two is the part ` +
+      `that needs pooling.</div>`
+    : "";
+
+  return `<div style="color:${TEXT_DIM};font-size:11px;margin-bottom:8px;">` +
+    `EVENT-LEVEL — not per-window, and not part of the judged benchmark. ` +
+    `Source: src/measure.py C42_POOLED_ACCURACY.</div>` +
+    combined +
+    `<table style="width:100%;border-collapse:collapse;font-size:12px;">` +
+    `<thead><tr><th style="text-align:left;">Windows pooled</th>` +
+    `<th style="text-align:right;">16QAM vs 64QAM accuracy</th></tr></thead>` +
+    `<tbody>${rows}</tbody></table>` +
+    `<div style="color:${TEXT_DIM};font-size:11px;margin-top:8px;">` +
+    `Measured at SNR &ge; ${dq.min_snr_db} dB, the regime the ${dq.c42_boundary} boundary was ` +
+    `calibrated for. Below that the channel pulls |C42| toward zero and the resolver ` +
+    `<strong>refuses to decide rather than guessing</strong> — so on low-SNR captures this ` +
+    `table does not apply and no order is reported. Fewer than ${dq.min_windows} windows is ` +
+    `also refused. Pooling fixes the C42 estimator only; averaging the model's own 16QAM/64QAM ` +
+    `probabilities stays at chance however many windows are used, because that error is a bias ` +
+    `rather than noise.</div>`;
+}
+
 /** The dashboard summary from performance.py:_build_dashboard -- benchmark
  * verdict, the by-category view, and the CEMA criterion.
  *

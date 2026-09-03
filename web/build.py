@@ -220,6 +220,22 @@ def build_data():
             "support": breakdown.support, "n_windows": breakdown.n_windows,
         },
         "scorecard": scorecard,
+        # Dense-QAM order resolution, shown alongside the per-window scorecard
+        # because the per-window 16QAM/64QAM split is a coin flip the model
+        # cannot win (src/evaluate.py:dense_qam_recall documents the measured
+        # 51.4% single-window / 49.7% at 64 windows for the model's own
+        # probabilities). The resolver is the C42 estimator in src/measure.py,
+        # which pools ACROSS windows -- so this is an event-level figure, not a
+        # per-window one, and is labelled as such on the page. The SNR gate
+        # travels with it: below min_snr_db constellation_order refuses to
+        # decide rather than guessing, so quoting the pooled accuracy without
+        # that caveat would overstate what the system delivers.
+        "dense_qam": {
+            "c42_boundary": C42_BOUNDARY,
+            "min_windows": MIN_WINDOWS_FOR_C42_DECISION,
+            "min_snr_db": C42_MIN_SNR_DB,
+            "pooled_accuracy": {str(k): v for k, v in C42_POOLED_ACCURACY.items()},
+        },
         "scorecard_mtime": (datetime.datetime.fromtimestamp(
             scorecard_path.stat().st_mtime).isoformat(timespec="seconds")
             if scorecard_path.is_file() else None),
