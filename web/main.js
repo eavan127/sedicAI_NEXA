@@ -4,7 +4,7 @@ import {
   noiseFloorPower, occupancy, powerSpectrumDb, resolveSession, scipyStft,
 } from "./analysis.js";
 import { drawConsole } from "./console.js";
-import { eventRows, headerLine, latestBlock, statusBlock } from "./panels.js";
+import { eventRows, headerLine, latestBlock, printHeaderHtml, statusBlock } from "./panels.js";
 import {
   drawAttention, drawBreakdown, modelCardHtml, probabilityHtml,
   provenanceHtml, scorecardHtml, windowMetadataHtml,
@@ -17,6 +17,7 @@ const statusEl = el("status"), headlineEl = el("headline");
 const statusBox = el("statusBox"), latestBox = el("latestBox");
 const consoleCanvas = el("console"), tbody = document.querySelector("#eventsTable tbody");
 const constellationCanvas = el("constellationCanvas"), constellationBlock = el("constellationBlock");
+const printHeader = el("printHeader"), printBtn = el("printBtn");
 const synthBtn = el("synthBtn"), uploadBtn = el("uploadBtn"), fileInput = el("fileInput");
 const caseSel = el("caseSel"), snrSel = el("snrSel"), hopSel = el("hopSel"), modelSel = el("modelSel");
 const smoothingRadio = el("smoothingRadio");
@@ -110,6 +111,14 @@ function render() {
     starts: result.starts, hop: result.hop, fs: FS,
   });
   lastDrawnWidth = consoleCanvas.clientWidth;
+
+  printHeader.innerHTML = printHeaderHtml({
+    source, caseNote, snrDb, snrKnown: source === "scenario",
+    hop: result.hop, nWindows: result.nWindows, durationMs,
+    modelLabel: modelLabel(which), nEvents: events.length, truth,
+    thresholds: THRESHOLDS,
+  });
+  printBtn.disabled = false;
 
   // The constellation is a SEPARATE component, not another panel inside the
   // console figure: that figure's whole premise is one shared time axis, and
@@ -258,6 +267,16 @@ hopSel.addEventListener("change", async () => {
     truth: session.truth, snrDb: session.snrDb,
   });
 });
+
+printBtn.addEventListener("click", () => window.print());
+
+// The canvases size their backing store from clientWidth at draw time, so a
+// figure drawn for a 1100px column is a stretched bitmap on a 186mm page.
+// Redraw against the print layout, then again afterwards for the screen.
+// (Chrome runs beforeprint synchronously before paginating, so a synchronous
+// redraw here lands in the output.)
+addEventListener("beforeprint", () => { if (session) render(); });
+addEventListener("afterprint", () => { if (session) render(); });
 
 // ResizeObserver rather than window's resize event: the canvas can also go
 // from zero-width to laid-out without the window changing size -- a hidden

@@ -93,6 +93,41 @@
   canvas { width: 100%; display: block; }
 
   .table-wrap { max-height: 520px; overflow-y: auto; background: var(--panel); }
+
+  /* ---- PDF export -------------------------------------------------------
+     The browser's own "Save as PDF" rather than a JS PDF library: it needs
+     no dependency, keeps text selectable and searchable, and prints the
+     canvases as they are. What it exports is one SYNTHESIZED capture -- a
+     demonstration, not a measurement -- which #printHeader states outright
+     so the document cannot be mistaken for benchmark evidence. */
+  .print-only { display: none; }
+  @media print {
+    @page { size: A4 portrait; margin: 14mm 12mm; }
+    body { padding: 0; background: #fff; }
+    /* Chrome drops background colours by default; these carry meaning here
+       (tier chips, the olive header rule), so force them. */
+    * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+
+    .print-only { display: block; }
+    /* Controls, navigation and live status are interaction, not content. */
+    nav, .grow, #status, h3.page-title, .note { display: none !important; }
+    header { margin-bottom: 10px; }
+    .layout { display: block; }
+    main { width: 100%; }
+
+    /* Never split a figure or a panel across a page break. */
+    .block, .panels > div { break-inside: avoid; page-break-inside: avoid; }
+    .panels { display: flex; gap: 10px; }
+    .block { border: 1px solid var(--grid); }
+
+    /* The events table is the one thing allowed to run long. */
+    .table-wrap { max-height: none; overflow: visible; }
+    thead { display: table-header-group; }   /* repeat header on each page */
+    tbody tr { break-inside: avoid; page-break-inside: avoid; }
+
+    /* Other pages are not part of this report. */
+    #page-signal, #page-performance, #page-model { display: none !important; }
+  }
   table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
   thead th { background: var(--brand-olive-tint); color: var(--text); text-align: left; padding: 7px 10px; font-weight: 600; position: sticky; top: 0; }
   tbody td { padding: 6px 10px; border-bottom: 1px solid var(--grid); background: var(--panel); color: var(--text); word-wrap: break-word; }
@@ -120,6 +155,12 @@
 
     <main>
     <section id="page-replay">
+      <!-- Print-only cover block. Populated in main.js:render() so the
+           exported PDF carries the run's own provenance: a page of
+           detections with no record of which case, SNR, model or thresholds
+           produced them is unreadable a week later. -->
+      <div id="printHeader" class="print-only"></div>
+
       <h3 class="page-title">RF Replay</h3>
 
       <!-- Global settings, matching rf_replay.py's first Row -->
@@ -166,6 +207,7 @@
           <select id="snrSel"></select>
         </div>
         <button class="secondary" id="synthBtn" style="flex:2;min-width:170px;" disabled>Synthesize Scenario</button>
+        <button class="secondary" id="printBtn" style="flex:2;min-width:170px;" disabled>⭳ Download report (PDF)</button>
       </div>
 
       <div class="note">

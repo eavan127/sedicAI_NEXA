@@ -140,6 +140,58 @@ export function latestBlock(events, emptyPct, capture) {
     caveat + `<div>${chips}</div>` + detectionList(events) + `</div>`;
 }
 
+/** Cover block for the PDF export.
+ *
+ * Two jobs, and the second is the important one.
+ *
+ * It records the run's provenance -- case, SNR, hop, model, thresholds,
+ * timestamp -- because a page of detections with no record of what produced
+ * them cannot be checked or reproduced later.
+ *
+ * And it states plainly that this is a SYNTHESIZED capture. Every click
+ * draws a fresh random seed, so what the document shows is a demonstration
+ * of one scene with known ground truth, not a measurement of accuracy. The
+ * measured figures live in the scorecard and on the Performance page; a
+ * reader who mistook a good-looking synthetic run for benchmark evidence
+ * would be misled by this document, which is the one thing it must not do.
+ */
+export function printHeaderHtml({ source, caseNote, snrDb, snrKnown, hop, nWindows,
+                                   durationMs, modelLabel, nEvents, truth, thresholds }) {
+  const now = new Date();
+  const truthLine = (truth && truth.length)
+    ? truth.map(s => `${s.className} ${(s.startS * 1000).toFixed(2)}–${(s.endS * 1000).toFixed(2)} ms`).join(" · ")
+    : "none — uploaded capture, no ground truth exists for it";
+  const thrLine = Object.entries(thresholds)
+    .map(([c, v]) => `${c} ${v}`).join(" · ");
+
+  const row = (k, v) => `<tr><td style="color:${TEXT_DIM};padding:2px 14px 2px 0;white-space:nowrap;">${k}</td>` +
+    `<td style="font-family:monospace;">${v}</td></tr>`;
+
+  return `<div style="border-bottom:2px solid ${BRAND_OLIVE};padding-bottom:10px;margin-bottom:12px;">` +
+    `<div style="font-size:17px;font-weight:700;color:${TEXT};">OMNI — RF Replay capture report</div>` +
+    `<div style="font-size:11px;color:${TEXT_DIM};margin-top:3px;">` +
+    `Generated ${now.toISOString().slice(0, 19).replace("T", " ")}</div></div>` +
+
+    `<div style="background:#FDF6EC;border:1px solid #B45309;color:#7a3c06;padding:9px 11px;` +
+    `border-radius:5px;font-size:11px;line-height:1.55;margin-bottom:12px;">` +
+    `<strong>This is a demonstration, not a measurement.</strong> The capture below was ` +
+    `synthesized in the browser from a fresh random seed, so the detections show what the ` +
+    `model does on one scene whose ground truth is known — they are not an accuracy result ` +
+    `and no recall or precision figure should be read from them. Measured performance on the ` +
+    `held-out test split is on the Performance page and in evals/scorecard.json.</div>` +
+
+    `<table style="font-size:11px;border-collapse:collapse;margin-bottom:10px;">` +
+    row("Source", source === "scenario" ? `synthesized scenario — ${caseNote.replace(/`/g, "")}` : "uploaded capture") +
+    row("SNR", snrKnown && snrDb !== null ? `${snrDb.toFixed(1)} dB (known, per emitter)` : "unknown — not a generated scene") +
+    row("Capture", `${durationMs.toFixed(1)} ms @ fs 3.2 MHz, baseband`) +
+    row("Windows", `${nWindows} @ hop ${hop} (512-sample window, 160 µs)`) +
+    row("Model", modelLabel) +
+    row("Detections", `${nEvents} emitter events (smoothed, gated, held — display rules on)`) +
+    row("Ground truth", truthLine) +
+    row("Thresholds", thrLine) +
+    `</table>`;
+}
+
 /** rf_replay.py:_rows -- one row per event; class names and peak
  * confidences share one column (splitting them doubled the table width). */
 export function eventRows(events) {
