@@ -76,11 +76,28 @@ def test_stft_branch_flag_off_is_deterministic_given_fixed_weights():
 
 
 def test_existing_checkpoint_still_loads_with_flag_off():
-    """The guard that protects the submission: results/best_model.pt was
-    trained against today's architecture. Flag off must keep AMC_CNN's
-    state_dict shape-compatible with it."""
+    """The guard that protects the submission: an already-trained checkpoint
+    was trained against today's architecture. Flag off must keep AMC_CNN's
+    state_dict shape-compatible with it.
+
+    Checks best_model.pt if present, falling back to the first ensemble
+    member -- not every branch commits best_model.pt (onnx-export ships only
+    ensemble_0.pt..ensemble_4.pt), but the guard's purpose (does today's
+    architecture still load a real trained checkpoint) is the same either
+    way. Skipped, not failed, if neither exists -- a bare clone before any
+    training has nothing to guard yet."""
+    import os
+
+    for candidate in ("results/best_model.pt", "results/ensemble_0.pt"):
+        if os.path.exists(candidate):
+            ckpt_path = candidate
+            break
+    else:
+        pytest.skip("no trained checkpoint present (results/best_model.pt or "
+                     "ensemble_0.pt) -- nothing to guard against yet")
+
     model = AMC_CNN(num_classes=len(CLASSES), input_len=WINDOW_LEN)
-    state_dict = torch.load("results/best_model.pt", map_location="cpu")
+    state_dict = torch.load(ckpt_path, map_location="cpu")
     model.load_state_dict(state_dict, strict=True)  # must not raise
 
 
