@@ -98,9 +98,17 @@ multilabel_threshold: 0.5 # fallback for any class not listed below
 # Values below are scripts/calibrate_thresholds.py --ensemble --n-models 5
 # (default 3pt margin), confirmed via train_ensemble.py --models 5
 # --eval-only against the SAME 5 checkpoints (no retrain, isolates the
-# threshold's effect): LFM_RADAR ensemble recall 0.8225 (was 0.7961 FAIL at
-# the no-margin threshold), FHSS 0.8301, JAMMING 0.8451 -- OVERALL PASS,
-# every judged class with real margin above 80%, not sitting on the edge.
+# threshold's effect): LFM_RADAR ensemble recall 0.8500, FHSS 0.8284,
+# JAMMING 0.8444 -- OVERALL PASS, every judged class with real margin above
+# 80%, not sitting on the edge.
+#
+# Recalibrated 2026-09-03 against the rebuilt dataset (128,400 windows: the
+# civilian pool was redrawn and roughly doubled and the jamming-over-civilian
+# mixtures regenerated on top of it; radar / FHSS / noise windows carried over
+# unchanged). The previous values (0.26 / 0.27 / 0.77, calibrated 2026-08-24
+# on the 80,400-window set) score 0.8255 / 0.8163 / 0.8676 on these same
+# checkpoints -- still a PASS, but with less margin on the two weakest
+# classes.
 # Re-run calibrate_thresholds.py --ensemble after any retrain -- these are
 # tied to this specific set of 5 checkpoints' calibration.
 multilabel_thresholds_per_class:
@@ -108,17 +116,22 @@ multilabel_thresholds_per_class:
   FHSS: 0.25
   JAMMING: 0.87
   # Civilian classes were never calibrated -- they sat on the 0.5 fallback
-  # while the judged three were tuned, which is why 16QAM read 1.3% recall
+  # while the judged three were tuned, which is why 16QAM read 1.9% recall
   # and looked like a model that had learned nothing about it. It had: 96% of
   # true 16QAM windows score above the median negative. The probabilities are
   # informative, they simply live below 0.5.
   #
   # Selected by best F1 on the VALIDATION split, reported on test, so there is
   # no selection leakage. Recall at these values (test split, 5-model
-  # ensemble): BPSK 57.6%, QPSK 47.4%, 16QAM 73.0%, 64QAM 64.0% -- against
-  # 51.8 / 25.3 / 1.3 / 13.0 at 0.5.
+  # ensemble): BPSK 70.4%, QPSK 46.5%, 16QAM 64.6%, 64QAM 56.1% -- against
+  # 66.7 / 39.3 / 1.9 / 3.9 at 0.5.
   #
-  # The cost is precision: 16QAM 37%, 64QAM 35%, QPSK 47%, BPSK 86%. These
+  # Re-derived on the rebuilt dataset 2026-09-03 and left unchanged: the
+  # best-F1 values there are 0.28 / 0.24 / 0.235 / 0.25, worth +0.000 to
+  # +0.006 test F1 over the values below (BPSK is marginally worse), i.e.
+  # within val/test sampling noise. Not worth a change.
+  #
+  # The cost is precision: 16QAM 43%, 64QAM 46%, QPSK 84%, BPSK 96%. These
   # classes are NOT judged, and the criterion that does depend on them --
   # comms-vs-hostile discrimination -- is about not calling civilian traffic
   # JAMMING, which these thresholds do not affect. Re-check that false-alarm
@@ -127,17 +140,29 @@ multilabel_thresholds_per_class:
   QPSK: 0.265
   16QAM: 0.265
   64QAM: 0.275
-  # NOISE_FLOOR was the last class still on the 0.5 fallback. It is perfectly
-  # separable -- the median NEGATIVE scores 0.000 -- but positives sit at a
-  # median of 0.433, i.e. just under the default, which is why it read 33.6%
-  # recall. At 0.265 (best F1 on validation) recall is 83.0%.
+  # NOISE_FLOOR was the last class still on the 0.5 fallback. It separates
+  # cleanly -- the median NEGATIVE scores 0.000 -- but positives sit at a
+  # median of 0.284, i.e. below the default, which is why it read 0.0% recall
+  # there. At 0.265 recall is 54.6%.
   #
   # Treated more cautiously than the civilian classes, because the error is
   # not symmetric: a false NOISE_FLOOR means calling an OCCUPIED window empty,
-  # which is a missed emitter. Precision here is 57.3%, so that risk is real
-  # and was checked rather than assumed -- across Radar only / FHSS only /
-  # All three at -6 and +2 dB, no expected emitter was missed in either
-  # smoothed or raw mode.
+  # which is a missed emitter. Precision here is 42.2% -- 673 occupied test
+  # windows reported empty -- so that risk is real.
+  #
+  # Best F1 on the rebuilt data would put this at 0.17 (F1 0.504 vs 0.476,
+  # recall 80.0%). Deliberately NOT taken: it lifts occupied-called-empty
+  # from 673 to 1,239 windows. F1 weighs both error directions equally and
+  # this class does not. Left at 0.265; revisit only as an explicit call on
+  # that tradeoff, not as an F1 sweep.
+  #
+  # The emitter-miss risk was checked rather than assumed, and re-checked
+  # 2026-09-03 against the rebuilt dataset and retrained ensemble: Radar only
+  # / FHSS only / All three, at -6 and +2 dB, 5 seeds each, smoothed and raw
+  # -- 60/60 runs detected every scripted emitter, none missed. Note this
+  # bounds MISSES only; raw mode still carries a high false-positive load
+  # (a Radar-only capture also raises BPSK/FHSS/JAMMING windows), which is
+  # what the display-layer smoothing and gate exist to absorb.
   #
   # The RF Replay NOISE_FLOOR gate is a SEPARATE value (session.noise_gate,
   # 0.5) and is deliberately not lowered with this one. The gate suppresses
