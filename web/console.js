@@ -209,7 +209,7 @@ export function drawConsole(canvas, {
   ctx.rotate(-Math.PI / 2);
   ctx.textAlign = "center";
   ctx.font = `9px ${FONT}`;
-  ctx.fillText("frequency (MHz) — BASEBAND", 0, 0);
+  ctx.fillText("frequency (MHz), baseband", 0, 0);
   ctx.restore();
   ctx.font = `8px ${FONT}`;
 

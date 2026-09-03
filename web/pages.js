@@ -83,7 +83,7 @@ export function probabilityHtml(result, windowIndex) {
 
   return `<div style="background:${PANEL};padding:16px;border-radius:6px;">` +
     `<div style="color:${TEXT_DIM};font-size:11px;margin-bottom:10px;">` +
-    `independent probabilities &middot; multi-label &mdash; these do not sum to 100%</div>` +
+    `independent probabilities &middot; multi-label &middot; these do not sum to 100%</div>` +
     bars + noiseBlock + `</div>`;
 }
 
@@ -241,13 +241,13 @@ export function modelCardHtml(card, which) {
     `           ${card.classes.join(", ")}<br>` +
     `INPUT          (2, ${card.window_len})<br>` +
     `WINDOW         ${(card.window_len / card.fs * 1e6).toFixed(0)} µs @ ${(card.fs / 1e6).toFixed(1)} MHz<br>` +
-    `OUTPUT         sigmoid — multi-label, independent per class<br>` +
+    `OUTPUT         sigmoid, multi-label, independent per class<br>` +
     `POOLING        energy-gated attention<br>` +
     `SAMPLING       SNR-weighted, 10^(-SNR/20)<br>` +
-    `RUNTIME        onnxruntime-web (WASM) — exported from the .pt checkpoint<br>` +
+    `RUNTIME        onnxruntime-web (WASM), exported from the .pt checkpoint<br>` +
     `THRESHOLDS     per class<br>${thresholds}<br><br>` +
     `<span style="color:${TEXT_DIM};">Read from the checkpoint at build time, not hardcoded. ` +
-    `Describes what is running — not a claim that this architecture is the best performing.</span></div>`;
+    `Describes what is running. Not a claim that this architecture is the best performing.</span></div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -295,12 +295,12 @@ export function scorecardHtml(perf) {
       const pass = r * 100 >= bar;
       return `<tr><td style="font-family:${MONO};font-weight:600;">${cls}</td>` +
         `<td style="text-align:right;font-family:${MONO};font-weight:600;color:${pass ? "#0F766E" : "#C1121F"};">${(r * 100).toFixed(1)}%</td>` +
-        `<td style="text-align:right;font-family:${MONO};color:${TEXT_DIM};">${prec === undefined ? "—" : (prec * 100).toFixed(1) + "%"}</td></tr>`;
+        `<td style="text-align:right;font-family:${MONO};color:${TEXT_DIM};">${prec === undefined ? "n/a" : (prec * 100).toFixed(1) + "%"}</td></tr>`;
     }).join("");
     ensembleBlock =
       `<div style="margin-top:16px;padding-top:12px;border-top:1px solid ${GRID};">` +
       `<div style="color:${TEXT_DIM};font-size:11px;margin-bottom:6px;">` +
-      `${ens.n_models}-MODEL ENSEMBLE — judged classes only, from evals/ensemble_scorecard.json. ` +
+      `${ens.n_models}-MODEL ENSEMBLE, judged classes only, from evals/ensemble_scorecard.json. ` +
       `This is what the team submits; the table above is a different model.</div>` +
       `<table style="width:100%;border-collapse:collapse;font-size:12px;">` +
       `<thead><tr><th style="text-align:left;">Class</th><th style="text-align:right;">Recall</th>` +
@@ -344,22 +344,22 @@ export function denseQamHtml(perf) {
     const usable = n >= dq.min_windows;
     return `<tr>` +
       `<td style="font-family:${MONO};color:${usable ? TEXT : TEXT_DIM};">${n} window${n === 1 ? "" : "s"}` +
-      `${usable ? "" : ' <span style="font-size:10px;">below minimum — refused</span>'}</td>` +
+      `${usable ? "" : ' <span style="font-size:10px;">below minimum, refused</span>'}</td>` +
       `<td style="text-align:right;font-family:${MONO};font-weight:${usable ? 600 : 400};` +
       `color:${usable ? TEXT : TEXT_DIM};">${acc.toFixed(1)}%</td></tr>`;
   }).join("");
 
   const combined = perWindow
     ? `<div style="color:${TEXT_DIM};font-size:11px;margin-bottom:8px;">` +
-      `Per-window, the model's combined dense-QAM recall — did it notice SOME dense QAM was ` +
-      `present, regardless of which it named — is ` +
+      `Per-window, the model's combined dense-QAM recall, meaning did it notice some dense QAM was ` +
+      `present regardless of which it named, is ` +
       `<span style="font-family:${MONO};color:${TEXT};">${(perWindow.recall * 100).toFixed(1)}%</span> ` +
       `over ${perWindow.n_evaluated.toLocaleString()} windows. Naming which of the two is the part ` +
       `that needs pooling.</div>`
     : "";
 
   return `<div style="color:${TEXT_DIM};font-size:11px;margin-bottom:8px;">` +
-    `EVENT-LEVEL — not per-window, and not part of the judged benchmark. ` +
+    `EVENT-LEVEL. Not per-window, and not part of the judged benchmark. ` +
     `Source: src/measure.py C42_POOLED_ACCURACY.</div>` +
     combined +
     `<table style="width:100%;border-collapse:collapse;font-size:12px;">` +
@@ -369,7 +369,7 @@ export function denseQamHtml(perf) {
     `<div style="color:${TEXT_DIM};font-size:11px;margin-top:8px;">` +
     `Measured at SNR &ge; ${dq.min_snr_db} dB, the regime the ${dq.c42_boundary} boundary was ` +
     `calibrated for. Below that the channel pulls |C42| toward zero and the resolver ` +
-    `<strong>refuses to decide rather than guessing</strong> — so on low-SNR captures this ` +
+    `<strong>refuses to decide rather than guessing</strong>, so on low-SNR captures this ` +
     `table does not apply and no order is reported. Fewer than ${dq.min_windows} windows is ` +
     `also refused. Pooling fixes the C42 estimator only; averaging the model's own 16QAM/64QAM ` +
     `probabilities stays at chance however many windows are used, because that error is a bias ` +
@@ -424,7 +424,7 @@ export function summaryHtml(perf) {
       `<td style="color:${TEXT_DIM};font-family:${MONO};font-size:11px;padding:4px 12px 4px 0;">` +
       present.map(c => `${c} ${(perClass[c].recall * 100).toFixed(0)}%`).join(", ") + `</td>` +
       `<td style="text-align:right;font-family:${MONO};font-weight:600;">` +
-      (rec === undefined || rec === null ? "—" : pc(rec)) + `</td></tr>`);
+      (rec === undefined || rec === null ? "n/a" : pc(rec)) + `</td></tr>`);
   }
 
   if (cvj) {
@@ -434,7 +434,7 @@ export function summaryHtml(perf) {
     rows.push(
       `<tr><td style="font-weight:600;padding:4px 12px 4px 0;">CEMA</td>` +
       `<td style="color:${TEXT_DIM};font-family:${MONO};font-size:11px;padding:4px 12px 4px 0;">` +
-      `comms vs hostile — jamming recall ${pc(cvj.jamming_recall)}, ` +
+      `comms vs hostile, jamming recall ${pc(cvj.jamming_recall)}, ` +
       `false alarm ${(cvj.false_alarm_rate * 100).toFixed(2)}%</td>` +
       `<td style="text-align:right;font-family:${MONO};font-weight:700;color:#0F766E;">${pc(cvj.accuracy)}</td></tr>`);
   }
@@ -519,7 +519,7 @@ export function breakdownTableHtml(perf) {
   const b = perf.breakdown;
   if (!b?.recall) return "";
   const bins = perf.snr_bins;
-  const cell = v => v === null || v === undefined ? "—" : `${v.toFixed(0)}%`;
+  const cell = v => v === null || v === undefined ? "n/a" : `${v.toFixed(0)}%`;
 
   // performance.py's bd_summary opens by stating the model and how the test
   // split divides, so a reader knows how much each half of the table rests
@@ -564,11 +564,11 @@ export function provenanceHtml(perf) {
   const colour = smoke ? "#B45309" : TEXT_DIM;
   return `<div style="background:${smoke ? "#FDF6EC" : PANEL};border:1px solid ${smoke ? "#B45309" : GRID};` +
     `padding:12px 14px;border-radius:6px;color:${colour};font-size:12px;line-height:1.6;">` +
-    (smoke ? `<strong>These numbers come from a ${ds.total_windows}-window dataset — a smoke run, not the full dataset.</strong><br>` : "") +
+    (smoke ? `<strong>These numbers come from a ${ds.total_windows}-window dataset: a smoke run, not the full dataset.</strong><br>` : "") +
     `Measured by the Python evaluation at build time on the held-out test split ` +
     `(${ds.test_windows} of ${ds.total_windows} windows, test_frac ${ds.test_frac}, seed ${ds.seed}). ` +
     `The recall-vs-SNR breakdown below uses ${perf.breakdown_model ?? perf.model_label}; ` +
-    `the scorecard is whatever src.evaluate last wrote — see its own source line. ` +
+    `the scorecard is whatever src.evaluate last wrote; see its own source line. ` +
     `Generated ${perf.generated}. ` +
     `Rebuild with <code>python -m src.evaluate</code> then <code>python web/build.py</code> after any retrain.</div>`;
 }
@@ -653,7 +653,7 @@ export function drawBreakdown(canvas, perf) {
       ctx.beginPath(); ctx.moveTo(L + w + 10, legendY); ctx.lineTo(L + w + 24, legendY); ctx.stroke();
       ctx.restore();
       ctx.fillStyle = TEXT_DIM;
-      ctx.fillText(`${cls} — ${group}`, L + w + 28, legendY);
+      ctx.fillText(`${cls}, ${group}`, L + w + 28, legendY);
       legendY += 11;
     }
   }

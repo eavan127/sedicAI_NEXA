@@ -186,10 +186,10 @@
         <div class="field" style="flex:2;min-width:150px;">
           <label for="hopSel">Window hop</label>
           <select id="hopSel">
-            <option value="512">no overlap — 512</option>
-            <option value="256" selected>50% — 256</option>
-            <option value="128">75% — 128</option>
-            <option value="64">87.5% — 64</option>
+            <option value="512">no overlap, 512</option>
+            <option value="256" selected>50% overlap, 256</option>
+            <option value="128">75% overlap, 128</option>
+            <option value="64">87.5% overlap, 64</option>
           </select>
         </div>
         <div class="field" style="flex:2;min-width:150px;">
@@ -203,7 +203,7 @@
           <label for="modelSel">Model</label>
           <select id="modelSel">
             <option value="ensemble" selected>Ensemble (5 models)</option>
-            <option value="single">Single — best_model.pt</option>
+            <option value="single">Single, best_model.pt</option>
           </select>
         </div>
       </div>
@@ -233,7 +233,7 @@
         The Performance page is always per-window, ungated and unsmoothed.
       </div>
       <div class="note">
-        Static build — runs entirely in this browser tab via ONNX, no Python and no
+        Static build. Runs entirely in this browser tab via ONNX, with no Python and no
         server-side inference.
       </div>
 
@@ -246,12 +246,12 @@
       </div>
 
       <div class="block">
-        <div class="block-label">Spectrum · waterfall · detections · tier — shared time axis</div>
+        <div class="block-label">Spectrum · waterfall · detections · tier · shared time axis</div>
         <canvas id="console"></canvas>
       </div>
 
       <div class="block" id="constellationBlock" hidden>
-        <div class="block-label">Civilian constellation — raw I/Q vs recovered symbols</div>
+        <div class="block-label">Civilian constellation: raw I/Q vs recovered symbols</div>
         <canvas id="constellationCanvas"></canvas>
       </div>
 
@@ -270,7 +270,7 @@
     <section id="page-signal" hidden>
       <h3 class="page-title">Signal Analysis</h3>
       <div class="note" style="margin-bottom:12px;">
-        One 512-sample window — 160 µs — exactly as the classifier sees it.
+        One 512-sample window of 160 µs, exactly as the classifier sees it.
         Load a capture on RF Replay first, then pick a window.
       </div>
       <div class="grow">
@@ -279,7 +279,7 @@
           <input type="range" id="winSlider" min="1" max="1" value="1" step="1" style="width:100%;">
         </div>
         <div class="field"><label>&nbsp;</label>
-          <span id="winReadout" style="font-family:var(--mono);font-size:13px;color:var(--text-dim);min-height:38px;display:flex;align-items:center;">—</span>
+          <span id="winReadout" style="font-family:var(--mono);font-size:13px;color:var(--text-dim);min-height:38px;display:flex;align-items:center;"></span>
         </div>
       </div>
       <div class="panels" style="align-items:stretch;">
@@ -311,11 +311,11 @@
       </div>
 
       <div class="block">
-        <div class="block-label">Scorecard — per class, per window, ungated and unsmoothed</div>
+        <div class="block-label">Scorecard: per class, per window, ungated and unsmoothed</div>
         <div id="scorecardBox"></div>
       </div>
       <div class="block" id="figConfusion" hidden>
-        <div class="block-label">Confusion matrix — true vs predicted, per window</div>
+        <div class="block-label">Confusion matrix: true vs predicted, per window</div>
         <img id="imgConfusion" alt="Confusion matrix" style="width:100%;max-width:760px;display:block;">
         <div class="note" id="capConfusion" style="margin-top:6px;"></div>
       </div>
@@ -327,7 +327,7 @@
       </div>
 
       <div class="block">
-        <div class="block-label">Dense-QAM order — resolved across an event, not per window</div>
+        <div class="block-label">Dense-QAM order: resolved across an event, not per window</div>
         <div id="denseQamBox"></div>
       </div>
 

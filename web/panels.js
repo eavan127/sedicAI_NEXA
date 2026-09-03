@@ -32,7 +32,7 @@ export function channelState(tiers) {
   if (!tiers.length) return "";
   const empty = tiers.filter(t => t === "Empty").length / tiers.length * 100;
   if (empty >= 90) {
-    return `<span style="color:${BRAND_OLIVE};font-weight:700;">CHANNEL EMPTY — ${empty.toFixed(0)}% of windows</span>`;
+    return `<span style="color:${BRAND_OLIVE};font-weight:700;">CHANNEL EMPTY, ${empty.toFixed(0)}% of windows</span>`;
   }
   return `channel ${empty.toFixed(0)}% empty`;
 }
@@ -65,13 +65,13 @@ export function statusBlock({ occupancyValue, nEvents, nWindows, hop, durationMs
   const pad = (s, n) => String(s).padStart(n);
   return `<div style="font-family:monospace;background:${PANEL};padding:14px;border-radius:6px;color:${TEXT};line-height:1.8;">` +
     `Occupancy   ${pad((occupancyValue * 100).toFixed(1), 5)}%   ` +
-    `<span style="color:${TEXT_DIM};">measured — fraction of the spectrogram above the noise floor</span><br>` +
+    `<span style="color:${TEXT_DIM};">measured, fraction of the spectrogram above the noise floor</span><br>` +
     `Detections  ${pad(nEvents, 5)}   ` +
-    `<span style="color:${TEXT_DIM};">model — grouped events, not windows</span><br>` +
+    `<span style="color:${TEXT_DIM};">model, grouped events, not windows</span><br>` +
     `Windows     ${pad(nWindows, 5)}   ` +
     `<span style="color:${TEXT_DIM};">hop ${hop} · ${durationMs.toFixed(1)} ms capture</span><br>` +
     `Channel     ${pad(emptyPct.toFixed(0), 5)}%   ` +
-    `<span style="color:${TEXT_DIM};">model — windows reported as empty spectrum</span></div>`;
+    `<span style="color:${TEXT_DIM};">model, windows reported as empty spectrum</span></div>`;
 }
 
 /** rf_replay.py:_detection_list_html */
@@ -135,7 +135,7 @@ export function latestBlock(events, emptyPct, capture) {
   const e = headlineEvent(events);
   const color = TIER_COLOR[tierOfClasses(e.classes)];
   const caveat = headlineIsConfident(events) ? "" :
-    `<div style="color:${TEXT_DIM};font-size:11px;margin-top:6px;">nothing in this capture cleared 50% on the class setting its tier — showing the strongest available</div>`;
+    `<div style="color:${TEXT_DIM};font-size:11px;margin-top:6px;">nothing in this capture cleared 50% on the class setting its tier. Showing the strongest available</div>`;
 
   return `<div style="background:${PANEL};padding:16px;border-radius:6px;color:${TEXT};">` +
     `<div style="color:${TEXT_DIM};font-size:11px;">PRIMARY DETECTION</div>` +
@@ -172,8 +172,8 @@ export function printHeaderHtml({ source, caseNote, snrDb, snrKnown, hop, nWindo
   const synthetic = source === "scenario";
 
   const truthLine = (truth && truth.length)
-    ? truth.map(s => `${s.className} ${(s.startS * 1000).toFixed(2)}–${(s.endS * 1000).toFixed(2)} ms`).join("; ")
-    : "Not applicable — uploaded capture carries no ground truth";
+    ? truth.map(s => `${s.className} ${(s.startS * 1000).toFixed(2)} to ${(s.endS * 1000).toFixed(2)} ms`).join("; ")
+    : "Not applicable. Uploaded capture carries no ground truth";
   const thrLine = Object.entries(thresholds).map(([c, v]) => `${c} ${v}`).join("; ");
 
   // A ruled two-column parameter block: fixed-width label, value takes the
@@ -233,7 +233,7 @@ export function printHeaderHtml({ source, caseNote, snrDb, snrKnown, hop, nWindo
     // pixels (the leader column declares 99%) and wrap one character per
     // line. This table needs to size to its content.
     `<table style="width:100%;border-collapse:collapse;table-layout:auto;">` +
-    row("Source", synthetic ? `Synthesized scenario — ${caseNote.replace(/`/g, "")}` : "Operator-supplied file") +
+    row("Source", synthetic ? `Synthesized scenario: ${caseNote.replace(/`/g, "")}` : "Operator-supplied file") +
     row("Signal-to-noise ratio", snrKnown && snrDb !== null ? `${snrDb.toFixed(1)} dB, known, per emitter` : "Unknown") +
     row("Capture length", `${durationMs.toFixed(1)} ms`) +
     row("Sampling", "3.2 MHz complex baseband") +
