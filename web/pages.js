@@ -14,7 +14,16 @@ const GRID = "#DFE3D9";
 const TEXT = "#121C27";
 const TEXT_DIM = "#5F6B72";
 const INSTRUMENT = "#42505C";
-const MONO = '"JetBrains Mono", "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace';
+// src/ui/palette.py:MONO_STACK, but quoted with SINGLE quotes.
+//
+// The family names must be quoted in CSS, and this string is interpolated
+// into style="..." attributes. With double quotes the first one terminated
+// the attribute, so the browser parsed the remainder as junk attributes
+// (jetbrains="", mono",="") and dropped the whole declaration -- every
+// monospace element on the site silently lost its font, colour, background
+// and padding. Single quotes are equally valid in CSS and survive the
+// attribute.
+const MONO = "'JetBrains Mono','Cascadia Mono',Consolas,'DejaVu Sans Mono',monospace";
 const FONT = '"Inter", "Segoe UI", "Helvetica Neue", Arial, sans-serif';
 
 // src/ui/palette.py:CLASS_COLOR -- per-class hues, for charts that draw
@@ -53,7 +62,10 @@ export function probabilityHtml(result, windowIndex) {
     const text = hit ? TEXT : TEXT_DIM;
     return `<div style="display:flex;align-items:center;gap:8px;margin:3px 0;">` +
       `<span style="width:14px;color:${text};font-weight:700;">${hit ? "&#10003;" : "&#9675;"}</span>` +
-      `<span style="width:96px;font-family:${MONO};font-size:12px;color:${text};">${cls}</span>` +
+      // 112px, not the Gradio original's 96px: NOISE_FLOOR renders 100px
+      // wide in this stack and overflowed its box, colliding with the bar
+      // beside it. flex-shrink:0 stops the flex row squeezing it back.
+      `<span style="width:112px;flex:0 0 auto;font-family:${MONO};font-size:12px;color:${text};">${cls}</span>` +
       `<span style="flex:1;background:${BG};height:13px;border-radius:2px;overflow:hidden;">` +
       `<span style="display:block;width:${(p * 100).toFixed(1)}%;height:100%;background:${colour};"></span></span>` +
       `<span style="width:42px;text-align:right;font-family:${MONO};font-size:12px;color:${text};">${p.toFixed(2)}</span></div>`;

@@ -20,7 +20,10 @@ const TEXT_DIM = "#5F6B72";
 const BRAND_OLIVE = "#627143";
 // src/ui/palette.py:MONO_STACK -- used for the report's parameter values,
 // where a fixed pitch keeps the dot-leader column aligned.
-const MONO = '"JetBrains Mono", "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace';
+// SINGLE-quoted on purpose -- see the note on the same constant in pages.js.
+// Double quotes here terminate the style="..." attribute this is
+// interpolated into, silently discarding the whole declaration.
+const MONO = "'JetBrains Mono','Cascadia Mono',Consolas,'DejaVu Sans Mono',monospace";
 
 const pct = v => `${Math.round(v * 100)}%`;
 
