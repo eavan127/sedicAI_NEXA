@@ -19,9 +19,9 @@
  "window_len": 512,
  "fs": 3200000,
  "thresholds": {
-  "LFM_RADAR": 0.26,
-  "FHSS": 0.27,
-  "JAMMING": 0.77,
+  "LFM_RADAR": 0.22,
+  "FHSS": 0.25,
+  "JAMMING": 0.87,
   "BPSK": 0.33,
   "QPSK": 0.265,
   "16QAM": 0.265,
