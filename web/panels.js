@@ -18,6 +18,9 @@ const GRID = "#DFE3D9";
 const TEXT = "#121C27";
 const TEXT_DIM = "#5F6B72";
 const BRAND_OLIVE = "#627143";
+// src/ui/palette.py:MONO_STACK -- used for the report's parameter values,
+// where a fixed pitch keeps the dot-leader column aligned.
+const MONO = '"JetBrains Mono", "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace';
 
 const pct = v => `${Math.round(v * 100)}%`;
 
@@ -158,38 +161,87 @@ export function latestBlock(events, emptyPct, capture) {
 export function printHeaderHtml({ source, caseNote, snrDb, snrKnown, hop, nWindows,
                                    durationMs, modelLabel, nEvents, truth, thresholds }) {
   const now = new Date();
+  const pad = n => String(n).padStart(2, "0");
+  const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}` +
+                `-${pad(now.getHours())}${pad(now.getMinutes())}`;
+  const issued = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ` +
+                 `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+  const synthetic = source === "scenario";
+
   const truthLine = (truth && truth.length)
-    ? truth.map(s => `${s.className} ${(s.startS * 1000).toFixed(2)}–${(s.endS * 1000).toFixed(2)} ms`).join(" · ")
-    : "none — uploaded capture, no ground truth exists for it";
-  const thrLine = Object.entries(thresholds)
-    .map(([c, v]) => `${c} ${v}`).join(" · ");
+    ? truth.map(s => `${s.className} ${(s.startS * 1000).toFixed(2)}–${(s.endS * 1000).toFixed(2)} ms`).join("; ")
+    : "Not applicable — uploaded capture carries no ground truth";
+  const thrLine = Object.entries(thresholds).map(([c, v]) => `${c} ${v}`).join("; ");
 
-  const row = (k, v) => `<tr><td style="color:${TEXT_DIM};padding:2px 14px 2px 0;white-space:nowrap;">${k}</td>` +
-    `<td style="font-family:monospace;">${v}</td></tr>`;
+  // A ruled two-column parameter block: fixed-width label, value takes the
+  // rest. An earlier version used a three-column dot leader, which the
+  // stylesheet defeated twice over -- `table-layout: fixed` collapsed the
+  // outer columns to a few pixels, and `word-wrap: break-word` on tbody td
+  // (both there for the events table) broke the values apart even with
+  // white-space:nowrap. Two columns need neither override.
+  const row = (k, v) =>
+    `<tr>` +
+    `<td style="width:190px;color:${TEXT_DIM};font-size:10px;letter-spacing:0.05em;` +
+    `padding:3.5px 12px 3.5px 0;vertical-align:top;border-bottom:1px solid ${GRID};">` +
+    `${k.toUpperCase()}</td>` +
+    `<td style="font-family:${MONO};font-size:10.5px;color:${TEXT};line-height:1.45;` +
+    `padding:3.5px 0;vertical-align:top;border-bottom:1px solid ${GRID};">${v}</td></tr>`;
 
-  return `<div style="border-bottom:2px solid ${BRAND_OLIVE};padding-bottom:10px;margin-bottom:12px;">` +
-    `<div style="font-size:17px;font-weight:700;color:${TEXT};">OMNI — RF Replay capture report</div>` +
-    `<div style="font-size:11px;color:${TEXT_DIM};margin-top:3px;">` +
-    `Generated ${now.toISOString().slice(0, 19).replace("T", " ")}</div></div>` +
+  const heading = (n, t) =>
+    `<div style="font-size:11px;font-weight:700;letter-spacing:0.10em;color:${TEXT};` +
+    `margin:14px 0 5px;">${n}. ${t}</div>`;
 
-    `<div style="background:#FDF6EC;border:1px solid #B45309;color:#7a3c06;padding:9px 11px;` +
-    `border-radius:5px;font-size:11px;line-height:1.55;margin-bottom:12px;">` +
-    `<strong>This is a demonstration, not a measurement.</strong> The capture below was ` +
-    `synthesized in the browser from a fresh random seed, so the detections show what the ` +
-    `model does on one scene whose ground truth is known — they are not an accuracy result ` +
-    `and no recall or precision figure should be read from them. Measured performance on the ` +
-    `held-out test split is on the Performance page and in evals/scorecard.json.</div>` +
+  return (
+    // --- masthead ---
+    `<div style="border-top:3px solid ${BRAND_OLIVE};border-bottom:1px solid ${BRAND_OLIVE};` +
+    `padding:6px 0;margin-bottom:14px;display:flex;justify-content:space-between;` +
+    `align-items:baseline;font-size:10px;letter-spacing:0.12em;color:${TEXT_DIM};">` +
+    `<span>SEDIC 26 &nbsp;·&nbsp; PROJECT OMNI &nbsp;·&nbsp; RF SPECTRUM INTELLIGENCE</span>` +
+    `<span style="font-weight:700;color:${TEXT};">UNCLASSIFIED</span></div>` +
 
-    `<table style="font-size:11px;border-collapse:collapse;margin-bottom:10px;">` +
-    row("Source", source === "scenario" ? `synthesized scenario — ${caseNote.replace(/`/g, "")}` : "uploaded capture") +
-    row("SNR", snrKnown && snrDb !== null ? `${snrDb.toFixed(1)} dB (known, per emitter)` : "unknown — not a generated scene") +
-    row("Capture", `${durationMs.toFixed(1)} ms @ fs 3.2 MHz, baseband`) +
-    row("Windows", `${nWindows} @ hop ${hop} (512-sample window, 160 µs)`) +
-    row("Model", modelLabel) +
-    row("Detections", `${nEvents} emitter events (smoothed, gated, held — display rules on)`) +
-    row("Ground truth", truthLine) +
-    row("Thresholds", thrLine) +
-    `</table>`;
+    `<div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:2px;">` +
+    `<div style="font-size:18px;font-weight:700;letter-spacing:0.06em;color:${TEXT};">` +
+    `CAPTURE ANALYSIS REPORT</div>` +
+    `<div style="font-family:${MONO};font-size:10px;color:${TEXT_DIM};text-align:right;">` +
+    `REF &nbsp;OMNI-CAR-${stamp}<br>ISSUED &nbsp;${issued}</div></div>` +
+    `<div style="border-bottom:1px solid ${GRID};margin-bottom:2px;"></div>` +
+
+    // --- 1. Scope. The basis-of-data statement a formal report is expected
+    //     to carry, in body text rather than as a warning box.
+    heading(1, "SCOPE AND BASIS OF DATA") +
+    `<div style="font-size:11px;line-height:1.6;color:${TEXT};">` +
+    (synthetic
+      ? `This report documents a single synthetic capture generated within the analysis ` +
+        `console at the time of issue. Emitter positions, types and timings are therefore ` +
+        `known exactly and are reproduced at Section 2 as declared ground truth, permitting ` +
+        `direct comparison against classifier output. `
+      : `This report documents a single operator-supplied capture. No ground truth exists ` +
+        `for the file, so classifier output is presented without comparison. `) +
+    `The findings at Sections 3 to 5 characterise system behaviour on this capture only and ` +
+    `do not constitute a performance measurement. Measured detection performance is ` +
+    `established separately against the held-out test split and is reported in the system ` +
+    `scorecard (<span style="font-family:${MONO};">evals/scorecard.json</span>) and on the ` +
+    `Performance page of the console.</div>` +
+
+    heading(2, "CAPTURE PARAMETERS AND DECLARED GROUND TRUTH") +
+    // table-layout:auto explicitly: the stylesheet sets `fixed` globally so
+    // the events table's columns wrap to their declared widths, but under
+    // fixed layout this table's label and value columns collapse to a few
+    // pixels (the leader column declares 99%) and wrap one character per
+    // line. This table needs to size to its content.
+    `<table style="width:100%;border-collapse:collapse;table-layout:auto;">` +
+    row("Source", synthetic ? `Synthesized scenario — ${caseNote.replace(/`/g, "")}` : "Operator-supplied file") +
+    row("Signal-to-noise ratio", snrKnown && snrDb !== null ? `${snrDb.toFixed(1)} dB, known, per emitter` : "Unknown") +
+    row("Capture length", `${durationMs.toFixed(1)} ms`) +
+    row("Sampling", "3.2 MHz complex baseband") +
+    row("Analysis window", `512 samples (160 µs), hop ${hop}`) +
+    row("Windows classified", `${nWindows}`) +
+    row("Classifier", modelLabel) +
+    row("Decision thresholds", thrLine) +
+    row("Emitter events reported", `${nEvents} (smoothed, gated, held)`) +
+    row("Declared ground truth", truthLine) +
+    `</table>`
+  );
 }
 
 /** rf_replay.py:_rows -- one row per event; class names and peak

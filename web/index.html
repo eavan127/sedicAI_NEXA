@@ -118,7 +118,25 @@
     /* Never split a figure or a panel across a page break. */
     .block, .panels > div { break-inside: avoid; page-break-inside: avoid; }
     .panels { display: flex; gap: 10px; }
-    .block { border: 1px solid var(--grid); }
+    /* Formal report styling: numbered sections, rules rather than cards.
+       A boxed "panel" reads as screen furniture; a numbered heading over a
+       ruled block reads as a document. Counter starts at 2 so the first
+       figure follows Sections 1-2 in the printed header. */
+    main { counter-reset: sect 2; }
+    .block { border: none; border-top: 1px solid var(--brand-olive); padding: 0; margin: 14px 0 0; }
+    .block-label {
+      counter-increment: sect;
+      font-size: 11px; font-weight: 700; letter-spacing: 0.10em;
+      color: var(--text); text-transform: uppercase;
+      margin: 5px 0 7px; padding: 0;
+    }
+    .block-label::before { content: counter(sect) ". "; }
+    #headline { font-size: 10.5px; border-bottom: 1px solid var(--grid); padding-bottom: 8px; }
+    thead th { background: var(--brand-olive-tint); font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase; }
+    tbody td { font-size: 10.5px; }
+    /* The masthead already carries the branding; the screen header would
+       repeat it and cost a third of the first page. */
+    header { display: none !important; }
 
     /* The events table is the one thing allowed to run long. */
     .table-wrap { max-height: none; overflow: visible; }
