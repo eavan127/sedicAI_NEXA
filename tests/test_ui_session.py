@@ -75,12 +75,13 @@ def test_detected_events_use_per_class_thresholds(model):
 
     expected = dict(zip(CLASSES, resolve_multilabel_thresholds()))
     s = load_scenario(model, total_duration=0.005, hop=512, seed=0)
-
     assert set(s.thresholds) == set(CLASSES)
     for cls in CLASSES:
         assert s.thresholds[cls] == pytest.approx(expected[cls])
     # The bug this guards: a flat 0.5 for everything.
     assert not all(v == pytest.approx(0.5) for v in s.thresholds.values())
+    assert s.thresholds["LFM_RADAR"] == pytest.approx(0.22)
+    assert s.thresholds["JAMMING"] == pytest.approx(0.87)
 
 
 def test_window_count_cap_is_enforced(model):
