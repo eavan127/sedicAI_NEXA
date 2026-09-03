@@ -453,6 +453,18 @@ export function breakdownTableHtml(perf) {
   const bins = perf.snr_bins;
   const cell = v => v === null || v === undefined ? "—" : `${v.toFixed(0)}%`;
 
+  // performance.py's bd_summary opens by stating the model and how the test
+  // split divides, so a reader knows how much each half of the table rests
+  // on before reading any figure in it.
+  const nw = b.n_windows ?? {};
+  const head =
+    `<div style="font-size:11px;color:${TEXT_DIM};margin-top:10px;">` +
+    `<strong style="color:${TEXT};">${perf.breakdown_model ?? perf.model_label}</strong>` +
+    (nw.single !== undefined
+      ? ` &nbsp;·&nbsp; ${nw.single.toLocaleString()} single-signal / ` +
+        `${(nw.multi ?? 0).toLocaleString()} multi-signal windows in the test split`
+      : "") + `</div>`;
+
   let rows = "";
   for (const group of ["single", "multi"]) {
     for (const cls of perf.classes) {
@@ -467,7 +479,8 @@ export function breakdownTableHtml(perf) {
         `<td style="text-align:right;font-family:${MONO};font-weight:700;padding:3px 0 3px 8px;">${cell(tot)}</td></tr>`;
     }
   }
-  return `<table style="width:100%;border-collapse:collapse;font-size:11px;table-layout:auto;margin-top:10px;">` +
+  return head +
+    `<table style="width:100%;border-collapse:collapse;font-size:11px;table-layout:auto;margin-top:6px;">` +
     `<thead><tr><th style="text-align:left;">Class</th><th style="text-align:left;">Group</th>` +
     bins.map(s => `<th style="text-align:right;">${s >= 0 ? "+" : ""}${s} dB</th>`).join("") +
     `<th style="text-align:right;">All</th></tr></thead><tbody>${rows}</tbody></table>`;
