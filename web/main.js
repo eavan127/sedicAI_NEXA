@@ -6,8 +6,9 @@ import {
 import { drawConsole } from "./console.js";
 import { eventRows, headerLine, latestBlock, printHeaderHtml, statusBlock } from "./panels.js";
 import {
-  drawAttention, drawBreakdown, modelCardHtml, probabilityHtml,
-  provenanceHtml, scorecardHtml, windowMetadataHtml,
+  breakdownTableHtml, drawAttention, drawBreakdown, drawPerClassRecall,
+  modelCardHtml, probabilityHtml, provenanceHtml, scorecardHtml, summaryHtml,
+  windowMetadataHtml,
 } from "./pages.js";
 import { civilianWindows, drawConstellation } from "./constellation.js";
 import { THRESHOLDS } from "./analysis.js";
@@ -345,8 +346,11 @@ async function renderPerformance() {
     }
   }
   prov.innerHTML = provenanceHtml(perfData);
+  el("summaryBox").innerHTML = summaryHtml(perfData);
   box.innerHTML = scorecardHtml(perfData);
+  drawPerClassRecall(el("recallBarCanvas"), perfData);
   drawBreakdown(breakdownCanvas, perfData);
+  el("breakdownTable").innerHTML = breakdownTableHtml(perfData);
 
   // The two figures src/evaluate.py wrote, shown as-is and captioned with
   // when they were produced.

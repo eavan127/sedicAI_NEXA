@@ -5,7 +5,7 @@
 // values wear tier colours, MEASURED values wear INSTRUMENT/TEXT_DIM, and
 // the caveats that separate the two are copied across rather than trimmed.
 
-import { TIER_COLOR, estimateSnrDb, tierOfClasses, THRESHOLDS } from "./analysis.js";
+import { TIER_COLOR, TIER_OF, estimateSnrDb, tierOfClasses, THRESHOLDS } from "./analysis.js";
 import { CLASSES, FS, WINDOW_LEN } from "./model.js";
 
 const PANEL = "#FFFFFF";
@@ -306,6 +306,171 @@ export function scorecardHtml(perf) {
     `Per-window, ungated and unsmoothed. The RF Replay smoothing toggle, the NOISE_FLOOR ` +
     `gate and the event hold never reach this page. Pass mark is ${bar.toFixed(0)}% recall on the ` +
     `judged classes.</div>`;
+}
+
+/** The dashboard summary from performance.py:_build_dashboard -- benchmark
+ * verdict, the by-category view, and the CEMA criterion.
+ *
+ * The category table exists because a page showing only the three judged
+ * classes reads as though the model knows three things. Civilian is not
+ * judged, but "can it tell traffic from interference" is exactly what the
+ * CEMA criterion turns on, so it belongs on screen. */
+export function summaryHtml(perf) {
+  const sc = perf.scorecard;
+  if (!sc) return "";
+  const perClass = sc.per_class ?? {};
+  const bench = sc.benchmark;
+  const coarse = sc.coarse_tier;
+  const cvj = sc.comms_vs_jamming;
+  const pc = v => `${(v * 100).toFixed(1)}%`;
+
+  let out = "";
+
+  if (bench) {
+    const ok = bench.passed;
+    out += `<div style="font-size:14px;font-weight:700;color:${ok ? "#0F766E" : "#C1121F"};margin-bottom:6px;">` +
+      `Benchmark: ${ok ? "PASS" : "FAIL"} ` +
+      `<span style="font-weight:400;color:${TEXT_DIM};">(>${(bench.benchmark_recall * 100).toFixed(0)}% recall on judged classes)</span></div>` +
+      `<div style="font-size:12px;margin-bottom:12px;">` +
+      Object.entries(bench.judged_classes).map(([cls, r]) =>
+        `<span style="display:inline-block;margin-right:16px;">` +
+        `<span style="font-family:${MONO};font-weight:600;">${cls}</span> ` +
+        `<span style="color:${r.passed ? "#0F766E" : "#C1121F"};font-weight:600;">${pc(r.recall)}</span>` +
+        `</span>`).join("") + `</div>`;
+  }
+
+  // src/config.py:TIERS, in its declared order.
+  const TIERS = {
+    Civilian: ["BPSK", "QPSK", "16QAM", "64QAM"],
+    Military: ["LFM_RADAR", "FHSS"],
+    Hostile: ["JAMMING"],
+    Empty: ["NOISE_FLOOR"],
+  };
+  const rows = [];
+  for (const [tier, members] of Object.entries(TIERS)) {
+    const present = members.filter(c => (perClass[c]?.support ?? 0) > 0);
+    if (!present.length) continue;
+    const rec = coarse?.per_tier_recall?.[tier];
+    rows.push(
+      `<tr><td style="font-weight:600;color:${TIER_COLOR[tier]};padding:4px 12px 4px 0;">${tier}</td>` +
+      `<td style="color:${TEXT_DIM};font-family:${MONO};font-size:11px;padding:4px 12px 4px 0;">` +
+      present.map(c => `${c} ${(perClass[c].recall * 100).toFixed(0)}%`).join(", ") + `</td>` +
+      `<td style="text-align:right;font-family:${MONO};font-weight:600;">` +
+      (rec === undefined || rec === null ? "—" : pc(rec)) + `</td></tr>`);
+  }
+
+  if (cvj) {
+    // The competition's "Competitive Advantage" criterion, in the same table
+    // performance.py puts it in -- it is a tier-level discrimination result,
+    // not a per-class one.
+    rows.push(
+      `<tr><td style="font-weight:600;padding:4px 12px 4px 0;">CEMA</td>` +
+      `<td style="color:${TEXT_DIM};font-family:${MONO};font-size:11px;padding:4px 12px 4px 0;">` +
+      `comms vs hostile — jamming recall ${pc(cvj.jamming_recall)}, ` +
+      `false alarm ${(cvj.false_alarm_rate * 100).toFixed(2)}%</td>` +
+      `<td style="text-align:right;font-family:${MONO};font-weight:700;color:#0F766E;">${pc(cvj.accuracy)}</td></tr>`);
+  }
+
+  out += `<div style="font-size:11px;color:${TEXT_DIM};letter-spacing:0.04em;margin-bottom:4px;">BY CATEGORY</div>` +
+    `<table style="width:100%;border-collapse:collapse;font-size:12px;table-layout:auto;">` +
+    `<thead><tr><th style="text-align:left;">Category</th><th style="text-align:left;">Classes</th>` +
+    `<th style="text-align:right;">Tier recall</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
+
+  if (coarse) {
+    out += `<div style="font-size:11px;color:${TEXT_DIM};margin-top:8px;">` +
+      `Coarse tier accuracy <strong style="color:${TEXT};">${pc(coarse.accuracy)}</strong>` +
+      (cvj ? ` &nbsp;·&nbsp; CEMA evaluated over ${cvj.n_evaluated.toLocaleString()} windows` : "") +
+      `</div>`;
+  }
+  return out;
+}
+
+/** performance.py's per-class recall bar chart. Colour carries CLASS (the
+ * per-class hues), with the benchmark drawn across. */
+export function drawPerClassRecall(canvas, perf) {
+  const sc = perf.scorecard;
+  if (!sc?.per_class) return false;
+  const names = CLASSES.filter(c => (sc.per_class[c]?.support ?? 0) > 0);
+  if (!names.length) return false;
+
+  const cssW = canvas.clientWidth || canvas.parentElement?.clientWidth || 700;
+  const cssH = 260;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+  canvas.style.height = cssH + "px";
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = PANEL;
+  ctx.fillRect(0, 0, cssW, cssH);
+  ctx.font = `9px ${FONT}`;
+  ctx.textBaseline = "middle";
+
+  const L = 40, R = 12, T = 12, B = 56;
+  const w = cssW - L - R, h = cssH - T - B;
+  const yOf = v => T + h - v * h;                 // recall is 0..1
+
+  ctx.strokeStyle = GRID; ctx.lineWidth = 0.6; ctx.fillStyle = TEXT_DIM;
+  ctx.textAlign = "right";
+  for (let p = 0; p <= 100; p += 20) {
+    const y = yOf(p / 100);
+    ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(L + w, y); ctx.stroke();
+    ctx.fillText(`${p}%`, L - 5, y);
+  }
+
+  const slot = w / names.length, bw = Math.min(slot * 0.62, 46);
+  names.forEach((cls, i) => {
+    const cx = L + slot * (i + 0.5);
+    const r = sc.per_class[cls].recall;
+    ctx.fillStyle = CLASS_COLOR[cls] ?? TEXT_DIM;
+    ctx.fillRect(cx - bw / 2, yOf(r), bw, h - (yOf(r) - T));
+    ctx.fillStyle = TEXT_DIM;
+    ctx.save();
+    ctx.translate(cx, T + h + 8); ctx.rotate(-Math.PI / 6);
+    ctx.textAlign = "right";
+    ctx.fillText(cls, 0, 0);
+    ctx.restore();
+  });
+
+  const bench = sc.benchmark?.benchmark_recall;
+  if (bench) {
+    ctx.save();
+    ctx.setLineDash([2, 3]); ctx.strokeStyle = "#e5484d"; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(L, yOf(bench)); ctx.lineTo(L + w, yOf(bench)); ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = "#e5484d"; ctx.textAlign = "left";
+    ctx.fillText(`${(bench * 100).toFixed(0)}% benchmark`, L + 4, yOf(bench) - 7);
+  }
+  ctx.strokeStyle = GRID; ctx.lineWidth = 1; ctx.strokeRect(L, T, w, h);
+  return true;
+}
+
+/** The numeric table behind the single- vs multi-signal chart. The chart
+ * shows the shape; a judge checking a specific figure needs the number. */
+export function breakdownTableHtml(perf) {
+  const b = perf.breakdown;
+  if (!b?.recall) return "";
+  const bins = perf.snr_bins;
+  const cell = v => v === null || v === undefined ? "—" : `${v.toFixed(0)}%`;
+
+  let rows = "";
+  for (const group of ["single", "multi"]) {
+    for (const cls of perf.classes) {
+      const series = b.recall[group]?.[cls] ?? {};
+      // NOISE_FLOOR never co-occurs, so it has no multi-signal rows; an
+      // all-em-dash row reads like a failure rather than an absence.
+      if (bins.every(s => series[s] === null || series[s] === undefined)) continue;
+      const tot = b.totals[group]?.[cls];
+      rows += `<tr><td style="color:${TIER_COLOR[TIER_OF[cls]]};font-weight:600;padding:3px 10px 3px 0;">` +
+        `${cls}</td><td style="color:${TEXT_DIM};padding:3px 10px 3px 0;">${group}</td>` +
+        bins.map(s => `<td style="text-align:right;font-family:${MONO};padding:3px 8px;">${cell(series[s])}</td>`).join("") +
+        `<td style="text-align:right;font-family:${MONO};font-weight:700;padding:3px 0 3px 8px;">${cell(tot)}</td></tr>`;
+    }
+  }
+  return `<table style="width:100%;border-collapse:collapse;font-size:11px;table-layout:auto;margin-top:10px;">` +
+    `<thead><tr><th style="text-align:left;">Class</th><th style="text-align:left;">Group</th>` +
+    bins.map(s => `<th style="text-align:right;">${s >= 0 ? "+" : ""}${s} dB</th>`).join("") +
+    `<th style="text-align:right;">All</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 /** Provenance banner. data/processed holds either a smoke run or the real

@@ -299,6 +299,17 @@
     <section id="page-performance" hidden>
       <h3 class="page-title">Performance</h3>
       <div id="perfProvenance" style="margin-bottom:12px;"></div>
+
+      <div class="block">
+        <div class="block-label">Benchmark and category summary</div>
+        <div id="summaryBox"></div>
+      </div>
+
+      <div class="block">
+        <div class="block-label">Per-class recall</div>
+        <canvas id="recallBarCanvas"></canvas>
+      </div>
+
       <div class="block">
         <div class="block-label">Scorecard — per class, per window, ungated and unsmoothed</div>
         <div id="scorecardBox"></div>
@@ -318,6 +329,7 @@
       <div class="block">
         <div class="block-label">Single- vs multi-signal recall across the SNR sweep</div>
         <canvas id="breakdownCanvas"></canvas>
+        <div id="breakdownTable"></div>
         <div class="note" style="margin-top:8px;">
           Additive to the scorecard, not a competing one: same test split, same per-class
           thresholds, same checkpoint. Solid = single-signal windows, dashed = windows where
