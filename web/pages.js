@@ -11,6 +11,9 @@ import { CLASSES, FS, WINDOW_LEN } from "./model.js";
 const PANEL = "#FFFFFF";
 const BG = "#F7F8F5";
 const GRID = "#DFE3D9";
+// Provenance sits on grey so it reads as apparatus rather than as a result:
+// every other block on the page is a white PANEL carrying numbers.
+const PANEL_MUTED = "#EFF1EC";
 const TEXT = "#121C27";
 const TEXT_DIM = "#5F6B72";
 const INSTRUMENT = "#42505C";
@@ -276,6 +279,8 @@ export function scorecardHtml(perf) {
       `<td style="font-family:${MONO};color:${isJudged ? TEXT : TEXT_DIM};font-weight:${isJudged ? 600 : 400};">` +
       `${cls}${isJudged ? ' <span style="font-size:10px;color:' + TEXT_DIM + ';">judged</span>' : ""}</td>` +
       `<td style="text-align:right;font-family:${MONO};color:${colour};font-weight:${isJudged ? 600 : 400};">${recall.toFixed(1)}%</td>` +
+      `<td style="text-align:right;font-family:${MONO};color:${TEXT_DIM};">` +
+      `${m.balanced_accuracy === undefined ? "n/a" : (m.balanced_accuracy * 100).toFixed(1) + "%"}</td>` +
       `<td style="text-align:right;font-family:${MONO};color:${TEXT_DIM};">${(m.precision * 100).toFixed(1)}%</td>` +
       `<td style="text-align:right;font-family:${MONO};color:${TEXT_DIM};">${(m["f1-score"] * 100).toFixed(1)}%</td>` +
       `<td style="text-align:right;font-family:${MONO};color:${TEXT_DIM};">${m.support}</td></tr>`;
@@ -307,17 +312,20 @@ export function scorecardHtml(perf) {
       `<th style="text-align:right;">Precision</th></tr></thead><tbody>${cells}</tbody></table></div>`;
   }
 
-  return `<div style="color:${TEXT_DIM};font-size:11px;margin-bottom:8px;">` +
-    `Source: ${perf.scorecard_source ?? "evals/scorecard.json"}</div>` +
+  return `<div style="color:${TEXT_DIM};font-size:11px;line-height:1.5;margin-bottom:8px;">` +
+    `Recall first, then balanced accuracy, then precision and F1 for transparency. Judged ` +
+    `classes are marked; the rest are mandatory to classify but are not measured against the ` +
+    `pass mark. Every figure is per window, ungated and unsmoothed, so the RF Replay smoothing ` +
+    `toggle, the NOISE_FLOOR gate and the event hold never reach this page.</div>` +
     `<table style="width:100%;border-collapse:collapse;font-size:12px;">` +
     `<thead><tr><th style="text-align:left;">Class</th><th style="text-align:right;">Recall</th>` +
+    `<th style="text-align:right;">Bal. acc.</th>` +
     `<th style="text-align:right;">Precision</th><th style="text-align:right;">F1</th>` +
     `<th style="text-align:right;">Support</th></tr></thead><tbody>${rows}</tbody></table>` +
     ensembleBlock +
-    `<div style="color:${TEXT_DIM};font-size:11px;margin-top:8px;">` +
-    `Per-window, ungated and unsmoothed. The RF Replay smoothing toggle, the NOISE_FLOOR ` +
-    `gate and the event hold never reach this page. Pass mark is ${bar.toFixed(0)}% recall on the ` +
-    `judged classes.</div>`;
+    `<div style="color:${TEXT_DIM};font-size:11px;margin-top:8px;border-top:1px solid ${GRID};padding-top:6px;">` +
+    `Source: ${perf.scorecard_source ?? "evals/scorecard.json"}. ` +
+    `Pass mark is ${bar.toFixed(0)}% recall on the judged classes.</div>`;
 }
 
 /** Dense-QAM order resolution: the ONE place on this page where a figure is
@@ -358,15 +366,18 @@ export function denseQamHtml(perf) {
       `that needs pooling.</div>`
     : "";
 
-  return `<div style="color:${TEXT_DIM};font-size:11px;margin-bottom:8px;">` +
-    `EVENT-LEVEL. Not per-window, and not part of the judged benchmark. ` +
-    `Source: src/measure.py C42_POOLED_ACCURACY.</div>` +
+  return `<div style="color:${TEXT_DIM};font-size:11px;line-height:1.5;margin-bottom:8px;">` +
+    `Event level, not per window, and not part of the judged benchmark. A 512-sample window ` +
+    `carries about 56 symbols, and the separation between the two constellations is smaller ` +
+    `than the estimator's own spread at that count, so the split is not something a better ` +
+    `model fixes. Pooling across windows is what resolves it.</div>` +
     combined +
     `<table style="width:100%;border-collapse:collapse;font-size:12px;">` +
     `<thead><tr><th style="text-align:left;">Windows pooled</th>` +
     `<th style="text-align:right;">16QAM vs 64QAM accuracy</th></tr></thead>` +
     `<tbody>${rows}</tbody></table>` +
-    `<div style="color:${TEXT_DIM};font-size:11px;margin-top:8px;">` +
+    `<div style="color:${TEXT_DIM};font-size:11px;margin-top:8px;border-top:1px solid ${GRID};padding-top:6px;">` +
+    `Source: src/measure.py C42_POOLED_ACCURACY. ` +
     `Measured at SNR &ge; ${dq.min_snr_db} dB, the regime the ${dq.c42_boundary} boundary was ` +
     `calibrated for. Below that the channel pulls |C42| toward zero and the resolver ` +
     `<strong>refuses to decide rather than guessing</strong>, so on low-SNR captures this ` +
@@ -396,15 +407,60 @@ export function summaryHtml(perf) {
 
   if (bench) {
     const ok = bench.passed;
-    out += `<div style="font-size:14px;font-weight:700;color:${ok ? "#0F766E" : "#C1121F"};margin-bottom:6px;">` +
-      `Benchmark: ${ok ? "PASS" : "FAIL"} ` +
-      `<span style="font-weight:400;color:${TEXT_DIM};">(>${(bench.benchmark_recall * 100).toFixed(0)}% recall on judged classes)</span></div>` +
-      `<div style="font-size:12px;margin-bottom:12px;">` +
-      Object.entries(bench.judged_classes).map(([cls, r]) =>
-        `<span style="display:inline-block;margin-right:16px;">` +
-        `<span style="font-family:${MONO};font-weight:600;">${cls}</span> ` +
-        `<span style="color:${r.passed ? "#0F766E" : "#C1121F"};font-weight:600;">${pc(r.recall)}</span>` +
-        `</span>`).join("") + `</div>`;
+    // Verdict centred over the three class cards it summarises.
+    out += `<div style="text-align:center;margin-bottom:14px;">` +
+      `<div style="font-size:17px;font-weight:700;color:${ok ? "#0F766E" : "#C1121F"};">` +
+      `Benchmark: ${ok ? "PASS" : "FAIL"}</div>` +
+      `<div style="font-size:12px;color:${TEXT_DIM};margin-top:2px;">` +
+      `Greater than ${(bench.benchmark_recall * 100).toFixed(0)}% recall on all three judged classes` +
+      `</div></div>`;
+
+    // One card per judged class, left to right. The metric order inside each
+    // card is deliberate and is the same in all three:
+    //   recall            PRIMARY. What the rule is written against and what
+    //                     the thresholds were calibrated for.
+    //   balanced accuracy SUPPORTING. The defensible reading of the
+    //                     organiser's word "accuracy": it corrects for the
+    //                     class imbalance and cannot be gamed by silence.
+    //   precision, F1     TRANSPARENCY. Stated rather than omitted. Low
+    //                     precision on the two military classes is the direct
+    //                     cost of buying recall margin, and a reader finding
+    //                     it unannounced is worse than us naming it.
+    //   accuracy          DE-EMPHASISED, with its trivial baseline beside it.
+    //                     Included for completeness only; a model predicting
+    //                     nothing already scores the baseline.
+    const cards = Object.entries(bench.judged_classes).map(([cls, r]) => {
+      const m = perClass[cls] ?? {};
+      const line = (label, value, opts = {}) =>
+        `<div style="display:flex;justify-content:space-between;align-items:baseline;` +
+        `padding:3px 0;${opts.rule ? `border-top:1px solid ${GRID};margin-top:5px;padding-top:6px;` : ""}">` +
+        `<span style="font-size:11px;color:${TEXT_DIM};">${label}</span>` +
+        `<span style="font-family:${MONO};font-size:${opts.size ?? 12}px;` +
+        `font-weight:${opts.weight ?? 600};color:${opts.colour ?? TEXT};">${value}</span></div>`;
+
+      return `<div style="flex:1 1 0;min-width:0;background:${PANEL};border:1px solid ${GRID};` +
+        `border-radius:6px;padding:12px 14px;">` +
+        `<div style="font-family:${MONO};font-size:14px;font-weight:700;color:${TEXT};` +
+        `margin-bottom:8px;overflow-wrap:anywhere;">${cls}</div>` +
+        line("Recall (primary)", pc(r.recall), { size: 20, colour: r.passed ? "#0F766E" : "#C1121F" }) +
+        line("Balanced accuracy", m.balanced_accuracy === undefined ? "n/a" : pc(m.balanced_accuracy)) +
+        line("Precision", m.precision === undefined ? "n/a" : pc(m.precision), { rule: true, weight: 400 }) +
+        line("F1", m["f1-score"] === undefined ? "n/a" : pc(m["f1-score"]), { weight: 400 }) +
+        line("Accuracy", m.accuracy === undefined ? "n/a" : pc(m.accuracy),
+              { rule: true, weight: 400, colour: TEXT_DIM }) +
+        (m.trivial_accuracy === undefined ? "" :
+          `<div style="font-size:10px;color:${TEXT_DIM};line-height:1.4;margin-top:2px;">` +
+          `predicting nothing already scores ${pc(m.trivial_accuracy)}</div>`) +
+        `</div>`;
+    }).join("");
+
+    out += `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">${cards}</div>` +
+      `<div style="font-size:11px;color:${TEXT_DIM};line-height:1.5;margin-bottom:16px;">` +
+      `Recall is the primary figure: it is the metric the rule names and the one the per-class ` +
+      `thresholds were calibrated against. Balanced accuracy supports it and is the reading of ` +
+      `"accuracy" that survives the class imbalance. Precision and F1 are shown for transparency, ` +
+      `not because they are judged. Plain accuracy is included for completeness and should not be ` +
+      `leaned on, for the reason printed under each value.</div>`;
   }
 
   // src/config.py:TIERS, in its declared order.
@@ -439,17 +495,29 @@ export function summaryHtml(perf) {
       `<td style="text-align:right;font-family:${MONO};font-weight:700;color:#0F766E;">${pc(cvj.accuracy)}</td></tr>`);
   }
 
-  out += `<div style="font-size:11px;color:${TEXT_DIM};letter-spacing:0.04em;margin-bottom:4px;">BY CATEGORY</div>` +
+  // Analysis first, then the table, then the source. Same order in every
+  // section on this page, so a reader always knows where to look.
+  out += `<div style="font-size:14px;font-weight:700;color:${TEXT};margin-bottom:6px;">By category</div>` +
+    `<div style="font-size:11px;color:${TEXT_DIM};line-height:1.5;margin-bottom:8px;">` +
+    `The two secondary scorecard metrics live here. Coarse-tier accuracy asks whether a window ` +
+    `was placed in the right category, so a radar window called FHSS is still correct at this ` +
+    `level. Comms versus jamming accuracy is the discrimination the competition weighs most ` +
+    `heavily, and its false-alarm rate is the share of civilian traffic wrongly flagged hostile.` +
+    `</div>` +
     `<table style="width:100%;border-collapse:collapse;font-size:12px;table-layout:auto;">` +
     `<thead><tr><th style="text-align:left;">Category</th><th style="text-align:left;">Classes</th>` +
     `<th style="text-align:right;">Tier recall</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
 
   if (coarse) {
-    out += `<div style="font-size:11px;color:${TEXT_DIM};margin-top:8px;">` +
-      `Coarse tier accuracy <strong style="color:${TEXT};">${pc(coarse.accuracy)}</strong>` +
-      (cvj ? ` &nbsp;·&nbsp; CEMA evaluated over ${cvj.n_evaluated.toLocaleString()} windows` : "") +
+    out += `<div style="font-size:12px;color:${TEXT};margin-top:8px;">` +
+      `Coarse-tier accuracy <strong>${pc(coarse.accuracy)}</strong>` +
+      (cvj ? ` &nbsp;·&nbsp; comms versus jamming accuracy <strong>${pc(cvj.accuracy)}</strong>` +
+              ` over ${cvj.n_evaluated.toLocaleString()} windows` : "") +
       `</div>`;
   }
+  out += `<div style="font-size:11px;color:${TEXT_DIM};margin-top:8px;border-top:1px solid ${GRID};padding-top:6px;">` +
+    `Source: evals/scorecard.json, written by <code>python -m src.evaluate</code>. ` +
+    `Tiers as declared in src/config.py TIERS.</div>`;
   return out;
 }
 
@@ -562,8 +630,10 @@ export function provenanceHtml(perf) {
   const ds = perf.dataset;
   const smoke = ds.total_windows < 5000;
   const colour = smoke ? "#B45309" : TEXT_DIM;
-  return `<div style="background:${smoke ? "#FDF6EC" : PANEL};border:1px solid ${smoke ? "#B45309" : GRID};` +
+  return `<div style="background:${smoke ? "#FDF6EC" : PANEL_MUTED};border:1px solid ${smoke ? "#B45309" : GRID};` +
     `padding:12px 14px;border-radius:6px;color:${colour};font-size:12px;line-height:1.6;">` +
+    `<div style="font-size:14px;font-weight:700;color:${smoke ? "#B45309" : TEXT};margin-bottom:4px;">` +
+    `How these numbers were produced</div>` +
     (smoke ? `<strong>These numbers come from a ${ds.total_windows}-window dataset: a smoke run, not the full dataset.</strong><br>` : "") +
     `Measured by the Python evaluation at build time on the held-out test split ` +
     `(${ds.test_windows} of ${ds.total_windows} windows, test_frac ${ds.test_frac}, seed ${ds.seed}). ` +
