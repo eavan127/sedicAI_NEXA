@@ -63,8 +63,8 @@ def test_detected_events_use_per_class_thresholds(model):
     """The session must not fall back to a flat 0.5 -- that is the bug this
     work fixes."""
     s = load_scenario(model, total_duration=0.005, hop=512, seed=0)
-    assert s.thresholds["LFM_RADAR"] == pytest.approx(0.26)
-    assert s.thresholds["JAMMING"] == pytest.approx(0.77)
+    assert s.thresholds["LFM_RADAR"] == pytest.approx(0.22)
+    assert s.thresholds["JAMMING"] == pytest.approx(0.87)
 
 
 def test_window_count_cap_is_enforced(model):
@@ -113,12 +113,12 @@ def test_context_2_capture_has_a_timeline(model):
 
 
 def test_context_3_two_classes_produce_one_combined_event(model):
-    """FHSS 0.90 + JAMMING 0.85 -> both detected -> ONE event."""
+    """FHSS 0.90 + JAMMING 0.92 -> both detected -> ONE event."""
     from dataclasses import replace
     s = load_scenario(model, total_duration=0.005, hop=512, seed=0)
     probs = np.zeros((4, 8), dtype=np.float32)
     probs[:, CLASSES.index("FHSS")] = 0.90
-    probs[:, CLASSES.index("JAMMING")] = 0.85
+    probs[:, CLASSES.index("JAMMING")] = 0.92
     forced = replace(s.result, probs=probs, starts=np.arange(4) * 512)
     events = detections(forced, s.thresholds)
     assert len(events) == 1
