@@ -1,1 +1,1 @@
-{"snr_db": 10, "window_len": 512, "classes": {"BPSK": {"file": "civilian_BPSK.bin", "n": 22}, "QPSK": {"file": "civilian_QPSK.bin", "n": 22}, "16QAM": {"file": "civilian_16QAM.bin", "n": 22}, "64QAM": {"file": "civilian_64QAM.bin", "n": 22}}}
+{"snr_db": 10, "window_len": 512, "classes": {"BPSK": {"file": "civilian_BPSK.bin", "n": 400}, "QPSK": {"file": "civilian_QPSK.bin", "n": 400}, "16QAM": {"file": "civilian_16QAM.bin", "n": 400}, "64QAM": {"file": "civilian_64QAM.bin", "n": 400}}}

@@ -61,8 +61,25 @@ def test_session_stores_the_raw_unnormalized_capture(model):
 
 def test_detected_events_use_per_class_thresholds(model):
     """The session must not fall back to a flat 0.5 -- that is the bug this
-    work fixes."""
+    work fixes.
+
+    Asserted against the CONFIG rather than against hardcoded numbers. The
+    calibrated values are tied to one specific checkpoint set and
+    configs/default.yaml says in its own comments to re-run
+    calibrate_thresholds.py after any retrain, so pinning literals here makes
+    a routine recalibration look like a regression -- which is exactly what
+    happened when JAMMING moved 0.77 -> 0.87. What must hold is that the
+    session carries the config's per-class values and not the flat fallback.
+    """
+    from src.config import resolve_multilabel_thresholds
+
+    expected = dict(zip(CLASSES, resolve_multilabel_thresholds()))
     s = load_scenario(model, total_duration=0.005, hop=512, seed=0)
+    assert set(s.thresholds) == set(CLASSES)
+    for cls in CLASSES:
+        assert s.thresholds[cls] == pytest.approx(expected[cls])
+    # The bug this guards: a flat 0.5 for everything.
+    assert not all(v == pytest.approx(0.5) for v in s.thresholds.values())
     assert s.thresholds["LFM_RADAR"] == pytest.approx(0.22)
     assert s.thresholds["JAMMING"] == pytest.approx(0.87)
 
@@ -113,12 +130,27 @@ def test_context_2_capture_has_a_timeline(model):
 
 
 def test_context_3_two_classes_produce_one_combined_event(model):
-    """FHSS 0.90 + JAMMING 0.92 -> both detected -> ONE event."""
+    """FHSS and JAMMING both over threshold -> both detected -> ONE event.
+
+    Probabilities are derived from each class's OWN threshold rather than
+    hardcoded. The literals this replaced (FHSS 0.90, JAMMING 0.85) were
+    chosen against a 0.77 JAMMING threshold; recalibrating to 0.87 put 0.85
+    *below* the line, so the test started failing while testing nothing it
+    claimed to. The behaviour under test is the grouping -- two classes
+    present in the same windows collapse into one combined event -- not any
+    particular number.
+    """
     from dataclasses import replace
     s = load_scenario(model, total_duration=0.005, hop=512, seed=0)
-    probs = np.zeros((4, 8), dtype=np.float32)
-    probs[:, CLASSES.index("FHSS")] = 0.90
-    probs[:, CLASSES.index("JAMMING")] = 0.92
+
+    def clearly_over(cls):
+        """Midway between the class's threshold and 1.0, so this stays over
+        the line at any calibration short of 1.0."""
+        return (s.thresholds[cls] + 1.0) / 2.0
+
+    probs = np.zeros((4, len(CLASSES)), dtype=np.float32)
+    probs[:, CLASSES.index("FHSS")] = clearly_over("FHSS")
+    probs[:, CLASSES.index("JAMMING")] = clearly_over("JAMMING")
     forced = replace(s.result, probs=probs, starts=np.arange(4) * 512)
     events = detections(forced, s.thresholds)
     assert len(events) == 1

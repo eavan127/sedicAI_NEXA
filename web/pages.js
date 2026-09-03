@@ -269,10 +269,39 @@ export function scorecardHtml(perf) {
       `<td style="text-align:right;font-family:${MONO};color:${TEXT_DIM};">${m.support}</td></tr>`;
   }).join("");
 
-  return `<table style="width:100%;border-collapse:collapse;font-size:12px;">` +
+  // The ensemble's own judged-class figures, shown SEPARATELY rather than
+  // merged into the table above -- the two come from different models. The
+  // table is src.evaluate's output, which defaults to the single checkpoint;
+  // this is scripts/train_ensemble.py's. Putting both in one column with no
+  // way to tell which was which is the provenance error this page exists to
+  // avoid.
+  let ensembleBlock = "";
+  const ens = perf.ensemble_scorecard;
+  if (ens && ens.ensemble) {
+    const cells = Object.entries(ens.ensemble).map(([cls, r]) => {
+      const prec = ens.ensemble_precision?.[cls];
+      const pass = r * 100 >= bar;
+      return `<tr><td style="font-family:${MONO};font-weight:600;">${cls}</td>` +
+        `<td style="text-align:right;font-family:${MONO};font-weight:600;color:${pass ? "#0F766E" : "#C1121F"};">${(r * 100).toFixed(1)}%</td>` +
+        `<td style="text-align:right;font-family:${MONO};color:${TEXT_DIM};">${prec === undefined ? "—" : (prec * 100).toFixed(1) + "%"}</td></tr>`;
+    }).join("");
+    ensembleBlock =
+      `<div style="margin-top:16px;padding-top:12px;border-top:1px solid ${GRID};">` +
+      `<div style="color:${TEXT_DIM};font-size:11px;margin-bottom:6px;">` +
+      `${ens.n_models}-MODEL ENSEMBLE — judged classes only, from evals/ensemble_scorecard.json. ` +
+      `This is what the team submits; the table above is a different model.</div>` +
+      `<table style="width:100%;border-collapse:collapse;font-size:12px;">` +
+      `<thead><tr><th style="text-align:left;">Class</th><th style="text-align:right;">Recall</th>` +
+      `<th style="text-align:right;">Precision</th></tr></thead><tbody>${cells}</tbody></table></div>`;
+  }
+
+  return `<div style="color:${TEXT_DIM};font-size:11px;margin-bottom:8px;">` +
+    `Source: ${perf.scorecard_source ?? "evals/scorecard.json"}</div>` +
+    `<table style="width:100%;border-collapse:collapse;font-size:12px;">` +
     `<thead><tr><th style="text-align:left;">Class</th><th style="text-align:right;">Recall</th>` +
     `<th style="text-align:right;">Precision</th><th style="text-align:right;">F1</th>` +
     `<th style="text-align:right;">Support</th></tr></thead><tbody>${rows}</tbody></table>` +
+    ensembleBlock +
     `<div style="color:${TEXT_DIM};font-size:11px;margin-top:8px;">` +
     `Per-window, ungated and unsmoothed. The RF Replay smoothing toggle, the NOISE_FLOOR ` +
     `gate and the event hold never reach this page. Pass mark is ${bar.toFixed(0)}% recall on the ` +
@@ -291,8 +320,10 @@ export function provenanceHtml(perf) {
     `padding:12px 14px;border-radius:6px;color:${colour};font-size:12px;line-height:1.6;">` +
     (smoke ? `<strong>These numbers come from a ${ds.total_windows}-window dataset — a smoke run, not the full dataset.</strong><br>` : "") +
     `Measured by the Python evaluation at build time on the held-out test split ` +
-    `(${ds.test_windows} of ${ds.total_windows} windows, test_frac ${ds.test_frac}, seed ${ds.seed}) ` +
-    `using ${perf.model_label}. Generated ${perf.generated}. ` +
+    `(${ds.test_windows} of ${ds.total_windows} windows, test_frac ${ds.test_frac}, seed ${ds.seed}). ` +
+    `The recall-vs-SNR breakdown below uses ${perf.breakdown_model ?? perf.model_label}; ` +
+    `the scorecard is whatever src.evaluate last wrote — see its own source line. ` +
+    `Generated ${perf.generated}. ` +
     `Rebuild with <code>python -m src.evaluate</code> then <code>python web/build.py</code> after any retrain.</div>`;
 }
 

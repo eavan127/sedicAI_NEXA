@@ -15,7 +15,7 @@ import { CLASSES } from "./model.js";
 // --ensemble after any retrain and update this table with it.
 export const THRESHOLDS = {
   BPSK: 0.33, QPSK: 0.265, "16QAM": 0.265, "64QAM": 0.275,
-  LFM_RADAR: 0.26, FHSS: 0.27, JAMMING: 0.77, NOISE_FLOOR: 0.265,
+  LFM_RADAR: 0.22, FHSS: 0.25, JAMMING: 0.87, NOISE_FLOOR: 0.265,
 };
 
 // src/config.py:TIERS
