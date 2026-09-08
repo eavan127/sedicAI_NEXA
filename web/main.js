@@ -6,7 +6,7 @@ import {
 import { drawConsole } from "./console.js";
 import { eventRows, headerLine, latestBlock, printHeaderHtml, statusBlock } from "./panels.js";
 import {
-  breakdownTableHtml, drawAttention, drawBreakdown, drawPerClassRecall,
+  breakdownTableHtml, drawAttention, drawBreakdown, animateBreakdown, drawPerClassRecall,
   denseQamHtml, modelCardHtml, probabilityHtml, provenanceHtml, scorecardHtml, summaryHtml,
   windowMetadataHtml,
 } from "./pages.js";
@@ -349,7 +349,7 @@ async function renderPerformance() {
   el("summaryBox").innerHTML = summaryHtml(perfData);
   box.innerHTML = scorecardHtml(perfData);
   drawPerClassRecall(el("recallBarCanvas"), perfData);
-  drawBreakdown(breakdownCanvas, perfData);
+  animateBreakdown(breakdownCanvas, perfData);
   el("breakdownTable").innerHTML = breakdownTableHtml(perfData);
   el("denseQamBox").innerHTML = denseQamHtml(perfData);
 

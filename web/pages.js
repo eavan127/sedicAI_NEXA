@@ -649,8 +649,15 @@ export function provenanceHtml(perf) {
  * Colour carries CLASS, lightness carries SINGLE vs MULTI: eight classes
  * drawn twice is sixteen lines, and colouring by tier gave those only four
  * colours -- the four civilian classes became indistinguishable and a
- * class's own two curves shared a colour too. */
-export function drawBreakdown(canvas, perf) {
+ * class's own two curves shared a colour too.
+ *
+ * `revealMs` (default Infinity = fully drawn) lets a caller reveal the
+ * sixteen series one at a time, point by point, instead of all at once --
+ * see animateBreakdown() below, which drives this via requestAnimationFrame.
+ * `revealOpts.lineMs` is how long one series takes to grow in; `staggerMs`
+ * is the delay before the next series starts. */
+export function drawBreakdown(canvas, perf, revealMs = Infinity, revealOpts = {}) {
+  const { lineMs = 450, staggerMs = 140 } = revealOpts;
   const cssW = canvas.clientWidth || canvas.parentElement?.clientWidth || 800;
   const cssH = 380;
   const dpr = window.devicePixelRatio || 1;
@@ -687,7 +694,8 @@ export function drawBreakdown(canvas, perf) {
   ctx.fillText("recall (%)", 0, 0);
   ctx.restore();
 
-  // benchmark line
+  // benchmark line -- part of the static frame, always fully drawn so the
+  // 80% reference is visible from the very first frame of the reveal.
   const by = yOf(perf.benchmark_recall * 100);
   ctx.save();
   ctx.setLineDash([2, 3]);
@@ -697,15 +705,27 @@ export function drawBreakdown(canvas, perf) {
   ctx.restore();
 
   let legendY = T + 4;
+  let seriesIndex = 0;
   ctx.textAlign = "left";
   for (const cls of perf.classes) {
     const base = CLASS_COLOR[cls] ?? TEXT_DIM;
     for (const group of ["single", "multi"]) {
       const colour = group === "single" ? base : lighten(base, 0.45);
       const series = perf.breakdown.recall[group]?.[cls] ?? {};
-      const pts = bins.filter(s => series[s] !== null && series[s] !== undefined)
-                       .map(s => [xOf(s), yOf(series[s])]);
-      if (!pts.length) continue;
+      const allPts = bins.filter(s => series[s] !== null && series[s] !== undefined)
+                          .map(s => [xOf(s), yOf(series[s])]);
+      if (!allPts.length) continue;
+
+      // this series' own local progress: 0 until its staggered start time,
+      // 1 once it has had lineMs to finish growing in.
+      const segStart = seriesIndex * staggerMs;
+      const localFrac = Math.min(Math.max((revealMs - segStart) / lineMs, 0), 1);
+      seriesIndex++;
+      if (localFrac <= 0) continue;             // not this series' turn yet
+
+      const shown = Math.max(1, Math.ceil(allPts.length * localFrac));
+      const pts = allPts.slice(0, shown);
+
       ctx.save();
       if (group === "multi") ctx.setLineDash([4, 3]);
       ctx.strokeStyle = colour;
@@ -717,13 +737,17 @@ export function drawBreakdown(canvas, perf) {
       ctx.fillStyle = colour;
       for (const [x, y] of pts) { ctx.beginPath(); ctx.arc(x, y, 2, 0, 7); ctx.fill(); }
 
-      ctx.strokeStyle = colour;
+      // legend entry fades/pops in alongside its line rather than sitting
+      // there pre-drawn for a series that hasn't appeared yet.
       ctx.save();
+      ctx.globalAlpha = localFrac;
+      ctx.strokeStyle = colour;
       if (group === "multi") ctx.setLineDash([4, 3]);
       ctx.beginPath(); ctx.moveTo(L + w + 10, legendY); ctx.lineTo(L + w + 24, legendY); ctx.stroke();
-      ctx.restore();
+      ctx.setLineDash([]);
       ctx.fillStyle = TEXT_DIM;
       ctx.fillText(`${cls}, ${group}`, L + w + 28, legendY);
+      ctx.restore();
       legendY += 11;
     }
   }
@@ -731,4 +755,23 @@ export function drawBreakdown(canvas, perf) {
   ctx.strokeStyle = GRID;
   ctx.lineWidth = 1;
   ctx.strokeRect(L, T, w, h);
+
+  // true once every series has finished growing in -- animateBreakdown()
+  // uses this to know when to stop its requestAnimationFrame loop.
+  return revealMs >= seriesIndex * staggerMs + lineMs;
+}
+
+/** Runs drawBreakdown() on a rAF loop so the sixteen recall-vs-SNR lines
+ * grow in one at a time, point by point, instead of appearing all at once.
+ * Call this in place of drawBreakdown() wherever the chart is rendered for
+ * the video (main.js's renderPerformance()). Re-navigating to the
+ * Performance page re-triggers it, so it can simply be replayed for a
+ * fresh take without reloading the whole app. */
+export function animateBreakdown(canvas, perf, revealOpts = {}) {
+  const start = performance.now();
+  function frame(now) {
+    const done = drawBreakdown(canvas, perf, now - start, revealOpts);
+    if (!done) requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
 }
