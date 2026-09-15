@@ -6,8 +6,8 @@ import {
 import { drawConsole } from "./console.js";
 import { eventRows, headerLine, latestBlock, printHeaderHtml, statusBlock } from "./panels.js";
 import {
-  breakdownTableHtml, drawAttention, drawBreakdown, drawPerClassRecall,
-  modelCardHtml, probabilityHtml, provenanceHtml, scorecardHtml, summaryHtml,
+  breakdownTableHtml, drawAttention, drawBreakdown, animateBreakdown, drawPerClassRecall,
+  denseQamHtml, modelCardHtml, probabilityHtml, provenanceHtml, scorecardHtml, summaryHtml,
   windowMetadataHtml,
 } from "./pages.js";
 import { civilianWindows, drawConstellation } from "./constellation.js";
@@ -77,7 +77,7 @@ async function init() {
 }
 
 function modelLabel(which) {
-  return which === "ensemble" ? "5-model ensemble average" : "single checkpoint — best_model.pt";
+  return which === "ensemble" ? "5-model ensemble average" : "single checkpoint, best_model.pt";
 }
 
 /** Re-derives every panel from the cached raw result. Smoothing is a display
@@ -235,7 +235,7 @@ fileInput.addEventListener("change", async () => {
     const buf = await file.arrayBuffer();
     let raw = new Float32Array(buf);
     if (raw.length < 2) throw new Error(
-      "File contains no complex samples. Expected interleaved float32 I,Q,I,Q,... — at least 2 values.");
+      "File contains no complex samples. Expected interleaved float32 I,Q,I,Q,... with at least 2 values.");
     if (raw.length % 2) raw = raw.subarray(0, raw.length - 1);
     const n = raw.length / 2;
     if (n < WINDOW_LEN) throw new Error(
@@ -349,8 +349,9 @@ async function renderPerformance() {
   el("summaryBox").innerHTML = summaryHtml(perfData);
   box.innerHTML = scorecardHtml(perfData);
   drawPerClassRecall(el("recallBarCanvas"), perfData);
-  drawBreakdown(breakdownCanvas, perfData);
+  animateBreakdown(breakdownCanvas, perfData);
   el("breakdownTable").innerHTML = breakdownTableHtml(perfData);
+  el("denseQamBox").innerHTML = denseQamHtml(perfData);
 
   // The two figures src/evaluate.py wrote, shown as-is and captioned with
   // when they were produced.

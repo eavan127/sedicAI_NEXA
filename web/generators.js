@@ -263,7 +263,7 @@ function fromLibrary(className, length, library, rng) {
   const pool = library?.classes?.[className];
   if (!pool || !pool.length) {
     throw new Error(
-      `${className} has no generator and no library entry — civilian classes ` +
+      `${className} has no generator and no library entry. Civilian classes ` +
       `must be supplied from the dataset`);
   }
   const win = pool[0].re.length;

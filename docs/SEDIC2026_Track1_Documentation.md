@@ -7,7 +7,7 @@
 
 This document is the complete technical plan for attempting the SEDIC 2026 RF/Signal Track: an AI model that detects and classifies radio signals from raw IQ data into civilian modulation types, military/tactical signals (radar, frequency-hopping), and hostile jamming — evaluated at both clean (high-SNR) and noisy (low-SNR) conditions.
 
-**Known risk (stated up front, not buried):** the mandatory benchmark (>90% recall on Military/CEMA and Jamming classes) is measured against the organizer's own "Qualifier IQ Data Stream" — a file your team has not seen. Your training data for the military/jamming classes must be synthesized yourselves (no public dataset covers it), and there is no signal-processing expert available on your team's timeline to validate that synthetic data before submission. This document includes a self-QA methodology to partially mitigate that, but it does not eliminate the risk. Treat this as the single biggest go/no-go factor for this track.
+**Known risk (stated up front, not buried):** the mandatory benchmark (>80% recall on Military/CEMA and Jamming classes -- confirmed 2026-08-14, down from the original >90% announcement) is measured against the organizer's own "Qualifier IQ Data Stream" — a file your team has not seen. Your training data for the military/jamming classes must be synthesized yourselves (no public dataset covers it), and there is no signal-processing expert available on your team's timeline to validate that synthetic data before submission. This document includes a self-QA methodology to partially mitigate that, but it does not eliminate the risk. Treat this as the single biggest go/no-go factor for this track.
 
 ---
 
@@ -17,9 +17,9 @@ This document is the complete technical plan for attempting the SEDIC 2026 RF/Si
 |---|---|
 | Format | Online technical proof-of-concept, no live component in Phase 1 |
 | Mandatory classes | Civilian: BPSK, QPSK, 16QAM, 64QAM. Military/CEMA: Radar Pulses (LFM), FHSS bursts |
-| Bonus differentiator | Distinguishing standard comms vs. hostile jamming — but note: the Evaluation section explicitly folds Jamming into the >90% mandatory benchmark, so treat it as required, not optional |
+| Bonus differentiator | Distinguishing standard comms vs. hostile jamming — but note: the Evaluation section explicitly folds Jamming into the >80% mandatory benchmark, so treat it as required, not optional |
 | Conditions | Must work across high-SNR (clean) and low-SNR (faded/noisy) |
-| Submission package | Model source code, classification log & results (run on provided Qualifier IQ Data Stream), performance benchmark (>90% recall on Military/CEMA + Jamming), technical brief PDF, video demo (≤5 min, YouTube) |
+| Submission package | Model source code, classification log & results (run on provided Qualifier IQ Data Stream), performance benchmark (>80% recall on Military/CEMA + Jamming), technical brief PDF, video demo (≤5 min, YouTube) |
 | NOT required in Phase 1 | GUI, live demo station, poster, jury presentation — these are Phase 2 (Top 10 only) |
 
 ---
@@ -263,7 +263,13 @@ def augment_iq(arr):
 ## 9. Evaluation Plan
 
 Track and report:
-- **Per-class recall** (the exact metric named in the rules) — especially Military/CEMA and Jamming, must exceed 90%.
+- **Per-class recall** (the exact metric named in the rules) — especially Military/CEMA and Jamming, must exceed 80%.
+  Note the organiser's own wording says "accuracy"; the calibration in `configs/default.yaml` targets **recall**,
+  and the two differ materially here. Measured on the current ensemble, the judged classes pass on recall
+  (0.850 / 0.828 / 0.844), binary accuracy (0.860 / 0.881 / 0.975) and balanced accuracy (0.856 / 0.860 / 0.922),
+  but would FAIL on F1 (0.659 / 0.688 / 0.913) or precision (0.538 / 0.589 / 0.995). Threshold tuning cannot
+  close that: the best achievable F1 is 0.751 / 0.743, still short of 0.80, and reaching it costs the recall
+  margin we currently pass on. Worth confirming the metric with the organisers.
 - **Confusion matrix** — reveals which classes get confused with which (e.g., is jamming being misclassified as noisy civilian signal?).
 - **Accuracy-vs-SNR curve** — standard AMC evaluation plot, plot accuracy (y-axis) against SNR bins (x-axis), one line per class or overall. This is expected content for your technical brief and poster.
 
@@ -337,7 +343,7 @@ for snr in snr_bins:
 
 | Person | Day 1 | Day 2 | Day 3 | Day 4 |
 |---|---|---|---|---|
-| **A** | Download RadioML; build LFM radar generator + spectrogram QA plots | Fix radar generator per QA findings; help merge full dataset | Help evaluate model; iterate if recall <90% on Military class | Package submission (code, log, benchmark) |
+| **A** | Download RadioML; build LFM radar generator + spectrogram QA plots | Fix radar generator per QA findings; help merge full dataset | Help evaluate model; iterate if recall <80% on Military class | Package submission (code, log, benchmark) |
 | **B** | Build FHSS generator + spectrogram QA plots | Fix FHSS generator; help merge dataset | Monitor training; tune class weights/hyperparameters | Finish technical brief |
 | **C** | Build jamming generator (barrage/tone/sweep) + spectrogram QA plots | Fix jamming generator; kick off real training run | Run inference on organizer's Qualifier IQ Data Stream → classification log | Generate accuracy-vs-SNR plots + confusion matrix for brief |
 | **D** | Set up training pipeline; dry-run on RadioML-only data to confirm pipeline works end-to-end | Continue pipeline; prep evaluation scripts | Start recording video demo | Final video edit; submit with buffer time before deadline |
@@ -350,7 +356,7 @@ for snr in snr_bins:
 
 - [ ] Model source code (PyTorch), clean and runnable
 - [ ] Classification log generated by running the model on the organizer's Qualifier IQ Data Stream
-- [ ] Performance benchmark: recall >90% on Military/CEMA and Jamming classes, documented
+- [ ] Performance benchmark: recall >80% on Military/CEMA and Jamming classes, documented
 - [ ] Technical brief PDF: dataset methodology (including synthetic generation + self-QA process), architecture, training details, confusion matrix, accuracy-vs-SNR curve, honest discussion of limitations
 - [ ] Video demonstration (≤5 min, uploaded to YouTube): explain architecture, show classification log results
 - [ ] All sources/licenses cited (RadioML/DeepSig, any reference literature used for parameter validation)

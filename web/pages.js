@@ -11,6 +11,9 @@ import { CLASSES, FS, WINDOW_LEN } from "./model.js";
 const PANEL = "#FFFFFF";
 const BG = "#F7F8F5";
 const GRID = "#DFE3D9";
+// Provenance sits on grey so it reads as apparatus rather than as a result:
+// every other block on the page is a white PANEL carrying numbers.
+const PANEL_MUTED = "#EFF1EC";
 const TEXT = "#121C27";
 const TEXT_DIM = "#5F6B72";
 const INSTRUMENT = "#42505C";
@@ -83,7 +86,7 @@ export function probabilityHtml(result, windowIndex) {
 
   return `<div style="background:${PANEL};padding:16px;border-radius:6px;">` +
     `<div style="color:${TEXT_DIM};font-size:11px;margin-bottom:10px;">` +
-    `independent probabilities &middot; multi-label &mdash; these do not sum to 100%</div>` +
+    `independent probabilities &middot; multi-label &middot; these do not sum to 100%</div>` +
     bars + noiseBlock + `</div>`;
 }
 
@@ -241,13 +244,13 @@ export function modelCardHtml(card, which) {
     `           ${card.classes.join(", ")}<br>` +
     `INPUT          (2, ${card.window_len})<br>` +
     `WINDOW         ${(card.window_len / card.fs * 1e6).toFixed(0)} µs @ ${(card.fs / 1e6).toFixed(1)} MHz<br>` +
-    `OUTPUT         sigmoid — multi-label, independent per class<br>` +
+    `OUTPUT         sigmoid, multi-label, independent per class<br>` +
     `POOLING        energy-gated attention<br>` +
     `SAMPLING       SNR-weighted, 10^(-SNR/20)<br>` +
-    `RUNTIME        onnxruntime-web (WASM) — exported from the .pt checkpoint<br>` +
+    `RUNTIME        onnxruntime-web (WASM), exported from the .pt checkpoint<br>` +
     `THRESHOLDS     per class<br>${thresholds}<br><br>` +
     `<span style="color:${TEXT_DIM};">Read from the checkpoint at build time, not hardcoded. ` +
-    `Describes what is running — not a claim that this architecture is the best performing.</span></div>`;
+    `Describes what is running. Not a claim that this architecture is the best performing.</span></div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -276,6 +279,8 @@ export function scorecardHtml(perf) {
       `<td style="font-family:${MONO};color:${isJudged ? TEXT : TEXT_DIM};font-weight:${isJudged ? 600 : 400};">` +
       `${cls}${isJudged ? ' <span style="font-size:10px;color:' + TEXT_DIM + ';">judged</span>' : ""}</td>` +
       `<td style="text-align:right;font-family:${MONO};color:${colour};font-weight:${isJudged ? 600 : 400};">${recall.toFixed(1)}%</td>` +
+      `<td style="text-align:right;font-family:${MONO};color:${TEXT_DIM};">` +
+      `${m.balanced_accuracy === undefined ? "n/a" : (m.balanced_accuracy * 100).toFixed(1) + "%"}</td>` +
       `<td style="text-align:right;font-family:${MONO};color:${TEXT_DIM};">${(m.precision * 100).toFixed(1)}%</td>` +
       `<td style="text-align:right;font-family:${MONO};color:${TEXT_DIM};">${(m["f1-score"] * 100).toFixed(1)}%</td>` +
       `<td style="text-align:right;font-family:${MONO};color:${TEXT_DIM};">${m.support}</td></tr>`;
@@ -295,29 +300,91 @@ export function scorecardHtml(perf) {
       const pass = r * 100 >= bar;
       return `<tr><td style="font-family:${MONO};font-weight:600;">${cls}</td>` +
         `<td style="text-align:right;font-family:${MONO};font-weight:600;color:${pass ? "#0F766E" : "#C1121F"};">${(r * 100).toFixed(1)}%</td>` +
-        `<td style="text-align:right;font-family:${MONO};color:${TEXT_DIM};">${prec === undefined ? "—" : (prec * 100).toFixed(1) + "%"}</td></tr>`;
+        `<td style="text-align:right;font-family:${MONO};color:${TEXT_DIM};">${prec === undefined ? "n/a" : (prec * 100).toFixed(1) + "%"}</td></tr>`;
     }).join("");
     ensembleBlock =
       `<div style="margin-top:16px;padding-top:12px;border-top:1px solid ${GRID};">` +
       `<div style="color:${TEXT_DIM};font-size:11px;margin-bottom:6px;">` +
-      `${ens.n_models}-MODEL ENSEMBLE — judged classes only, from evals/ensemble_scorecard.json. ` +
+      `${ens.n_models}-MODEL ENSEMBLE, judged classes only, from evals/ensemble_scorecard.json. ` +
       `This is what the team submits; the table above is a different model.</div>` +
       `<table style="width:100%;border-collapse:collapse;font-size:12px;">` +
       `<thead><tr><th style="text-align:left;">Class</th><th style="text-align:right;">Recall</th>` +
       `<th style="text-align:right;">Precision</th></tr></thead><tbody>${cells}</tbody></table></div>`;
   }
 
-  return `<div style="color:${TEXT_DIM};font-size:11px;margin-bottom:8px;">` +
-    `Source: ${perf.scorecard_source ?? "evals/scorecard.json"}</div>` +
+  return `<div style="color:${TEXT_DIM};font-size:11px;line-height:1.5;margin-bottom:8px;">` +
+    `Recall first, then balanced accuracy, then precision and F1 for transparency. Judged ` +
+    `classes are marked; the rest are mandatory to classify but are not measured against the ` +
+    `pass mark. Every figure is per window, ungated and unsmoothed, so the RF Replay smoothing ` +
+    `toggle, the NOISE_FLOOR gate and the event hold never reach this page.</div>` +
     `<table style="width:100%;border-collapse:collapse;font-size:12px;">` +
     `<thead><tr><th style="text-align:left;">Class</th><th style="text-align:right;">Recall</th>` +
+    `<th style="text-align:right;">Bal. acc.</th>` +
     `<th style="text-align:right;">Precision</th><th style="text-align:right;">F1</th>` +
     `<th style="text-align:right;">Support</th></tr></thead><tbody>${rows}</tbody></table>` +
     ensembleBlock +
-    `<div style="color:${TEXT_DIM};font-size:11px;margin-top:8px;">` +
-    `Per-window, ungated and unsmoothed. The RF Replay smoothing toggle, the NOISE_FLOOR ` +
-    `gate and the event hold never reach this page. Pass mark is ${bar.toFixed(0)}% recall on the ` +
-    `judged classes.</div>`;
+    `<div style="color:${TEXT_DIM};font-size:11px;margin-top:8px;border-top:1px solid ${GRID};padding-top:6px;">` +
+    `Source: ${perf.scorecard_source ?? "evals/scorecard.json"}. ` +
+    `Pass mark is ${bar.toFixed(0)}% recall on the judged classes.</div>`;
+}
+
+/** Dense-QAM order resolution: the ONE place on this page where a figure is
+ * event-level rather than per-window, so it is fenced off and labelled.
+ *
+ * Why it exists: the scorecard's 16QAM and 64QAM rows are each measuring
+ * "dense QAM detected, split by a coin flip". A single 512-sample window
+ * carries ~56 symbols, and the |C42| separation between the two
+ * constellations (0.680 vs 0.619) is smaller than the estimator's own spread
+ * at that count -- so the split is not something a better model fixes. The
+ * resolver pools |C42| ACROSS windows instead, which is why accuracy climbs
+ * with the window count below.
+ *
+ * DISPLAYS what src/measure.py measured (C42_POOLED_ACCURACY), the same way
+ * the rest of this page displays src.evaluate's output. Nothing recomputed. */
+export function denseQamHtml(perf) {
+  const dq = perf.dense_qam;
+  if (!dq || !dq.pooled_accuracy) return "";
+  const perWindow = perf.scorecard?.dense_qam_recall;
+
+  const counts = Object.keys(dq.pooled_accuracy).map(Number).sort((a, b) => a - b);
+  const rows = counts.map((n) => {
+    const acc = dq.pooled_accuracy[String(n)] * 100;
+    const usable = n >= dq.min_windows;
+    return `<tr>` +
+      `<td style="font-family:${MONO};color:${usable ? TEXT : TEXT_DIM};">${n} window${n === 1 ? "" : "s"}` +
+      `${usable ? "" : ' <span style="font-size:10px;">below minimum, refused</span>'}</td>` +
+      `<td style="text-align:right;font-family:${MONO};font-weight:${usable ? 600 : 400};` +
+      `color:${usable ? TEXT : TEXT_DIM};">${acc.toFixed(1)}%</td></tr>`;
+  }).join("");
+
+  const combined = perWindow
+    ? `<div style="color:${TEXT_DIM};font-size:11px;margin-bottom:8px;">` +
+      `Per-window, the model's combined dense-QAM recall, meaning did it notice some dense QAM was ` +
+      `present regardless of which it named, is ` +
+      `<span style="font-family:${MONO};color:${TEXT};">${(perWindow.recall * 100).toFixed(1)}%</span> ` +
+      `over ${perWindow.n_evaluated.toLocaleString()} windows. Naming which of the two is the part ` +
+      `that needs pooling.</div>`
+    : "";
+
+  return `<div style="color:${TEXT_DIM};font-size:11px;line-height:1.5;margin-bottom:8px;">` +
+    `Event level, not per window, and not part of the judged benchmark. A 512-sample window ` +
+    `carries about 56 symbols, and the separation between the two constellations is smaller ` +
+    `than the estimator's own spread at that count, so the split is not something a better ` +
+    `model fixes. Pooling across windows is what resolves it.</div>` +
+    combined +
+    `<table style="width:100%;border-collapse:collapse;font-size:12px;">` +
+    `<thead><tr><th style="text-align:left;">Windows pooled</th>` +
+    `<th style="text-align:right;">16QAM vs 64QAM accuracy</th></tr></thead>` +
+    `<tbody>${rows}</tbody></table>` +
+    `<div style="color:${TEXT_DIM};font-size:11px;margin-top:8px;border-top:1px solid ${GRID};padding-top:6px;">` +
+    `Source: src/measure.py C42_POOLED_ACCURACY. ` +
+    `Measured at SNR &ge; ${dq.min_snr_db} dB, the regime the ${dq.c42_boundary} boundary was ` +
+    `calibrated for. Below that the channel pulls |C42| toward zero and the resolver ` +
+    `<strong>refuses to decide rather than guessing</strong>, so on low-SNR captures this ` +
+    `table does not apply and no order is reported. Fewer than ${dq.min_windows} windows is ` +
+    `also refused. Pooling fixes the C42 estimator only; averaging the model's own 16QAM/64QAM ` +
+    `probabilities stays at chance however many windows are used, because that error is a bias ` +
+    `rather than noise.</div>`;
 }
 
 /** The dashboard summary from performance.py:_build_dashboard -- benchmark
@@ -340,15 +407,60 @@ export function summaryHtml(perf) {
 
   if (bench) {
     const ok = bench.passed;
-    out += `<div style="font-size:14px;font-weight:700;color:${ok ? "#0F766E" : "#C1121F"};margin-bottom:6px;">` +
-      `Benchmark: ${ok ? "PASS" : "FAIL"} ` +
-      `<span style="font-weight:400;color:${TEXT_DIM};">(>${(bench.benchmark_recall * 100).toFixed(0)}% recall on judged classes)</span></div>` +
-      `<div style="font-size:12px;margin-bottom:12px;">` +
-      Object.entries(bench.judged_classes).map(([cls, r]) =>
-        `<span style="display:inline-block;margin-right:16px;">` +
-        `<span style="font-family:${MONO};font-weight:600;">${cls}</span> ` +
-        `<span style="color:${r.passed ? "#0F766E" : "#C1121F"};font-weight:600;">${pc(r.recall)}</span>` +
-        `</span>`).join("") + `</div>`;
+    // Verdict centred over the three class cards it summarises.
+    out += `<div style="text-align:center;margin-bottom:14px;">` +
+      `<div style="font-size:17px;font-weight:700;color:${ok ? "#0F766E" : "#C1121F"};">` +
+      `Benchmark: ${ok ? "PASS" : "FAIL"}</div>` +
+      `<div style="font-size:12px;color:${TEXT_DIM};margin-top:2px;">` +
+      `Greater than ${(bench.benchmark_recall * 100).toFixed(0)}% recall on all three judged classes` +
+      `</div></div>`;
+
+    // One card per judged class, left to right. The metric order inside each
+    // card is deliberate and is the same in all three:
+    //   recall            PRIMARY. What the rule is written against and what
+    //                     the thresholds were calibrated for.
+    //   balanced accuracy SUPPORTING. The defensible reading of the
+    //                     organiser's word "accuracy": it corrects for the
+    //                     class imbalance and cannot be gamed by silence.
+    //   precision, F1     TRANSPARENCY. Stated rather than omitted. Low
+    //                     precision on the two military classes is the direct
+    //                     cost of buying recall margin, and a reader finding
+    //                     it unannounced is worse than us naming it.
+    //   accuracy          DE-EMPHASISED, with its trivial baseline beside it.
+    //                     Included for completeness only; a model predicting
+    //                     nothing already scores the baseline.
+    const cards = Object.entries(bench.judged_classes).map(([cls, r]) => {
+      const m = perClass[cls] ?? {};
+      const line = (label, value, opts = {}) =>
+        `<div style="display:flex;justify-content:space-between;align-items:baseline;` +
+        `padding:3px 0;${opts.rule ? `border-top:1px solid ${GRID};margin-top:5px;padding-top:6px;` : ""}">` +
+        `<span style="font-size:11px;color:${TEXT_DIM};">${label}</span>` +
+        `<span style="font-family:${MONO};font-size:${opts.size ?? 12}px;` +
+        `font-weight:${opts.weight ?? 600};color:${opts.colour ?? TEXT};">${value}</span></div>`;
+
+      return `<div style="flex:1 1 0;min-width:0;background:${PANEL};border:1px solid ${GRID};` +
+        `border-radius:6px;padding:12px 14px;">` +
+        `<div style="font-family:${MONO};font-size:14px;font-weight:700;color:${TEXT};` +
+        `margin-bottom:8px;overflow-wrap:anywhere;">${cls}</div>` +
+        line("Recall (primary)", pc(r.recall), { size: 20, colour: r.passed ? "#0F766E" : "#C1121F" }) +
+        line("Balanced accuracy", m.balanced_accuracy === undefined ? "n/a" : pc(m.balanced_accuracy)) +
+        line("Precision", m.precision === undefined ? "n/a" : pc(m.precision), { rule: true, weight: 400 }) +
+        line("F1", m["f1-score"] === undefined ? "n/a" : pc(m["f1-score"]), { weight: 400 }) +
+        line("Accuracy", m.accuracy === undefined ? "n/a" : pc(m.accuracy),
+              { rule: true, weight: 400, colour: TEXT_DIM }) +
+        (m.trivial_accuracy === undefined ? "" :
+          `<div style="font-size:10px;color:${TEXT_DIM};line-height:1.4;margin-top:2px;">` +
+          `predicting nothing already scores ${pc(m.trivial_accuracy)}</div>`) +
+        `</div>`;
+    }).join("");
+
+    out += `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">${cards}</div>` +
+      `<div style="font-size:11px;color:${TEXT_DIM};line-height:1.5;margin-bottom:16px;">` +
+      `Recall is the primary figure: it is the metric the rule names and the one the per-class ` +
+      `thresholds were calibrated against. Balanced accuracy supports it and is the reading of ` +
+      `"accuracy" that survives the class imbalance. Precision and F1 are shown for transparency, ` +
+      `not because they are judged. Plain accuracy is included for completeness and should not be ` +
+      `leaned on, for the reason printed under each value.</div>`;
   }
 
   // src/config.py:TIERS, in its declared order.
@@ -368,7 +480,7 @@ export function summaryHtml(perf) {
       `<td style="color:${TEXT_DIM};font-family:${MONO};font-size:11px;padding:4px 12px 4px 0;">` +
       present.map(c => `${c} ${(perClass[c].recall * 100).toFixed(0)}%`).join(", ") + `</td>` +
       `<td style="text-align:right;font-family:${MONO};font-weight:600;">` +
-      (rec === undefined || rec === null ? "—" : pc(rec)) + `</td></tr>`);
+      (rec === undefined || rec === null ? "n/a" : pc(rec)) + `</td></tr>`);
   }
 
   if (cvj) {
@@ -378,22 +490,34 @@ export function summaryHtml(perf) {
     rows.push(
       `<tr><td style="font-weight:600;padding:4px 12px 4px 0;">CEMA</td>` +
       `<td style="color:${TEXT_DIM};font-family:${MONO};font-size:11px;padding:4px 12px 4px 0;">` +
-      `comms vs hostile — jamming recall ${pc(cvj.jamming_recall)}, ` +
+      `comms vs hostile, jamming recall ${pc(cvj.jamming_recall)}, ` +
       `false alarm ${(cvj.false_alarm_rate * 100).toFixed(2)}%</td>` +
       `<td style="text-align:right;font-family:${MONO};font-weight:700;color:#0F766E;">${pc(cvj.accuracy)}</td></tr>`);
   }
 
-  out += `<div style="font-size:11px;color:${TEXT_DIM};letter-spacing:0.04em;margin-bottom:4px;">BY CATEGORY</div>` +
+  // Analysis first, then the table, then the source. Same order in every
+  // section on this page, so a reader always knows where to look.
+  out += `<div style="font-size:14px;font-weight:700;color:${TEXT};margin-bottom:6px;">By category</div>` +
+    `<div style="font-size:11px;color:${TEXT_DIM};line-height:1.5;margin-bottom:8px;">` +
+    `The two secondary scorecard metrics live here. Coarse-tier accuracy asks whether a window ` +
+    `was placed in the right category, so a radar window called FHSS is still correct at this ` +
+    `level. Comms versus jamming accuracy is the discrimination the competition weighs most ` +
+    `heavily, and its false-alarm rate is the share of civilian traffic wrongly flagged hostile.` +
+    `</div>` +
     `<table style="width:100%;border-collapse:collapse;font-size:12px;table-layout:auto;">` +
     `<thead><tr><th style="text-align:left;">Category</th><th style="text-align:left;">Classes</th>` +
     `<th style="text-align:right;">Tier recall</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
 
   if (coarse) {
-    out += `<div style="font-size:11px;color:${TEXT_DIM};margin-top:8px;">` +
-      `Coarse tier accuracy <strong style="color:${TEXT};">${pc(coarse.accuracy)}</strong>` +
-      (cvj ? ` &nbsp;·&nbsp; CEMA evaluated over ${cvj.n_evaluated.toLocaleString()} windows` : "") +
+    out += `<div style="font-size:12px;color:${TEXT};margin-top:8px;">` +
+      `Coarse-tier accuracy <strong>${pc(coarse.accuracy)}</strong>` +
+      (cvj ? ` &nbsp;·&nbsp; comms versus jamming accuracy <strong>${pc(cvj.accuracy)}</strong>` +
+              ` over ${cvj.n_evaluated.toLocaleString()} windows` : "") +
       `</div>`;
   }
+  out += `<div style="font-size:11px;color:${TEXT_DIM};margin-top:8px;border-top:1px solid ${GRID};padding-top:6px;">` +
+    `Source: evals/scorecard.json, written by <code>python -m src.evaluate</code>. ` +
+    `Tiers as declared in src/config.py TIERS.</div>`;
   return out;
 }
 
@@ -463,7 +587,7 @@ export function breakdownTableHtml(perf) {
   const b = perf.breakdown;
   if (!b?.recall) return "";
   const bins = perf.snr_bins;
-  const cell = v => v === null || v === undefined ? "—" : `${v.toFixed(0)}%`;
+  const cell = v => v === null || v === undefined ? "n/a" : `${v.toFixed(0)}%`;
 
   // performance.py's bd_summary opens by stating the model and how the test
   // split divides, so a reader knows how much each half of the table rests
@@ -506,13 +630,15 @@ export function provenanceHtml(perf) {
   const ds = perf.dataset;
   const smoke = ds.total_windows < 5000;
   const colour = smoke ? "#B45309" : TEXT_DIM;
-  return `<div style="background:${smoke ? "#FDF6EC" : PANEL};border:1px solid ${smoke ? "#B45309" : GRID};` +
+  return `<div style="background:${smoke ? "#FDF6EC" : PANEL_MUTED};border:1px solid ${smoke ? "#B45309" : GRID};` +
     `padding:12px 14px;border-radius:6px;color:${colour};font-size:12px;line-height:1.6;">` +
-    (smoke ? `<strong>These numbers come from a ${ds.total_windows}-window dataset — a smoke run, not the full dataset.</strong><br>` : "") +
+    `<div style="font-size:14px;font-weight:700;color:${smoke ? "#B45309" : TEXT};margin-bottom:4px;">` +
+    `How these numbers were produced</div>` +
+    (smoke ? `<strong>These numbers come from a ${ds.total_windows}-window dataset: a smoke run, not the full dataset.</strong><br>` : "") +
     `Measured by the Python evaluation at build time on the held-out test split ` +
     `(${ds.test_windows} of ${ds.total_windows} windows, test_frac ${ds.test_frac}, seed ${ds.seed}). ` +
     `The recall-vs-SNR breakdown below uses ${perf.breakdown_model ?? perf.model_label}; ` +
-    `the scorecard is whatever src.evaluate last wrote — see its own source line. ` +
+    `the scorecard is whatever src.evaluate last wrote; see its own source line. ` +
     `Generated ${perf.generated}. ` +
     `Rebuild with <code>python -m src.evaluate</code> then <code>python web/build.py</code> after any retrain.</div>`;
 }
@@ -523,8 +649,15 @@ export function provenanceHtml(perf) {
  * Colour carries CLASS, lightness carries SINGLE vs MULTI: eight classes
  * drawn twice is sixteen lines, and colouring by tier gave those only four
  * colours -- the four civilian classes became indistinguishable and a
- * class's own two curves shared a colour too. */
-export function drawBreakdown(canvas, perf) {
+ * class's own two curves shared a colour too.
+ *
+ * `revealMs` (default Infinity = fully drawn) lets a caller reveal the
+ * sixteen series one at a time, point by point, instead of all at once --
+ * see animateBreakdown() below, which drives this via requestAnimationFrame.
+ * `revealOpts.lineMs` is how long one series takes to grow in; `staggerMs`
+ * is the delay before the next series starts. */
+export function drawBreakdown(canvas, perf, revealMs = Infinity, revealOpts = {}) {
+  const { lineMs = 450, staggerMs = 140 } = revealOpts;
   const cssW = canvas.clientWidth || canvas.parentElement?.clientWidth || 800;
   const cssH = 380;
   const dpr = window.devicePixelRatio || 1;
@@ -561,7 +694,8 @@ export function drawBreakdown(canvas, perf) {
   ctx.fillText("recall (%)", 0, 0);
   ctx.restore();
 
-  // benchmark line
+  // benchmark line -- part of the static frame, always fully drawn so the
+  // 80% reference is visible from the very first frame of the reveal.
   const by = yOf(perf.benchmark_recall * 100);
   ctx.save();
   ctx.setLineDash([2, 3]);
@@ -571,15 +705,27 @@ export function drawBreakdown(canvas, perf) {
   ctx.restore();
 
   let legendY = T + 4;
+  let seriesIndex = 0;
   ctx.textAlign = "left";
   for (const cls of perf.classes) {
     const base = CLASS_COLOR[cls] ?? TEXT_DIM;
     for (const group of ["single", "multi"]) {
       const colour = group === "single" ? base : lighten(base, 0.45);
       const series = perf.breakdown.recall[group]?.[cls] ?? {};
-      const pts = bins.filter(s => series[s] !== null && series[s] !== undefined)
-                       .map(s => [xOf(s), yOf(series[s])]);
-      if (!pts.length) continue;
+      const allPts = bins.filter(s => series[s] !== null && series[s] !== undefined)
+                          .map(s => [xOf(s), yOf(series[s])]);
+      if (!allPts.length) continue;
+
+      // this series' own local progress: 0 until its staggered start time,
+      // 1 once it has had lineMs to finish growing in.
+      const segStart = seriesIndex * staggerMs;
+      const localFrac = Math.min(Math.max((revealMs - segStart) / lineMs, 0), 1);
+      seriesIndex++;
+      if (localFrac <= 0) continue;             // not this series' turn yet
+
+      const shown = Math.max(1, Math.ceil(allPts.length * localFrac));
+      const pts = allPts.slice(0, shown);
+
       ctx.save();
       if (group === "multi") ctx.setLineDash([4, 3]);
       ctx.strokeStyle = colour;
@@ -591,13 +737,17 @@ export function drawBreakdown(canvas, perf) {
       ctx.fillStyle = colour;
       for (const [x, y] of pts) { ctx.beginPath(); ctx.arc(x, y, 2, 0, 7); ctx.fill(); }
 
-      ctx.strokeStyle = colour;
+      // legend entry fades/pops in alongside its line rather than sitting
+      // there pre-drawn for a series that hasn't appeared yet.
       ctx.save();
+      ctx.globalAlpha = localFrac;
+      ctx.strokeStyle = colour;
       if (group === "multi") ctx.setLineDash([4, 3]);
       ctx.beginPath(); ctx.moveTo(L + w + 10, legendY); ctx.lineTo(L + w + 24, legendY); ctx.stroke();
-      ctx.restore();
+      ctx.setLineDash([]);
       ctx.fillStyle = TEXT_DIM;
-      ctx.fillText(`${cls} — ${group}`, L + w + 28, legendY);
+      ctx.fillText(`${cls}, ${group}`, L + w + 28, legendY);
+      ctx.restore();
       legendY += 11;
     }
   }
@@ -605,4 +755,23 @@ export function drawBreakdown(canvas, perf) {
   ctx.strokeStyle = GRID;
   ctx.lineWidth = 1;
   ctx.strokeRect(L, T, w, h);
+
+  // true once every series has finished growing in -- animateBreakdown()
+  // uses this to know when to stop its requestAnimationFrame loop.
+  return revealMs >= seriesIndex * staggerMs + lineMs;
+}
+
+/** Runs drawBreakdown() on a rAF loop so the sixteen recall-vs-SNR lines
+ * grow in one at a time, point by point, instead of appearing all at once.
+ * Call this in place of drawBreakdown() wherever the chart is rendered for
+ * the video (main.js's renderPerformance()). Re-navigating to the
+ * Performance page re-triggers it, so it can simply be replayed for a
+ * fresh take without reloading the whole app. */
+export function animateBreakdown(canvas, perf, revealOpts = {}) {
+  const start = performance.now();
+  function frame(now) {
+    const done = drawBreakdown(canvas, perf, now - start, revealOpts);
+    if (!done) requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
 }

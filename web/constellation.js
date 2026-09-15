@@ -631,27 +631,27 @@ export function drawConstellation(canvas, { picks, capture, starts, windowLen, f
     const est = constellationOrder(pooled, noisePower, c42cfg);
     if (est.decision !== null) {
       lines.push(`measured constellation order (|C42|, ${est.nWindows} windows pooled, ` +
-                  `${Math.round(est.accuracy * 100)}% accuracy at this pooling): ${est.decision} — ` +
-                  `the classifier called this span ${className}`);
+                  `${Math.round(est.accuracy * 100)}% accuracy at this pooling): ${est.decision}. ` +
+                  `The classifier called this span ${className}.`);
     } else if (est.nWindows < c42cfg.min_windows) {
       lines.push(`measured constellation order: only ${est.nWindows} qualifying window(s) pooled, ` +
-                  `below the ${c42cfg.min_windows} needed for a reliable 16QAM-vs-64QAM call — ` +
-                  `refusing rather than guessing (classifier called this span ${className})`);
+                  `below the ${c42cfg.min_windows} needed for a reliable 16QAM-vs-64QAM call. ` +
+                  `Refusing rather than guessing. The classifier called this span ${className}.`);
     } else {
       lines.push(`measured constellation order: ${est.nWindows} windows pooled at an estimated ` +
                   `${est.snrDb.toFixed(1)} dB, below the ${c42cfg.min_snr_db.toFixed(0)} dB this ` +
-                  `measurement is calibrated for — refusing rather than guessing ` +
-                  `(classifier called this span ${className})`);
+                  `measurement is calibrated for. Refusing rather than guessing. ` +
+                  `The classifier called this span ${className}.`);
     }
   }
   lines.push(
-    `"clusters" is measured from this window's own recovered symbols, not the classifier — ` +
+    `"clusters" is measured from this window's own recovered symbols, not the classifier. ` +
     `0 means no cluster structure; clean QPSK at +10 dB reads ~0.3, below 0.07 means nothing ` +
     `is there, and 1.0 is never reached on a real capture`,
-    `${className} — unit-power scale → matched filter → de-rotate → decimate 1-in-${SAMPLES_PER_SYMBOL}`,
-    `cluster count is the modulation order — ${symbolsPerWindow(windowLen)} symbols separates ` +
+    `${className}: unit-power scale → matched filter → de-rotate → decimate 1-in-${SAMPLES_PER_SYMBOL}`,
+    `cluster count is the modulation order. ${symbolsPerWindow(windowLen)} symbols separates ` +
     `2 clusters from 4, not enough to resolve 64QAM`,
-    `four windows spaced evenly across the civilian span, not chosen for how they look — a ` +
+    `four windows spaced evenly across the civilian span, not chosen for how they look. A ` +
     `synthesized scene splices independent recordings, so some windows straddle a seam and will not cluster`,
   );
 

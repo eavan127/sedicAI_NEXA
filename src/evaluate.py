@@ -335,6 +335,33 @@ def evaluate(ensemble=False, n_models=5):
     print(classification_report(y_test, preds, labels=range(len(CLASSES)),
                                  target_names=CLASSES, zero_division=0))
 
+    # Two metrics sklearn's report does not carry, added because the
+    # organiser's wording says "accuracy" while this scorecard is built around
+    # recall, and the two do not agree here.
+    #
+    #   accuracy          per-class binary (TP+TN)/N. Reported for
+    #                     completeness and NOT to be leaned on: with ~3,060
+    #                     positives in ~19,260 windows, a model that never
+    #                     predicts a judged class already scores ~84% on it,
+    #                     so a pass here is not evidence of capability. The
+    #                     trivial baseline is emitted alongside it so the
+    #                     margin over "predict nothing" is visible rather
+    #                     than having to be worked out.
+    #   balanced_accuracy (recall + specificity)/2, which corrects for that
+    #                     imbalance and cannot be gamed by silence. This is
+    #                     the honest reading of "accuracy" for these classes.
+    for cls in CLASSES:
+        i = CLASS_TO_IDX[cls]
+        pred_i, true_i = preds[:, i] == 1, y_test[:, i] == 1
+        tp = int((pred_i & true_i).sum()); fp = int((pred_i & ~true_i).sum())
+        fn = int((~pred_i & true_i).sum()); tn = int((~pred_i & ~true_i).sum())
+        specificity = tn / (tn + fp) if (tn + fp) else 0.0
+        report[cls]["accuracy"] = (tp + tn) / len(y_test)
+        report[cls]["balanced_accuracy"] = (report[cls]["recall"] + specificity) / 2
+        report[cls]["specificity"] = specificity
+        # accuracy of a model that never predicts this class at all
+        report[cls]["trivial_accuracy"] = (tn + fp) / len(y_test)
+
     # Scorecard — the number the judges actually check
     scorecard = {"benchmark_recall": BENCHMARK_RECALL, "judged_classes": {}, "passed": True}
     for cls in CFG["judged_classes"]:
@@ -373,11 +400,13 @@ def evaluate(ensemble=False, n_models=5):
     csv_dir.mkdir(parents=True, exist_ok=True)
     with open(csv_dir / "per_class_report.csv", "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["class", "precision", "recall", "f1_score", "support", "is_judged_class"])
+        w.writerow(["class", "precision", "recall", "f1_score", "balanced_accuracy",
+                     "accuracy", "trivial_accuracy", "support", "is_judged_class"])
         for cls in CLASSES:
             r = report[cls]
-            w.writerow([cls, r["precision"], r["recall"], r["f1-score"], r["support"],
-                        cls in CFG["judged_classes"]])
+            w.writerow([cls, r["precision"], r["recall"], r["f1-score"],
+                        r["balanced_accuracy"], r["accuracy"], r["trivial_accuracy"],
+                        r["support"], cls in CFG["judged_classes"]])
 
     print(f"\n--- Benchmark (>{BENCHMARK_RECALL:.0%} recall on judged classes) ---")
     for cls, r in scorecard["judged_classes"].items():
