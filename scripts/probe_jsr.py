@@ -163,14 +163,27 @@ def main():
                           "Required when probing a checkpoint trained with it, "
                           "since the flag changes the fused tensor shape. Set "
                           "in memory only -- configs/default.yaml is not touched.")
+    ap.add_argument("--stft-keep-rows", action="store_true",
+                    help="build models with model.stft_keep_rows enabled (variant "
+                          "C2: the frequency rows are kept, not averaged). Required "
+                          "when probing a checkpoint trained with it. In memory only.")
+    ap.add_argument("--thresholds", type=Path, default=None,
+                    help="JSON {class: threshold} to use instead of configs/default.yaml "
+                          "(a retrained model needs its own; scripts/evaluate_experiment.py writes them).")
     ap.add_argument("--out", type=Path, default=None, help="write JSON here")
     args = ap.parse_args()
 
+    if args.thresholds:
+        CFG.setdefault("multilabel_thresholds_per_class", {}).update(json.loads(args.thresholds.read_text()))
+
     if args.stft_freq_summary:
         CFG.setdefault("model", {})["stft_freq_summary"] = True
+    if args.stft_keep_rows:
+        CFG.setdefault("model", {})["stft_keep_rows"] = True
     models = _load_models(args.members, args.checkpoint)
     print(f"stft_freq_summary = "
-          f"{bool(CFG.get('model', {}).get('stft_freq_summary', False))}")
+          f"{bool(CFG.get('model', {}).get('stft_freq_summary', False))}   "
+          f"stft_keep_rows = {bool(CFG.get('model', {}).get('stft_keep_rows', False))}")
     print(f"{len(models)} ensemble members  ·  n={args.n} per condition  "
           f"·  SNR {args.snr_db:+.0f} dB  ·  seed {args.seed}\n")
 
@@ -196,6 +209,7 @@ def main():
         args.out.write_text(json.dumps({
             "n": args.n, "seed": args.seed, "snr_db": args.snr_db,
             "stft_freq_summary": bool(CFG.get("model", {}).get("stft_freq_summary", False)),
+            "stft_keep_rows": bool(CFG.get("model", {}).get("stft_keep_rows", False)),
             "members": len(models),
             "rows": rows,
         }, indent=2))
