@@ -107,7 +107,12 @@ def compute_snr_weights(snr_labels, y=None, neutral_classes=()):
     anything else by construction, so in practice this is just "is this a
     NOISE_FLOOR example").
     """
-    ratio = 10 ** (-np.asarray(snr_labels, dtype=np.float64) / 20)
+    # training.snr_weight_divisor sets how steep the low-SNR emphasis is: 20 is the
+    # original (-10 dB sampled ~10x more often than +10 dB), larger is flatter, and
+    # a very large value means uniform sampling. The default keeps every existing
+    # run and checkpoint reproducible.
+    divisor = CFG.get("training", {}).get("snr_weight_divisor", 20)
+    ratio = 10 ** (-np.asarray(snr_labels, dtype=np.float64) / divisor)
     weights = ratio / ratio.mean()
     if y is not None and len(neutral_classes):
         is_neutral = np.zeros(len(weights), dtype=bool)

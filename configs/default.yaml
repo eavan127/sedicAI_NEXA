@@ -441,6 +441,14 @@ training:
   batch_size: 64
   learning_rate: 0.001
   scheduler_patience: 3
+  # How strongly training oversamples low-SNR windows. Sampling weight is
+  # 10^(-SNR_dB / divisor): 20 (the value every shipped checkpoint was trained with)
+  # samples -10 dB about 10x more often than +10 dB; 40 gives about 3x; 1000 is
+  # effectively uniform. Measured 2026-09-20: FHSS-under-jammer recall falls in step
+  # with this weighting from -2 dB to +10 dB, so flattening it is an experiment
+  # candidate (docs/POST_STAGE1_FIXES.md, E5). Do NOT change it for a submission
+  # without retraining: thresholds were calibrated on models trained at 20.
+  snr_weight_divisor: 20
 
 paths:
   raw_data: data/raw
