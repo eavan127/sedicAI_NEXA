@@ -1,0 +1,10 @@
+{
+  "BPSK": 0.14,
+  "QPSK": 0.15,
+  "16QAM": 0.2,
+  "64QAM": 0.18,
+  "LFM_RADAR": 0.21,
+  "FHSS": 0.22,
+  "JAMMING": 0.94,
+  "NOISE_FLOOR": 0.14
+}

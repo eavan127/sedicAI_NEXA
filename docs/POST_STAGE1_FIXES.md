@@ -78,7 +78,7 @@ windows (2026-09-11): 46% of hop-to-hop jumps are smaller than one 200 kHz row, 
 examples fit their whole channel comb inside a single row, and 18% fit inside one 400 kHz
 pooled row. The IQ branch has to carry those hops.
 
-**A bug in the designed fix: shift the spectrogram first.** `STFTBranch` passes the spectrogram
+**DONE 2026-09-20 — the spectrogram is now shifted (guarded by the flag).** `STFTBranch` passes the spectrogram
 to its convolutions and to `_peak_freq_delta` in raw FFT order: row 0 is 0 Hz, rows 1–7 are
 positive frequencies and rows 8–15 are negative (verified in the Lesson 5 trace, 2026-09-11).
 `_peak_freq_delta` takes the loudest row and differences it between frames with no wrap-around.
@@ -88,6 +88,13 @@ between the top and bottom edges of the convolution input. Fix: apply `torch.fft
 the frequency axis inside `STFTBranch.forward`, before the convolutions and the features. Mirror
 it in `src/models/onnx_export.py` (`compute_stft_mag`) and `web/dsp.js`, so the web parity tests
 still hold.
+Implemented in `STFTBranch.forward` as `torch.fft.fftshift(mag, dim=2)` under `if self.freq_summary`,
+so the flag-off path is unchanged: the shipped `ensemble_0.pt` produces logits identical to 0.000e+00
+after the edit. Verified effect: a tone drifting across 0 Hz used to report a frame-to-frame jump of
+0.938 (maximum possible is 1.0); it now reports 0.062. `tests/test_amc_cnn.py` and
+`tests/test_pipeline.py` pass. Mirrored in `src/models/onnx_export.py` on branch `c2-keep-stft-rows` (2026-09-20): the exported copy
+applies the same shift with `torch.roll`, which is `fftshift` for an even `n_fft`. `web/dsp.js` needs no
+change, because the shift is inside the exported graph and the browser still feeds it raw-order magnitudes.
 
 **Run it alongside item 1**, since both need a full retrain. The peak-frequency-change feature
 measures exactly what a repeating sweep does. Turning the flag on changes the fused width from
@@ -316,7 +323,194 @@ generalisation beyond your own generator without needing any new data source.
 with it (0.736 → 0.690), so this is genuine uncertainty rather than a threshold artefact. Radar
 shows the same pattern mildly (0.776 → 0.746).
 
-**Diagnose before fixing.** Split the +10 dB misses by generator parameter (hop rate, channel
+**DIAGNOSED 2026-09-20 (`scripts/high_snr_probe.py`, 200 windows per cell, 5-model ensemble).**
+The decline is not in the class itself. Splitting FHSS windows by kind:
+
+| FHSS recall | −2 dB | +6 dB | +10 dB |
+|---|---|---|---|
+| standalone | 100% | 99.5% | 100% |
+| mixture (with radar) | 96.5% | 94% | 94% |
+| overlay (with a jammer) | 83.5% | 47.5% | **33%** |
+
+Clean FHSS is perfect at high SNR. The loss is entirely in **jammed** windows, and on those misses
+the model reports JAMMING instead: as noise drops, the jammer gets crisper and takes over the
+window. Jammed-FHSS windows are about 17.6% of all FHSS windows (1,800 overlay + 1,800 three-way of
+20,400), so losing ~50 points on them costs ~8.8 points overall — which accounts for the 9.4-point
+aggregate drop in §6.2.
+
+This is the same failure `scripts/probe_jsr.py` was written for, and its pinned baseline shows the
+cliff directly: FHSS recall 0.96 at JSR 0 dB, 0.56 at +5, **0.035 at +10**. That script's own
+analysis names the cause: FHSS occupies 10–48 kHz channels while barrage jamming spreads over
+200 kHz–1.2 MHz, so 10–20 dB of frequency-selective processing gain is available and the model
+cannot use it, because the STFT branch averages the frequency axis away. **So E5 is item 2, and the
+fix is the `stft_freq_summary` experiment that was never run.**
+
+**Is the victim really "gone" under a strong jammer? No (measured 2026-09-20).** For each jammer
+subtype and JSR, take the STFT the model receives and, per time frame, compare the FHSS energy
+with the jammer's energy in the one cell the FHSS occupies. Share of hops where FHSS is at least
+as loud as the jammer in its own cell (200 windows per cell, dataset generators, no noise):
+
+| Jammer | JSR +0 | +5 | +10 | +15 | +20 dB |
+|---|---|---|---|---|---|
+| barrage | 96% | 85% | 72% | 63% | 57% |
+| tone | 92% | 74% | 65% | 60% | 57% |
+| sweep (as generated: near-flat) | 83% | 52% | 41% | 35% | 31% |
+
+So even at +20 dB most hops are still recoverable from where they sit in frequency: a coherent
+16-sample tone gains about 10 dB over wideband noise in one cell, and a barrage covers only 1–6 of
+the 16 rows, so many hops land outside it. Total power says the victim is buried; per-cell
+position says it is mostly still there. The current model cannot use that, because the STFT
+branch averages the frequency axis away. This argues for item 2 (`stft_freq_summary`) *before*
+narrowing `jamming.jsr_db`, which would make the task easier rather than the model better.
+It is a physical proxy, not proof the model can learn it: the experiment is the proof.
+
+If `jsr_db` is narrowed later, it lives in four places: `configs/default.yaml`
+(`jamming.jsr_db`), read by `overlay_jamming` (`src/data/composite.py:47`), by `mix_components`
+(`:120`, three-way mixtures containing JAMMING) and by `src/scenarios.py:266`; and the JavaScript
+copy `web/generators.js:38` and `:357`. Change all of them together or the web demo drifts from the
+training data.
+
+**The exact plan for the jammed-FHSS failure (decided 2026-09-20).**
+
+*Metric.* `scripts/high_snr_probe.py` now prints, for overlay windows that truly hold FHSS and
+JAMMING, four columns: both (correct), JAMMING only, FHSS only, neither. The aim is to move
+"JAMMING only" into "both" without growing "FHSS only" (that would mean the jammer got missed).
+
+*Baselines (single member, `ensemble_0.pt`, seed 2000; 300 windows per cell; command:
+`python scripts/high_snr_probe.py --n 300 --class FHSS --ensemble --n-models 1 --seed 7`).*
+
+| SNR | both | JAMMING only | FHSS only | neither |
+|---|---|---|---|---|
+| −2 dB | 62.0% | 26.3% | 11.7% | 0.0% |
+| +2 | 49.0% | 44.0% | 7.0% | 0.0% |
+| +6 | 25.3% | 72.3% | 2.0% | 0.3% |
+| **+10** | **16.3%** | **79.7%** | 4.0% | 0.0% |
+
+(The 5-model ensemble gives 23.0% at +10 dB, 43.5% at +6 dB.)
+
+*Pass marks, fixed before running.* Primary: "both" at +10 dB reaches at least 45% (baseline 16.3%)
+and at +6 dB at least 55% (baseline 25.3%), a gain larger than the run-to-run noise (single runs
+vary by up to about 6 points). Guardrails: "FHSS only" at +6 and +10 dB grows by no more than
+3 points; standalone FHSS recall stays at least 97% for SNR ≥ −6 dB; standalone JAMMING recall
+stays above 80% after recalibration; the comms-vs-jamming false alarm rate stays at or below 0.1%.
+
+*Design: a 2×2 of single-model runs (seed 2000, about 2.5 h each on Colab).*
+
+| | divisor 20 (today) | divisor 40 |
+|---|---|---|
+| **flag off** | baseline (already measured above) | run A |
+| **flag on** | run C | run A+C |
+
+`training.snr_weight_divisor` (added 2026-09-20, default 20 = unchanged) sets how strongly
+training oversamples low SNR: 20 samples −10 dB about 10× more than +10 dB; 40 gives about 3×.
+Why it is a candidate: from −2 dB to +10 dB, the "both" rate falls in step with the sampling
+weight (72.5 → 61.0 → 43.5 → 23.0% against relative weights 1.26 → 0.79 → 0.50 → 0.32).
+That is correlation, not proof, so the run decides. The flag (`stft_freq_summary`) is item 2.
+`scripts/run_stft_experiment.py` currently hard-wires flag on and divisor 20, so it needs
+arguments for the flag and the divisor to run all four cells.
+
+*Fallback if no cell reaches the pass mark:* narrow `jamming.jsr_db` (see the note above).
+
+*A decision-rule fix was measured and rejected.* Among windows where JAMMING is detected, the
+FHSS probability separates "jammed FHSS" from "jammer only" with an AUC of only 0.74–0.76
+(400 windows each, 5-model ensemble). Lowering the FHSS threshold trades found hops for false
+alarms almost one for one: at +10 dB, threshold 0.25 finds 28.0% of jammed FHSS with 1.8% false
+FHSS on jammer-only windows, 0.15 finds 47.6% with 7.3%, 0.10 finds 64.5% with 27.5%. At +2 dB
+the model already raises FHSS on 44.8% of jammer-only windows at the current threshold. So the
+fix has to change what the model can see, not where the line is drawn.
+
+**What the STFT branch does for jamming (measured 2026-09-20, 5-model ensemble).** Switching the
+branch off at inference (never trained that way) on 6,000 held-out test windows, thresholds
+unchanged, drops JAMMING recall 85.5 → 49.6% and LFM_RADAR 85.2 → 68.7%, so it cannot be removed.
+By jammer type, standalone at +6 dB (300 windows each):
+
+| Jammer | JAMMING recall, STFT on → off | Called FHSS, STFT on → off |
+|---|---|---|
+| barrage | 95.3% → 73.0% | 18.3% → 80.3% |
+| tone | 99.3% → 57.3% | 2.3% → 81.0% |
+| sweep (near-flat) | 100% → 98.0% | 9.0% → 62.0% |
+
+Reading: the IQ branch alone reads any narrowband, steady energy as FHSS; the STFT branch is what
+says "steady or wide, so a jammer". Restricting the switch-off to windows where JAMMING fired is
+worse than lowering the FHSS threshold (AUC 0.73 → 0.67; at +10 dB, 51.7% found for 26.4% false
+against 47.6% for 7.3% by threshold alone). So the fix must give the STFT branch position
+information (item 2), not remove it.
+
+**A guess that did not hold.** "FHSS windows with only a few distinct frequencies look like a tone
+and get missed" is not supported: standalone FHSS at +10 dB is found 94.3% of the time with 3–4
+distinct frequencies and 99.8% with 5–8. What the check did show is a data gap: only 73 of 3,000
+generated FHSS windows (2.4%) contain four or fewer distinct frequencies, and none contains one, so
+slow hopping (report §3.3 limitation) is barely represented. Belongs with E2.
+
+**Correction: what `stft_freq_summary` really does (read from the code, 2026-09-20).** The line
+`f = f.mean(dim=2)` still runs with the flag on. The flag (a) pools time only, so the conv path
+keeps 16 rows of 200 kHz instead of 8 of 400 kHz before that average, and (b) attaches three
+per-frame numbers computed straight from the spectrogram: frequency max (the *level* of the
+loudest row, not its position), spectral flatness (how peaky), and peak-frequency change (how far
+the loudest row moved since the previous frame). None of them says *which* row. So the flag adds
+"did it move" and "how peaky", which is hop evidence, but not "where relative to the jammer's
+block". It is a side channel, not a redesign.
+
+The `stft_freq_summary` history: `f.mean(dim=2)` arrived with the dual-branch model (commit
+`aaa77b4`, 2026-08-18); the flag followed ten days later (`186c3e7`, 2026-08-28), after the
+jammer-overlay probes measured the cost.
+
+**Variant C2 — BUILT on branch `c2-keep-stft-rows` (2026-09-20), not yet trained.** Keep the rows through a
+learned layer.
+- Code: `STFTBranch(keep_rows=True)` in `src/models/amc_cnn.py`; config key `model.stft_keep_rows` (default false).
+  With it on, `f.mean(dim=2)` becomes `flatten(1, 2)` → `Conv1d(64·rows → 64, kernel 1)` → BatchNorm → ReLU,
+  behind `_collapse_rows()`, and the spectrogram rows are put in frequency order first. Layers exist only when
+  the flag is on, so the flag-off `state_dict` is unchanged and every checkpoint still loads strict.
+- Cost: 181,898 parameters (+32,960; the report's 148,938 is the flag-off model). Combined with `stft_freq_summary`
+  (which keeps 16 rows): 215,437. Fused width stays 192 (195 with the flag), so the head is untouched.
+- Proof it is safe: flag off gives a logit difference of exactly 0.0 on the shipped `ensemble_0.pt`; 17 new tests
+  in `tests/test_stft_keep_rows.py` (356 pass overall), which I checked fail when the code is sabotaged three
+  ways; the exported ONNX graph matches PyTorch to about 1e-7 for all four flag combinations, run through
+  onnxruntime (the repo `.venv`; export a C2 checkpoint by setting `stft_keep_rows: true` first, since
+  `scripts/export_onnx.py` builds its model from the config).
+- Runner: `scripts/run_stft_experiment.py` now takes `--keep-rows`, `--no-freq-summary`, `--divisor N`, `--seed`,
+  `--smoke`, `--out-dir`. No arguments = the original run, byte for byte in what it writes. It saves the best
+  checkpoint on every validation improvement and a history file every epoch. Cells:
+  `--no-freq-summary --divisor 40` (A) · no arguments (C, the flag) · `--no-freq-summary --keep-rows` (C2) ·
+  `--keep-rows` (C2 + flag) · `--keep-rows --divisor 40` (C2 + flag + A) · `--no-freq-summary` (baseline re-run,
+  which also measures run-to-run noise). Each writes `results/experiment_<name>.pt`.
+- Scoring: `scripts/probe_jsr.py` (the pre-registered bar) and `scripts/high_snr_probe.py` (the four-column
+  table) both take `--checkpoint PATH` plus `--stft-keep-rows` / `--stft-freq-summary`. A wrong flag fails
+  loudly (a `state_dict` error), it does not mis-score.
+- Smoke-tested end to end (train → save → both probes) on CPU; the smoke numbers mean nothing.
+
+*Original design note for C2 (kept for reference):*
+Replace `f.mean(dim=2)` with `f.flatten(1, 2)` (64 channels × 8 rows = 512 channels; 1,024 if the
+time-only pool is also used) followed by `Conv1d(512, 64, 1)` + BatchNorm + ReLU, behind its own
+flag (for example `model.stft_keep_rows`, default false so every checkpoint still loads). Output
+stays 64 channels, so fusion is still 192 wide. Cost: about +33k parameters (+65k with 16 rows),
+so 148,938 becomes about 182k. Why it is the more direct test: in the branch-bottleneck test the
+tensor *before* the average held more evidence than the one after (linear-probe AUC 0.92 against
+0.84 at +10 dB, jammed FHSS versus jammer only), and C2 gives the network access to exactly that
+tensor. The flag and C2 attack the same gap in two ways; if both are built, run them as separate
+cells beside A.
+
+**Already on the team's remote: `origin/eileen-stft-experiment` (Eileen, 2026-08-29 to 08-31).** Found while
+building C2, and it corrects two statements above.
+- It holds `notebooks/colab_stft_freq_summary.ipynb`, a ready Colab run of the `stft_freq_summary` experiment
+  (train seed 2000 with `ckpt_path`/`history_path`, then `probe_jsr.py --stft-freq-summary`, then a PASS/FAIL cell
+  against the 0.25 bar). It has **no saved outputs and no result files**, so whether it was ever run is a question
+  for Eileen. So "never run" should read "no result recorded". Ask before spending 2.5 h on the same cell.
+- It also adds two expert-feature flags in `src/models/amc_cnn.py`, both default off: `model.cumulant_features`
+  (|C40|, |C42|, |C63| after an RRC matched filter, aimed at 16QAM vs 64QAM) and `model.if_features`
+  (max|d²phase| / median|d²phase| of the unwrapped phase, pooled AUC 0.887 on the radar/FHSS confusion). The
+  second is a scalar cousin of option F4 (instantaneous frequency), so F4 is partly prototyped. Neither targets
+  jammed-FHSS masking.
+- Merging: her edits sit after `STFTBranch` and in `AMC_CNN.__init__` (extra `cumulant_features`, `if_features`
+  arguments); C2 edits `STFTBranch` and adds one `stft_keep_rows` argument in the same constructor. Expect one
+  small conflict there, resolved by keeping all three arguments in one signature. Do **not** merge the
+  `results/*.pt` checkpoints she force-added for Render.
+
+LFM_RADAR is a separate story: under a jammer it holds up (90% at +10 dB). Its milder loss is in
+mixtures with FHSS (96% at −6 dB → 85% at +10 dB), where 30 of its misses were called FHSS. That is
+E2, not this.
+
+**Remaining diagnosis, if wanted.** Split the +10 dB misses by generator parameter (hop rate, channel
 count and spacing for FHSS; pulse width, PRI and duty cycle for radar), using
 `scripts/fhss_radar_false_positive.py` and `scripts/duty_cycle_breakdown.py` as templates. Expect
 an interaction with items 1 and 3: at high SNR, a near-flat sweep and an under-strength jammer
