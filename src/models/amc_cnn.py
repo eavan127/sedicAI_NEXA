@@ -195,6 +195,20 @@ class STFTBranch(nn.Module):
                            window=self.window, center=False, return_complex=True)
         mag = spec.abs().unsqueeze(1)   # (batch, 1, freq, time_frames)
 
+        # torch.stft returns rows in raw FFT order: row 0 is DC, rows 1..n/2-1
+        # the positive frequencies, then the negative ones. Two consequences,
+        # both only matter once the frequency axis carries information:
+        #   - a signal centred on 0 Hz (every civilian class) is split across
+        #     the FIRST and LAST rows, so conv1's 3x3 kernel never sees it whole;
+        #   - _peak_freq_delta differences the argmax row with no wrap-around, so
+        #     a peak drifting across DC (row n-1 -> row 0) scores the maximum
+        #     possible jump -- "hopping" that never happened.
+        # Shifting puts 0 Hz in the middle and makes the axis monotonic. Guarded
+        # by freq_summary so the flag-off path stays byte-for-byte identical and
+        # every checkpoint in results/ keeps reproducing its published numbers.
+        if self.freq_summary:
+            mag = torch.fft.fftshift(mag, dim=2)
+
         f = self.pool(self.relu(self.bn1(self.conv1(mag))))
         f = self.relu(self.bn2(self.conv2(f)))          # (batch, out_channels, freq', time')
         f = f.mean(dim=2)                                 # collapse frequency -> (batch, out_channels, time')
