@@ -449,7 +449,7 @@ model:
   #
   # Default false: the five checkpoints in results/ were trained flag-off and must
   # keep loading strict=True. Turning it on means a retrain.
-  stft_keep_rows: false
+  stft_keep_rows: true
 
 training:
   epochs: 30
