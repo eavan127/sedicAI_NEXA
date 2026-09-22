@@ -98,6 +98,10 @@ def main():
     ap.add_argument("--stamp-branch", action="store_true",
                     help="turn model.stamp_branch ON (fixed LFM matched-filter bank, for radar precision)")
     ap.add_argument("--divisor", type=float, default=None, help="training.snr_weight_divisor (default: config, 20)")
+    ap.add_argument("--epochs", type=int, default=None,
+                    help="training.epochs (default: config, 30). The saved checkpoint is the "
+                         "BEST-validation one, so a shorter run only risks stopping before a "
+                         "variant has converged -- it cannot make a converged one worse.")
     ap.add_argument("--seed", type=int, default=SEED)
     ap.add_argument("--smoke", action="store_true", help="1 epoch on a tiny slice: prove the pipeline, not the model")
     ap.add_argument("--out-dir", type=Path, default=ROOT / "results")
@@ -113,6 +117,8 @@ def main():
     CFG["model"]["stamp_branch"] = args.stamp_branch
     if args.divisor is not None:
         CFG["training"]["snr_weight_divisor"] = args.divisor
+    if args.epochs is not None:
+        CFG["training"]["epochs"] = args.epochs
     divisor = CFG["training"].get("snr_weight_divisor", 20)
     if args.smoke:
         CFG["training"]["epochs"] = 1
