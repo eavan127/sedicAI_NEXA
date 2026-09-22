@@ -190,6 +190,8 @@ if __name__ == "__main__":
                     help="build the model with model.stft_freq_summary on (needed for a checkpoint trained with it)")
     ap.add_argument("--stft-keep-rows", action="store_true",
                     help="build the model with model.stft_keep_rows on (variant C2)")
+    ap.add_argument("--stamp-branch", action="store_true",
+                    help="build the model with model.stamp_branch on (radar matched-filter bank)")
     ap.add_argument("--thresholds", default=None,
                     help="JSON {class: threshold} to use instead of configs/default.yaml. A retrained "
                          "model needs its OWN thresholds (scripts/evaluate_experiment.py writes them).")
@@ -201,4 +203,6 @@ if __name__ == "__main__":
         CFG.setdefault("model", {})["stft_freq_summary"] = True
     if a.stft_keep_rows:
         CFG.setdefault("model", {})["stft_keep_rows"] = True
+    if a.stamp_branch:
+        CFG.setdefault("model", {})["stamp_branch"] = True
     main(a.n, a.cls, a.ensemble, a.n_models, a.seed, a.checkpoint, a.out)

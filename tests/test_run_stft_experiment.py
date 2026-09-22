@@ -18,3 +18,9 @@ def test_a_second_seed_never_overwrites_the_first():
     assert run_tag(False, True, 20, 2001) != run_tag(False, True, 20, 2000)
     assert run_tag(False, True, 20, 2001).endswith("_seed2001")
     assert run_tag(False, True, 20, 2000) == "rows"            # the baseline seed adds no suffix
+
+
+def test_the_stamp_branch_gets_its_own_name_and_leaves_old_names_alone():
+    assert run_tag(False, False, 20, stamp=True) == "stamp"
+    assert run_tag(False, False, 20) == "baseline"               # unchanged without the switch
+    assert run_tag(True, False, 20, stamp=True) != run_tag(True, False, 20)

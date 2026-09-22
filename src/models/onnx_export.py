@@ -100,6 +100,9 @@ class AMC_CNN_ONNX(nn.Module):
         super().__init__()
         self.iq_branch = model.iq_branch
         self.stft_branch = STFTBranchONNX(model.stft_branch)
+        # StampBranch is plain conv1d/pad/sqrt/log1p/mean, all exportable as-is,
+        # so it is shared directly rather than mirrored. None when the flag is off.
+        self.stamp_branch = model.stamp_branch
         self.attn_pool = model.attn_pool
         self.relu = model.relu
         self.dropout = model.dropout
@@ -113,7 +116,10 @@ class AMC_CNN_ONNX(nn.Module):
         tf_feats = self.stft_branch(stft_mag)
         tf_feats = F.interpolate(tf_feats, size=iq_feats.shape[-1],
                                   mode="linear", align_corners=False)
-        fused = torch.cat([iq_feats, tf_feats], dim=1)
+        feats = [iq_feats, tf_feats]
+        if self.stamp_branch is not None:
+            feats.append(self.stamp_branch(iq))
+        fused = torch.cat(feats, dim=1)
 
         # AttentionPool1d.forward, inlined so the softmaxed weights can be
         # returned alongside the pooled output. Identical arithmetic --

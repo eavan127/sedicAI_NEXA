@@ -11,6 +11,7 @@ existing checkpoint loads into this. Needs a full retrain and validation
 (measure_variance.py) against main's numbers before being trusted for
 anything.
 """
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -262,9 +263,112 @@ class STFTBranch(nn.Module):
         return torch.cat([f, extra], dim=1)   # (batch, out_channels+3, time')
 
 
+class StampBranch(nn.Module):
+    """Matched-filter path: slide a fixed bank of clean LFM chirps ("stamps")
+    along the raw IQ and report how well each one lines up at every moment.
+
+    EXPERIMENTAL, behind `model.stamp_branch` (configs/default.yaml, default
+    false). Aimed at radar precision. At -6 dB the shipped ensemble called 77%
+    of pure FHSS windows LFM_RADAR and 50% of pure jammer windows, while
+    realistic single-pulse radar alone was found only 76% of the time -- the
+    IQ and STFT branches both lose the chirp shape once noise dominates. A
+    matched filter does not: noise is multiplied by a clean copy instead of by
+    more noise, so an LFM pulse still produces one sharp spike while hops and
+    barrage noise stay flat. Measured on generated windows at -6 dB, the best
+    stamp score alone separated realistic radar from FHSS with AUC 0.92 and
+    from jammers with 0.97.
+
+    It was tried first as a hard veto after the model (cancel LFM_RADAR when no
+    stamp matched) and rejected: the peak score overlaps between classes, and a
+    louder FHSS in the same window lifts the background, so the veto cancelled
+    real radar (radar+FHSS recall 96% -> 76% at -6 dB). As an input branch the
+    model gets the whole match pattern -- one sharp spot (radar), many dim
+    patches (FHSS), evenly repeating spots with no silence (sweep jammer) -- and
+    learns from the labels how far to trust it next to the other two branches.
+
+    Steps:
+      1. Fixed complex cross-correlation with STAMP_PULSE_WIDTHS_S x
+         STAMP_BANDWIDTHS_HZ x {up, down} = 120 unit-energy chirps, each centred
+         in a common kernel so a pulse's spike lands near the pulse's centre.
+         The stamps are a non-persistent buffer: never trained, not saved in
+         checkpoints, rebuilt identically from the constants below.
+      2. Magnitude, divided by that stamp's mean over the window, then log1p:
+         "spike height against this window's own background", independent of
+         loudness (mean rather than median so the graph exports to ONNX).
+      3. A learned 1x1 conv (+BatchNorm, ReLU) condenses 120 scores into
+         `out_channels` clues per moment. The only trained part: ~1k weights.
+
+    Output is (batch, out_channels, window_len) -- the IQ branch's full time
+    resolution, so fusion needs no resampling.
+
+    Stamp ranges match the radar generator (configs/default.yaml radar:
+    pulse 10-100 us, bandwidth 50 kHz-1.5 MHz). A radar outside them matches
+    more weakly; the other branches are unchanged, so it helps less rather
+    than hurting. Cost: the 100 us stamps are 320 samples long, so this branch
+    is about 80M multiply-adds per window -- more than the rest of the model
+    combined. Fine on a GPU; measure CPU latency before deploying.
+    """
+
+    STAMP_PULSE_WIDTHS_S = tuple(float(v) for v in np.geomspace(10e-6, 100e-6, 6))
+    STAMP_BANDWIDTHS_HZ = tuple(float(v) for v in np.geomspace(50e3, 1.5e6, 10))
+
+    def __init__(self, out_channels=8, fs=None):
+        super().__init__()
+        if fs is None:
+            from src.config import CFG
+            fs = CFG["signal"]["fs"]
+        stamps = self.build_stamps(fs)
+        n_stamps, kernel = len(stamps), max(len(s) for s in stamps)
+        self.n_stamps = n_stamps
+        self.kernel = kernel
+
+        # conv1d is cross-correlation: y[n] = sum_k x[n+k] * w[k]. With w =
+        # conj(stamp) that is the matched filter. Split into real arithmetic:
+        #   x * conj(c) = (xi*ci + xq*cq) + j(xq*ci - xi*cq)
+        # rows 0..n-1 give the real part, rows n..2n-1 the imaginary part.
+        weight = np.zeros((2 * n_stamps, 2, kernel), dtype=np.float32)
+        for i, c in enumerate(stamps):
+            off = (kernel - len(c)) // 2          # centre each stamp in the kernel
+            sl = slice(off, off + len(c))
+            weight[i, 0, sl], weight[i, 1, sl] = c.real, c.imag
+            weight[n_stamps + i, 0, sl], weight[n_stamps + i, 1, sl] = -c.imag, c.real
+        self.register_buffer("stamps", torch.from_numpy(weight), persistent=False)
+
+        self.mix = nn.Conv1d(n_stamps, out_channels, kernel_size=1)
+        self.bn = nn.BatchNorm1d(out_channels)
+        self.relu = nn.ReLU()
+        self.out_channels = out_channels
+
+    @classmethod
+    def build_stamps(cls, fs):
+        """The fixed chirp bank: unit-energy complex LFM pulses, made with the
+        same chirp function the radar generator uses."""
+        from src.generators.radar import generate_lfm_chirp_iq
+        stamps = []
+        for pw in cls.STAMP_PULSE_WIDTHS_S:
+            for bw in cls.STAMP_BANDWIDTHS_HZ:
+                for direction in (1, -1):
+                    c = generate_lfm_chirp_iq(fs, pw, direction * bw, -direction * bw / 2)
+                    stamps.append(c / np.linalg.norm(c))
+        return stamps
+
+    def match_scores(self, x):
+        """Raw matched-filter magnitude, (batch, n_stamps, time)."""
+        left = self.kernel // 2
+        xp = F.pad(x, (left, self.kernel - 1 - left))
+        y = F.conv1d(xp, self.stamps)
+        re, im = y[:, :self.n_stamps], y[:, self.n_stamps:]
+        return torch.sqrt(re ** 2 + im ** 2 + 1e-12)
+
+    def forward(self, x):
+        mag = self.match_scores(x)
+        spike = torch.log1p(mag / (mag.mean(dim=2, keepdim=True) + 1e-8))
+        return self.relu(self.bn(self.mix(spike)))   # (batch, out_channels, time)
+
+
 class AMC_CNN(nn.Module):
     def __init__(self, num_classes, input_len=1024, stft_freq_summary=None,
-                 stft_keep_rows=None):
+                 stft_keep_rows=None, stamp_branch=None):
         super().__init__()
         if stft_freq_summary is None:
             from src.config import CFG
@@ -272,14 +376,23 @@ class AMC_CNN(nn.Module):
         if stft_keep_rows is None:
             from src.config import CFG
             stft_keep_rows = CFG.get("model", {}).get("stft_keep_rows", False)
+        if stamp_branch is None:
+            from src.config import CFG
+            stamp_branch = CFG.get("model", {}).get("stamp_branch", False)
 
         iq_out_channels = 128
         self.iq_branch = IQBranch(out_channels=iq_out_channels)
         self.stft_branch = STFTBranch(out_channels=64, freq_summary=stft_freq_summary,
                                        keep_rows=stft_keep_rows)
+        # Only constructed when the flag is on, so the flag-off state_dict is
+        # unchanged and every checkpoint in results/ still loads strict=True.
+        self.stamp_branch = StampBranch() if stamp_branch else None
         # Computed from what the branches actually produce, not hardcoded --
-        # stft_branch.out_channels is 64 with the flag off, 67 with it on.
+        # stft_branch.out_channels is 64 with the flag off, 67 with it on;
+        # the stamp branch adds its 8 when present.
         fused_channels = iq_out_channels + self.stft_branch.out_channels
+        if self.stamp_branch is not None:
+            fused_channels += self.stamp_branch.out_channels
         self.attn_pool = AttentionPool1d(fused_channels)
         self.relu = nn.ReLU()
         self.dropout = nn.Dropout(0.5)
@@ -307,7 +420,10 @@ class AMC_CNN(nn.Module):
         # into the fused sequence and into attention.
         tf_feats = F.interpolate(tf_feats, size=iq_feats.shape[-1],
                                   mode="linear", align_corners=False)
-        fused = torch.cat([iq_feats, tf_feats], dim=1)   # (batch, 128+64, time_full)
+        feats = [iq_feats, tf_feats]
+        if self.stamp_branch is not None:
+            feats.append(self.stamp_branch(x))   # (batch, 8, time_full) -- already full resolution
+        fused = torch.cat(feats, dim=1)          # (batch, 128+64[+8], time_full)
 
         x = self.attn_pool(fused, raw_power)
         x = self.dropout(self.relu(self.fc1(x)))

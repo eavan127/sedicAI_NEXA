@@ -450,6 +450,21 @@ model:
   # Default false: the five checkpoints in results/ were trained flag-off and must
   # keep loading strict=True. Turning it on means a retrain.
   stft_keep_rows: false
+  # EXPERIMENTAL, aimed at radar precision (0.51 on the C2 baseline). Adds a
+  # third branch, StampBranch: 120 FIXED clean LFM chirps slid along the raw IQ
+  # (a matched-filter bank), turned into "spike vs background" scores and
+  # condensed by one learned 1x1 layer into 8 clues per moment. At -6 dB the
+  # shipped ensemble calls 77% of pure FHSS and 50% of pure jammers LFM_RADAR;
+  # the best stamp score alone separates radar from FHSS at AUC 0.92 there.
+  # Fused width 192 -> 200; +3,040 learned parameters (148,938 -> 151,978).
+  # The stamps are a non-persistent buffer, so checkpoints do not carry them.
+  # Compute: ~80M multiply-adds per window, more than the rest of the model.
+  # Measured CPU, batch 64: 2.1 -> 3.9 ms per window. See StampBranch in
+  # src/models/amc_cnn.py.
+  #
+  # Default false: shipped checkpoints load unchanged. Turning it on means a
+  # retrain (scripts/run_stft_experiment.py --stamp-branch).
+  stamp_branch: false
 
 training:
   epochs: 30
