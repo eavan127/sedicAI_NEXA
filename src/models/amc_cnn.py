@@ -162,11 +162,13 @@ class STFTBranch(nn.Module):
     always has, byte for byte, so the checkpoints in results/ keep loading.
     """
 
-    def __init__(self, n_fft=16, hop_length=4, out_channels=64, freq_summary=False):
+    def __init__(self, n_fft=16, hop_length=4, out_channels=64, freq_summary=False,
+                 keep_rows=False):
         super().__init__()
         self.n_fft = n_fft
         self.hop_length = hop_length
         self.freq_summary = freq_summary
+        self.keep_rows = keep_rows
         self.register_buffer("window", torch.hann_window(n_fft))
 
         self.conv1 = nn.Conv2d(1, 16, kernel_size=3, padding=1)
@@ -182,10 +184,40 @@ class STFTBranch(nn.Module):
         # time, so both land on the same time' count.
         self.summary_pool = nn.AvgPool1d(2) if freq_summary else None
 
+        # EXPERIMENTAL, behind `model.stft_keep_rows` (default false). Replaces
+        # the frequency average `f.mean(dim=2)` with a learned layer that keeps
+        # every row: the (channels x rows) block is laid out as one long channel
+        # axis and a 1x1 convolution learns, for each output channel, how much
+        # each (detector, row) pair counts. Rows are NOT averaged, so "a jammer
+        # block on rows 1-3 AND a hopper dash on row 6" stays distinguishable
+        # from "a louder jammer". Output is still `out_channels` wide, so fusion
+        # and everything downstream are unchanged.
+        #
+        # Only constructed when the flag is on, so with it off the state_dict is
+        # identical and every checkpoint in results/ keeps loading strict=True.
+        # rows = what is left of the n_fft STFT rows after conv1's pool: the
+        # default 2x2 pool halves them, the freq_summary time-only pool keeps all.
+        if keep_rows:
+            n_rows = n_fft if freq_summary else n_fft // 2
+            self.row_proj = nn.Conv1d(out_channels * n_rows, out_channels, kernel_size=1)
+            self.row_bn = nn.BatchNorm1d(out_channels)
+
         # out_channels is fixed regardless of the flag; the extra 3 hand-built
         # channels only exist when freq_summary is on. Read by AMC_CNN to
-        # size fusion correctly instead of hardcoding it.
+        # size fusion correctly instead of hardcoding it. keep_rows does not
+        # change it: the learned layer maps back to `out_channels`.
         self.out_channels = out_channels + (3 if freq_summary else 0)
+
+    def _collapse_rows(self, f):
+        """(batch, C, rows, time') -> (batch, C, time'): the step that decides what
+        happens to the frequency axis.
+
+        Default: average it away. keep_rows: lay the (C x rows) block out as one
+        channel axis and let a learned 1x1 layer decide how much each
+        (detector, row) pair counts, so which row a pattern sits in survives."""
+        if self.keep_rows:
+            return self.relu(self.row_bn(self.row_proj(f.flatten(1, 2))))
+        return f.mean(dim=2)
 
     def forward(self, x):
         # x: (batch, 2, time) real/imag -> complex signal for a proper
@@ -195,9 +227,26 @@ class STFTBranch(nn.Module):
                            window=self.window, center=False, return_complex=True)
         mag = spec.abs().unsqueeze(1)   # (batch, 1, freq, time_frames)
 
+        # torch.stft returns rows in raw FFT order: row 0 is DC, rows 1..n/2-1
+        # the positive frequencies, then the negative ones. Two consequences,
+        # both only matter once the frequency axis carries information:
+        #   - a signal centred on 0 Hz (every civilian class) is split across
+        #     the FIRST and LAST rows, so conv1's 3x3 kernel never sees it whole;
+        #   - _peak_freq_delta differences the argmax row with no wrap-around, so
+        #     a peak drifting across DC (row n-1 -> row 0) scores the maximum
+        #     possible jump -- "hopping" that never happened.
+        # Shifting puts 0 Hz in the middle and makes the axis monotonic. Guarded
+        # by freq_summary so the flag-off path stays byte-for-byte identical and
+        # every checkpoint in results/ keeps reproducing its published numbers.
+        # keep_rows needs it for the first reason (a signal at 0 Hz split across
+        # the first and last rows), and the learned layer below wants a
+        # monotonic frequency axis.
+        if self.freq_summary or self.keep_rows:
+            mag = torch.fft.fftshift(mag, dim=2)
+
         f = self.pool(self.relu(self.bn1(self.conv1(mag))))
         f = self.relu(self.bn2(self.conv2(f)))          # (batch, out_channels, freq', time')
-        f = f.mean(dim=2)                                 # collapse frequency -> (batch, out_channels, time')
+        f = self._collapse_rows(f)                        # -> (batch, out_channels, time')
 
         if not self.freq_summary:
             return f
@@ -214,15 +263,20 @@ class STFTBranch(nn.Module):
 
 
 class AMC_CNN(nn.Module):
-    def __init__(self, num_classes, input_len=1024, stft_freq_summary=None):
+    def __init__(self, num_classes, input_len=1024, stft_freq_summary=None,
+                 stft_keep_rows=None):
         super().__init__()
         if stft_freq_summary is None:
             from src.config import CFG
             stft_freq_summary = CFG.get("model", {}).get("stft_freq_summary", False)
+        if stft_keep_rows is None:
+            from src.config import CFG
+            stft_keep_rows = CFG.get("model", {}).get("stft_keep_rows", False)
 
         iq_out_channels = 128
         self.iq_branch = IQBranch(out_channels=iq_out_channels)
-        self.stft_branch = STFTBranch(out_channels=64, freq_summary=stft_freq_summary)
+        self.stft_branch = STFTBranch(out_channels=64, freq_summary=stft_freq_summary,
+                                       keep_rows=stft_keep_rows)
         # Computed from what the branches actually produce, not hardcoded --
         # stft_branch.out_channels is 64 with the flag off, 67 with it on.
         fused_channels = iq_out_channels + self.stft_branch.out_channels

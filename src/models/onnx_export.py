@@ -39,15 +39,31 @@ class STFTBranchONNX(nn.Module):
         self.bn2 = stft_branch.bn2
         self.relu = stft_branch.relu
         self.freq_summary = stft_branch.freq_summary
+        self.keep_rows = stft_branch.keep_rows
         self.summary_pool = stft_branch.summary_pool
         self.out_channels = stft_branch.out_channels
+        self.n_fft = stft_branch.n_fft
+        if self.keep_rows:
+            self.row_proj = stft_branch.row_proj
+            self.row_bn = stft_branch.row_bn
 
     def forward(self, mag):
         # mag: (batch, 1, freq, time_frames) -- precomputed |STFT|, same
         # shape torch.stft(...).abs().unsqueeze(1) would have produced.
+        #
+        # Mirrors STFTBranch.forward, including the fftshift it applies when
+        # freq_summary or keep_rows is on. torch.roll by n_fft//2 IS fftshift for
+        # an even n_fft, and exports to plain Slice/Concat, so the browser feeds
+        # this graph the same raw-FFT-order magnitude it always did.
+        if self.freq_summary or self.keep_rows:
+            mag = torch.roll(mag, shifts=self.n_fft // 2, dims=2)
+
         f = self.pool(self.relu(self.bn1(self.conv1(mag))))
         f = self.relu(self.bn2(self.conv2(f)))
-        f = f.mean(dim=2)
+        if self.keep_rows:
+            f = self.relu(self.row_bn(self.row_proj(f.flatten(1, 2))))
+        else:
+            f = f.mean(dim=2)
 
         if not self.freq_summary:
             return f

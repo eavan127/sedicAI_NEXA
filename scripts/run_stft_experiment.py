@@ -1,4 +1,4 @@
-"""Train ONE model with model.stft_freq_summary enabled, for the JSR experiment.
+"""Train ONE model for the jammed-FHSS experiment (any combination of the switches below).
 
 The hypothesis
 --------------
@@ -30,43 +30,124 @@ checkpoints in results/ will load. Leaving it enabled on disk would break the
 console and the submission. This script cannot leave that landmine behind.
 
 The checkpoint is written to a NEW file. Nothing in results/ is overwritten.
+
+Switches (2026-09-20). With no arguments this is exactly what it always was: flag on, seed
+2000, writing results/experiment_stft_freq_summary.pt. Every cell of the 2x2-plus plan in
+docs/POST_STAGE1_FIXES.md (E5) is one invocation:
+
+    python scripts/run_stft_experiment.py --no-freq-summary --divisor 40          # A
+    python scripts/run_stft_experiment.py                                          # C  (flag)
+    python scripts/run_stft_experiment.py --no-freq-summary --keep-rows            # C2 (keep the rows)
+    python scripts/run_stft_experiment.py --keep-rows --divisor 40                 # C2 + flag + A
+    python scripts/run_stft_experiment.py --no-freq-summary                        # baseline re-run
+
+    --keep-rows        variant C2: replace the frequency average with a learned layer
+    --no-freq-summary  turn the original flag off
+    --divisor N        training.snr_weight_divisor (20 = today; 40 samples -10 dB ~3x, not ~10x)
+    --smoke            1 epoch on a tiny slice, to prove the whole pipeline in about a minute
+    --out-dir DIR      where to write (default results/)
+
+Score a finished run with the probes, passing the same model switches:
+
+    python scripts/probe_jsr.py --n 600 --seed 0 --checkpoint results/experiment_rows.pt --stft-keep-rows
+    python scripts/high_snr_probe.py --n 300 --checkpoint results/experiment_rows.pt --stft-keep-rows
 """
+
+import argparse
+import json
 import sys
 from pathlib import Path
 
+import numpy as np
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.config import CFG, CLASSES  # noqa: E402
 
-# Switch the experiment on BEFORE anything constructs a model, and only in
-# this process's memory.
-CFG.setdefault("model", {})["stft_freq_summary"] = True
-
-from src.train import load_data, stratified_split  # noqa: E402
-from scripts.train_ensemble import train_one  # noqa: E402
-
 ROOT = Path(__file__).resolve().parents[1]
-OUT = ROOT / "results" / "experiment_stft_freq_summary.pt"
-HISTORY = ROOT / "docs" / "experiments" / "stft_experiment_history.json"
 SEED = 2000       # member 0's seed -- the one the pinned baseline was measured on
 
 
+def _tag(freq_summary, keep_rows, divisor):
+    """Output name. The default run keeps its historical name so the notebook still finds it."""
+    if freq_summary and not keep_rows and divisor == 20:
+        return "stft_freq_summary"
+    parts = (["freq"] if freq_summary else []) + (["rows"] if keep_rows else [])
+    if divisor != 20:
+        parts.append(f"div{divisor:g}")
+    return "_".join(parts) or "baseline"
+
+
+def run_tag(freq_summary, keep_rows, divisor, seed=SEED):
+    """The full output name for a run: the architecture/training cell, plus the seed when it is
+    not the baseline seed, so a second seed can never overwrite the first. The Colab notebook
+    calls this same function, so the file names cannot drift apart."""
+    tag = _tag(freq_summary, keep_rows, divisor)
+    return tag if seed == SEED else f"{tag}_seed{seed}"
+
+
 def main():
-    assert CFG["model"]["stft_freq_summary"] is True, "flag failed to enable"
-    print(f"stft_freq_summary = {CFG['model']['stft_freq_summary']}")
-    print(f"seed {SEED}  ·  writing to {OUT.name}  ·  results/ untouched otherwise\n")
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--no-freq-summary", action="store_true", help="turn model.stft_freq_summary OFF")
+    ap.add_argument("--keep-rows", action="store_true", help="turn model.stft_keep_rows ON (variant C2)")
+    ap.add_argument("--divisor", type=float, default=None, help="training.snr_weight_divisor (default: config, 20)")
+    ap.add_argument("--seed", type=int, default=SEED)
+    ap.add_argument("--smoke", action="store_true", help="1 epoch on a tiny slice: prove the pipeline, not the model")
+    ap.add_argument("--out-dir", type=Path, default=ROOT / "results")
+    args = ap.parse_args()
+
+    # Switch the experiment on BEFORE anything constructs a model, and only in this
+    # process's memory (configs/default.yaml is never edited: with a flag on, the
+    # fused shape or the layer set changes and NONE of the five checkpoints in
+    # results/ would load).
+    freq_summary = not args.no_freq_summary
+    CFG.setdefault("model", {})["stft_freq_summary"] = freq_summary
+    CFG["model"]["stft_keep_rows"] = args.keep_rows
+    if args.divisor is not None:
+        CFG["training"]["snr_weight_divisor"] = args.divisor
+    divisor = CFG["training"].get("snr_weight_divisor", 20)
+    if args.smoke:
+        CFG["training"]["epochs"] = 1
+
+    from src.models.amc_cnn import AMC_CNN
+    from src.train import load_data, stratified_split
+    from scripts.train_ensemble import train_one
+
+    # Prove the switches took, the way the notebook does, before spending hours.
+    probe = AMC_CNN(num_classes=len(CLASSES), input_len=CFG["signal"]["window_len"])
+    assert probe.stft_branch.freq_summary == freq_summary, "stft_freq_summary did not apply"
+    assert probe.stft_branch.keep_rows == args.keep_rows, "stft_keep_rows did not apply"
+    n_params = sum(p.numel() for p in probe.parameters())
+    del probe
+
+    tag = run_tag(freq_summary, args.keep_rows, divisor, args.seed) + ("_smoke" if args.smoke else "")
+    out = args.out_dir / f"experiment_{tag}.pt"
+    hist = args.out_dir / f"experiment_{tag}_history.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    print(f"stft_freq_summary = {freq_summary}   stft_keep_rows = {args.keep_rows}   "
+          f"snr_weight_divisor = {divisor:g}")
+    print(f"parameters {n_params:,}   seed {args.seed}   writing {out.name} (+ history); results/ otherwise untouched\n")
 
     X, y, snr_labels = load_data()
     d = CFG["dataset"]
     tr, va, _ = stratified_split(y, snr_labels, d["val_frac"], d["test_frac"], d["seed"])
+    if args.smoke:
+        # stratified_split returns indices grouped by class, so a plain [:N] slice would
+        # be one class only. Take a random subset.
+        rng = np.random.default_rng(0)
+        tr, va = rng.choice(tr, 2000, replace=False), rng.choice(va, 500, replace=False)
     print(f"train {len(tr)}  val {len(va)}  epochs {CFG['training']['epochs']}\n")
 
-    model = train_one(X, y, snr_labels, tr, va, seed=SEED)
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(model.state_dict(), OUT)
-    print(f"\nsaved {OUT}")
+    # history_path / ckpt_path: rewritten after every epoch and on every validation
+    # improvement, so a run killed at epoch 25 leaves a usable checkpoint.
+    model = train_one(X, y, snr_labels, tr, va, seed=args.seed, history_path=hist, ckpt_path=out)
+    torch.save(model.state_dict(), out)
+    (args.out_dir / f"experiment_{tag}_config.json").write_text(json.dumps({
+        "stft_freq_summary": freq_summary, "stft_keep_rows": args.keep_rows,
+        "snr_weight_divisor": divisor, "seed": args.seed, "parameters": n_params,
+    }, indent=2))
+    print(f"\nsaved {out}")
 
 
 if __name__ == "__main__":
