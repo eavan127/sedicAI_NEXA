@@ -337,6 +337,7 @@ def print_report(ev):
     print(f"\n{'=' * 100}\nEVALUATION: {ev['name']}   ({ev['parameters']:,} parameters, "
           f"{ev['n_test']:,} test windows)\n{'=' * 100}")
     print(f"flags: stft_freq_summary={ev['flags']['stft_freq_summary']}  stft_keep_rows={ev['flags']['stft_keep_rows']}"
+          f"  stft_dwell_feature={ev['flags'].get('stft_dwell_feature', False)}"
           f"   checkpoint(s): {', '.join(Path(c).name for c in ev['checkpoints'])}")
 
     print(f"\nTHRESHOLDS calibrated on the validation split ({ev['n_val']:,} windows), "
@@ -441,6 +442,8 @@ def main():
     ap.add_argument("--checkpoint", action="append", default=None, help="trained checkpoint (repeat to average several)")
     ap.add_argument("--stft-freq-summary", action="store_true")
     ap.add_argument("--stft-keep-rows", action="store_true")
+    ap.add_argument("--stft-dwell-feature", action="store_true",
+                    help="branch fix_radar-fhss-confusion: model.stft_dwell_feature")
     ap.add_argument("--name", default="experiment")
     ap.add_argument("--margin", type=float, default=0.03, help="safety margin above the benchmark when calibrating")
     ap.add_argument("--out", type=Path, default=None, help="evaluation JSON (default results/eval_<name>.json)")
@@ -468,6 +471,7 @@ def main():
     assert args.checkpoint, "--checkpoint is required (or use --verdict-only)"
     CFG.setdefault("model", {})["stft_freq_summary"] = bool(args.stft_freq_summary)
     CFG["model"]["stft_keep_rows"] = bool(args.stft_keep_rows)
+    CFG["model"]["stft_dwell_feature"] = bool(args.stft_dwell_feature)
 
     from src.train import load_data, stratified_split
 
@@ -493,7 +497,8 @@ def main():
     result = compute_metrics(y[test_idx], probs_test, thr_vec, snr[test_idx])
     result.update({
         "name": args.name, "checkpoints": [str(c) for c in args.checkpoint], "parameters": n_params,
-        "flags": {"stft_freq_summary": bool(args.stft_freq_summary), "stft_keep_rows": bool(args.stft_keep_rows)},
+        "flags": {"stft_freq_summary": bool(args.stft_freq_summary), "stft_keep_rows": bool(args.stft_keep_rows),
+                 "stft_dwell_feature": bool(args.stft_dwell_feature)},
         "margin": args.margin, "thresholds": cal, "n_val": int(len(val_idx)), "n_test": int(len(test_idx)),
     })
 
