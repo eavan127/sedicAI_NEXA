@@ -436,6 +436,29 @@ model:
   # before ever being turned on for a submission.
   stft_freq_summary: false
 
+  # EXPERIMENTAL, off by default (branch fix_radar-fhss-confusion). Targets a
+  # different failure than stft_freq_summary: LFM_RADAR precision is 51%, and
+  # 46% of its false positives are windows that are really FHSS
+  # (docs/experiments/c2_baseline_eval.json, radar_fhss_confusion). That is
+  # not masking (the signal is not hidden under noise), it is the two
+  # classes looking similar to the model as it stands -- a radar chirp
+  # sweeps continuously across rows; FHSS holds one row per hop, then jumps
+  # to an arbitrary new one. `_peak_freq_delta` (used by stft_freq_summary)
+  # already reports frame-to-frame jumps, but not whether consecutive jumps
+  # keep going the same way, which is what turns a jump into a sweep.
+  #
+  # When true: adds one more per-frame feature, `_sweep_consistency` --
+  # whether this frame's frequency step has the same sign as the previous
+  # one's. High and sustained for a chirp, near chance for FHSS hopping to
+  # arbitrary channels. Composes with stft_freq_summary (shares its
+  # time-only pooling and its downsampling; needs freq_summary OR this flag
+  # on before frequency resolution is kept in the first place). Adds 1
+  # output channel alone, same architecture shape as stft_freq_summary's 3.
+  #
+  # Default false: no checkpoint has been trained with it yet, and every
+  # checkpoint in results/ must keep loading strict=True.
+  stft_dwell_feature: false
+
 training:
   epochs: 30
   batch_size: 64

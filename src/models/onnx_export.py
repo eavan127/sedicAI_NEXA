@@ -39,6 +39,7 @@ class STFTBranchONNX(nn.Module):
         self.bn2 = stft_branch.bn2
         self.relu = stft_branch.relu
         self.freq_summary = stft_branch.freq_summary
+        self.dwell_feature = stft_branch.dwell_feature
         self.summary_pool = stft_branch.summary_pool
         self.out_channels = stft_branch.out_channels
 
@@ -49,16 +50,20 @@ class STFTBranchONNX(nn.Module):
         f = self.relu(self.bn2(self.conv2(f)))
         f = f.mean(dim=2)
 
-        if not self.freq_summary:
+        if not self.freq_summary and not self.dwell_feature:
             return f
 
         from src.models.amc_cnn import (_frequency_max, _peak_freq_delta,
-                                         _spectral_flatness)
+                                         _spectral_flatness, _sweep_consistency)
         mag_bft = mag.squeeze(1)
-        freq_max = _frequency_max(mag_bft, dim=1)
-        flatness = _spectral_flatness(mag_bft, dim=1)
-        peak_delta = _peak_freq_delta(mag_bft, dim=1)
-        extra = torch.stack([freq_max, flatness, peak_delta], dim=1)
+        extras = []
+        if self.freq_summary:
+            extras.append(_frequency_max(mag_bft, dim=1))
+            extras.append(_spectral_flatness(mag_bft, dim=1))
+            extras.append(_peak_freq_delta(mag_bft, dim=1))
+        if self.dwell_feature:
+            extras.append(_sweep_consistency(mag_bft, dim=1))
+        extra = torch.stack(extras, dim=1)
         extra = self.summary_pool(extra)
         return torch.cat([f, extra], dim=1)
 

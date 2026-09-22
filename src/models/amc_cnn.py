@@ -109,6 +109,27 @@ def _peak_freq_delta(mag, dim=1):
     return delta
 
 
+def _sweep_consistency(mag, dim=1):
+    """Per-frame agreement between this frame's frequency step and the
+    previous one's, i.e. "is the peak row still moving the same way it just
+    moved". A linear radar chirp steps in one direction for many consecutive
+    frames in a row (high agreement); FHSS jumps to an arbitrary new channel
+    each hop, so consecutive steps have no reason to share a sign (agreement
+    near chance). Unlike `_peak_freq_delta`, which only says a jump happened,
+    this says whether jumps compound into a sweep -- the cue
+    `model.stft_dwell_feature` (configs/default.yaml) adds. The first two
+    frames have no defined step-of-a-step, so their value is 0."""
+    n_bins = mag.shape[dim]
+    peak = mag.argmax(dim=dim).to(mag.dtype)          # (..., time_frames)
+    step = torch.zeros_like(peak)
+    step[..., 1:] = (peak[..., 1:] - peak[..., :-1]) / n_bins
+
+    consistency = torch.zeros_like(peak)
+    same_sign = torch.sign(step[..., 2:]) == torch.sign(step[..., 1:-1])
+    consistency[..., 2:] = same_sign.to(mag.dtype)
+    return consistency
+
+
 class STFTBranch(nn.Module):
     """Time-frequency path: STFT computed inline from the raw IQ input, then
     a small 2D CNN over the magnitude spectrogram.
@@ -162,30 +183,37 @@ class STFTBranch(nn.Module):
     always has, byte for byte, so the checkpoints in results/ keep loading.
     """
 
-    def __init__(self, n_fft=16, hop_length=4, out_channels=64, freq_summary=False):
+    def __init__(self, n_fft=16, hop_length=4, out_channels=64, freq_summary=False,
+                 dwell_feature=False):
         super().__init__()
         self.n_fft = n_fft
         self.hop_length = hop_length
         self.freq_summary = freq_summary
+        self.dwell_feature = dwell_feature
         self.register_buffer("window", torch.hann_window(n_fft))
 
+        # Either flag needs frequency resolution kept (not pooled away), so
+        # either one switches the pool to time-only.
+        keep_freq_res = freq_summary or dwell_feature
         self.conv1 = nn.Conv2d(1, 16, kernel_size=3, padding=1)
         self.bn1 = nn.BatchNorm2d(16)
-        self.pool = nn.MaxPool2d((1, 2)) if freq_summary else nn.MaxPool2d(2)
+        self.pool = nn.MaxPool2d((1, 2)) if keep_freq_res else nn.MaxPool2d(2)
         self.conv2 = nn.Conv2d(16, out_channels, kernel_size=3, padding=1)
         self.bn2 = nn.BatchNorm2d(out_channels)
         self.relu = nn.ReLU()
 
-        # Downsamples the 3 hand-built per-frame features from the raw STFT
+        # Downsamples the hand-built per-frame features from the raw STFT
         # frame count down to the conv path's pooled time axis, so the two
         # can be concatenated. Same factor-of-2 the conv path applies in
-        # time, so both land on the same time' count.
-        self.summary_pool = nn.AvgPool1d(2) if freq_summary else None
+        # time, so both land on the same time' count. One pool shared by
+        # both flags -- same shape of downsampling either way.
+        self.summary_pool = nn.AvgPool1d(2) if keep_freq_res else None
 
-        # out_channels is fixed regardless of the flag; the extra 3 hand-built
-        # channels only exist when freq_summary is on. Read by AMC_CNN to
-        # size fusion correctly instead of hardcoding it.
-        self.out_channels = out_channels + (3 if freq_summary else 0)
+        # out_channels is fixed regardless of either flag; freq_summary adds
+        # 3 hand-built channels, dwell_feature adds 1 more, independently.
+        # Read by AMC_CNN to size fusion correctly instead of hardcoding it.
+        self.out_channels = (out_channels + (3 if freq_summary else 0)
+                              + (1 if dwell_feature else 0))
 
     def forward(self, x):
         # x: (batch, 2, time) real/imag -> complex signal for a proper
@@ -199,30 +227,39 @@ class STFTBranch(nn.Module):
         f = self.relu(self.bn2(self.conv2(f)))          # (batch, out_channels, freq', time')
         f = f.mean(dim=2)                                 # collapse frequency -> (batch, out_channels, time')
 
-        if not self.freq_summary:
+        if not self.freq_summary and not self.dwell_feature:
             return f
 
         mag_bft = mag.squeeze(1)   # (batch, freq, time_frames)
-        freq_max = _frequency_max(mag_bft, dim=1)          # (batch, time_frames)
-        flatness = _spectral_flatness(mag_bft, dim=1)       # (batch, time_frames)
-        peak_delta = _peak_freq_delta(mag_bft, dim=1)        # (batch, time_frames)
+        extras = []
+        if self.freq_summary:
+            extras.append(_frequency_max(mag_bft, dim=1))     # (batch, time_frames)
+            extras.append(_spectral_flatness(mag_bft, dim=1))  # (batch, time_frames)
+            extras.append(_peak_freq_delta(mag_bft, dim=1))     # (batch, time_frames)
+        if self.dwell_feature:
+            extras.append(_sweep_consistency(mag_bft, dim=1))   # (batch, time_frames)
 
-        extra = torch.stack([freq_max, flatness, peak_delta], dim=1)  # (batch, 3, time_frames)
-        extra = self.summary_pool(extra)                                # -> (batch, 3, time')
+        extra = torch.stack(extras, dim=1)   # (batch, len(extras), time_frames)
+        extra = self.summary_pool(extra)      # -> (batch, len(extras), time')
 
-        return torch.cat([f, extra], dim=1)   # (batch, out_channels+3, time')
+        return torch.cat([f, extra], dim=1)   # (batch, out_channels+len(extras), time')
 
 
 class AMC_CNN(nn.Module):
-    def __init__(self, num_classes, input_len=1024, stft_freq_summary=None):
+    def __init__(self, num_classes, input_len=1024, stft_freq_summary=None,
+                 stft_dwell_feature=None):
         super().__init__()
         if stft_freq_summary is None:
             from src.config import CFG
             stft_freq_summary = CFG.get("model", {}).get("stft_freq_summary", False)
+        if stft_dwell_feature is None:
+            from src.config import CFG
+            stft_dwell_feature = CFG.get("model", {}).get("stft_dwell_feature", False)
 
         iq_out_channels = 128
         self.iq_branch = IQBranch(out_channels=iq_out_channels)
-        self.stft_branch = STFTBranch(out_channels=64, freq_summary=stft_freq_summary)
+        self.stft_branch = STFTBranch(out_channels=64, freq_summary=stft_freq_summary,
+                                       dwell_feature=stft_dwell_feature)
         # Computed from what the branches actually produce, not hardcoded --
         # stft_branch.out_channels is 64 with the flag off, 67 with it on.
         fused_channels = iq_out_channels + self.stft_branch.out_channels
