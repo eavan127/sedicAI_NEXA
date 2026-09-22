@@ -284,6 +284,63 @@ A chirp is a smooth ramp; FHSS is a staircase.
 **Test.** `scripts/fhss_radar_false_positive.py` reproduces the by-hop-rate table, and
 `radar_fhss_confusion` in the scorecard gives the headline fractions.
 
+**BUILT and MEASURED 2026-09-22, branch `fix_radar-fhss-confusion` (a version of Fix B).**
+`model.stft_dwell_feature` (`src/models/amc_cnn.py`, default false): one more per-frame feature,
+`_sweep_consistency` — whether this frame's frequency step keeps going the same direction as the
+previous frame's, i.e. whether jumps compound into a sweep rather than landing as isolated hops.
+Where `stft_freq_summary`'s existing `_peak_freq_delta` says *a* jump happened, this says whether
+consecutive jumps *agree*: high and sustained for a radar chirp, near chance for FHSS hopping to
+an arbitrary new channel each time. Adds 1 output channel, +257 parameters (149,195 vs the
+148,938-parameter baseline). Composes with `stft_keep_rows` and `stft_freq_summary` — neither is
+required, but note `_sweep_consistency` reads the raw STFT magnitude directly (same as
+`_peak_freq_delta`), so `stft_keep_rows`'s richer *conv-path* representation does not reach it;
+they are independent mechanisms, not one subsuming the other. Flag off is proven byte-identical
+(`tests/test_stft_dwell_feature.py`), so every checkpoint in `results/` keeps loading strict=True.
+
+**Result is mixed, not a fix for LFM_RADAR precision — but a real, repeated effect on the specific
+confusion mechanism.** Two single-model seeds (2000, 2001) on two datasets:
+
+| Run | vs. | LFM_RADAR precision | radar's FPs that are true FHSS |
+|---|---|---|---|
+| old data (`eavan-retrain`), seed 2000 | old single-model baseline (51.4% / 46.4%) | 50.2% (−1.3) | 49.8% (+3.4, worse) |
+| old data, seed 2001 | same | 51.3% (−0.1, flat) | 46.1% (−0.3, flat) |
+| `radar-fix-data`, seed 2000 | same-data flag-off baseline (47.0% / 47.7%) | 46.5% (−0.5, flat) | 43.4% (−4.3, better) |
+| `radar-fix-data`, seed 2001 | same-data flag-off baseline | 44.3% (−2.7) | 35.7% (−12.0, better) |
+
+On the old dataset the effect is inside noise (the two seeds disagree on direction) — no real
+effect. On `radar-fix-data` (same shape, `(128400, 2, 512)`, unclear yet how its generation differs
+from `eavan-retrain` — ask before treating it as the new standard set) the confusion fraction drops
+in the same direction both times, averaging **−8.2 points**, which is outside the ~6-point
+single-run noise band this codebase has measured elsewhere. LFM_RADAR precision itself does **not**
+rise on either dataset — at best flat, at worst down a few points, same direction both new-data
+seeds. Reading it plainly: the feature makes the model mistake FHSS for radar less often, but
+total false positives on LFM_RADAR do not fall by a matching amount, so something else is
+contributing false alarms this feature does not touch. Not the precision fix E2 is looking for;
+a real, narrower, partial one.
+
+**Why it plausibly works less than hoped: `_sweep_consistency` tracks the single loudest row per
+frame.** In a composite window (radar or FHSS *plus* a jammer — most of the confused cases), the
+loudest row is often the jammer's, not the victim emitter's own movement, so the feature may be
+reporting "is the jammer steady or erratic" rather than "is the underlying emitter sweeping or
+hopping" in exactly the cases that matter. Untried: restricting the peak search to the top few rows
+per frame, or masking out a detected jammer block first (via `_spectral_flatness`/`_frequency_max`)
+before picking which row to track.
+
+**Not yet done, before this is a decided result:** a third seed or the full 5-model ensemble; a
+same-data baseline+flag comparison on old data too (only `radar-fix-data` got one); clarity on
+`radar-fix-data`'s provenance and whether it should replace `eavan-retrain` generally, which would
+also mean re-baselining `main`'s existing checkpoints against it, not just this branch.
+
+**Tooling added alongside this:** `scripts/run_dwell_experiment.py` and
+`scripts/run_stft_experiment.py --dwell-feature` (single-member training runs, same pattern as the
+C2/`stft_freq_summary` runners); `--stft-dwell-feature` on `evaluate_experiment.py`;
+`scripts/radar_fhss_confusion_check.py`, which reads `evaluate_experiment.py`'s JSON and reports
+only the two numbers this hypothesis makes a claim about (LFM_RADAR precision, the FHSS-confusion
+fraction) plus guardrails, across multiple seeds — built because
+`evaluate_experiment.py --verdict-only`'s 10 checks are pre-registered for the *other* experiment
+(C2 / masking) and can PASS a `stft_dwell_feature` run that does nothing for this problem, which is
+exactly what happened with the first old-data seed-2000 run before a second seed corrected it.
+
 ### E3. Civilian–civilian mixtures (closing the one untrained overlap)
 
 **What to do.** Add pairs to `dataset.mixture_combos` in `configs/default.yaml`, for example
