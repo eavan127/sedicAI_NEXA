@@ -95,7 +95,10 @@ class TestGracefulFallback:
         def boom(*a, **k):
             raise FileNotFoundError("no RadChar here")
 
-        monkeypatch.setattr("src.data.radchar.load_radchar_lfm", boom)
+        # load_real_radar buckets by measured SNR now (see radchar.py's
+        # "measured (not labelled) SNR" section) -- load_radchar_lfm_by_measured_snr
+        # is the entry point that must raise/propagate FileNotFoundError.
+        monkeypatch.setattr("src.data.radchar.load_radchar_lfm_by_measured_snr", boom)
         assert bd.load_real_radar() == []
 
     def test_zero_fraction_skips_radchar_entirely(self, monkeypatch):

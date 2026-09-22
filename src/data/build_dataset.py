@@ -119,29 +119,49 @@ def load_radioml_civilian(path=None, seed=None):
     return out
 
 
-def load_real_radar():
+def load_real_radar(return_rows=False):
     """Real LFM waveforms from RadChar, or [] if the file is not present.
 
-    IMPORTANT: these already contain noise at their labelled SNR, so they must
-    NOT be passed through add_awgn. Doing so would leave each sample noisier
-    than its own label claims, making every RadChar SNR label wrong.
+    IMPORTANT: these already contain noise, so they must NOT be passed
+    through add_awgn. Doing so would leave each sample noisier than its own
+    label claims.
+
+    Buckets by MEASURED SNR (src.data.radchar.load_radchar_lfm_by_measured_snr),
+    not RadChar's own signal_to_noise_ratio label -- see
+    src/data/diagnose_radchar_snr.py, which found the label's gap from the
+    true (active-reference) SNR grows to -15dB at the label's own "+20dB"
+    tier. Bucketing by the label would train the model on two different
+    meanings of the same SNR number, which is a worse problem than the
+    ~29 examples/bin this occasionally leaves short of radchar_fraction's
+    exact target (some of our snr_bins_db values have fewer eligible
+    real waveforms within tolerance than others -- see rebucket_radchar.py
+    for the actual counts).
 
     Only P2 downloads RadChar, so a missing file is not an error — the rest of
     the team still needs build_dataset to run.
+
+    return_rows: if True, returns (examples, rows_used) so a later caller
+    (composite/mixture examples, once that's wired) can request a disjoint
+    pool via exclude_rows and avoid reusing the same waveform in both.
     """
-    from src.data.radchar import load_radchar_lfm
+    from src.data.radchar import load_radchar_lfm_by_measured_snr
 
     n_per = CFG["dataset"]["examples_per_class_per_snr"]
     n_real = int(n_per * CFG["dataset"]["radchar_fraction"])
     if n_real == 0:
-        return []
+        return ([], []) if return_rows else []
 
     try:
-        return load_radchar_lfm(per_snr=n_real, snr_bins=CFG["snr_bins_db"])
+        # cap_per_label=None: measure the FULL RadChar LFM population (not a
+        # diagnostic sample), so the per-bin pool reflects everything really
+        # available. One-time cost, cached to data/processed/radchar_measured_snr.npz.
+        return load_radchar_lfm_by_measured_snr(
+            per_snr=n_real, snr_bins=CFG["snr_bins_db"], cap_per_label=None,
+            return_rows=return_rows)
     except FileNotFoundError:
         print("  ! RadChar not found — LFM_RADAR will be fully synthetic.")
         print("    See docs/pipeline/01-data-sources.md to download it.")
-        return []
+        return ([], []) if return_rows else []
 
 
 def build_synthetic_examples(n_real_radar=0, rng=None):

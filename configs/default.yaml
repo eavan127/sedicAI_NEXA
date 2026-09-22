@@ -281,7 +281,7 @@ dataset:
   # standalone_count / total_count (~29%), not 100%. Extending those two
   # functions to optionally draw a real waveform is the next step if more is
   # needed later.
-  radchar_fraction: 1.0
+  radchar_fraction: 0.5
   # Composite ("jammer overlaid on a real signal") examples, ADDITIVE on top
   # of the standalone per-class counts above -- standalone data is untouched.
   # Expressed as a fraction of examples_per_class_per_snr, generated per

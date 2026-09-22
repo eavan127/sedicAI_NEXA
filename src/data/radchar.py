@@ -90,6 +90,163 @@ def load_radchar_lfm(path=None, per_snr=None, snr_bins=None, seed=42):
     return [(iq[i], "LFM_RADAR", float(snr_of[i])) for i in range(len(iq))]
 
 
+# --- measured (not labelled) SNR -------------------------------------------
+#
+# RadChar's own `signal_to_noise_ratio` label does not mean what our
+# add_awgn-labelled SNR means. Checked 2026-09-22 (src/data/diagnose_radchar_snr.py):
+# comparing the label against an independent measurement (using RadChar's own
+# ground-truth pulse timing to isolate pure-noise "off" samples from
+# pulse+noise "on" samples, active-reference convention matching add_awgn),
+# the gap is small at the label's -10dB end (~+1dB) but grows to -15dB at the
+# label's own "+20dB" tier -- i.e. RadChar's nominal "clean" examples still
+# carry real noise. Bucketing by the label would train the model on two
+# different meanings of the same SNR number. load_radchar_lfm_by_measured_snr
+# below buckets by the independently measured value instead.
+
+RADCHAR_MEASURED_CACHE = REPO_ROOT / "data" / "processed" / "radchar_measured_snr.npz"
+
+
+def pulse_mask(fs, n_samples, pulse_width, time_delay, pri, n_pulses):
+    """Exact on/off sample mask from RadChar's own ground-truth pulse timing
+    -- no amplitude threshold, so it doesn't inherit the failure mode a
+    fixed dB-below-peak rule hits once noise is added (see
+    src/data/diagnose_duty_cycle.py)."""
+    mask = np.zeros(n_samples, dtype=bool)
+    t = time_delay
+    count = 0
+    while t < n_samples / fs and count < n_pulses:
+        start = int(t * fs)
+        end = min(int((t + pulse_width) * fs), n_samples)
+        if start < n_samples:
+            mask[start:end] = True
+        t += pri
+        count += 1
+    return mask
+
+
+def measured_snr_db(iq, mask):
+    """Independent SNR estimate from the ground-truth on/off split, active-
+    reference convention (matches src/data/preprocess.py::add_awgn)."""
+    off, on = iq[~mask], iq[mask]
+    if off.size == 0 or on.size == 0:
+        return np.nan
+    noise_power = np.mean(np.abs(off) ** 2)
+    on_power = np.mean(np.abs(on) ** 2)
+    if noise_power <= 0 or on_power <= noise_power:
+        return np.nan
+    return float(10 * np.log10((on_power - noise_power) / noise_power))
+
+
+def measure_all_lfm(path=None, cap_per_label=None, seed=0, use_cache=True):
+    """Measure every (or a capped-per-label sample of every) LFM waveform's
+    true SNR. Returns (rows, measured_snr, labelled_snr), aligned arrays.
+
+    This is a one-time, several-minute pass (row-by-row pulse masking after
+    one bulk HDF5 read), so it's cached to RADCHAR_MEASURED_CACHE. Delete
+    that file to force a re-measure (e.g. after switching RadChar-Tiny <->
+    RadChar-Small, or widening cap_per_label).
+    """
+    import h5py
+
+    path = Path(path) if path else DEFAULT_PATH
+    if use_cache and RADCHAR_MEASURED_CACHE.exists():
+        cached = np.load(RADCHAR_MEASURED_CACHE)
+        return cached["rows"], cached["measured"], cached["label"]
+
+    rng = np.random.default_rng(seed)
+    with h5py.File(path, "r") as f:
+        labels = f["labels"][...]
+        is_lfm = labels["signal_type"] == LFM
+        lfm_rows = np.flatnonzero(is_lfm)
+
+        by_label = {}
+        for lab in np.unique(labels["signal_to_noise_ratio"][is_lfm]):
+            rows = lfm_rows[labels["signal_to_noise_ratio"][lfm_rows] == lab]
+            if cap_per_label is not None and rows.size > cap_per_label:
+                rows = rng.choice(rows, cap_per_label, replace=False)
+            by_label[lab] = np.sort(rows)
+
+        all_rows = np.sort(np.concatenate(list(by_label.values())))
+        iq_all = f["iq"][all_rows]          # one bulk read
+        lab_all = labels[all_rows]
+
+        rows_out, measured_out, label_out = [], [], []
+        for i in range(len(all_rows)):
+            m = measured_snr_db(
+                iq_all[i],
+                pulse_mask(RADCHAR_FS, iq_all.shape[1], lab_all[i]["pulse_width"],
+                           lab_all[i]["time_delay"], lab_all[i]["pulse_repetition_interval"],
+                           int(lab_all[i]["number_of_pulses"])),
+            )
+            if not np.isnan(m):
+                rows_out.append(all_rows[i])
+                measured_out.append(m)
+                label_out.append(lab_all[i]["signal_to_noise_ratio"])
+
+    rows_out, measured_out, label_out = map(np.array, (rows_out, measured_out, label_out))
+    if use_cache:
+        RADCHAR_MEASURED_CACHE.parent.mkdir(parents=True, exist_ok=True)
+        np.savez(RADCHAR_MEASURED_CACHE, rows=rows_out, measured=measured_out, label=label_out)
+    return rows_out, measured_out, label_out
+
+
+def load_radchar_lfm_by_measured_snr(path=None, per_snr=None, snr_bins=None,
+                                      tolerance_db=3.0, seed=42, exclude_rows=None,
+                                      return_rows=False, cap_per_label=300):
+    """Drop-in replacement for load_radchar_lfm that buckets each waveform by
+    its OWN measured SNR instead of trusting RadChar's label (see the module
+    note above this section for why).
+
+    A waveform is only assigned to a snr_bins target if its measured SNR is
+    within tolerance_db of it -- a waveform measuring -13dB is not silently
+    relabelled into a -10dB bin.
+
+    exclude_rows: row indices to never draw from, so a second caller (e.g.
+    composite/mixture examples) can get a pool disjoint from a first caller's
+    (e.g. standalone examples) -- reusing the same waveform in both leaks
+    train/test the same way the RadioML loader's docstring warns about.
+
+    return_rows: if True, returns (examples, rows_used) instead of just
+    examples, so the caller can pass rows_used as the next call's
+    exclude_rows.
+    """
+    import h5py
+
+    path = Path(path) if path else DEFAULT_PATH
+    snr_bins = np.array(snr_bins if snr_bins is not None else CFG["snr_bins_db"], dtype=float)
+
+    rows, measured, _ = measure_all_lfm(path, cap_per_label=cap_per_label)
+    if exclude_rows is not None and len(exclude_rows):
+        keep_mask = ~np.isin(rows, exclude_rows)
+        rows, measured = rows[keep_mask], measured[keep_mask]
+
+    dist = np.abs(measured[:, None] - snr_bins[None, :])
+    nearest_idx = dist.argmin(axis=1)
+    nearest_gap = dist.min(axis=1)
+    eligible = nearest_gap <= tolerance_db
+
+    rng = np.random.default_rng(seed)
+    picked_rows, picked_snr = [], []
+    for i, target in enumerate(snr_bins):
+        candidates = rows[eligible & (nearest_idx == i)]
+        if per_snr is not None and candidates.size > per_snr:
+            candidates = rng.choice(candidates, per_snr, replace=False)
+        picked_rows.append(candidates)
+        picked_snr.append(np.full(candidates.size, float(target)))
+
+    picked_rows = np.concatenate(picked_rows) if picked_rows else np.array([], dtype=int)
+    picked_snr = np.concatenate(picked_snr) if picked_snr else np.array([])
+    if picked_rows.size == 0:
+        return ([], []) if return_rows else []
+
+    order = np.argsort(picked_rows)
+    with h5py.File(path, "r") as f:
+        iq = f["iq"][picked_rows[order]]
+    snr_of = picked_snr[order]
+    examples = [(iq[i], "LFM_RADAR", float(snr_of[i])) for i in range(len(iq))]
+    return (examples, picked_rows[order]) if return_rows else examples
+
+
 def describe(path=None):
     """Print the real parameter distributions — these are measurements, and they
     are what our synthetic generator should be reconciled against."""
