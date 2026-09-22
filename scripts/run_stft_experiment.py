@@ -42,6 +42,9 @@ docs/POST_STAGE1_FIXES.md (E5) is one invocation:
     python scripts/run_stft_experiment.py --no-freq-summary                        # baseline re-run
 
     --keep-rows        variant C2: replace the frequency average with a learned layer
+    --dwell-feature     branch fix_radar-fhss-confusion: add _sweep_consistency, targeting
+                        LFM_RADAR precision / the radar-called-FHSS confusion, not masking
+                        (see model.stft_dwell_feature in configs/default.yaml)
     --no-freq-summary  turn the original flag off
     --divisor N        training.snr_weight_divisor (20 = today; 40 samples -10 dB ~3x, not ~10x)
     --smoke            1 epoch on a tiny slice, to prove the whole pipeline in about a minute
@@ -69,21 +72,22 @@ ROOT = Path(__file__).resolve().parents[1]
 SEED = 2000       # member 0's seed -- the one the pinned baseline was measured on
 
 
-def _tag(freq_summary, keep_rows, divisor):
+def _tag(freq_summary, keep_rows, divisor, dwell_feature=False):
     """Output name. The default run keeps its historical name so the notebook still finds it."""
-    if freq_summary and not keep_rows and divisor == 20:
+    if freq_summary and not keep_rows and not dwell_feature and divisor == 20:
         return "stft_freq_summary"
-    parts = (["freq"] if freq_summary else []) + (["rows"] if keep_rows else [])
+    parts = ((["freq"] if freq_summary else []) + (["rows"] if keep_rows else [])
+             + (["dwell"] if dwell_feature else []))
     if divisor != 20:
         parts.append(f"div{divisor:g}")
     return "_".join(parts) or "baseline"
 
 
-def run_tag(freq_summary, keep_rows, divisor, seed=SEED):
+def run_tag(freq_summary, keep_rows, divisor, seed=SEED, dwell_feature=False):
     """The full output name for a run: the architecture/training cell, plus the seed when it is
     not the baseline seed, so a second seed can never overwrite the first. The Colab notebook
     calls this same function, so the file names cannot drift apart."""
-    tag = _tag(freq_summary, keep_rows, divisor)
+    tag = _tag(freq_summary, keep_rows, divisor, dwell_feature)
     return tag if seed == SEED else f"{tag}_seed{seed}"
 
 
@@ -91,6 +95,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--no-freq-summary", action="store_true", help="turn model.stft_freq_summary OFF")
     ap.add_argument("--keep-rows", action="store_true", help="turn model.stft_keep_rows ON (variant C2)")
+    ap.add_argument("--dwell-feature", action="store_true",
+                    help="turn model.stft_dwell_feature ON (branch fix_radar-fhss-confusion, "
+                          "targets LFM_RADAR precision / radar-called-FHSS confusion)")
     ap.add_argument("--divisor", type=float, default=None, help="training.snr_weight_divisor (default: config, 20)")
     ap.add_argument("--seed", type=int, default=SEED)
     ap.add_argument("--smoke", action="store_true", help="1 epoch on a tiny slice: prove the pipeline, not the model")
@@ -104,6 +111,7 @@ def main():
     freq_summary = not args.no_freq_summary
     CFG.setdefault("model", {})["stft_freq_summary"] = freq_summary
     CFG["model"]["stft_keep_rows"] = args.keep_rows
+    CFG["model"]["stft_dwell_feature"] = args.dwell_feature
     if args.divisor is not None:
         CFG["training"]["snr_weight_divisor"] = args.divisor
     divisor = CFG["training"].get("snr_weight_divisor", 20)
@@ -118,15 +126,17 @@ def main():
     probe = AMC_CNN(num_classes=len(CLASSES), input_len=CFG["signal"]["window_len"])
     assert probe.stft_branch.freq_summary == freq_summary, "stft_freq_summary did not apply"
     assert probe.stft_branch.keep_rows == args.keep_rows, "stft_keep_rows did not apply"
+    assert probe.stft_branch.dwell_feature == args.dwell_feature, "stft_dwell_feature did not apply"
     n_params = sum(p.numel() for p in probe.parameters())
     del probe
 
-    tag = run_tag(freq_summary, args.keep_rows, divisor, args.seed) + ("_smoke" if args.smoke else "")
+    tag = run_tag(freq_summary, args.keep_rows, divisor, args.seed,
+                  args.dwell_feature) + ("_smoke" if args.smoke else "")
     out = args.out_dir / f"experiment_{tag}.pt"
     hist = args.out_dir / f"experiment_{tag}_history.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     print(f"stft_freq_summary = {freq_summary}   stft_keep_rows = {args.keep_rows}   "
-          f"snr_weight_divisor = {divisor:g}")
+          f"stft_dwell_feature = {args.dwell_feature}   snr_weight_divisor = {divisor:g}")
     print(f"parameters {n_params:,}   seed {args.seed}   writing {out.name} (+ history); results/ otherwise untouched\n")
 
     X, y, snr_labels = load_data()
@@ -145,6 +155,7 @@ def main():
     torch.save(model.state_dict(), out)
     (args.out_dir / f"experiment_{tag}_config.json").write_text(json.dumps({
         "stft_freq_summary": freq_summary, "stft_keep_rows": args.keep_rows,
+        "stft_dwell_feature": args.dwell_feature,
         "snr_weight_divisor": divisor, "seed": args.seed, "parameters": n_params,
     }, indent=2))
     print(f"\nsaved {out}")
