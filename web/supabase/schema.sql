@@ -1,5 +1,8 @@
 -- Tables and bucket for the History page (web/storage.js).
 --
+-- Project in use: SEDIC26, https://yoirhstytgrhvfunxvlc.supabase.co (the URL is
+-- also the default in web/storage.js, so only the key has to be entered).
+--
 -- Run this once in the Supabase SQL editor (Dashboard -> SQL -> New query),
 -- then paste the project URL and the ANON PUBLIC key into the Storage panel
 -- on the History page. Never the service_role key: anything pasted into the

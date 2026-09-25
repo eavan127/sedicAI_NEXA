@@ -24,6 +24,13 @@
 // anywhere until someone enters a project URL, and the History page says so
 // beside the fields.
 
+// The team's project (SEDIC26). A project URL is not a secret -- it is in
+// every request the browser makes -- so it ships here to save re-typing it on
+// each machine. The KEY never ships: it is entered on the History page and
+// kept in that browser's local storage. Point this at another project, or
+// clear the field on the page, to use a different one.
+const DEFAULT_SUPABASE_URL = "https://yoirhstytgrhvfunxvlc.supabase.co";
+
 const DB_NAME = "omni-analyses";
 const DB_VERSION = 1;
 const STORE = "analyses";
@@ -121,15 +128,20 @@ function cryptoId() {
 // Configuration (kept in localStorage, entered by the operator)
 // ---------------------------------------------------------------------------
 
+const BLANK_CONFIG = { backend: "local", url: DEFAULT_SUPABASE_URL, key: "", storeFiles: false };
+
 export function readConfig() {
   try {
     const raw = localStorage.getItem(CONFIG_KEY);
-    if (!raw) return { backend: "local", url: "", key: "", storeFiles: false };
-    return { backend: "local", url: "", key: "", storeFiles: false, ...JSON.parse(raw) };
+    if (!raw) return { ...BLANK_CONFIG };
+    // A stored config wins field by field, so a saved empty URL stays empty:
+    // someone who deliberately cleared the field must not have the default
+    // silently put back on the next reload.
+    return { ...BLANK_CONFIG, ...JSON.parse(raw) };
   } catch {
     // Private mode, blocked site data, or a corrupted entry: the app must
     // still analyse captures, so fall back to local rather than throwing.
-    return { backend: "local", url: "", key: "", storeFiles: false };
+    return { ...BLANK_CONFIG };
   }
 }
 

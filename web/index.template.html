@@ -384,7 +384,7 @@
           </div>
           <div>
             <label for="stUrl">Supabase project URL</label>
-            <input id="stUrl" type="text" placeholder="https://xxxx.supabase.co" autocomplete="off">
+            <input id="stUrl" type="text" placeholder="https://xxxx.supabase.co" autocomplete="off" spellcheck="false">
           </div>
           <div>
             <label for="stKey">Supabase anon key</label>
@@ -403,11 +403,13 @@
           </div>
         </div>
         <div class="note" style="margin-top:8px;">
-          Records stay in this browser until a Supabase project is entered here. After that,
+          Records stay in this browser until "Supabase project" is selected above. After that,
           every analysed capture is sent to that project, and raw IQ files too if the last
-          option is switched on. The key is stored in this browser's local storage; use the
-          anon public key, never the service role key. Table and bucket definitions:
-          <code>web/supabase/schema.sql</code>.
+          option is switched on. The URL is pre-filled with the team project (SEDIC26); paste
+          the <b>anon public</b> key from Supabase &rarr; Settings &rarr; API, never the service
+          role key. The key is kept in this browser's local storage only. Run
+          <code>web/supabase/schema.sql</code> in the project's SQL editor first, or the first
+          write fails with "relation analyses does not exist".
         </div>
       </div>
     </section>
