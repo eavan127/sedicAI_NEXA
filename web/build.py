@@ -155,9 +155,25 @@ def build_data():
     from src.breakdown import single_vs_multi
     from src.ui.app_models import load_model, model_label
 
-    model = load_model("auto")
-    breakdown = single_vs_multi(model, X[test], y[test], snr[test],
-                                 classes=list(CLASSES))
+    # A model/checkpoint mismatch must not stop the page being rebuilt. This
+    # step needs results/*.pt to match the ARCHITECTURE the config currently
+    # selects, and the config carries experiment flags (stft_keep_rows and
+    # friends) that are turned on well before the matching checkpoints exist.
+    # Editing the HTML then failed with a wall of missing state_dict keys,
+    # after index.html had already been written -- the build looked broken
+    # when only its last step was. The existing web/data/performance.json is
+    # left in place and the page keeps showing the numbers it was built with.
+    try:
+        model = load_model("auto")
+        breakdown = single_vs_multi(model, X[test], y[test], snr[test],
+                                     classes=list(CLASSES))
+    except Exception as e:
+        first = str(e).strip().splitlines()[0]
+        print(f"  warning: performance data NOT refreshed -- {first}")
+        print("           results/*.pt do not match the architecture in "
+               "configs/default.yaml (check the model: flags), so the Performance "
+               "page keeps its previous numbers.")
+        return
     scorecard_path = REPO / "evals" / "scorecard.json"
     scorecard = (json.loads(scorecard_path.read_text())
                   if scorecard_path.is_file() else None)
@@ -310,5 +326,15 @@ if __name__ == "__main__":
     print("building web/")
     build_html()
     build_models()
-    build_data()
+    # The page is always rebuilt; the data steps need things a machine editing
+    # the HTML may simply not have -- the 330 MB dataset (untracked), or
+    # checkpoints matching the config's current experiment flags. Missing
+    # either one is reported as a warning against the files it would have
+    # refreshed, not as a traceback after index.html has already been written.
+    try:
+        build_data()
+    except FileNotFoundError as e:
+        print(f"  warning: page data NOT refreshed -- {e.filename or e}")
+        print("           run scripts/build_dataset.py, or ignore this when only "
+               "editing the page: web/data/ keeps its previous contents.")
     print("done")
