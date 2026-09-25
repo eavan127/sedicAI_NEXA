@@ -82,6 +82,27 @@ def train_one(X, y, snr_labels, tr, va, seed, history_path=None, ckpt_path=None)
     # Multi-label: each class is an independent yes/no -- see src/train.py.
     criterion = nn.BCEWithLogitsLoss(
         pos_weight=compute_class_weights(y, len(CLASSES), dampen=dampen).to(DEVICE))
+
+    # Composite windows (>1 class present) are worth composite_pos_weight times
+    # a standalone one in the TRAINING loss. Default 1.0 = exactly the old
+    # behaviour.
+    #
+    # Why this exists: pos_weight is per-CLASS, applied identically to every
+    # window, so missing QPSK costs the same whether QPSK sits alone in a clean
+    # window or shares one with a jammer. Measured on the test split at
+    # SNR >= +2 dB, standalone QPSK recall is 0.997 and composite QPSK recall
+    # is 0.061 -- the model learned to describe whichever emitter dominates,
+    # which is optimal for a loss where 71% of QPSK windows are standalone.
+    # This makes the secondary emitter expensive to miss.
+    #
+    # VALIDATION loss is deliberately left unweighted, so "best epoch" means
+    # the same thing here as in every other run and val losses stay comparable
+    # across experiment cells.
+    composite_w = float(t.get("composite_pos_weight", 1.0))
+    weighted = composite_w != 1.0
+    train_criterion = (nn.BCEWithLogitsLoss(
+        pos_weight=compute_class_weights(y, len(CLASSES), dampen=dampen).to(DEVICE),
+        reduction="none") if weighted else criterion)
     opt = torch.optim.Adam(model.parameters(), lr=t["learning_rate"])
     sched = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, patience=t["scheduler_patience"])
 
@@ -93,7 +114,14 @@ def train_one(X, y, snr_labels, tr, va, seed, history_path=None, ckpt_path=None)
         for xb, yb in train_loader:
             xb, yb = xb.to(DEVICE), yb.to(DEVICE)
             opt.zero_grad()
-            loss = criterion(model(xb), yb)
+            if weighted:
+                per_elem = train_criterion(model(xb), yb)          # (batch, n_classes)
+                w = torch.where(yb.sum(dim=1, keepdim=True) > 1,
+                                torch.as_tensor(composite_w, device=DEVICE, dtype=per_elem.dtype),
+                                torch.as_tensor(1.0, device=DEVICE, dtype=per_elem.dtype))
+                loss = (per_elem * w).mean()
+            else:
+                loss = criterion(model(xb), yb)
             loss.backward()
             opt.step()
             tloss += loss.item() * xb.size(0)
