@@ -16,6 +16,7 @@ Usage:
 import argparse
 import csv
 import json
+from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
@@ -291,7 +292,27 @@ def _predict_probs(models, X):
     return summed / len(models)
 
 
-def evaluate(ensemble=False, n_models=5):
+def _arch_flags_for(ckpt_path):
+    """Which architecture switches a checkpoint was trained with.
+
+    run_stft_experiment.py writes experiment_<tag>_config.json next to every
+    checkpoint it saves, so the weights carry their own architecture with
+    them. Reading it here is what lets --checkpoint score an experiment run
+    whose flags differ from configs/default.yaml: building from the config
+    instead would fail load_state_dict, or worse, silently score the wrong
+    shape. Falls back to the config for checkpoints with no sidecar
+    (best_model.pt, ensemble_*.pt), which is the behaviour this function
+    replaced.
+    """
+    sidecar = ckpt_path.parent / f"{ckpt_path.stem}_config.json"
+    if not sidecar.exists():
+        return {}
+    f = json.loads(sidecar.read_text())
+    return {k: f.get(k, False) for k in
+            ("stft_freq_summary", "stft_keep_rows", "cumulant_features") if k in f}
+
+
+def evaluate(ensemble=False, n_models=5, checkpoint=None):
     X, y, snr_labels = load_data()
     d = CFG["dataset"]
     _, _, test_idx = stratified_split(y, snr_labels, d["val_frac"], d["test_frac"], d["seed"])
@@ -299,7 +320,10 @@ def evaluate(ensemble=False, n_models=5):
     X_test, y_test, snr_test = X[test_idx], y[test_idx], snr_labels[test_idx]
 
     ckpt_dir = REPO_ROOT / CFG["paths"]["checkpoints"]
-    if ensemble:
+    if checkpoint is not None:
+        ckpt_paths = [Path(checkpoint)]
+        ckpt_desc = str(ckpt_paths[0])
+    elif ensemble:
         ckpt_paths = [ckpt_dir / f"ensemble_{i}.pt" for i in range(n_models)]
         missing = [p for p in ckpt_paths if not p.exists()]
         if missing:
@@ -313,7 +337,11 @@ def evaluate(ensemble=False, n_models=5):
 
     models = []
     for p in ckpt_paths:
-        model = AMC_CNN(num_classes=len(CLASSES), input_len=X.shape[-1]).to(DEVICE)
+        flags = _arch_flags_for(p)
+        if flags:
+            print(f"  {p.name}: architecture from sidecar -- "
+                  + ", ".join(f"{k}={v}" for k, v in flags.items()))
+        model = AMC_CNN(num_classes=len(CLASSES), input_len=X.shape[-1], **flags).to(DEVICE)
         model.load_state_dict(torch.load(p, map_location=DEVICE))
         model.eval()
         models.append(model)
@@ -569,5 +597,9 @@ if __name__ == "__main__":
     p.add_argument("--ensemble", action="store_true",
                     help="evaluate the ensemble_*.pt average instead of best_model.pt")
     p.add_argument("--n-models", type=int, default=5)
+    p.add_argument("--checkpoint", default=None,
+                    help="score this checkpoint instead of results/best_model.pt -- "
+                         "its architecture is read from the _config.json sidecar "
+                         "run_stft_experiment.py writes beside it")
     a = p.parse_args()
-    evaluate(a.ensemble, a.n_models)
+    evaluate(a.ensemble, a.n_models, a.checkpoint)
