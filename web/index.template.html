@@ -144,8 +144,42 @@
     tbody tr { break-inside: avoid; page-break-inside: avoid; }
 
     /* Other pages are not part of this report. */
-    #page-signal, #page-performance, #page-model { display: none !important; }
+    #page-signal, #page-history, #page-performance, #page-model { display: none !important; }
   }
+  /* History page. Bars are divs, not a canvas: they reflow with the panel and
+     survive the print stylesheet that the browser-print PDF path uses. */
+  .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .kpi { background: var(--brand-olive-tint); border-radius: 6px; padding: 10px 12px; }
+  .kpi-label { font-size: 11px; color: var(--text-dim); letter-spacing: 0.04em; text-transform: uppercase; }
+  .kpi-value { font-size: 22px; font-weight: 700; color: var(--brand-slate); margin-top: 2px; }
+  .tier-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .tier-chip { border: 1px solid var(--grid); border-left-width: 4px; border-radius: 4px; padding: 4px 10px; font-size: 12px; }
+  .tier-chip .dim { color: var(--text-dim); }
+  .barlist { display: grid; gap: 6px; }
+  /* The label column shrinks before the bar does: at 120px fixed, the two
+     side-by-side panels left the track 2px wide and the chart read as a list
+     of numbers with a hairline beside it. */
+  .barrow { display: grid; grid-template-columns: minmax(0, 7.5rem) minmax(40px, 1fr) 2.5rem; align-items: center; gap: 8px; font-size: 12px; }
+  .barlabel { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bartrack { background: var(--bg); border: 1px solid var(--grid); border-radius: 3px; height: 14px; }
+  .barfill { background: var(--brand-olive); height: 100%; border-radius: 2px 0 0 2px; }
+  .barvalue { text-align: right; color: var(--text-dim); font-family: var(--mono); }
+  .filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+  .filters select, .filters input { padding: 6px 8px; border: 1px solid var(--grid); border-radius: 4px; background: var(--panel); color: var(--text); font-family: var(--font); font-size: 12px; }
+  button.mini { padding: 3px 8px; font-size: 11px; border: 1px solid var(--grid); border-radius: 4px; background: var(--panel); color: var(--text); cursor: pointer; }
+  button.mini:hover { background: var(--brand-olive-tint); }
+  td.row-actions { display: flex; gap: 6px; }
+  td.num, th.num { text-align: right; font-family: var(--mono); }
+  /* The global table rule is table-layout: fixed, which suits the two-column
+     panels elsewhere. Eight columns under it wrapped every cell to two or
+     three lines ("Milita/r/y") and clipped the row buttons, so this table
+     sizes to its content and scrolls sideways inside .table-wrap instead. */
+  table.history { table-layout: auto; min-width: 780px; }
+  table.history td, table.history th { white-space: nowrap; }
+  table.history td:nth-child(2), table.history td:nth-child(4) { white-space: normal; }
+  .storage-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; align-items: end; }
+  .storage-grid label { font-size: 11px; color: var(--text-dim); display: block; margin-bottom: 3px; }
+  .storage-grid input, .storage-grid select { width: 100%; padding: 6px 8px; border: 1px solid var(--grid); border-radius: 4px; font-family: var(--mono); font-size: 12px; background: var(--panel); color: var(--text); }
   table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
   thead th { background: var(--brand-olive-tint); color: var(--text); text-align: left; padding: 7px 10px; font-weight: 600; position: sticky; top: 0; }
   tbody td { padding: 6px 10px; border-bottom: 1px solid var(--grid); background: var(--panel); color: var(--text); word-wrap: break-word; }
@@ -167,6 +201,7 @@
       <div class="menu-label">Menu</div>
       <button class="active" data-page="replay">RF Replay</button>
       <button data-page="signal">Signal Analysis</button>
+      <button data-page="history">History</button>
       <button data-page="performance">Performance</button>
       <button data-page="model">Model</button>
     </nav>
@@ -292,6 +327,87 @@
             <div class="block-label">Amplitude (measured) + attention (model)</div>
             <canvas id="attnCanvas"></canvas>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="page-history" hidden>
+      <h3 class="page-title">History</h3>
+      <div class="filters">
+        <button class="secondary" id="histRefresh">Refresh</button>
+        <button class="secondary" id="histPdfAll">Download PDF of all signals</button>
+        <select id="histTier"><option value="">Every verdict</option></select>
+        <select id="histClass"><option value="">Every class</option></select>
+        <select id="histSource"><option value="">Scenario and upload</option>
+          <option value="scenario">Scenario only</option>
+          <option value="upload">Upload only</option></select>
+        <input id="histQuery" type="search" placeholder="Search file, case, class">
+        <span class="note" id="histStatus"></span>
+      </div>
+
+      <div class="block">
+        <div class="block-label">Everything analysed so far</div>
+        <div id="histSummary"></div>
+      </div>
+
+      <div class="panels">
+        <div class="block grow">
+          <div class="block-label">Captures containing each class</div>
+          <div id="histClassBars"></div>
+        </div>
+        <div class="block grow">
+          <div class="block-label">Captures by SNR band (dB)</div>
+          <div id="histSnrBars"></div>
+        </div>
+      </div>
+
+      <div class="block">
+        <div class="block-label">Captures per day</div>
+        <div id="histDayBars"></div>
+      </div>
+
+      <div class="block">
+        <div class="block-label">Stored analyses</div>
+        <div class="table-wrap" id="histTable"></div>
+      </div>
+
+      <div class="block">
+        <div class="block-label">Storage</div>
+        <div class="note" id="histBackendNote"></div>
+        <div class="storage-grid" style="margin-top:8px;">
+          <div>
+            <label for="stBackend">Where records are kept</label>
+            <select id="stBackend">
+              <option value="local">This browser only (no account needed)</option>
+              <option value="supabase">Supabase project (shared)</option>
+            </select>
+          </div>
+          <div>
+            <label for="stUrl">Supabase project URL</label>
+            <input id="stUrl" type="text" placeholder="https://xxxx.supabase.co" autocomplete="off">
+          </div>
+          <div>
+            <label for="stKey">Supabase anon key</label>
+            <input id="stKey" type="password" placeholder="paste the anon public key" autocomplete="off">
+          </div>
+          <div>
+            <label for="stFiles">Uploaded IQ files</label>
+            <select id="stFiles">
+              <option value="no">Keep the analysis only</option>
+              <option value="yes">Also upload the raw IQ file</option>
+            </select>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button class="primary" id="stSave">Save</button>
+            <button class="secondary" id="stTest">Test connection</button>
+          </div>
+        </div>
+        <div class="note" style="margin-top:8px;">
+          Records stay in this browser until a Supabase project is entered here. After that,
+          every analysed capture is sent to that project, and raw IQ files too if the last
+          option is switched on. The key is stored in this browser's local storage; use the
+          anon public key, never the service role key. Table and bucket definitions:
+          <code>web/supabase/schema.sql</code>.
         </div>
       </div>
     </section>

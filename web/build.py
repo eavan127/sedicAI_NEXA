@@ -21,8 +21,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import onnx
-
 REPO = Path(__file__).resolve().parents[1]
 WEB = REPO / "web"
 MODELS_OUT = WEB / "models"
@@ -46,6 +44,17 @@ def build_html():
 
 
 def build_models():
+    # Imported here, not at module scope: editing the page (the common case)
+    # must not require the onnx package. Without this, a machine that only
+    # writes HTML/JS cannot regenerate index.html at all -- it fails on the
+    # import before reaching build_html().
+    try:
+        import onnx
+    except ImportError:
+        print("  onnx not installed -- skipping model copy (pip install onnx to refresh "
+               "web/models/). index.html was still rebuilt.")
+        return
+
     MODELS_OUT.mkdir(parents=True, exist_ok=True)
     for name in CHECKPOINTS:
         src = ONNX_SRC / f"{name}.onnx"
