@@ -40,8 +40,21 @@ def _n_params(module):
 # 1. Flag off == today's behaviour.
 # ---------------------------------------------------------------------------
 
-def test_keep_rows_is_off_in_the_config():
-    assert CFG.get("model", {}).get("stft_keep_rows") is False
+def test_keep_rows_is_a_deliberate_config_choice():
+    """stft_keep_rows was turned ON in the config on 2026-09-22 (commit
+    aa033bd), after the C2 experiment. This test no longer guards "off"; it
+    guards that the value is set deliberately and that the flag reaches the
+    model, so a stray edit cannot leave the config and the architecture
+    disagreeing.
+
+    Consequence of the flag being on, recorded here because it bites
+    elsewhere: the checkpoints in results/ were trained flag-off and will NOT
+    load into a config-built model until they are retrained. Tests that guard
+    checkpoint loading therefore pass their flags explicitly."""
+    value = CFG.get("model", {}).get("stft_keep_rows")
+    assert value in (True, False), "stft_keep_rows must be set explicitly"
+    assert AMC_CNN(num_classes=len(CLASSES), input_len=WINDOW_LEN
+                    ).stft_branch.keep_rows is value
 
 
 def test_flag_off_builds_no_new_layers_and_the_state_dict_keys_are_unchanged():

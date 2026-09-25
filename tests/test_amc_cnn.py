@@ -101,7 +101,15 @@ def test_existing_checkpoint_still_loads_with_flag_off():
         pytest.skip("no trained checkpoint present (results/best_model.pt or "
                      "ensemble_0.pt) -- nothing to guard against yet")
 
-    model = AMC_CNN(num_classes=len(CLASSES), input_len=WINDOW_LEN)
+    # Every experimental flag forced off explicitly. Reading them from the
+    # config instead would make this guard depend on whatever experiment the
+    # config currently selects -- it failed exactly that way once the team set
+    # stft_keep_rows: true, reporting a missing-key error that says nothing
+    # about the guard's real question: does the FLAG-OFF architecture still
+    # load a shipped checkpoint?
+    model = AMC_CNN(num_classes=len(CLASSES), input_len=WINDOW_LEN,
+                     stft_freq_summary=False, stft_keep_rows=False,
+                     cumulant_features=False)
     state_dict = torch.load(ckpt_path, map_location="cpu")
     model.load_state_dict(state_dict, strict=True)  # must not raise
 
@@ -278,6 +286,7 @@ def test_existing_checkpoint_still_loads_with_cumulant_flag_off():
     CumulantFeatures branch must not even be constructed, let alone add
     parameters/buffers, when the flag is off."""
     model = AMC_CNN(num_classes=len(CLASSES), input_len=WINDOW_LEN,
+                     stft_freq_summary=False, stft_keep_rows=False,
                      cumulant_features=False)
     state_dict = torch.load("results/best_model.pt", map_location="cpu")
     model.load_state_dict(state_dict, strict=True)  # must not raise
@@ -372,3 +381,30 @@ def test_cumulant_features_degenerate_all_zero_window_is_finite():
     feats = branch(x)
     assert torch.isfinite(feats).all()
     assert feats.shape == (2, 3)
+
+
+# ---------------------------------------------------------------------------
+# The exported copy must compute the same network with the flag on.
+#
+# It did not: AMC_CNN_ONNX was written before CumulantFeatures existed and
+# never learned about it, so with model.cumulant_features on it fed fc1 192
+# inputs against 195 trained weights. Training and evaluation never touch that
+# wrapper, so nothing caught it until an export was attempted.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("cumulant_features", [False, True])
+def test_onnx_wrapper_matches_the_model(cumulant_features):
+    from src.models.onnx_export import AMC_CNN_ONNX, compute_stft_mag
+
+    torch.manual_seed(3)
+    model = AMC_CNN(num_classes=len(CLASSES), input_len=WINDOW_LEN,
+                     stft_freq_summary=False, stft_keep_rows=False,
+                     cumulant_features=cumulant_features).eval()
+    x = torch.from_numpy(
+        np.random.default_rng(0).standard_normal((2, 2, WINDOW_LEN)).astype(np.float32))
+    with torch.no_grad():
+        mag = compute_stft_mag(x, n_fft=model.stft_branch.n_fft,
+                               hop_length=model.stft_branch.hop_length,
+                               window=model.stft_branch.window)
+        logits, _attention = AMC_CNN_ONNX(model)(x, mag)
+        assert torch.allclose(logits, model(x), atol=1e-5)
