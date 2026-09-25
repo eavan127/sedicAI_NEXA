@@ -507,7 +507,7 @@ function paintHistory() {
   histSnrBars.innerHTML = barsHtml(s.snr.map(b => [b.label, b.count]),
     { empty: "No capture carries a known SNR.", sort: false });
   histDayBars.innerHTML = barsHtml(s.byDay, { empty: "Nothing stored yet.", sort: false });
-  histTable.innerHTML = tableHtml(filtered);
+  histTable.innerHTML = tableHtml(filtered, { canDelete: !usingSupabase() });
   histStatus.textContent = filtered.length === histRecords.length
     ? `${histRecords.length} stored`
     : `${filtered.length} of ${histRecords.length} stored`;

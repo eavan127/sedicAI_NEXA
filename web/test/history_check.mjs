@@ -4,7 +4,7 @@
 //
 // Pure functions only -- no DOM, no IndexedDB -- so this runs in node:
 //     node web/test/history_check.mjs
-import { applyFilters, barsHtml, summarise, SNR_BINS } from "../history.js";
+import { applyFilters, barsHtml, summarise, tableHtml, SNR_BINS } from "../history.js";
 import { buildRecord, topTier } from "../storage.js";
 
 let failures = 0;
@@ -142,6 +142,19 @@ check("empty input does not divide by zero", (() => {
     labels(barsHtml(pairs, { sort: false })).join("") === "abc",
     labels(barsHtml(pairs, { sort: false })).join(""));
   check("empty message when there is nothing", barsHtml([]).includes("Nothing recorded yet."));
+}
+
+// --- the Delete button follows what the backend allows ----------------------
+
+{
+  // The shared database gives the anon key insert and select but not delete
+  // (web/supabase/schema.sql), so a Delete button on those rows could only
+  // ever fail. Local rows keep theirs.
+  const rows = [rec({ id: "a" })];
+  check("delete offered by default", tableHtml(rows).includes('data-act="delete"'));
+  check("delete hidden when the backend forbids it",
+    !tableHtml(rows, { canDelete: false }).includes('data-act="delete"'));
+  check("PDF stays either way", tableHtml(rows, { canDelete: false }).includes('data-act="pdf"'));
 }
 
 check("topTier prefers Hostile over Military", topTier({ Military: 9, Hostile: 1 }) === "Hostile");

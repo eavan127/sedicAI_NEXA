@@ -40,16 +40,21 @@ create index if not exists analyses_created_at_idx
 
 -- Row Level Security.
 --
--- The policies below open the table to the anon key, which is what makes a
--- static page with no login work at all: the key ships in the browser, so
--- anyone who can open the page can read and write these rows. That is the
--- right trade for a demo or a single team on a private link, and the wrong
--- one for anything that must not be publicly readable.
+-- The anon key ships inside the page, so "what the key may do" is "what any
+-- visitor may do". It may read and insert: that is what makes a static page
+-- with no login work at all.
 --
--- To lock it down later: turn on Supabase Auth, replace `using (true)` with
--- `using (auth.uid() = owner)`, and add an `owner uuid default auth.uid()`
--- column. Nothing in web/storage.js needs to change except sending the user's
--- access token instead of the anon key.
+-- It may NOT delete. Deleting is the one action that destroys work already
+-- done, and a key that can delete is one careless link away from an empty
+-- table. Remove rows from the Supabase dashboard (Table Editor -> select ->
+-- Delete), which authenticates as you. The app hides its Delete button when
+-- it is storing to Supabase for this reason.
+--
+-- This still leaves reading and writing open to anyone with the page. To
+-- close that too: turn on Supabase Auth, add an `owner uuid default
+-- auth.uid()` column, and replace `using (true)` with `using (auth.uid() =
+-- owner)`. Nothing in web/storage.js changes except sending the user's access
+-- token instead of the anon key.
 alter table public.analyses enable row level security;
 
 drop policy if exists analyses_read on public.analyses;
@@ -60,9 +65,9 @@ drop policy if exists analyses_insert on public.analyses;
 create policy analyses_insert on public.analyses
   for insert with check (true);
 
+-- Deliberately no delete policy: with RLS on, no policy means no deletes for
+-- the anon key. Dropping any policy an earlier version of this file created.
 drop policy if exists analyses_delete on public.analyses;
-create policy analyses_delete on public.analyses
-  for delete using (true);
 
 -- Bucket for raw IQ, used only when "Also upload the raw IQ file" is on.
 -- Private, so files are reachable with the key rather than by public URL.
