@@ -374,43 +374,6 @@
       <div class="block">
         <div class="block-label">Storage</div>
         <div class="note" id="histBackendNote"></div>
-        <div class="storage-grid" style="margin-top:8px;">
-          <div>
-            <label for="stBackend">Where records are kept</label>
-            <select id="stBackend">
-              <option value="local">This browser only (no account needed)</option>
-              <option value="supabase">Supabase project (shared)</option>
-            </select>
-          </div>
-          <div>
-            <label for="stUrl">Supabase project URL</label>
-            <input id="stUrl" type="text" placeholder="https://xxxx.supabase.co" autocomplete="off" spellcheck="false">
-          </div>
-          <div>
-            <label for="stKey">Supabase anon key</label>
-            <input id="stKey" type="password" placeholder="paste the anon public key" autocomplete="off">
-          </div>
-          <div>
-            <label for="stFiles">Uploaded IQ files</label>
-            <select id="stFiles">
-              <option value="no">Keep the analysis only</option>
-              <option value="yes">Also upload the raw IQ file</option>
-            </select>
-          </div>
-          <div style="display:flex; gap:8px;">
-            <button class="primary" id="stSave">Save</button>
-            <button class="secondary" id="stTest">Test connection</button>
-          </div>
-        </div>
-        <div class="note" style="margin-top:8px;">
-          Records stay in this browser until "Supabase project" is selected above. After that,
-          every analysed capture is sent to that project, and raw IQ files too if the last
-          option is switched on. The URL is pre-filled with the team project (SEDIC26); paste
-          the <b>anon public</b> key from Supabase &rarr; Settings &rarr; API, never the service
-          role key. The key is kept in this browser's local storage only. Run
-          <code>web/supabase/schema.sql</code> in the project's SQL editor first, or the first
-          write fails with "relation analyses does not exist".
-        </div>
       </div>
     </section>
 
@@ -468,6 +431,12 @@
     </main>
   </div>
 
+  <!-- Supabase credentials, in this order:
+         1. web/supabase-config.js, a gitignored local file (dev machines)
+         2. the block below, written by web/build.py from SUPABASE_ANON_KEY
+       Neither is required: with no key the app stores analyses in the
+       browser. The key is never committed -- this repository is public. -->
+  <script>window.OMNI_SUPABASE = { url: "https://yoirhstytgrhvfunxvlc.supabase.co", anonKey: "" };</script>
   <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
   <script type="module" src="./main.js"></script>
 </body>

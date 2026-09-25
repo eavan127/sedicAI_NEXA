@@ -25,16 +25,34 @@
 // beside the fields.
 
 // The team's project (SEDIC26). A project URL is not a secret -- it is in
-// every request the browser makes -- so it ships here to save re-typing it on
-// each machine. The KEY never ships: it is entered on the History page and
-// kept in that browser's local storage. Point this at another project, or
-// clear the field on the page, to use a different one.
+// every request the browser makes -- so it ships here.
+//
+// The KEY does not ship. This repository is public, and the schema's policies
+// let the anon key insert, select and delete, so a committed key would let
+// anyone who finds the repo empty the table. It is supplied at runtime
+// instead, by whichever of these exists:
+//
+//   web/supabase-config.js   a one-line file, gitignored, for a local machine
+//   build-time injection      web/build.py writes the SUPABASE_ANON_KEY
+//                             environment variable into index.html, which is
+//                             how the deployed site gets it
+//
+// With a key present every analysis goes to Supabase automatically. With no
+// key the app stores in this browser and says so -- it never silently drops a
+// record, and it never asks anyone to paste anything.
 const DEFAULT_SUPABASE_URL = "https://yoirhstytgrhvfunxvlc.supabase.co";
+
+function injected() {
+  const c = globalThis.OMNI_SUPABASE || {};
+  // A build that ran without the variable set leaves the placeholder behind;
+  // treat that as "no key" rather than sending it as one.
+  const key = typeof c.anonKey === "string" && !c.anonKey.startsWith("__") ? c.anonKey.trim() : "";
+  return { url: (c.url || DEFAULT_SUPABASE_URL).trim(), key };
+}
 
 const DB_NAME = "omni-analyses";
 const DB_VERSION = 1;
 const STORE = "analyses";
-const CONFIG_KEY = "omni.storage.config";
 
 // ---------------------------------------------------------------------------
 // The record
@@ -128,35 +146,15 @@ function cryptoId() {
 // Configuration (kept in localStorage, entered by the operator)
 // ---------------------------------------------------------------------------
 
-const BLANK_CONFIG = { backend: "local", url: DEFAULT_SUPABASE_URL, key: "", storeFiles: false };
-
+/** What the app is configured to do, with no operator input: Supabase when a
+ *  key reached the page, this browser otherwise. `storeFiles` stays off --
+ *  raw IQ is ~25 MB per second of capture, which is a deliberate decision per
+ *  deployment, not a default. */
 export function readConfig() {
-  try {
-    const raw = localStorage.getItem(CONFIG_KEY);
-    if (!raw) return { ...BLANK_CONFIG };
-    // A stored config wins field by field, so a saved empty URL stays empty:
-    // someone who deliberately cleared the field must not have the default
-    // silently put back on the next reload.
-    return { ...BLANK_CONFIG, ...JSON.parse(raw) };
-  } catch {
-    // Private mode, blocked site data, or a corrupted entry: the app must
-    // still analyse captures, so fall back to local rather than throwing.
-    return { ...BLANK_CONFIG };
-  }
+  const { url, key } = injected();
+  return { backend: key ? "supabase" : "local", url, key, storeFiles: false };
 }
 
-export function writeConfig(cfg) {
-  try {
-    localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** True when Supabase is both selected and actually configured. Everything
- *  else falls back to local, so a half-filled form cannot silently drop
- *  records on the floor. */
 export function usingSupabase(cfg = readConfig()) {
   return cfg.backend === "supabase" && !!cfg.url && !!cfg.key;
 }
@@ -326,8 +324,26 @@ export async function saveAnalysis(record, file = null) {
   }
 }
 
+/**
+ * Every stored analysis, newest first: {records, backend, warning}.
+ *
+ * Reads fall back exactly like writes do. Without this, a bad or expired key
+ * made the History page empty -- while saveAnalysis was quietly writing those
+ * same captures to the local store, so the records existed and the page
+ * claimed they did not.
+ */
 export async function listAnalyses() {
-  return backendFor().list();
+  const backend = backendFor();
+  try {
+    return { records: await backend.list(), backend: backend.name, warning: null };
+  } catch (e) {
+    if (backend.name !== "supabase") throw e;
+    return {
+      records: await localBackend.list(),
+      backend: "local",
+      warning: `${e.message} Showing what is stored in this browser instead.`,
+    };
+  }
 }
 
 export async function deleteAnalysis(id) {

@@ -13,8 +13,7 @@ import {
 import { civilianWindows, drawConstellation } from "./constellation.js";
 import { THRESHOLDS } from "./analysis.js";
 import {
-  buildRecord, clearAnalyses, deleteAnalysis, listAnalyses, readConfig,
-  saveAnalysis, testConnection, usingSupabase, writeConfig,
+  buildRecord, deleteAnalysis, listAnalyses, readConfig, saveAnalysis, usingSupabase,
 } from "./storage.js";
 import { applyFilters, barsHtml, summarise, summaryHtml as histSummaryHtml, tableHtml } from "./history.js";
 import { buildCombined, buildSingle } from "./report.js";
@@ -472,8 +471,7 @@ const histClassBars = el("histClassBars"), histSnrBars = el("histSnrBars");
 const histDayBars = el("histDayBars"), histTable = el("histTable");
 const histTier = el("histTier"), histClassSel = el("histClass");
 const histSource = el("histSource"), histQuery = el("histQuery");
-const stBackend = el("stBackend"), stUrl = el("stUrl"), stKey = el("stKey");
-const stFiles = el("stFiles"), histBackendNote = el("histBackendNote");
+const histBackendNote = el("histBackendNote");
 
 let histRecords = [];
 
@@ -517,16 +515,17 @@ function paintHistory() {
 
 async function renderHistory() {
   const cfg = readConfig();
-  stBackend.value = cfg.backend; stUrl.value = cfg.url; stKey.value = cfg.key;
-  stFiles.value = cfg.storeFiles ? "yes" : "no";
   histBackendNote.textContent = usingSupabase(cfg)
-    ? `Records are read from and written to ${cfg.url}.`
-    : "Records are kept in this browser only. Nothing is sent anywhere.";
+    ? `Every analysis is stored in ${cfg.url} and read back from it.`
+    : "No Supabase key reached this page, so analyses are kept in this browser only. "
+      + "See web/supabase/schema.sql for how the key is supplied.";
   histStatus.textContent = "Loading…";
   try {
-    histRecords = await listAnalyses();
+    const { records, warning } = await listAnalyses();
+    histRecords = records;
     fillFilters(histRecords);
     paintHistory();
+    if (warning) histBackendNote.textContent = warning;
   } catch (e) {
     histStatus.textContent = `Could not read stored analyses: ${e.message}`;
   }
@@ -581,31 +580,5 @@ histTable.addEventListener("click", async (ev) => {
     } catch (e) {
       histStatus.textContent = `Delete failed: ${e.message}`;
     }
-  }
-});
-
-el("stSave").addEventListener("click", async () => {
-  const cfg = {
-    backend: stBackend.value,
-    url: stUrl.value.trim(),
-    key: stKey.value.trim(),
-    storeFiles: stFiles.value === "yes",
-  };
-  if (cfg.backend === "supabase" && (!cfg.url || !cfg.key)) {
-    histStatus.textContent = "A Supabase project needs both a URL and a key.";
-    return;
-  }
-  histStatus.textContent = writeConfig(cfg)
-    ? "Storage settings saved." : "Could not save settings (browser storage blocked).";
-  await renderHistory();
-});
-
-el("stTest").addEventListener("click", async () => {
-  histStatus.textContent = "Testing…";
-  try {
-    await testConnection({ url: stUrl.value.trim(), key: stKey.value.trim() });
-    histStatus.textContent = "Connection works: the analyses table is reachable.";
-  } catch (e) {
-    histStatus.textContent = e.message;
   }
 });

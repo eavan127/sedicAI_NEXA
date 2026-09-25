@@ -15,6 +15,7 @@ Usage:
     python web/build.py
 """
 import base64
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -39,6 +40,25 @@ def build_html():
         print(f"  warning: {logo} not found — header will show a broken image")
         src = ""
     out = template.replace("__LOGO_BASE64__", src)
+
+    # Supabase credentials for the deployed site. The URL is public; the key
+    # is not committed (this repository is public and the anon key can delete
+    # rows), so it is read from the environment at build time -- set
+    # SUPABASE_ANON_KEY in the host's build settings. Left as the placeholder
+    # when unset, which storage.js reads as "no key" and falls back to storing
+    # analyses in the browser.
+    key = os.environ.get("SUPABASE_ANON_KEY", "")
+    url = os.environ.get("SUPABASE_URL", "https://yoirhstytgrhvfunxvlc.supabase.co")
+    # The local-config <script> is emitted only when the file is there: a tag
+    # pointing at a file that does not exist logs a 404 in every visitor's
+    # console, including on the deployed site, which never has this file.
+    local_cfg = WEB / "supabase-config.js"
+    local_tag = '  <script src="./supabase-config.js"></script>\n'
+    out = out.replace("__SUPABASE_LOCAL_CONFIG__", local_tag if local_cfg.is_file() else "")
+    out = out.replace("__SUPABASE_URL__", url)
+    out = out.replace("__SUPABASE_ANON_KEY__", key)
+    print("  supabase   " + ("key injected from SUPABASE_ANON_KEY"
+                              if key else "no SUPABASE_ANON_KEY set -- browser storage only"))
     (WEB / "index.html").write_text(out, encoding="utf-8")
     print(f"  index.html  ({len(out) / 1024:.0f} KB)")
 
