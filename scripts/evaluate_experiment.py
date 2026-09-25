@@ -336,8 +336,8 @@ def print_verdict(checks):
 def print_report(ev):
     print(f"\n{'=' * 100}\nEVALUATION: {ev['name']}   ({ev['parameters']:,} parameters, "
           f"{ev['n_test']:,} test windows)\n{'=' * 100}")
-    print(f"flags: stft_freq_summary={ev['flags']['stft_freq_summary']}  stft_keep_rows={ev['flags']['stft_keep_rows']}"
-          f"   checkpoint(s): {', '.join(Path(c).name for c in ev['checkpoints'])}")
+    print("flags: " + "  ".join(f"{k}={v}" for k, v in ev["flags"].items())
+          + f"   checkpoint(s): {', '.join(Path(c).name for c in ev['checkpoints'])}")
 
     print(f"\nTHRESHOLDS calibrated on the validation split ({ev['n_val']:,} windows), "
           f"target recall {BENCHMARK:.0%} + {ev['margin']:.0%} margin")
@@ -436,11 +436,55 @@ def print_compare(new, base):
 
 # --------------------------------------------------------------------------- main
 
+MODEL_FLAGS = ("stft_freq_summary", "stft_keep_rows", "cumulant_features")
+
+
+def resolve_flags(checkpoints, args):
+    """Which architecture to build, from the flags given or from the run's own
+    sidecar.
+
+    scripts/run_stft_experiment.py writes experiment_<tag>_config.json beside
+    every checkpoint it trains. Reading it means a checkpoint cannot be scored
+    against the wrong architecture by forgetting a flag -- which does not
+    produce a wrong number, it produces a missing-key error partway through a
+    long evaluation. Explicit flags still win, for a checkpoint with no
+    sidecar (results/ensemble_*.pt) or to override one deliberately.
+
+    scripts/civilian_composite_report.py does the same for one checkpoint;
+    this handles several, and refuses a mixed set rather than silently
+    building the architecture of whichever one came first.
+    """
+    given = {f: bool(getattr(args, f, False)) for f in MODEL_FLAGS}
+    if any(given.values()):
+        return given
+
+    found = {}
+    for ckpt in checkpoints:
+        sidecar = ckpt.parent / f"{ckpt.stem}_config.json"
+        if not sidecar.exists():
+            continue
+        cfg = json.loads(sidecar.read_text())
+        found[ckpt.name] = {f: bool(cfg.get(f, False)) for f in MODEL_FLAGS}
+
+    if not found:
+        return given
+    distinct = {tuple(sorted(v.items())) for v in found.values()}
+    assert len(distinct) == 1, (
+        "the checkpoints were trained with different architectures, so they cannot be "
+        f"averaged: {json.dumps(found, indent=2)}")
+    flags = next(iter(found.values()))
+    print(f"(flags read from {len(found)} sidecar file(s): "
+          + "  ".join(f"{k}={v}" for k, v in flags.items()) + ")")
+    return flags
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[1])
     ap.add_argument("--checkpoint", action="append", default=None, help="trained checkpoint (repeat to average several)")
     ap.add_argument("--stft-freq-summary", action="store_true")
     ap.add_argument("--stft-keep-rows", action="store_true")
+    ap.add_argument("--cumulant-features", action="store_true",
+                    help="build the model with model.cumulant_features on (|C40|,|C42|,|C63|)")
     ap.add_argument("--name", default="experiment")
     ap.add_argument("--margin", type=float, default=0.03, help="safety margin above the benchmark when calibrating")
     ap.add_argument("--out", type=Path, default=None, help="evaluation JSON (default results/eval_<name>.json)")
@@ -466,8 +510,8 @@ def main():
         sys.exit(0 if ok else 1)
 
     assert args.checkpoint, "--checkpoint is required (or use --verdict-only)"
-    CFG.setdefault("model", {})["stft_freq_summary"] = bool(args.stft_freq_summary)
-    CFG["model"]["stft_keep_rows"] = bool(args.stft_keep_rows)
+    flags = resolve_flags([Path(c) for c in args.checkpoint], args)
+    CFG.setdefault("model", {}).update(flags)
 
     from src.train import load_data, stratified_split
 
@@ -493,7 +537,7 @@ def main():
     result = compute_metrics(y[test_idx], probs_test, thr_vec, snr[test_idx])
     result.update({
         "name": args.name, "checkpoints": [str(c) for c in args.checkpoint], "parameters": n_params,
-        "flags": {"stft_freq_summary": bool(args.stft_freq_summary), "stft_keep_rows": bool(args.stft_keep_rows)},
+        "flags": flags,
         "margin": args.margin, "thresholds": cal, "n_val": int(len(val_idx)), "n_test": int(len(test_idx)),
     })
 
