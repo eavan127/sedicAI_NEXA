@@ -337,4 +337,8 @@ if __name__ == "__main__":
         print(f"  warning: page data NOT refreshed -- {e.filename or e}")
         print("           run scripts/build_dataset.py, or ignore this when only "
                "editing the page: web/data/ keeps its previous contents.")
+    except ImportError as e:
+        # numpy/torch/scipy are not installed everywhere the page is edited.
+        print(f"  warning: page data NOT refreshed -- {e}")
+        print("           pip install -r requirements.txt to refresh web/data/.")
     print("done")
