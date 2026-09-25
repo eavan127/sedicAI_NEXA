@@ -12,6 +12,7 @@ import {
 } from "./pages.js";
 import { civilianWindows, drawConstellation } from "./constellation.js";
 import { THRESHOLDS } from "./analysis.js";
+import { initAssistant, openStore, summarizeUpload } from "./chatbot.js";
 
 const el = id => document.getElementById(id);
 const statusEl = el("status"), headlineEl = el("headline");
@@ -62,7 +63,7 @@ async function getModel(which) {
 
 async function init() {
   try {
-    ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/";
+    ort.env.wasm.wasmPaths = new URL("./vendor/ort/", document.baseURI).href;   // bundled copy: the demo must run with no internet
     // The constellation panel needs the C42 calibration constants, so the
     // card is loaded up front rather than lazily on the Model page.
     modelCard = await (await fetch("./data/model_card.json")).json();
@@ -149,6 +150,22 @@ function render() {
   }
 }
 
+/** Saves one finished analysis to the assistant's history. A storage failure
+ * must never break the analysis itself, so it is logged and swallowed. */
+async function saveToHistory({ name, source, caseNote, snrDb, which, result, capture }) {
+  try {
+    const events = resolveSession(result, true).events;
+    const store = await assistantStorePromise;
+    await store.addUpload(summarizeUpload({
+      name: name || (source === "upload" ? "uploaded capture" : `synthetic ${caseNote}`.trim()),
+      source, caseNote, snrDb, nWindows: result.nWindows, hop: result.hop,
+      durationMs: capture.re.length / FS * 1000, events, model: which,
+    }));
+  } catch (e) {
+    console.warn("Could not save this analysis to the assistant history:", e);
+  }
+}
+
 /** Everything a capture needs that does NOT depend on the model or the
  * display rules -- computed once per capture, reused on every re-render. */
 function measureCapture(re, im) {
@@ -162,7 +179,8 @@ function measureCapture(re, im) {
 }
 
 async function analyze(re, im, { source, caseNote = "", truth = null, snrDb = null,
-                                  snrCapped = false, requestedSnrDb = null }) {
+                                  snrCapped = false, requestedSnrDb = null,
+                                  name = null, record = true }) {
   synthBtn.disabled = uploadBtn.disabled = true;
   try {
     const which = modelSel.value;
@@ -183,6 +201,7 @@ async function analyze(re, im, { source, caseNote = "", truth = null, snrDb = nu
     session = { capture, result, source, caseNote, truth, snrDb, which,
                  snrCapped, requestedSnrDb };
     render();
+    if (record) await saveToHistory({ name, source, caseNote, snrDb, which, result, capture });
     statusEl.textContent = `${result.nWindows} windows classified in ${elapsed}s.`;
   } catch (e) {
     statusEl.textContent = `Error: ${e.message}`;
@@ -213,7 +232,7 @@ synthBtn.addEventListener("click", async () => {
       script, library, librarySnrDb,
     });
     await analyze(scenario.re, scenario.im, {
-      source: "scenario", caseNote: `case \`${caseName}\``,
+      source: "scenario", caseNote: `case \`${caseName}\``, name: `synthetic: ${caseName}`,
       truth: scenario.segments, snrDb: scenario.trueSnrDb,
       snrCapped: scenario.snrCapped, requestedSnrDb: scenario.requestedSnrDb,
     });
@@ -244,7 +263,7 @@ fileInput.addEventListener("change", async () => {
     for (let i = 0; i < n; i++) { re[i] = raw[2 * i]; im[i] = raw[2 * i + 1]; }
     // truth is scenario-only: never render a TRUTH overlay over data we do
     // not actually have ground truth for (session.py:analyze).
-    await analyze(re, im, { source: "upload" });
+    await analyze(re, im, { source: "upload", name: file.name });
   } catch (e) {
     statusEl.textContent = `Error: ${e.message}`;
     console.error(e);
@@ -257,7 +276,7 @@ modelSel.addEventListener("change", async () => {
   if (!session) return;
   await analyze(session.capture.re, session.capture.im, {
     source: session.source, caseNote: session.caseNote,
-    truth: session.truth, snrDb: session.snrDb,
+    truth: session.truth, snrDb: session.snrDb, record: false,
   });
 });
 
@@ -265,7 +284,7 @@ hopSel.addEventListener("change", async () => {
   if (!session) return;
   await analyze(session.capture.re, session.capture.im, {
     source: session.source, caseNote: session.caseNote,
-    truth: session.truth, snrDb: session.snrDb,
+    truth: session.truth, snrDb: session.snrDb, record: false,
   });
 });
 
@@ -296,6 +315,7 @@ const winSlider = el("winSlider"), winReadout = el("winReadout");
 const probsBox = el("probsBox"), winMetaBox = el("winMetaBox");
 const attnCanvas = el("attnCanvas"), breakdownCanvas = el("breakdownCanvas");
 let currentPage = "replay";
+const assistantStorePromise = openStore();
 let perfData = null, modelCard = null;
 
 function showPage(page) {
@@ -398,5 +418,10 @@ async function renderModel() {
   }
   box.innerHTML = modelCardHtml(modelCard, modelSel.value);
 }
+
+assistantStorePromise.then(store => initAssistant({
+  store, logEl: el("chatLog"), formEl: el("chatForm"), inputEl: el("chatInput"),
+  suggestEl: el("chatSuggest"), clearBtn: el("chatClear"), noteEl: el("chatNote"),
+})).catch(e => console.error("Assistant failed to start:", e));
 
 init();
