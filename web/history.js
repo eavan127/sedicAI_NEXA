@@ -135,7 +135,10 @@ export function barsHtml(pairs, { empty = "Nothing recorded yet.", sort = true }
     </div>`).join("")}</div>`;
 }
 
-export function tableHtml(records) {
+export function tableHtml(records, { canDelete = true } = {}) {
+  // canDelete=false for the shared database: the anon key may insert and read
+  // but not delete (web/supabase/schema.sql), so a Delete button there could
+  // only ever fail. Rows are removed from the Supabase dashboard instead.
   if (!records.length) {
     return `<div class="note">No stored analyses match. Analyse a capture on RF Replay,
              or clear the filters.</div>`;
@@ -151,7 +154,7 @@ export function tableHtml(records) {
       <td>${esc(r.model)}</td>
       <td class="row-actions">
         <button class="mini" data-act="pdf" data-id="${esc(r.id)}">PDF</button>
-        <button class="mini" data-act="delete" data-id="${esc(r.id)}">Delete</button>
+        ${canDelete ? `<button class="mini" data-act="delete" data-id="${esc(r.id)}">Delete</button>` : ""}
       </td>
     </tr>`).join("");
   return `<table class="history">
