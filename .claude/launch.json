@@ -2,13 +2,13 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "omni-ui",
+      "name": "nexa-ui",
       "runtimeExecutable": "python",
       "runtimeArgs": ["scripts/inference_ui.py"],
       "port": 7860
     },
     {
-      "name": "omni-static-poc",
+      "name": "nexa-web",
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "http.server", "8099", "--directory", "web"],
       "port": 8099

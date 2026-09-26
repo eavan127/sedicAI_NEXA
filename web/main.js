@@ -1,5 +1,5 @@
 import { CASES, buildScenario, caseNeedsLibrary, loadCivilianLibrary } from "./generators.js";
-import { classifyCapture, loadModel, FS, WINDOW_LEN } from "./model.js";
+import { classifyCapture, loadModel, CLASSES, FS, WINDOW_LEN } from "./model.js";
 import {
   noiseFloorPower, occupancy, powerSpectrumDb, resolveSession, scipyStft,
 } from "./analysis.js";
@@ -13,6 +13,11 @@ import {
 import { civilianWindows, drawConstellation } from "./constellation.js";
 import { THRESHOLDS } from "./analysis.js";
 import { initAssistant, openStore, summarizeUpload } from "./chatbot.js";
+import {
+  buildRecord, deleteAnalysis, listAnalyses, readConfig, saveAnalysis, usingSupabase,
+} from "./storage.js";
+import { applyFilters, barsHtml, summarise, summaryHtml as histSummaryHtml, tableHtml } from "./history.js";
+import { buildCombined, buildSingle } from "./report.js";
 
 const el = id => document.getElementById(id);
 const statusEl = el("status"), headlineEl = el("headline");
@@ -203,6 +208,12 @@ async function analyze(re, im, { source, caseNote = "", truth = null, snrDb = nu
     render();
     if (record) await saveToHistory({ name, source, caseNote, snrDb, which, result, capture });
     statusEl.textContent = `${result.nWindows} windows classified in ${elapsed}s.`;
+    // Stored AFTER render: a storage backend that is slow, full or
+    // misconfigured must not delay the picture the operator is waiting for,
+    // and must not lose it either -- store() reports its own failures and
+    // falls back to the local store.
+    store(pendingFile);
+    pendingFile = null;
   } catch (e) {
     statusEl.textContent = `Error: ${e.message}`;
     console.error(e);
@@ -263,6 +274,7 @@ fileInput.addEventListener("change", async () => {
     for (let i = 0; i < n; i++) { re[i] = raw[2 * i]; im[i] = raw[2 * i + 1]; }
     // truth is scenario-only: never render a TRUTH overlay over data we do
     // not actually have ground truth for (session.py:analyze).
+    pendingFile = file;
     await analyze(re, im, { source: "upload", name: file.name });
   } catch (e) {
     statusEl.textContent = `Error: ${e.message}`;
@@ -288,7 +300,22 @@ hopSel.addEventListener("change", async () => {
   });
 });
 
-printBtn.addEventListener("click", () => window.print());
+printBtn.addEventListener("click", async () => {
+  // A real .pdf when the library is reachable; the print dialog (which also
+  // produces a PDF, via the print stylesheet) when it is not, so an offline
+  // demo still has a way to export.
+  if (!lastRecord) { window.print(); return; }
+  printBtn.disabled = true;
+  try {
+    await buildSingle(lastRecord, { classes: CLASSES });
+    statusEl.textContent += "  Report downloaded.";
+  } catch (e) {
+    statusEl.textContent = `PDF library unavailable (${e.message}) — using the print dialog.`;
+    window.print();
+  } finally {
+    printBtn.disabled = false;
+  }
+});
 
 // The canvases size their backing store from clientWidth at draw time, so a
 // figure drawn for a 1100px column is a stretched bitmap on a 186mm page.
@@ -308,7 +335,39 @@ new ResizeObserver(() => {
 }).observe(consoleCanvas);
 
 // ---------------------------------------------------------------------------
-// Page switching + the other three pages
+// Storing analyses
+// ---------------------------------------------------------------------------
+
+// The file that produced the session being analysed, so the record can name
+// it (and upload it, when that is switched on). Cleared once consumed: a
+// later scenario run must not inherit the previous upload's name.
+let pendingFile = null;
+let lastRecord = null;
+
+async function store(file) {
+  try {
+    const resolved = resolveSession(session.result, smoothingChoice === "Smoothed");
+    const record = buildRecord(session, resolved, {
+      classes: CLASSES,
+      fileName: file?.name || null,
+      fileBytes: file?.size ?? null,
+    });
+    const { record: saved, backend, warning } = await saveAnalysis(record, file);
+    lastRecord = saved;
+    printBtn.disabled = false;
+    if (warning) statusEl.textContent += `  Storage: ${warning}`;
+    else statusEl.textContent += backend === "supabase"
+      ? "  Saved to Supabase." : "  Saved to this browser.";
+  } catch (e) {
+    // Never throw into the analyse path: the analysis on screen is valid
+    // whether or not it could be written down.
+    statusEl.textContent += `  Not stored: ${e.message}`;
+    console.error(e);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Page switching + the other four pages
 // ---------------------------------------------------------------------------
 
 const winSlider = el("winSlider"), winReadout = el("winReadout");
@@ -328,6 +387,7 @@ function showPage(page) {
   }
   // Canvases cannot be sized while hidden, so each page draws on entry.
   if (page === "signal") renderSignal();
+  if (page === "history") renderHistory();
   if (page === "performance") renderPerformance();
   if (page === "model") renderModel();
   if (page === "replay" && session) render();
@@ -425,3 +485,125 @@ assistantStorePromise.then(store => initAssistant({
 })).catch(e => console.error("Assistant failed to start:", e));
 
 init();
+
+
+// ---------------------------------------------------------------------------
+// History page: stored analyses, the dashboard over them, and where they live
+// ---------------------------------------------------------------------------
+
+const histStatus = el("histStatus"), histSummary = el("histSummary");
+const histClassBars = el("histClassBars"), histSnrBars = el("histSnrBars");
+const histDayBars = el("histDayBars"), histTable = el("histTable");
+const histTier = el("histTier"), histClassSel = el("histClass");
+const histSource = el("histSource"), histQuery = el("histQuery");
+const histBackendNote = el("histBackendNote");
+
+let histRecords = [];
+
+/** Filter dropdowns are built from what is actually stored, not from the full
+ *  class list: offering a filter that can only ever return nothing reads as a
+ *  broken page. */
+function fillFilters(records) {
+  const keep = (sel, values) => {
+    const chosen = sel.value;
+    const first = sel.options[0];
+    sel.innerHTML = "";
+    sel.appendChild(first);
+    for (const v of values) {
+      const o = document.createElement("option");
+      o.value = v; o.textContent = v;
+      sel.appendChild(o);
+    }
+    sel.value = values.includes(chosen) ? chosen : "";
+  };
+  keep(histTier, [...new Set(records.map(r => r.verdict))].sort());
+  keep(histClassSel, [...new Set(records.flatMap(r => r.classes_detected || []))].sort());
+}
+
+function paintHistory() {
+  const filtered = applyFilters(histRecords, {
+    tier: histTier.value, cls: histClassSel.value,
+    source: histSource.value, query: histQuery.value,
+  });
+  const s = summarise(filtered);
+  histSummary.innerHTML = histSummaryHtml(s);
+  histClassBars.innerHTML = barsHtml(Object.entries(s.byClass),
+    { empty: "No class has been detected in a stored capture yet." });
+  histSnrBars.innerHTML = barsHtml(s.snr.map(b => [b.label, b.count]),
+    { empty: "No capture carries a known SNR.", sort: false });
+  histDayBars.innerHTML = barsHtml(s.byDay, { empty: "Nothing stored yet.", sort: false });
+  histTable.innerHTML = tableHtml(filtered, { canDelete: !usingSupabase() });
+  histStatus.textContent = filtered.length === histRecords.length
+    ? `${histRecords.length} stored`
+    : `${filtered.length} of ${histRecords.length} stored`;
+}
+
+async function renderHistory() {
+  const cfg = readConfig();
+  histBackendNote.textContent = usingSupabase(cfg)
+    ? `Every analysis is stored in ${cfg.url} and read back from it.`
+    : "No Supabase key reached this page, so analyses are kept in this browser only. "
+      + "See web/supabase/schema.sql for how the key is supplied.";
+  histStatus.textContent = "Loading…";
+  try {
+    const { records, warning } = await listAnalyses();
+    histRecords = records;
+    fillFilters(histRecords);
+    paintHistory();
+    if (warning) histBackendNote.textContent = warning;
+  } catch (e) {
+    histStatus.textContent = `Could not read stored analyses: ${e.message}`;
+  }
+}
+
+for (const node of [histTier, histClassSel, histSource]) {
+  node.addEventListener("change", paintHistory);
+}
+histQuery.addEventListener("input", paintHistory);
+el("histRefresh").addEventListener("click", renderHistory);
+
+el("histPdfAll").addEventListener("click", async () => {
+  const filtered = applyFilters(histRecords, {
+    tier: histTier.value, cls: histClassSel.value,
+    source: histSource.value, query: histQuery.value,
+  });
+  if (!filtered.length) { histStatus.textContent = "Nothing to report."; return; }
+  histStatus.textContent = "Building PDF…";
+  try {
+    await buildCombined(filtered, summarise(filtered), {
+      title: filtered.length === histRecords.length
+        ? "All analysed signals" : "Analysed signals (filtered)",
+    });
+    histStatus.textContent = `${filtered.length} captures exported.`;
+  } catch (e) {
+    histStatus.textContent = `PDF failed: ${e.message}`;
+  }
+});
+
+// One listener on the table rather than per row: the table is rebuilt on
+// every filter keystroke, and per-row listeners would leak with it.
+histTable.addEventListener("click", async (ev) => {
+  const btn = ev.target.closest("button[data-act]");
+  if (!btn) return;
+  const record = histRecords.find(r => r.id === btn.dataset.id);
+  if (!record) return;
+  if (btn.dataset.act === "pdf") {
+    histStatus.textContent = "Building PDF…";
+    try {
+      await buildSingle(record, { classes: CLASSES });
+      histStatus.textContent = "PDF downloaded.";
+    } catch (e) {
+      histStatus.textContent = `PDF failed: ${e.message}`;
+    }
+    return;
+  }
+  if (btn.dataset.act === "delete") {
+    if (!confirm("Delete this stored analysis? This cannot be undone.")) return;
+    try {
+      await deleteAnalysis(record.id);
+      await renderHistory();
+    } catch (e) {
+      histStatus.textContent = `Delete failed: ${e.message}`;
+    }
+  }
+});

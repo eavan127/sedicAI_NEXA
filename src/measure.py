@@ -14,6 +14,14 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.signal import stft
 
+# The actual cumulant formulas live in src/cumulants.py (ONE definition,
+# shared with src/models/amc_cnn.py's CumulantFeatures expert-feature
+# branch, behind `model.cumulant_features`) -- aliased to this module's
+# historical private name so every existing
+# `from src.measure import _normalized_c42` import and test keeps working
+# unchanged.
+from src.cumulants import normalized_c42 as _normalized_c42
+
 from src.config import CFG
 
 _EPS = 1e-20
@@ -205,24 +213,6 @@ class ConstellationOrderEstimate:
     margin: float
     accuracy: object
     snr_db: object
-
-
-def _normalized_c42(points):
-    """|C42| of a set of recovered symbol points, normalised to unit average
-    power so absolute amplitude (an AGC/scaling artefact, not information
-    about the constellation) cannot move the result. Returns None for an
-    empty set or a set with zero power -- both mean there is nothing here to
-    measure, not a C42 of 0."""
-    points = np.asarray(points)
-    if len(points) == 0:
-        return None
-    m2 = float(np.mean(np.abs(points) ** 2))
-    if m2 <= 0:
-        return None
-    p = points / np.sqrt(m2)
-    m2n = float(np.mean(np.abs(p) ** 2))
-    m4n = float(np.mean(np.abs(p) ** 4))
-    return abs(m4n - 2.0 * m2n ** 2)
 
 
 def _pooled_accuracy(n_windows):

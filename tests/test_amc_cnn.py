@@ -17,17 +17,22 @@ These tests protect two things at once:
 """
 import numbers
 
+import numpy as np
 import pytest
 import torch
 
 from src.config import CFG, CLASSES
+from src.cumulants import normalized_c40, normalized_c42, normalized_c63
 from src.models.amc_cnn import (
     AMC_CNN,
+    CumulantFeatures,
     STFTBranch,
     _frequency_max,
     _peak_freq_delta,
     _spectral_flatness,
+    _torch_normalized_cumulants,
 )
+from tests.test_measure import _qam_constellation
 
 WINDOW_LEN = 512  # matches configs/default.yaml signal.window_len
 
@@ -96,9 +101,33 @@ def test_existing_checkpoint_still_loads_with_flag_off():
         pytest.skip("no trained checkpoint present (results/best_model.pt or "
                      "ensemble_0.pt) -- nothing to guard against yet")
 
-    model = AMC_CNN(num_classes=len(CLASSES), input_len=WINDOW_LEN)
+    # Built from the CONFIG, deliberately.
+    #
+    # This used to force every flag off and assert a shipped checkpoint loaded
+    # into the flag-off architecture. That premise died when the team shipped
+    # the C2 (stft_keep_rows) ensemble: results/ now holds 181,898-parameter
+    # checkpoints, so a flag-off model cannot load them and the guard failed
+    # while nothing was actually wrong.
+    #
+    # The invariant worth protecting is not "flag off loads" -- it is that the
+    # config and the shipped checkpoints AGREE. That is what src/evaluate.py,
+    # calibrate_thresholds.py, the UI console and web/build.py all depend on:
+    # each constructs a model from the config and loads results/*.pt into it.
+    # A disagreement breaks every one of them, and it has happened twice.
+    cfg_flags = {k: CFG.get("model", {}).get(k, False)
+                 for k in ("stft_freq_summary", "stft_keep_rows", "cumulant_features")}
+    model = AMC_CNN(num_classes=len(CLASSES), input_len=WINDOW_LEN, **cfg_flags)
     state_dict = torch.load(ckpt_path, map_location="cpu")
-    model.load_state_dict(state_dict, strict=True)  # must not raise
+    try:
+        model.load_state_dict(state_dict, strict=True)
+    except RuntimeError as exc:
+        pytest.fail(
+            f"{ckpt_path} does not match the architecture configs/default.yaml "
+            f"selects.\n  config flags : {cfg_flags}\n"
+            f"  config model : {sum(p.numel() for p in model.parameters()):,} parameters\n"
+            f"  checkpoint   : {sum(v.numel() for v in state_dict.values()):,} parameters\n"
+            f"Fix by setting the flags to match the checkpoint, or by installing "
+            f"checkpoints trained with these flags -- they move together.\n\n{exc}")
 
 
 def test_flag_off_is_the_config_default():
@@ -243,3 +272,168 @@ def test_gradients_flow_through_flag_on_path():
             any_param_grad = True
             assert torch.isfinite(p.grad).all()
     assert any_param_grad
+
+
+# ---------------------------------------------------------------------------
+# `model.cumulant_features`: expert-feature branch (RRC matched filter +
+# |C40|/|C42|/|C63|) fixing the model's demonstrated inability to tell
+# 16QAM from 64QAM apart. See configs/default.yaml's `cumulant_features`
+# comment for the measured numbers motivating this (51.4% chance-level
+# single-window accuracy, 47.0% on true 16QAM -- worse than chance -- and
+# the AUC improvement matched filtering buys: 0.576 raw -> 0.609 filtered).
+# ---------------------------------------------------------------------------
+
+def test_cumulant_flag_default_is_off_in_config():
+    assert CFG.get("model", {}).get("cumulant_features") is False
+
+
+def test_cumulant_flag_off_fc1_unchanged_and_forward_shape_unchanged():
+    model = AMC_CNN(num_classes=len(CLASSES), input_len=WINDOW_LEN,
+                     cumulant_features=False)
+    assert model.fc1.in_features == 128 + 64
+    x = _random_iq_batch(batch=2)
+    assert model(x).shape == (2, len(CLASSES))
+
+
+def test_cumulant_flag_off_adds_no_state_dict_entries():
+    """Flag off must leave the state_dict byte-identical to a model that
+    never heard of cumulants -- the CumulantFeatures branch must not even be
+    constructed, let alone contribute parameters or buffers.
+
+    Checked structurally rather than by loading results/best_model.pt: the
+    shipped checkpoints track whichever architecture the team is submitting
+    (they are C2/stft_keep_rows today), so a test pinned to them measures the
+    submission rather than this flag. test_existing_checkpoint_still_loads_with_flag_off
+    covers config-vs-checkpoint agreement; this covers the flag itself."""
+    off = AMC_CNN(num_classes=len(CLASSES), input_len=WINDOW_LEN,
+                   stft_freq_summary=False, stft_keep_rows=False,
+                   cumulant_features=False)
+    on = AMC_CNN(num_classes=len(CLASSES), input_len=WINDOW_LEN,
+                  stft_freq_summary=False, stft_keep_rows=False,
+                  cumulant_features=True)
+
+    assert off.cumulant_branch is None
+    assert on.cumulant_branch is not None
+    assert not any("cumulant" in k for k in off.state_dict())
+    # fc1 is the only shape the flag may touch: +3 inputs, nothing else.
+    assert on.fc1.in_features == off.fc1.in_features + 3
+    off_keys, on_keys = set(off.state_dict()), set(on.state_dict())
+    assert off_keys <= on_keys, "flag off must not introduce keys the flag-on model lacks"
+
+
+def test_cumulant_flag_on_adds_exactly_three_fc1_inputs():
+    model_off = AMC_CNN(num_classes=len(CLASSES), input_len=WINDOW_LEN,
+                         cumulant_features=False)
+    model_on = AMC_CNN(num_classes=len(CLASSES), input_len=WINDOW_LEN,
+                        cumulant_features=True)
+    assert model_on.fc1.in_features == model_off.fc1.in_features + 3
+
+    x = _random_iq_batch(batch=2)
+    assert model_on(x).shape == (2, len(CLASSES))
+
+
+def test_torch_cumulants_match_numpy_cumulants():
+    """The test that matters: two independent implementations of the same
+    formula (numpy in src/cumulants.py, batched torch in
+    src/models/amc_cnn.py's _torch_normalized_cumulants) WILL drift apart
+    silently unless something checks them against each other directly."""
+    rng = np.random.default_rng(0)
+    batch = 5
+    n = 200
+    signals = (rng.normal(size=(batch, n)) + 1j * rng.normal(size=(batch, n))
+               ) * (1.0 + rng.uniform(0, 3, size=(batch, 1)))  # varied power
+
+    z = torch.tensor(signals, dtype=torch.complex64)
+    torch_feats = _torch_normalized_cumulants(z).numpy()  # (batch, 3): c40,c42,c63
+
+    for i in range(batch):
+        pts = signals[i]
+        expected = np.array([
+            normalized_c40(pts), normalized_c42(pts), normalized_c63(pts),
+        ])
+        np.testing.assert_allclose(torch_feats[i], expected, atol=1e-4, rtol=1e-4)
+
+
+def test_cumulant_feature_separates_16qam_from_64qam():
+    """The feature actually separates the classes it exists to separate.
+    Theoretical noiseless |C42|: 16QAM 0.680, 64QAM 0.619 (C42_THEORY,
+    src/measure.py) -- 16QAM's constellation is "spikier" (more low-amplitude
+    inner points relative to its power) so its normalised 4th moment sits
+    higher. The torch path must reproduce that ordering on bare
+    constellations (no matched filtering needed here -- these are already
+    symbol-rate points, not an oversampled window)."""
+    const_16 = _qam_constellation(16)
+    const_64 = _qam_constellation(64)
+
+    z16 = torch.tensor(const_16, dtype=torch.complex64).unsqueeze(0)
+    z64 = torch.tensor(const_64, dtype=torch.complex64).unsqueeze(0)
+
+    feats_16 = _torch_normalized_cumulants(z16)[0]
+    feats_64 = _torch_normalized_cumulants(z64)[0]
+
+    c42_16 = feats_16[1].item()
+    c42_64 = feats_64[1].item()
+    assert c42_16 > c42_64
+    assert c42_16 == pytest.approx(0.680, abs=1e-3)
+    assert c42_64 == pytest.approx(0.619, abs=1e-3)
+
+
+def test_cumulant_branch_gradients_finite_with_flag_on():
+    model = AMC_CNN(num_classes=len(CLASSES), input_len=WINDOW_LEN,
+                     cumulant_features=True)
+    x = _random_iq_batch(batch=3)
+    x.requires_grad_(True)
+
+    out = model(x)
+    loss = out.sum()
+    loss.backward()  # must not raise
+
+    assert x.grad is not None
+    assert torch.isfinite(x.grad).all()
+
+    any_param_grad = False
+    for p in model.parameters():
+        if p.grad is not None:
+            any_param_grad = True
+            assert torch.isfinite(p.grad).all()
+    assert any_param_grad
+
+    # The matched-filter kernel is fixed, not learned.
+    assert model.cumulant_branch.mf_kernel.requires_grad is False
+    for p in model.cumulant_branch.parameters():
+        pytest.fail(f"CumulantFeatures must have no learned parameters, got {p}")
+
+
+def test_cumulant_features_degenerate_all_zero_window_is_finite():
+    branch = CumulantFeatures()
+    x = torch.zeros(2, 2, WINDOW_LEN)
+    feats = branch(x)
+    assert torch.isfinite(feats).all()
+    assert feats.shape == (2, 3)
+
+
+# ---------------------------------------------------------------------------
+# The exported copy must compute the same network with the flag on.
+#
+# It did not: AMC_CNN_ONNX was written before CumulantFeatures existed and
+# never learned about it, so with model.cumulant_features on it fed fc1 192
+# inputs against 195 trained weights. Training and evaluation never touch that
+# wrapper, so nothing caught it until an export was attempted.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("cumulant_features", [False, True])
+def test_onnx_wrapper_matches_the_model(cumulant_features):
+    from src.models.onnx_export import AMC_CNN_ONNX, compute_stft_mag
+
+    torch.manual_seed(3)
+    model = AMC_CNN(num_classes=len(CLASSES), input_len=WINDOW_LEN,
+                     stft_freq_summary=False, stft_keep_rows=False,
+                     cumulant_features=cumulant_features).eval()
+    x = torch.from_numpy(
+        np.random.default_rng(0).standard_normal((2, 2, WINDOW_LEN)).astype(np.float32))
+    with torch.no_grad():
+        mag = compute_stft_mag(x, n_fft=model.stft_branch.n_fft,
+                               hop_length=model.stft_branch.hop_length,
+                               window=model.stft_branch.window)
+        logits, _attention = AMC_CNN_ONNX(model)(x, mag)
+        assert torch.allclose(logits, model(x), atol=1e-5)

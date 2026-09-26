@@ -100,6 +100,12 @@ class AMC_CNN_ONNX(nn.Module):
         super().__init__()
         self.iq_branch = model.iq_branch
         self.stft_branch = STFTBranchONNX(model.stft_branch)
+        # CumulantFeatures is a fixed depthwise conv plus mean/abs/power
+        # arithmetic -- every op exports as-is, so the branch is shared rather
+        # than mirrored. None when model.cumulant_features is off. Without
+        # this the exported graph feeds fc1 192 inputs where the trained
+        # weights expect 195, which fails at export time rather than silently.
+        self.cumulant_branch = model.cumulant_branch
         self.attn_pool = model.attn_pool
         self.relu = model.relu
         self.dropout = model.dropout
@@ -122,6 +128,11 @@ class AMC_CNN_ONNX(nn.Module):
         combined = torch.cat([fused, energy], dim=1)
         weights = torch.softmax(self.attn_pool.score(combined), dim=2)
         pooled = (fused * weights).sum(dim=2)
+
+        # Same order AMC_CNN.forward uses: the three whole-window cumulants go
+        # after the pooled features, not before them.
+        if self.cumulant_branch is not None:
+            pooled = torch.cat([pooled, self.cumulant_branch(iq)], dim=1)
 
         x = self.dropout(self.relu(self.fc1(pooled)))
         return self.fc2(x), weights[:, 0, :]

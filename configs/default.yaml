@@ -112,9 +112,9 @@ multilabel_threshold: 0.5 # fallback for any class not listed below
 # Re-run calibrate_thresholds.py --ensemble after any retrain -- these are
 # tied to this specific set of 5 checkpoints' calibration.
 multilabel_thresholds_per_class:
-  LFM_RADAR: 0.22
-  FHSS: 0.25
-  JAMMING: 0.87
+  LFM_RADAR: 0.24
+  FHSS: 0.24
+  JAMMING: 0.89
   # Civilian classes were never calibrated -- they sat on the 0.5 fallback
   # while the judged three were tuned, which is why 16QAM read 1.9% recall
   # and looked like a model that had learned nothing about it. It had: 96% of
@@ -136,10 +136,10 @@ multilabel_thresholds_per_class:
   # comms-vs-hostile discrimination -- is about not calling civilian traffic
   # JAMMING, which these thresholds do not affect. Re-check that false-alarm
   # rate after any change here.
-  BPSK: 0.33
-  QPSK: 0.265
-  16QAM: 0.265
-  64QAM: 0.275
+  BPSK: 0.16
+  QPSK: 0.16
+  16QAM: 0.19
+  64QAM: 0.2
   # NOISE_FLOOR was the last class still on the 0.5 fallback. It separates
   # cleanly -- the median NEGATIVE scores 0.000 -- but positives sit at a
   # median of 0.284, i.e. below the default, which is why it read 0.0% recall
@@ -168,7 +168,7 @@ multilabel_thresholds_per_class:
   # 0.5) and is deliberately not lowered with this one. The gate suppresses
   # other detections, so it must stay conservative; this threshold only
   # decides whether a window is REPORTED as empty.
-  NOISE_FLOOR: 0.265
+  NOISE_FLOOR: 0.16
 
 # Decision boundary for src/measure.py's constellation_order -- a MEASURED
 # (not model) resolver for 16QAM vs 64QAM, the one distinction the trained
@@ -450,6 +450,44 @@ model:
   # Default false: the five checkpoints in results/ were trained flag-off and must
   # keep loading strict=True. Turning it on means a retrain.
   stft_keep_rows: false
+
+  # EXPERIMENTAL, off by default. The classifier cannot tell 16QAM from
+  # 64QAM at all -- measured on the held-out test split with the 5-model
+  # ensemble: picking the larger of the two probabilities is right 51.4% of
+  # the time (chance), averaging 64 windows is 49.7% (still chance, because
+  # the error is a systematic BIAS, not noise -- pooling the model's own
+  # output cannot fix a bias), and on true 16QAM specifically it is right
+  # 47.0% of the time, WORSE than chance. On 16qam.f32 in the verification
+  # pack, 16QAM fires on 73% of windows and 64QAM on 68% of the SAME
+  # windows.
+  #
+  # The information is present in the samples -- the fourth-order cumulant
+  # separates the two classes even though the CNN's learned features do
+  # not (measured AUC between the classes at SNR >= +2 dB, 400 windows/
+  # class: 0.576 on the raw window, 0.609 after matched filtering, 0.633
+  # after full symbol recovery -- see src/measure.py's constellation_order,
+  # which already uses the fully-recovered-symbol version of this as a
+  # MEASURED, non-model decision rule). Matched filtering alone recovers
+  # most of that separation and is a fixed convolution, so it can live
+  # inside the model as an expert feature -- combining deep-learned and
+  # hand-built features for classes of the same family a CNN conflates is
+  # the standard AMC-literature answer to exactly this failure mode.
+  #
+  # When true: AMC_CNN's CumulantFeatures branch (src/models/amc_cnn.py)
+  # applies the RRC matched filter (src/dsp.py's rrc_taps, the SAME taps
+  # recover_symbols uses -- fixed, non-learned, requires_grad=False) to the
+  # raw IQ window as a depthwise Conv1d, computes three normalised cumulant
+  # magnitudes on the filtered complex signal (|C40|, |C42|, |C63| --
+  # src/cumulants.py, the same normalisation src/measure.py's
+  # constellation_order already relies on), and concatenates them onto the
+  # fused feature vector before fc1 -- fc1.in_features grows by exactly 3.
+  #
+  # Default false because the five checkpoints in results/ were trained
+  # against the flag-off architecture (fc1 sized without these 3 extra
+  # inputs) and must keep loading with strict=True; this is an
+  # experimental option to be evaluated (retrain + measure_variance.py)
+  # before ever being turned on for a submission.
+  cumulant_features: false
 
 training:
   epochs: 30

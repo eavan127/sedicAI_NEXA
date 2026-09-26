@@ -69,21 +69,25 @@ ROOT = Path(__file__).resolve().parents[1]
 SEED = 2000       # member 0's seed -- the one the pinned baseline was measured on
 
 
-def _tag(freq_summary, keep_rows, divisor):
+def _tag(freq_summary, keep_rows, divisor, cumulant=False, composite_w=1.0):
     """Output name. The default run keeps its historical name so the notebook still finds it."""
-    if freq_summary and not keep_rows and divisor == 20:
+    if freq_summary and not keep_rows and divisor == 20 and not cumulant and composite_w == 1.0:
         return "stft_freq_summary"
     parts = (["freq"] if freq_summary else []) + (["rows"] if keep_rows else [])
+    if cumulant:
+        parts.append("cum")
+    if composite_w != 1.0:
+        parts.append(f"cw{composite_w:g}")
     if divisor != 20:
         parts.append(f"div{divisor:g}")
     return "_".join(parts) or "baseline"
 
 
-def run_tag(freq_summary, keep_rows, divisor, seed=SEED):
+def run_tag(freq_summary, keep_rows, divisor, seed=SEED, cumulant=False, composite_w=1.0):
     """The full output name for a run: the architecture/training cell, plus the seed when it is
     not the baseline seed, so a second seed can never overwrite the first. The Colab notebook
     calls this same function, so the file names cannot drift apart."""
-    tag = _tag(freq_summary, keep_rows, divisor)
+    tag = _tag(freq_summary, keep_rows, divisor, cumulant=cumulant, composite_w=composite_w)
     return tag if seed == SEED else f"{tag}_seed{seed}"
 
 
@@ -91,7 +95,17 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--no-freq-summary", action="store_true", help="turn model.stft_freq_summary OFF")
     ap.add_argument("--keep-rows", action="store_true", help="turn model.stft_keep_rows ON (variant C2)")
+    ap.add_argument("--cumulant-features", action="store_true",
+                    help="turn model.cumulant_features ON (|C40|,|C42|,|C63| expert features, "
+                         "for the QPSK/QAM order confusion)")
+    ap.add_argument("--composite-weight", type=float, default=None,
+                    help="training.composite_pos_weight: how much a multi-label window is worth "
+                         "in the training loss (1.0 = today's behaviour)")
     ap.add_argument("--divisor", type=float, default=None, help="training.snr_weight_divisor (default: config, 20)")
+    ap.add_argument("--epochs", type=int, default=None,
+                    help="training.epochs (default: config, 30). The saved checkpoint is the "
+                         "BEST-validation one, so a shorter run only risks stopping before a "
+                         "variant has converged -- it cannot make a converged one worse.")
     ap.add_argument("--seed", type=int, default=SEED)
     ap.add_argument("--smoke", action="store_true", help="1 epoch on a tiny slice: prove the pipeline, not the model")
     ap.add_argument("--out-dir", type=Path, default=ROOT / "results")
@@ -104,9 +118,15 @@ def main():
     freq_summary = not args.no_freq_summary
     CFG.setdefault("model", {})["stft_freq_summary"] = freq_summary
     CFG["model"]["stft_keep_rows"] = args.keep_rows
+    CFG["model"]["cumulant_features"] = args.cumulant_features
     if args.divisor is not None:
         CFG["training"]["snr_weight_divisor"] = args.divisor
+    if args.composite_weight is not None:
+        CFG["training"]["composite_pos_weight"] = args.composite_weight
+    composite_w = CFG["training"].get("composite_pos_weight", 1.0)
     divisor = CFG["training"].get("snr_weight_divisor", 20)
+    if args.epochs is not None:
+        CFG["training"]["epochs"] = args.epochs
     if args.smoke:
         CFG["training"]["epochs"] = 1
 
@@ -118,14 +138,17 @@ def main():
     probe = AMC_CNN(num_classes=len(CLASSES), input_len=CFG["signal"]["window_len"])
     assert probe.stft_branch.freq_summary == freq_summary, "stft_freq_summary did not apply"
     assert probe.stft_branch.keep_rows == args.keep_rows, "stft_keep_rows did not apply"
+    assert (probe.cumulant_branch is not None) == args.cumulant_features, "cumulant_features did not apply"
     n_params = sum(p.numel() for p in probe.parameters())
     del probe
 
-    tag = run_tag(freq_summary, args.keep_rows, divisor, args.seed) + ("_smoke" if args.smoke else "")
+    tag = run_tag(freq_summary, args.keep_rows, divisor, args.seed,
+                  cumulant=args.cumulant_features, composite_w=composite_w) + ("_smoke" if args.smoke else "")
     out = args.out_dir / f"experiment_{tag}.pt"
     hist = args.out_dir / f"experiment_{tag}_history.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     print(f"stft_freq_summary = {freq_summary}   stft_keep_rows = {args.keep_rows}   "
+          f"cumulant_features = {args.cumulant_features}   composite_pos_weight = {composite_w:g}   "
           f"snr_weight_divisor = {divisor:g}")
     print(f"parameters {n_params:,}   seed {args.seed}   writing {out.name} (+ history); results/ otherwise untouched\n")
 
@@ -145,6 +168,7 @@ def main():
     torch.save(model.state_dict(), out)
     (args.out_dir / f"experiment_{tag}_config.json").write_text(json.dumps({
         "stft_freq_summary": freq_summary, "stft_keep_rows": args.keep_rows,
+        "cumulant_features": args.cumulant_features, "composite_pos_weight": composite_w,
         "snr_weight_divisor": divisor, "seed": args.seed, "parameters": n_params,
     }, indent=2))
     print(f"\nsaved {out}")

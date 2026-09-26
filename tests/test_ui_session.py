@@ -80,8 +80,14 @@ def test_detected_events_use_per_class_thresholds(model):
         assert s.thresholds[cls] == pytest.approx(expected[cls])
     # The bug this guards: a flat 0.5 for everything.
     assert not all(v == pytest.approx(0.5) for v in s.thresholds.values())
-    assert s.thresholds["LFM_RADAR"] == pytest.approx(0.22)
-    assert s.thresholds["JAMMING"] == pytest.approx(0.87)
+    # ...and that they are genuinely per-class rather than one value repeated.
+    #
+    # Deliberately NOT pinning literals here (LFM_RADAR 0.22, JAMMING 0.87 were
+    # pinned and broke when recalibration moved them to 0.24/0.89) -- that is
+    # the exact failure mode this test's own docstring warns about. The
+    # assertion above already ties the session to whatever the config holds,
+    # which is the invariant that matters.
+    assert len(set(s.thresholds.values())) > 1
 
 
 def test_window_count_cap_is_enforced(model):
