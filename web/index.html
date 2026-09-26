@@ -180,6 +180,19 @@
   .storage-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; align-items: end; }
   .storage-grid label { font-size: 11px; color: var(--text-dim); display: block; margin-bottom: 3px; }
   .storage-grid input, .storage-grid select { width: 100%; padding: 6px 8px; border: 1px solid var(--grid); border-radius: 4px; font-family: var(--mono); font-size: 12px; background: var(--panel); color: var(--text); }
+  /* Click-to-enlarge (web/zoom.js). The overlay is fixed rather than in the
+     flow so it covers the column the figures are cramped into, and the stage
+     is capped at 96% so the "click to close" background is always reachable. */
+  canvas.zoomable, main img { cursor: zoom-in; }
+  .zoom-overlay { position: fixed; inset: 0; z-index: 1000; background: rgba(18, 28, 39, 0.82);
+                   display: flex; align-items: center; justify-content: center; cursor: zoom-out; padding: 32px; }
+  .zoom-stage { width: 96vw; max-height: 92vh; overflow: auto; background: var(--panel);
+                 border-radius: 8px; padding: 14px; }
+  .zoom-stage canvas { display: block; width: 100%; }
+  .zoom-stage img { display: block; max-width: 100%; max-height: 86vh; margin: 0 auto; }
+  .zoom-hint { position: fixed; top: 14px; left: 0; right: 0; text-align: center;
+                color: #fff; font-size: 12px; letter-spacing: 0.04em; }
+  @media print { .zoom-overlay { display: none !important; } }
   table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
   thead th { background: var(--brand-olive-tint); color: var(--text); text-align: left; padding: 7px 10px; font-weight: 600; position: sticky; top: 0; }
   tbody td { padding: 6px 10px; border-bottom: 1px solid var(--grid); background: var(--panel); color: var(--text); word-wrap: break-word; }
