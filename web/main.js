@@ -17,6 +17,9 @@ import {
 } from "./storage.js";
 import { applyFilters, barsHtml, summarise, summaryHtml as histSummaryHtml, tableHtml } from "./history.js";
 import { buildCombined, buildSingle } from "./report.js";
+import { installZoom, registerZoom } from "./zoom.js";
+
+installZoom();
 
 const el = id => document.getElementById(id);
 const statusEl = el("status"), headlineEl = el("headline");
@@ -111,11 +114,15 @@ function render() {
   });
   latestBox.innerHTML = latestBlock(events, emptyPct, capture);
 
-  drawConsole(consoleCanvas, {
+  const consoleOpts = {
     spectro: capture.spectro, spectrum: capture.spectrum,
     events, tiers, truth, durationMs,
     starts: result.starts, hop: result.hop, fs: FS,
-  });
+  };
+  drawConsole(consoleCanvas, consoleOpts);
+  // Re-registered on every render: the options carry this capture's data, and
+  // a zoom of the previous one would be a picture of the wrong signal.
+  registerZoom(consoleCanvas, target => drawConsole(target, consoleOpts));
   lastDrawnWidth = consoleCanvas.clientWidth;
 
   printHeader.innerHTML = printHeaderHtml({
@@ -136,10 +143,12 @@ function render() {
   // CaptureSession.civilian_windows(smoothed=...).
   const picks = civilianWindows(resolved.probs, result.nWindows, result.nClasses,
                                  THRESHOLDS, 4);
-  const drew = modelCard && picks.length && drawConstellation(constellationCanvas, {
+  const constellationOpts = {
     picks, capture, starts: result.starts, windowLen: result.windowLen,
     fs: FS, noisePower: capture.noisePower, c42cfg: modelCard.c42,
-  });
+  };
+  const drew = modelCard && picks.length && drawConstellation(constellationCanvas, constellationOpts);
+  if (drew) registerZoom(constellationCanvas, t => drawConstellation(t, constellationOpts));
   constellationBlock.hidden = !drew;
 
   tbody.innerHTML = "";
@@ -390,6 +399,7 @@ function renderSignal() {
   probsBox.innerHTML = probabilityHtml(session.result, idx);
   winMetaBox.innerHTML = windowMetadataHtml(session, idx);
   drawAttention(attnCanvas, session, idx);
+  registerZoom(attnCanvas, t => drawAttention(t, session, idx));
 }
 
 winSlider.addEventListener("input", () => { if (currentPage === "signal") renderSignal(); });
@@ -409,7 +419,11 @@ async function renderPerformance() {
   el("summaryBox").innerHTML = summaryHtml(perfData);
   box.innerHTML = scorecardHtml(perfData);
   drawPerClassRecall(el("recallBarCanvas"), perfData);
+  registerZoom(el("recallBarCanvas"), t => drawPerClassRecall(t, perfData));
   animateBreakdown(breakdownCanvas, perfData);
+  // The zoom redraws the finished chart rather than replaying the animation:
+  // someone who clicked to look closely wants the figure, not the intro.
+  registerZoom(breakdownCanvas, t => drawBreakdown(t, perfData));
   el("breakdownTable").innerHTML = breakdownTableHtml(perfData);
   el("denseQamBox").innerHTML = denseQamHtml(perfData);
 
