@@ -18,7 +18,15 @@ import { CLASSES } from "./model.js";
 // still said 0.22/0.25/0.87, so the page decided at the old operating point
 // using the new checkpoints. Re-exported rather than moved so main.js and
 // pages.js keep importing THRESHOLDS from analysis.js.
-export { THRESHOLDS } from "./thresholds.js";
+//
+// Imported and then re-exported, NOT `export { THRESHOLDS } from ...`: a
+// bare re-export forwards the name to importers without creating a binding
+// in this module, so smoothProbs' own use of it below threw "THRESHOLDS is
+// not defined" on the deployed page -- every capture failed at the first
+// line of analysis while the import in main.js and pages.js looked fine.
+import { THRESHOLDS } from "./thresholds.js";
+
+export { THRESHOLDS };
 
 // src/config.py:TIERS
 export const TIER_OF = {
