@@ -43,7 +43,7 @@
 const DEFAULT_SUPABASE_URL = "https://yoirhstytgrhvfunxvlc.supabase.co";
 
 function injected() {
-  const c = globalThis.OMNI_SUPABASE || {};
+  const c = globalThis.NEXA_SUPABASE || {};
   // A build that ran without the variable set leaves the placeholder behind;
   // treat that as "no key" rather than sending it as one.
   const key = typeof c.anonKey === "string" && !c.anonKey.startsWith("__") ? c.anonKey.trim() : "";

@@ -98,7 +98,7 @@ function sheet(doc, title, subtitle) {
   // which capture, model and thresholds produced them is unreadable later --
   // the same reason main.js builds a print header.
   doc.setFont("helvetica", "bold"); doc.setFontSize(16); doc.setTextColor(...SLATE);
-  doc.text("OMNI", M, s.y); s.y += 18;
+  doc.text("NEXA", M, s.y); s.y += 18;
   doc.setFontSize(12); doc.setTextColor(...OLIVE);
   doc.text(title, M, s.y); s.y += 16;
   doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...DIM);
@@ -167,7 +167,7 @@ export async function buildSingle(record, { classes = [] } = {}) {
   s.text("Probabilities are the model's own outputs; a class counts as detected when it "
     + "clears its calibrated threshold.", { size: 8, color: DIM, gap: 11 });
 
-  doc.save(`omni-capture-${fileStamp()}.pdf`);
+  doc.save(`nexa-capture-${fileStamp()}.pdf`);
 }
 
 /** Every stored capture: the dashboard, as a document. */
@@ -212,5 +212,5 @@ export async function buildCombined(records, summary, { title = "All analysed si
       String(r.n_windows),
     ]), [0.2, 0.24, 0.13, 0.28, 0.08, 0.07]);
 
-  doc.save(`omni-all-signals-${fileStamp()}.pdf`);
+  doc.save(`nexa-all-signals-${fileStamp()}.pdf`);
 }

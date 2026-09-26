@@ -199,14 +199,14 @@ export function printHeaderHtml({ source, caseNote, snrDb, snrKnown, hop, nWindo
     `<div style="border-top:3px solid ${BRAND_OLIVE};border-bottom:1px solid ${BRAND_OLIVE};` +
     `padding:6px 0;margin-bottom:14px;display:flex;justify-content:space-between;` +
     `align-items:baseline;font-size:10px;letter-spacing:0.12em;color:${TEXT_DIM};">` +
-    `<span>SEDIC 26 &nbsp;·&nbsp; PROJECT OMNI &nbsp;·&nbsp; RF SPECTRUM INTELLIGENCE</span>` +
+    `<span>SEDIC 26 &nbsp;·&nbsp; PROJECT NEXA &nbsp;·&nbsp; RF SPECTRUM INTELLIGENCE</span>` +
     `<span style="font-weight:700;color:${TEXT};">UNCLASSIFIED</span></div>` +
 
     `<div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:2px;">` +
     `<div style="font-size:18px;font-weight:700;letter-spacing:0.06em;color:${TEXT};">` +
     `CAPTURE ANALYSIS REPORT</div>` +
     `<div style="font-family:${MONO};font-size:10px;color:${TEXT_DIM};text-align:right;">` +
-    `REF &nbsp;OMNI-CAR-${stamp}<br>ISSUED &nbsp;${issued}</div></div>` +
+    `REF &nbsp;NEXA-CAR-${stamp}<br>ISSUED &nbsp;${issued}</div></div>` +
     `<div style="border-bottom:1px solid ${GRID};margin-bottom:2px;"></div>` +
 
     // --- 1. Scope. The basis-of-data statement a formal report is expected

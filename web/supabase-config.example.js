@@ -14,7 +14,7 @@
 // The deployed site does not use this file; web/build.py writes the
 // SUPABASE_ANON_KEY environment variable into index.html at build time.
 
-window.OMNI_SUPABASE = {
+window.NEXA_SUPABASE = {
   url: "https://yoirhstytgrhvfunxvlc.supabase.co",
   anonKey: "",
 };
