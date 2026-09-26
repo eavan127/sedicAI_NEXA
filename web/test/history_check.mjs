@@ -157,6 +157,16 @@ check("empty input does not divide by zero", (() => {
   check("PDF stays either way", tableHtml(rows, { canDelete: false }).includes('data-act="pdf"'));
 }
 
+// --- date filter (local days, inclusive) ----------------------------------------
+{
+  const day = d => rec({ created_at: new Date(`${d}T12:00:00`).toISOString() });
+  const rows = [day("2026-09-24"), day("2026-09-25"), day("2026-09-26")];
+  check("from/to keep inclusive local days",
+    applyFilters(rows, { from: "2026-09-25", to: "2026-09-26" }).length === 2);
+  check("from alone", applyFilters(rows, { from: "2026-09-26" }).length === 1);
+  check("no dates keeps everything", applyFilters(rows, {}).length === 3);
+}
+
 check("topTier prefers Hostile over Military", topTier({ Military: 9, Hostile: 1 }) === "Hostile");
 check("topTier of nothing is Empty", topTier({}) === "Empty");
 

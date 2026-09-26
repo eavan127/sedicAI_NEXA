@@ -15,7 +15,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from src.localdb import Actor, LocalDB  # noqa: E402
+from src.localdb import Actor, LocalDB, now_iso  # noqa: E402
 import serve_local  # noqa: E402
 
 ME = Actor("eavan", "operator", "127.0.0.1")
@@ -329,3 +329,43 @@ def test_corrections_over_http(server):
                         headers={"X-NEXA-Operator": "jessy"})
     assert status == 200
     assert json.loads(call(base + "/api/corrections/stats")[2])["approved"] == 1
+
+
+# --- retraining trigger (step 5) -------------------------------------------------
+
+def test_trigger_quiet_on_an_empty_database(db):
+    s = db.retrain_status()
+    assert not s["triggered"] and not s["recommended"] and s["analysed"] == 0
+    assert [c["id"] for c in s["conditions"]] == ["volume", "rate", "data", "cooldown"]
+    assert s["conditions"][3]["met"]            # never retrained: no cooldown
+
+
+def test_trigger_fires_on_correction_rate_and_needs_data(db):
+    rules = {"min_reviewed": 10, "min_per_class": 2}
+    for i in range(10):
+        db.save_analysis(record(f"t{i}", created_at=now_iso(),
+                                duration_s=0.05, file_path=f"iq/t{i}/x.f32"), ME)
+    for i in range(2):                           # 2 of 10 corrected = 20% > 15%
+        db.create_correction(correction(f"t{i}"), ME)
+    s = db.retrain_status(rules=rules)
+    assert s["analysed"] == 10 and s["corrected"] == 2 and abs(s["rate"] - 0.2) < 1e-9
+    assert s["triggered"] and not s["recommended"]          # nothing approved yet
+    for c in db.list_corrections(status="pending"):
+        db.review_correction(c["id"], "approve", "", EXPERT)
+    s = db.retrain_status(rules=rules)
+    assert s["approved_new_per_class"]["FHSS"] == 2 and s["recommended"]
+
+
+def test_rejected_corrections_do_not_count_toward_the_rate(db):
+    rules = {"min_reviewed": 1}
+    db.save_analysis(record("r1", created_at=now_iso(),
+                            duration_s=0.05, file_path="iq/r1/x.f32"), ME)
+    c = db.create_correction(correction("r1"), ME)
+    db.review_correction(c["id"], "reject", "wrong", EXPERT)
+    assert db.retrain_status(rules=rules)["corrected"] == 0
+
+
+def test_trigger_status_over_http(server):
+    base, _ = server
+    s = json.loads(call(base + "/api/retrain/status")[2])
+    assert "conditions" in s and s["rules"]["max_rate"] == 0.15

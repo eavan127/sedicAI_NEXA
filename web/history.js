@@ -70,9 +70,15 @@ export function summarise(records) {
 
 /** Records whose stored fields match every active filter. Empty/absent
  *  filters match everything, so the default view is "all". */
-export function applyFilters(records, { tier = "", cls = "", source = "", query = "" } = {}) {
+/** from/to are "YYYY-MM-DD" days in LOCAL time, both inclusive -- what an
+ *  operator means by "the 26th". */
+export function applyFilters(records, { tier = "", cls = "", source = "", query = "", from = "", to = "" } = {}) {
   const q = query.trim().toLowerCase();
+  const lo = from ? new Date(`${from}T00:00:00`).getTime() : -Infinity;
+  const hi = to ? new Date(`${to}T23:59:59.999`).getTime() : Infinity;
   return records.filter(r => {
+    const t = new Date(r.created_at).getTime();
+    if (t < lo || t > hi) return false;
     if (tier && r.verdict !== tier) return false;
     if (cls && !(r.classes_detected || []).includes(cls)) return false;
     if (source && r.source !== source) return false;

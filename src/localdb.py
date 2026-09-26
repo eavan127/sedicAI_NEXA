@@ -29,7 +29,7 @@ import sqlite3
 import threading
 import uuid
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 SCHEMA_VERSION = 2
@@ -40,6 +40,21 @@ GENESIS_HASH = "0" * 64
 # tests/test_localdb.py fails if the two ever disagree.
 CLASSES = ("BPSK", "QPSK", "16QAM", "64QAM", "LFM_RADAR", "FHSS", "JAMMING", "NOISE_FLOOR")
 REVIEW_DECISIONS = {"approve": "approved", "reject": "rejected"}
+
+# When to retrain (decided 2026-09-26, see the team's HITL plan). The TRIGGER
+# is performance: experts correcting more than 15% of what they review over a
+# week means the model is struggling on what it now sees -- the same logic as
+# electronic-warfare "urgent reprogramming". The other two are safety checks:
+# enough approved labels to learn from, and a cooldown so it does not churn.
+# A human still starts every retrain; an expert may override with a reason.
+RETRAIN_RULES = {
+    "window_days": 7,          # look-back for the correction rate
+    "min_reviewed": 100,       # captures analysed in that window before the rate counts
+    "max_rate": 0.15,          # corrected captures / analysed captures
+    "min_per_class": 30,       # approved corrections in at least one class
+    "cooldown_days": 7,        # since the last retrain
+}
+JUDGED = ("LFM_RADAR", "FHSS", "JAMMING")
 
 # Columns the page may write, and how each is stored. JSON columns hold lists
 # and objects as text; the rest are plain SQLite values.
@@ -135,6 +150,23 @@ CREATE TABLE IF NOT EXISTS audit_log (
     details     TEXT NOT NULL DEFAULT '{}',
     prev_hash   TEXT NOT NULL,
     hash        TEXT NOT NULL
+);
+
+-- One row per retraining run (scripts/retrain_from_feedback.py). The model a
+-- successful run produces goes into `models` as a candidate.
+CREATE TABLE IF NOT EXISTS jobs (
+    id            TEXT PRIMARY KEY,
+    created_at    TEXT NOT NULL,
+    started_by    TEXT NOT NULL,
+    reason        TEXT NOT NULL,
+    override      INTEGER NOT NULL DEFAULT 0,
+    status        TEXT NOT NULL DEFAULT 'queued'
+                  CHECK (status IN ('queued', 'running', 'succeeded', 'failed')),
+    finished_at   TEXT,
+    model_version TEXT,
+    log_path      TEXT,
+    pid           INTEGER,
+    result        TEXT DEFAULT '{}'
 );
 
 CREATE TRIGGER IF NOT EXISTS audit_log_no_update BEFORE UPDATE ON audit_log
@@ -500,6 +532,208 @@ class LocalDB:
                     per_class[c] += 1
         return {"pending": by_status.get("pending", 0), "approved": by_status.get("approved", 0),
                 "rejected": by_status.get("rejected", 0), "approved_per_class": per_class}
+
+    # -- retraining trigger ---------------------------------------------------
+
+    def retrain_status(self, now: datetime | None = None, rules: dict | None = None) -> dict:
+        """Should the model be retrained? Every number the decision uses, and
+        each rule with whether it is met -- the UI shows the checklist, not
+        just a yes/no, so an expert can see WHY."""
+        r = {**RETRAIN_RULES, **(rules or {})}
+        now = now or datetime.now(timezone.utc)
+        since = (now - timedelta(days=r["window_days"])).strftime("%Y-%m-%dT%H:%M:%S")
+        with closing(self._connect()) as con:
+            analysed = con.execute("SELECT COUNT(*) FROM analyses WHERE created_at >= ?",
+                                   (since,)).fetchone()[0]
+            corrected = con.execute(
+                "SELECT COUNT(DISTINCT analysis_id) FROM corrections WHERE created_at >= ?"
+                " AND status != 'rejected'", (since,)).fetchone()[0]
+            last = con.execute("SELECT MAX(created_at) FROM models").fetchone()[0]
+            q = "SELECT corrected_labels FROM corrections WHERE status = 'approved'"
+            args = ()
+            if last:                       # labels not yet used by a retrain
+                q += " AND reviewed_at > ?"
+                args = (last,)
+            per_class = {c: 0 for c in CLASSES}
+            for (labels,) in con.execute(q, args):
+                for c in json.loads(labels):
+                    per_class[c] += 1
+        rate = corrected / analysed if analysed else 0.0
+        days_since = None
+        if last:
+            then = datetime.strptime(last[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+            days_since = (now - then).total_seconds() / 86400
+        best_class = max(per_class, key=per_class.get)
+        conditions = [
+            {"id": "volume", "met": analysed >= r["min_reviewed"],
+             "text": f"At least {r['min_reviewed']} captures analysed in the last {r['window_days']} days "
+                     f"(now {analysed})"},
+            {"id": "rate", "met": analysed >= r["min_reviewed"] and rate > r["max_rate"],
+             "text": f"Experts corrected more than {r['max_rate']:.0%} of them (now {rate:.1%})"},
+            {"id": "data", "met": per_class[best_class] >= r["min_per_class"],
+             "text": f"At least {r['min_per_class']} new approved corrections in one class "
+                     + (f"(most: {best_class} {per_class[best_class]})" if per_class[best_class]
+                        else "(none yet)")},
+            {"id": "cooldown", "met": days_since is None or days_since >= r["cooldown_days"],
+             "text": f"At least {r['cooldown_days']} days since the last retrain "
+                     + ("(never retrained)" if days_since is None else f"({days_since:.1f} days)")},
+        ]
+        triggered = conditions[0]["met"] and conditions[1]["met"]
+        ready = all(c["met"] for c in conditions)
+        return {
+            "rules": r, "analysed": analysed, "corrected": corrected, "rate": rate,
+            "approved_new_per_class": per_class, "last_retrain_at": last,
+            "days_since_retrain": days_since, "conditions": conditions,
+            "triggered": triggered, "recommended": ready,
+            "summary": ("Retraining recommended: every rule is met." if ready else
+                        "Triggered, but not every safety check is met yet." if triggered else
+                        "Not triggered: the model is not being corrected often enough to need it."),
+        }
+
+    # -- retraining jobs and model versions -------------------------------------
+
+    @staticmethod
+    def _job_row(row) -> dict:
+        d = dict(row)
+        d["result"] = json.loads(d.get("result") or "{}")
+        d["override"] = bool(d["override"])
+        return d
+
+    def start_retrain(self, reason: str, override: bool, actor: Actor) -> dict:
+        """Queue a retrain. A named person starts it, with a reason. When the
+        trigger's rules are not all met, it takes an explicit override (logged
+        with the rule status at that moment) -- an expert may order an urgent
+        update, but never silently."""
+        if actor.name.lower() == "operator":
+            raise PermissionError("Set your name before starting a retrain.")
+        reason = str(reason or "").strip()
+        if len(reason) < 5:
+            raise ValueError("say why you are retraining (at least a few words)")
+        status = self.retrain_status()
+        if not status["recommended"] and not override:
+            raise PermissionError("The retraining rules are not all met. Tick 'override' to start anyway; "
+                                  "your reason is recorded in the audit trail.")
+        with self._write() as con:
+            busy = con.execute("SELECT id FROM jobs WHERE status IN ('queued', 'running')").fetchone()
+            if busy:
+                raise PermissionError(f"A retrain is already running (job {busy['id'][:8]}).")
+            job = {"id": str(uuid.uuid4()), "created_at": now_iso(), "started_by": actor.name,
+                   "reason": reason, "override": 1 if override else 0}
+            con.execute("INSERT INTO jobs (id, created_at, started_by, reason, override) VALUES "
+                        "(:id, :created_at, :started_by, :reason, :override)", job)
+            self._append_audit(con, actor, "retrain.start", "job", job["id"], {
+                "reason": reason, "override": bool(override),
+                "rules_met": {c["id"]: c["met"] for c in status["conditions"]},
+                "correction_rate": round(status["rate"], 4),
+            })
+        return self.get_job(job["id"])
+
+    def get_job(self, job_id: str) -> dict | None:
+        with closing(self._connect()) as con:
+            row = con.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        return self._job_row(row) if row else None
+
+    def list_jobs(self, limit: int = 20) -> list[dict]:
+        with closing(self._connect()) as con:
+            return [self._job_row(r) for r in con.execute(
+                "SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?", (int(limit),))]
+
+    def update_job(self, job_id: str, **fields) -> None:
+        allowed = {"status", "log_path", "pid"}
+        sets = {k: v for k, v in fields.items() if k in allowed}
+        if not sets:
+            return
+        with self._write() as con:
+            con.execute(f"UPDATE jobs SET {', '.join(f'{k} = :{k}' for k in sets)} WHERE id = :id",
+                        {**sets, "id": job_id})
+
+    def finish_job(self, job_id: str, ok: bool, result: dict, candidate: dict | None = None) -> None:
+        """Called by the training script. A successful run registers its model
+        as a CANDIDATE: nothing replaces the running model until a second
+        person approves it."""
+        with self._write() as con:
+            if candidate:
+                con.execute(
+                    "INSERT INTO models (version, created_at, path, source, metrics, status, notes)"
+                    " VALUES (?, ?, ?, ?, ?, 'candidate', ?)",
+                    (candidate["version"], now_iso(), candidate["path"], json.dumps(candidate["source"]),
+                     json.dumps(candidate["metrics"]), candidate.get("notes", "")))
+            con.execute("UPDATE jobs SET status = ?, finished_at = ?, result = ?, model_version = ?"
+                        " WHERE id = ?", ("succeeded" if ok else "failed", now_iso(), json.dumps(result),
+                                          candidate["version"] if candidate else None, job_id))
+            self._append_audit(con, SYSTEM, "retrain.finish" if ok else "retrain.fail", "job", job_id, {
+                "candidate": candidate["version"] if candidate else None,
+                "gate_passed": (candidate or {}).get("metrics", {}).get("gate", {}).get("passed"),
+                "error": result.get("error"),
+            })
+
+    @staticmethod
+    def _model_row(row) -> dict:
+        d = dict(row)
+        d["metrics"] = json.loads(d.get("metrics") or "{}")
+        d["source"] = json.loads(d.get("source") or "{}") if (d.get("source") or "").startswith("{") else d.get("source")
+        return d
+
+    def list_models(self) -> list[dict]:
+        with closing(self._connect()) as con:
+            return [self._model_row(r) for r in con.execute("SELECT * FROM models ORDER BY created_at DESC")]
+
+    def active_model(self) -> dict | None:
+        with closing(self._connect()) as con:
+            row = con.execute("SELECT * FROM models WHERE status = 'active'").fetchone()
+        return self._model_row(row) if row else None
+
+    def review_model(self, version: str, decision: str, note: str, actor: Actor) -> dict:
+        """Approve (and activate) or reject a candidate. Four-eyes: not the
+        person who started the retrain. Only a candidate that PASSED its gate
+        can be activated -- no override for that one."""
+        if decision not in ("approve", "reject"):
+            raise ValueError("decision must be 'approve' or 'reject'")
+        if actor.name.lower() == "operator":
+            raise PermissionError("Set your name before reviewing a model.")
+        note = str(note or "").strip()
+        with self._write() as con:
+            row = con.execute("SELECT * FROM models WHERE version = ?", (version,)).fetchone()
+            if not row:
+                raise ValueError("no such model")
+            m = self._model_row(row)
+            if m["status"] != "candidate":
+                raise PermissionError(f"{version} is {m['status']}, not a candidate")
+            job = con.execute("SELECT started_by FROM jobs WHERE model_version = ?", (version,)).fetchone()
+            if job and job["started_by"].lower() == actor.name.lower():
+                raise PermissionError("Four-eyes rule: the model must be approved by someone other "
+                                      "than the person who started the retrain.")
+            if decision == "approve" and not m["metrics"].get("gate", {}).get("passed"):
+                raise PermissionError("This candidate failed its gate and cannot be activated.")
+            if decision == "reject" and len(note) < 3:
+                raise ValueError("say why it is rejected")
+            if decision == "approve":
+                con.execute("UPDATE models SET status = 'retired' WHERE status = 'active'")
+                con.execute("UPDATE models SET status = 'active', approved_by = ?, approved_at = ?, notes = ?"
+                            " WHERE version = ?", (actor.name, now_iso(), note or m.get("notes"), version))
+            else:
+                con.execute("UPDATE models SET status = 'rejected', approved_by = ?, approved_at = ?, notes = ?"
+                            " WHERE version = ?", (actor.name, now_iso(), note, version))
+            self._append_audit(con, actor, f"model.{decision}", "model", version, {"note": note})
+        return self.get_model(version)
+
+    def get_model(self, version: str) -> dict | None:
+        with closing(self._connect()) as con:
+            row = con.execute("SELECT * FROM models WHERE version = ?", (version,)).fetchone()
+        return self._model_row(row) if row else None
+
+    def rollback_model(self, note: str, actor: Actor) -> str | None:
+        """Stop using the active retrained model: back to the shipped one."""
+        if actor.name.lower() == "operator":
+            raise PermissionError("Set your name before rolling back.")
+        with self._write() as con:
+            row = con.execute("SELECT version FROM models WHERE status = 'active'").fetchone()
+            if not row:
+                raise ValueError("already on the shipped model; nothing to roll back")
+            con.execute("UPDATE models SET status = 'retired' WHERE version = ?", (row["version"],))
+            self._append_audit(con, actor, "model.rollback", "model", row["version"],
+                               {"note": str(note or "").strip(), "now_using": "shipped best_model.pt"})
+        return row["version"]
 
     def log(self, actor: Actor, action: str, target_type=None, target_id=None, details=None) -> dict:
         """An audited event with no row of its own (e.g. a report export)."""

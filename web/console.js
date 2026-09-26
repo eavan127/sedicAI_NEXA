@@ -300,4 +300,9 @@ export function drawConsole(canvas, {
   ctx.font = `9px ${FONT}`;
   ctx.fillStyle = TEXT_DIM;
   ctx.fillText("time (ms)", wfX + wfW / 2, yTierBot + 25);
+
+  // Layout in CSS pixels, so the page can turn a mouse position into a time
+  // (and a detection lane) for the correction tools in main.js.
+  return { cssW, cssH, wfX, wfW, durationMs, yTop: yWfTop, yBot: yTierBot,
+           yLaneTop, laneH, lanes };
 }

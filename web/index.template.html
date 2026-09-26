@@ -110,7 +110,7 @@
 
     .print-only { display: block; }
     /* Controls, navigation and live status are interaction, not content. */
-    nav, .grow, #status, h3.page-title, .note, .receiver, #corrMissed, #eventsTable button { display: none !important; }
+    nav, .grow, #status, h3.page-title, .note, .receiver, #corrMissed, #eventsTable button, #consoleEnlarge, #suggestBlock, .tl-cursor, .tl-sel { display: none !important; }
     header { margin-bottom: 10px; }
     .layout { display: block; }
     main { width: 100%; }
@@ -203,6 +203,41 @@
   .pill.pending { background: #FFF3D6; color: #8A5A00; }
   .pill.approved { background: #E3F4E8; color: #1E6B35; }
   .pill.rejected { background: #FBE4E2; color: #8C1D18; }
+  .tl-wrap { position: relative; }
+  .tl-cursor { position: absolute; width: 0; border-left: 1px dashed #121C27; pointer-events: none; }
+  .tl-cursor span { position: absolute; top: 2px; left: 6px; white-space: nowrap; font-family: var(--mono); font-size: 12px; background: #121C27; color: #fff; padding: 2px 7px; border-radius: 4px; }
+  .tl-sel { position: absolute; background: rgba(98, 113, 67, 0.18); border-left: 2px solid #627143; border-right: 2px solid #627143; pointer-events: none; }
+  .sugg { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-top: 1px solid var(--grid); font-size: 13px; flex-wrap: wrap; }
+  .sugg:first-child { border-top: 0; }
+  .sugg:hover { background: var(--brand-olive-tint); }
+  .sugg-kind { font-size: 10px; font-weight: 700; letter-spacing: 0.05em; padding: 2px 7px; border-radius: 4px; flex: none; }
+  .sugg-kind.missed { background: #FBE4E2; color: #8C1D18; }
+  .sugg-kind.false_alarm { background: #FFF3D6; color: #8A5A00; }
+  .sugg-kind.wrong_class { background: #EDE3F6; color: #5B2C83; }
+  .sugg-kind.uncertain { background: #E6EDF5; color: #2C4F7C; }
+  .sugg-time { font-family: var(--mono); font-size: 12px; color: var(--text); flex: none; min-width: 9.5em; }
+  .sugg-text { flex: 1; min-width: 12em; }
+  .gauge-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 8px 0; font-size: 13px; }
+  .gauge-state { font-size: 11px; font-weight: 700; letter-spacing: 0.05em; padding: 3px 9px; border-radius: 4px; }
+  .gauge-state.ok { background: #E3F4E8; color: #1E6B35; }
+  .gauge-state.warn { background: #FFF3D6; color: #8A5A00; }
+  .gauge-state.go { background: #FBE4E2; color: #8C1D18; }
+  .gauge { position: relative; height: 16px; background: var(--bg); border: 1px solid var(--grid); border-radius: 4px; margin: 18px 0 6px; }
+  .gauge-fill { height: 100%; background: var(--brand-olive); border-radius: 3px 0 0 3px; }
+  .gauge-fill.over { background: #B3261E; }
+  .gauge-mark { position: absolute; top: -6px; bottom: -6px; border-left: 2px dashed #121C27; }
+  .gauge-mark span { position: absolute; top: -16px; left: -30px; width: 60px; text-align: center; font-size: 10px; color: var(--text-dim); }
+  .checklist { list-style: none; padding: 0; margin: 8px 0 0; font-size: 13px; }
+  .checklist li { padding: 3px 0; }
+  .checklist li.met span { color: #1E6B35; font-weight: 700; }
+  .checklist li.unmet span { color: #B3261E; font-weight: 700; }
+  .rb-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; margin-top: 8px; }
+  .rb-grid fieldset { border: 1px solid var(--grid); border-radius: 6px; padding: 8px 12px; margin: 0; }
+  .rb-grid legend { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; }
+  .rb-grid label { display: flex; align-items: baseline; gap: 6px; font-size: 13px; padding: 3px 0; }
+  .rt-log { font-family: var(--mono); font-size: 11.5px; background: #121C27; color: #D8E0D0; border-radius: 6px; padding: 10px 12px; max-height: 18em; overflow: auto; white-space: pre-wrap; margin: 0; }
+  #rtModels .up { color: #1E6B35; } #rtModels .down { color: #B3261E; }
+  #rtModels details summary { cursor: pointer; list-style: none; }
   /* The global table rule is table-layout: fixed, which suits the two-column
      panels elsewhere. Eight columns under it wrapped every cell to two or
      three lines ("Milita/r/y") and clipped the row buttons, so this table
@@ -376,8 +411,23 @@
       </div>
 
       <div class="block">
-        <div class="block-label">Spectrum · waterfall · detections · tier · shared time axis</div>
-        <canvas id="console"></canvas>
+        <div class="block-label" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          Spectrum · waterfall · detections · tier · shared time axis
+          <button class="mini" id="consoleEnlarge" title="Show this figure full-window">⤢ Enlarge</button>
+        </div>
+        <div class="note">Hover over the timeline to read the exact time. Click a spot, or drag across a
+          stretch, to correct it. Dashed boxes are the true answer (synthesized or annotated captures only).</div>
+        <div class="tl-wrap">
+          <canvas id="console"></canvas>
+          <div class="tl-sel" id="tlSel" hidden></div>
+          <div class="tl-cursor" id="tlCursor" hidden><span id="tlLabel"></span></div>
+        </div>
+      </div>
+
+      <div class="block" id="suggestBlock" hidden>
+        <div class="block-label">Recommended corrections</div>
+        <div class="note" id="suggestNote"></div>
+        <div id="suggestList"></div>
       </div>
 
       <div class="block" id="constellationBlock" hidden>
@@ -434,14 +484,54 @@
       <h3 class="page-title">History</h3>
       <div class="filters">
         <button class="secondary" id="histRefresh">Refresh</button>
-        <button class="secondary" id="histPdfAll">Download PDF of all signals</button>
         <select id="histTier"><option value="">Every verdict</option></select>
         <select id="histClass"><option value="">Every class</option></select>
         <select id="histSource"><option value="">Scenario and upload</option>
           <option value="scenario">Scenario only</option>
           <option value="upload">Upload only</option></select>
         <input id="histQuery" type="search" placeholder="Search file, case, class">
+        <label class="note" style="margin:0;">From <input id="histFrom" type="date"></label>
+        <label class="note" style="margin:0;">To <input id="histTo" type="date"></label>
         <span class="note" id="histStatus"></span>
+      </div>
+
+      <div class="block" id="reportBlock">
+        <div class="block-label">Report builder</div>
+        <div class="note">Builds a report from the captures that match the filters above
+          (<strong id="rbCount">0 captures</strong>). Tick what to include, pick a format, build.</div>
+        <div class="rb-grid">
+          <fieldset id="rbSections"><legend>Sections</legend>
+            <label><input type="checkbox" value="summary" checked> Summary: counts, verdicts, classes</label>
+            <label><input type="checkbox" value="captures" checked> Captures table</label>
+            <label><input type="checkbox" value="corrections" checked> Human corrections</label>
+            <label><input type="checkbox" value="audit"> Audit trail</label>
+            <label><input type="checkbox" value="model"> Model and thresholds</label>
+            <label><input type="checkbox" value="iq"> Raw IQ files with SHA-256</label>
+          </fieldset>
+          <fieldset><legend>Format</legend>
+            <label><input type="radio" name="rbFormat" value="pdf" checked> <strong>PDF</strong>: formal report to read or print</label>
+            <label><input type="radio" name="rbFormat" value="xlsx"> <strong>Excel (.xlsx)</strong>: one sheet per section</label>
+            <label><input type="radio" name="rbFormat" value="csv"> <strong>CSV</strong>: one table per section (zip)</label>
+            <label><input type="radio" name="rbFormat" value="json"> <strong>JSON</strong>: for other software</label>
+            <label><input type="radio" name="rbFormat" value="sigmf"> <strong>SigMF bundle</strong>: the recordings + approved corrections as labels (zip)</label>
+            <label><input type="radio" name="rbFormat" value="raw"> <strong>Raw IQ bundle</strong>: the stored files exactly as received (zip)</label>
+            <div class="note" id="rbServerNote" hidden>Only PDF is available without the local server.</div>
+          </fieldset>
+        </div>
+        <label class="corr-block">Classification banner (printed on every page / file)
+          <input id="rbBanner" maxlength="120" value="UNCLASSIFIED // DEMO - SYNTHETIC DATA"></label>
+        <div class="filters" style="margin-top:10px;">
+          <button class="primary" id="rbBuild">⭳ Build report</button>
+          <span class="note" id="rbMsg" role="status"></span>
+        </div>
+      </div>
+
+      <div class="block" hidden>
+        <div class="block-label">Model health: retraining trigger</div>
+        <div class="note">The model is retrained when experts keep correcting it: more than 15% of the
+          captures they review in a week. The other two rules make sure there is enough approved data to
+          learn from, and that it does not retrain too often. A person always starts the retrain (Model page).</div>
+        <div id="histTrigger"></div>
       </div>
 
       <div class="block">
@@ -557,6 +647,31 @@
 
     <section id="page-model" hidden>
       <h3 class="page-title">Model</h3>
+      <div class="block" id="retrainBlock" hidden>
+        <div class="block-label">Retraining from human feedback</div>
+        <div class="note">Approved corrections become training data. A retrain fine-tunes the <strong>single</strong>
+          model on them (mixed with original training data so it does not forget), then sits a fixed exam: the new
+          model is only allowed to replace the old one if it does not get worse on LFM_RADAR, FHSS or JAMMING, and
+          only after a second person approves it. The 5-model ensemble is never changed.</div>
+        <div id="modelTrigger"></div>
+        <div class="note" id="rtActive" style="margin-top:10px;"></div>
+        <label class="corr-block">Why retrain now? (required, recorded in the audit trail)
+          <textarea id="rtReason" rows="2" placeholder="e.g. operators keep correcting FHSS as LFM_RADAR on the new captures"></textarea></label>
+        <label class="note" id="rtOverrideRow" style="display:flex;gap:6px;align-items:center;margin-top:6px;">
+          <input type="checkbox" id="rtOverride"> Override: start even though the retraining rules are not all met (recorded)</label>
+        <div class="filters" style="margin-top:8px;">
+          <label class="note" for="rtOperator" style="margin:0;">Your name</label>
+          <input id="rtOperator" maxlength="64" style="width:160px;">
+          <button class="primary" id="rtStart">▶ Start retraining</button>
+          <span class="note" id="rtMsg" role="status"></span>
+        </div>
+        <div id="rtJob" hidden style="margin-top:10px;">
+          <div id="rtJobHead" style="font-size:13px;margin-bottom:6px;"></div>
+          <pre class="rt-log" id="rtLog"></pre>
+        </div>
+        <div class="block-label" style="margin-top:14px;">Model versions</div>
+        <div class="table-wrap" id="rtModels"></div>
+      </div>
       <div id="modelCardBox"></div>
     </section>
     <section id="page-assistant" hidden>

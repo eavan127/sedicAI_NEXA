@@ -22,6 +22,7 @@ const JSPDF_URL = "https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.j
 const OLIVE = [98, 113, 67];       // --brand-olive, so the PDF matches the app
 const SLATE = [18, 28, 39];        // --brand-slate
 const DIM = [95, 107, 114];        // --text-dim
+const BANNER = [179, 38, 30];      // classification marking red
 
 let jsPDFPromise = null;
 
@@ -45,11 +46,11 @@ async function getJsPDF() {
 // A tiny layout helper: a cursor that knows when to break the page
 // ---------------------------------------------------------------------------
 
-function sheet(doc, title, subtitle) {
+function sheet(doc, title, subtitle, { banner = "" } = {}) {
   const W = doc.internal.pageSize.getWidth();
   const H = doc.internal.pageSize.getHeight();
   const M = 48;                      // margin, points
-  const s = { doc, W, H, M, y: M, page: 1 };
+  const s = { doc, W, H, M, y: M, page: 1, banner };
 
   s.room = (h = 16) => {
     if (s.y + h <= H - M) return;
@@ -113,7 +114,22 @@ function foot(s) {
   doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(...DIM);
   doc.text(`Generated ${new Date().toLocaleString()}`, M, H - 24);
   doc.text(`Page ${s.page}`, W - M, H - 24, { align: "right" });
+  // Handling marking at the top and bottom of EVERY page, as on any
+  // controlled document: a page that travels alone must still say what it is.
+  if (s.banner) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...BANNER);
+    doc.text(s.banner, W / 2, 20, { align: "center" });
+    doc.text(s.banner, W / 2, H - 10, { align: "center" });
+    doc.setFont("helvetica", "normal");
+  }
   doc.setTextColor(...SLATE);
+}
+
+/** Military date-time group, e.g. 261430Z SEP 26 (UTC). */
+export function dtg(t = new Date()) {
+  const p = n => String(n).padStart(2, "0");
+  const mon = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"][t.getUTCMonth()];
+  return `${p(t.getUTCDate())}${p(t.getUTCHours())}${p(t.getUTCMinutes())}Z ${mon} ${String(t.getUTCFullYear()).slice(2)}`;
 }
 
 function fileStamp() {
@@ -168,6 +184,91 @@ export async function buildSingle(record, { classes = [] } = {}) {
     + "clears its calibrated threshold.", { size: 8, color: DIM, gap: 11 });
 
   doc.save(`nexa-capture-${fileStamp()}.pdf`);
+}
+
+/**
+ * The report builder's PDF: the sections the operator ticked, for the
+ * captures the History filters selected, under a classification banner.
+ * Laid out like a signals report: bottom line first, then the evidence.
+ */
+export async function buildReport({ records, summary, corrections = [], audit = [], modelCard = null,
+                                    sections, banner, generatedBy, filters = "" }) {
+  const JsPDF = await getJsPDF();
+  const doc = new JsPDF({ unit: "pt", format: "a4" });
+  const now = new Date();
+  const reportId = `NEXA-${now.toISOString().slice(0, 19).replace(/[-:T]/g, "").replace(/^(\d{8})/, "$1-")}`;
+  const s = sheet(doc, "Signal intelligence report",
+    `${reportId} · DTG ${dtg(now)} · by ${generatedBy} · ${records.length} captures`
+      + (filters ? ` · filters: ${filters}` : ""), { banner });
+  const has = id => sections.includes(id);
+
+  // Bottom line up front: the most serious thing found, in one sentence.
+  const hostile = records.filter(r => r.verdict === "Hostile").length;
+  const military = records.filter(r => r.verdict === "Military").length;
+  s.heading("1. Bottom line");
+  s.text(hostile ? `${hostile} of ${records.length} captures contain HOSTILE activity (jamming).`
+    : military ? `No hostile activity. ${military} of ${records.length} captures contain military emitters.`
+      : `No hostile or military emitters in ${records.length} captures.`, { size: 11, bold: true });
+  const pending = corrections.filter(c => c.status === "pending").length;
+  if (corrections.length) {
+    s.text(`${corrections.length} human correction(s) on these captures: `
+      + `${corrections.filter(c => c.status === "approved").length} approved, ${pending} awaiting review.`,
+    { size: 9, color: DIM });
+  }
+  let n = 2;
+  if (has("summary")) {
+    s.heading(`${n++}. Summary`);
+    s.table(["Measure", "Value"], [
+      ["Captures analysed", summary.total],
+      ["Windows classified", summary.windows.toLocaleString()],
+      ["Signal time", `${summary.seconds.toFixed(4)} s`],
+      ["Mean SNR", summary.meanSnrDb == null ? "—" : `${summary.meanSnrDb} dB`],
+      ...Object.entries(summary.byTier).map(([t, k]) => [`Verdict: ${t}`, k]),
+      ...Object.entries(summary.byClass).sort((a, b) => b[1] - a[1]).map(([c, k]) => [`Captures containing ${c}`, k]),
+    ], [0.5, 0.5]);
+  }
+  if (has("captures")) {
+    s.heading(`${n++}. Captures`);
+    s.table(["When", "Capture", "Operator", "Verdict", "Classes", "SNR"],
+      records.map(r => [new Date(r.created_at).toLocaleString(), r.file_name || r.case_note || r.source,
+        r.operator || "—", r.verdict, (r.classes_detected || []).join(", "),
+        r.snr_db == null ? "—" : String(r.snr_db)]), [0.19, 0.25, 0.1, 0.1, 0.28, 0.08]);
+  }
+  if (has("corrections")) {
+    s.heading(`${n++}. Human corrections`);
+    if (!corrections.length) s.text("None on these captures.", { size: 9, color: DIM });
+    else {
+      s.table(["Span (ms)", "Model said", "Human says", "By", "Status", "Reason"],
+        corrections.map(c => [`${(c.start_s * 1000).toFixed(1)}–${(c.end_s * 1000).toFixed(1)}`,
+          c.predicted_labels.join("+") || "nothing", c.corrected_labels.join("+"), c.operator,
+          c.status + (c.reviewed_by ? ` (${c.reviewed_by})` : ""), c.reason]),
+        [0.12, 0.16, 0.16, 0.1, 0.16, 0.3]);
+    }
+  }
+  if (has("audit")) {
+    s.heading(`${n++}. Audit trail`);
+    s.table(["#", "Time", "Who", "Action", "Target"],
+      audit.map(e => [e.seq, new Date(e.ts).toLocaleString(), e.actor, e.action,
+        `${e.target_type || ""} ${(e.target_id || "").slice(0, 12)}`]), [0.07, 0.25, 0.14, 0.26, 0.28]);
+  }
+  if (has("model")) {
+    s.heading(`${n++}. Model and thresholds`);
+    const rows = Object.entries(modelCard || {}).filter(([, v]) => v == null || typeof v !== "object")
+      .map(([k, v]) => [k, String(v)]);
+    const th = modelCard?.thresholds || modelCard?.multilabel_thresholds;
+    if (th && typeof th === "object") rows.push(["thresholds", JSON.stringify(th)]);
+    s.table(["Field", "Value"], rows.length ? rows : [["model card", "not available"]], [0.3, 0.7]);
+  }
+  if (has("iq")) {
+    s.heading(`${n++}. Raw IQ files`);
+    s.table(["Capture", "File", "SHA-256"],
+      records.map(r => [r.file_name || r.case_note || r.source, r.file_path || "(not stored)",
+        r.file_sha256 ? r.file_sha256.slice(0, 32) + "…" : "—"]), [0.3, 0.35, 0.35]);
+  }
+  s.text("Probabilities are the model's own outputs. Corrections become training data only after a "
+    + "second person approves them.", { size: 8, color: DIM, gap: 11 });
+  doc.save(`${reportId}.pdf`);
+  return reportId;
 }
 
 /** Every stored capture: the dashboard, as a document. */

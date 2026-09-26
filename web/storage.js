@@ -469,6 +469,54 @@ export function listCorrections({ status = "", analysisId = "" } = {}) {
   return serverJson(`/api/corrections?${q}`, "corrections read");
 }
 
+/** Report builder, server-built formats. Returns {blob, filename, reportId}. */
+export async function exportReport(body) {
+  await detectServer();
+  if (!serverInfo) throw new Error("This format is built by the local server (scripts/serve_local.py).");
+  const res = await fetch("/api/export", {
+    method: "POST", headers: serverHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+  await serverCheck(res, "export");
+  const name = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") || "")?.[1] || "nexa-report";
+  return { blob: await res.blob(), filename: name, reportId: res.headers.get("X-Report-Id") };
+}
+
+// ---------------------------------------------------------------------------
+// Retraining and model versions (local server only)
+// ---------------------------------------------------------------------------
+
+export function startRetrain(reason, override) {
+  return serverJson("/api/retrain/start", "retrain start", {
+    method: "POST", headers: serverHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ reason, override }),
+  });
+}
+
+export const listJobs = () => serverJson("/api/retrain/jobs", "jobs read");
+export const getJob = id => serverJson(`/api/retrain/jobs/${encodeURIComponent(id)}`, "job read");
+export const listModels = () => serverJson("/api/models", "models read");
+
+/** decision: "approve" (activates it) | "reject". Four-eyes, gate must pass. */
+export function reviewModel(version, decision, note = "") {
+  return serverJson(`/api/models/${encodeURIComponent(version)}/review`, "model review", {
+    method: "POST", headers: serverHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ decision, note }),
+  });
+}
+
+export function rollbackModel(note = "") {
+  return serverJson("/api/models/rollback", "roll back", {
+    method: "POST", headers: serverHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ note }),
+  });
+}
+
+/** The retraining trigger: every number and rule behind "retrain now?". */
+export function retrainStatus() {
+  return serverJson("/api/retrain/status", "retrain status");
+}
+
 export function correctionStats() {
   return serverJson("/api/corrections/stats", "correction stats");
 }

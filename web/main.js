@@ -6,6 +6,7 @@ import {
 import { drawConsole } from "./console.js";
 import { describe, isSigmfName, readSigmf } from "./sigmf.js";
 import { FileReplay, SimulatedReceiver, dwellLevel, shouldStore, toInterleavedF32 } from "./receiver.js";
+import { detectedIn, spanAt, suggestCorrections } from "./review.js";
 import { eventRows, headerLine, latestBlock, printHeaderHtml, statusBlock } from "./panels.js";
 import {
   breakdownTableHtml, drawAttention, drawBreakdown, animateBreakdown, drawPerClassRecall,
@@ -17,12 +18,13 @@ import { THRESHOLDS } from "./analysis.js";
 import { initAssistant, openChatLog } from "./chatbot.js";
 import { isAvailable as ollamaAvailable, rewrite as ollamaRewrite, warmUp as ollamaWarmUp } from "./ollama.js";
 import {
-  attachCapture, buildRecord, canDelete, correctionStats, deleteAnalysis, detectServer,
+  attachCapture, buildRecord, canDelete, correctionStats, deleteAnalysis, detectServer, exportReport, retrainStatus,
+  getJob, listJobs, listModels, reviewModel, rollbackModel, startRetrain,
   listAnalyses, listAudit, listCorrections, logEvent, operatorName, readConfig, reviewCorrection,
   saveAnalysis, setOperatorName, submitCorrection, supportsCorrections, usingSupabase, verifyAudit,
 } from "./storage.js";
 import { applyFilters, barsHtml, summarise, summaryHtml as histSummaryHtml, tableHtml } from "./history.js";
-import { buildCombined, buildSingle } from "./report.js";
+import { buildReport, buildSingle } from "./report.js";
 import { installZoom, registerZoom } from "./zoom.js";
 
 installZoom();
@@ -90,6 +92,7 @@ async function init() {
     // card is loaded up front rather than lazily on the Model page.
     modelCard = await (await fetch("./data/model_card.json")).json();
     await getModel("ensemble");
+    detectServer().then(info => labelSingleOption(info?.active_model ? { version: info.active_model } : null));
     statusEl.textContent = "Ready. Synthesize a scenario, or select a capture file.";
     synthBtn.disabled = false;
     uploadBtn.disabled = false;
@@ -99,8 +102,12 @@ async function init() {
   }
 }
 
+// The retrained single model the server is serving, if one was approved.
+let activeSingleVersion = null;
+
 function modelLabel(which) {
-  return which === "ensemble" ? "5-model ensemble average" : "single checkpoint, best_model.pt";
+  if (which === "ensemble") return "5-model ensemble average";
+  return activeSingleVersion ? `single checkpoint, retrained ${activeSingleVersion}` : "single checkpoint, best_model.pt";
 }
 
 /** Re-derives every panel from the cached raw result. Smoothing is a display
@@ -134,10 +141,13 @@ function render() {
     events, tiers, truth, durationMs,
     starts: result.starts, hop: result.hop, fs: FS,
   };
-  drawConsole(consoleCanvas, consoleOpts);
+  consoleGeom = drawConsole(consoleCanvas, consoleOpts);
   // Re-registered on every render: the options carry this capture's data, and
   // a zoom of the previous one would be a picture of the wrong signal.
   registerZoom(consoleCanvas, target => drawConsole(target, consoleOpts));
+  consoleCanvas.title = "";   // the time cursor explains itself; ⤢ Enlarge zooms
+  session.suggestions = suggestCorrections({ events, truth, durationS: capture.re.length / FS });
+  renderSuggestions();
   lastDrawnWidth = consoleCanvas.clientWidth;
 
   printHeader.innerHTML = printHeaderHtml({
@@ -351,16 +361,19 @@ corrClasses.innerHTML = CLASS_GROUPS.map(([group, classes]) =>
 let corrCtx = null;
 const eventsNote = el("eventsNote");
 
-function openCorrection({ predicted, startS, endS, missed }) {
+function openCorrection({ predicted, startS, endS, missed, suggested = null, reason = "", title = null }) {
   corrCtx = { sess: session, predicted };
   const durS = session.capture.re.length / FS;
-  corrTitle.textContent = missed ? "Report a signal the model missed" : "Correct this detection";
+  corrTitle.textContent = title || (missed ? "Report a signal the model missed" : "Correct this detection");
   corrModelSaid.textContent = predicted.length ? predicted.join(" + ") : "nothing (missed signal)";
   corrStart.value = (startS * 1000).toFixed(2);
   corrEnd.value = (Math.min(endS, durS) * 1000).toFixed(2);
   corrStart.max = corrEnd.max = (durS * 1000).toFixed(2);
-  for (const box of corrClasses.querySelectorAll("input")) box.checked = predicted.includes(box.value);
-  corrReason.value = "";
+  // Pre-ticked: the recommended answer when there is one, else what the
+  // model said (so the operator only changes what is wrong).
+  const ticks = suggested || predicted;
+  for (const box of corrClasses.querySelectorAll("input")) box.checked = ticks.includes(box.value);
+  corrReason.value = reason;
   corrOperator.value = operatorName();
   corrError.textContent = "";
   corrSubmit.disabled = false;
@@ -431,6 +444,170 @@ corrForm.addEventListener("submit", async (ev) => {
     corrError.textContent = e.message.replace(/^Local database correction failed \(\d+\)\. /, "");
     corrSubmit.disabled = false;
   }
+});
+
+// ---------------------------------------------------------------------------
+// Timeline: read the time under the cursor, click or drag to correct
+// ---------------------------------------------------------------------------
+
+let consoleGeom = null;
+const tlCursor = el("tlCursor"), tlLabel = el("tlLabel"), tlSel = el("tlSel");
+let tlDrag = null, enlargeRequested = false;
+
+/** Mouse position -> {x (css px on the canvas), tMs, lane, inside, k}. */
+function tlPos(ev) {
+  const g = consoleGeom, r = consoleCanvas.getBoundingClientRect();
+  const k = r.width / g.cssW;
+  const x = (ev.clientX - r.left) / k, y = (ev.clientY - r.top) / k;
+  const inside = x >= g.wfX && x <= g.wfX + g.wfW && y >= g.yTop && y <= g.yBot;
+  const tMs = Math.min(Math.max((x - g.wfX) / g.wfW, 0), 1) * g.durationMs;
+  const li = Math.floor((y - g.yLaneTop) / g.laneH);
+  const lane = y >= g.yLaneTop && li >= 0 && li < g.lanes.length ? g.lanes[li] : null;
+  return { x, y, tMs, lane, inside, k };
+}
+
+const msToCss = ms => (consoleGeom.wfX + ms / consoleGeom.durationMs * consoleGeom.wfW)
+  * (consoleCanvas.getBoundingClientRect().width / consoleGeom.cssW);
+
+/** Shade [aMs, bMs] over the plot (a drag in progress, or a hovered suggestion). */
+function showSpan(aMs, bMs) {
+  if (!consoleGeom) return;
+  const k = consoleCanvas.getBoundingClientRect().width / consoleGeom.cssW;
+  const x0 = msToCss(Math.min(aMs, bMs)), x1 = msToCss(Math.max(aMs, bMs));
+  Object.assign(tlSel.style, { left: `${x0}px`, width: `${Math.max(x1 - x0, 2)}px`,
+    top: `${consoleGeom.yTop * k}px`, height: `${(consoleGeom.yBot - consoleGeom.yTop) * k}px` });
+  tlSel.hidden = false;
+}
+
+function hideCursor() { tlCursor.hidden = true; if (!tlDrag) tlSel.hidden = true; }
+
+consoleCanvas.addEventListener("pointermove", (ev) => {
+  if (!session || !consoleGeom) return;
+  const p = tlPos(ev);
+  if (!p.inside && !tlDrag) { hideCursor(); consoleCanvas.style.cursor = ""; return; }
+  consoleCanvas.style.cursor = "crosshair";
+  Object.assign(tlCursor.style, { left: `${p.x * p.k}px`, top: `${consoleGeom.yTop * p.k}px`,
+    height: `${(consoleGeom.yBot - consoleGeom.yTop) * p.k}px` });
+  tlLabel.textContent = tlDrag
+    ? `${Math.min(tlDrag.tMs, p.tMs).toFixed(2)}–${Math.max(tlDrag.tMs, p.tMs).toFixed(2)} ms`
+    : `${p.tMs.toFixed(2)} ms${p.lane ? ` · ${p.lane}` : ""} · click to correct`;
+  // The label rides next to the pointer, so it is in view whichever panel
+  // (waterfall or lanes) the operator is looking at; flips left near the edge.
+  tlLabel.style.top = `${Math.max((p.y - consoleGeom.yTop) * p.k - 30, 0)}px`;
+  const flip = p.x > consoleGeom.wfX + consoleGeom.wfW * 0.7;
+  tlLabel.style.left = flip ? "auto" : "8px";
+  tlLabel.style.right = flip ? "8px" : "auto";
+  tlCursor.hidden = false;
+  if (tlDrag) showSpan(tlDrag.tMs, p.tMs);
+});
+
+consoleCanvas.addEventListener("pointerleave", () => { if (!tlDrag) hideCursor(); });
+
+consoleCanvas.addEventListener("pointerdown", (ev) => {
+  if (!session || !consoleGeom || ev.button !== 0) return;
+  const p = tlPos(ev);
+  if (!p.inside) return;
+  tlDrag = { x: p.x, tMs: p.tMs, lane: p.lane };
+  consoleCanvas.setPointerCapture(ev.pointerId);
+});
+
+consoleCanvas.addEventListener("pointerup", (ev) => {
+  if (!tlDrag) return;
+  const start = tlDrag;
+  tlDrag = null;
+  tlSel.hidden = true;
+  const p = tlPos(ev);
+  const events = session.events || [];
+  const suggestions = session.suggestions?.items || [];
+  const durationS = session.capture.re.length / FS;
+  if (Math.abs(p.x - start.x) > 4) {
+    // A dragged stretch: whatever the model reported anywhere inside it.
+    const a = Math.min(start.tMs, p.tMs) / 1000, b = Math.max(start.tMs, p.tMs) / 1000;
+    startCorrection({ predicted: detectedIn(events, a, b), startS: a, endS: b,
+                      missed: false, title: "Correct this stretch" });
+    return;
+  }
+  const s = spanAt(start.tMs / 1000, { suggestions, events, durationS });
+  let suggested = s.suggested;
+  // Clicked inside an empty stretch of one class's lane: the operator is
+  // pointing at a signal of THAT class the model did not report.
+  if (!suggested && start.lane && start.lane !== "NOISE_FLOOR" && !s.predicted.includes(start.lane)) {
+    suggested = [...s.predicted, start.lane];
+  }
+  startCorrection({ predicted: s.predicted, startS: s.startS, endS: s.endS, suggested,
+                    reason: s.reason || "", missed: !s.predicted.length,
+                    title: s.from === "suggestion" ? `Review: ${s.text}` : null });
+});
+
+// Clicks on the time plot are for correcting; the zoom view stays on the
+// spectrum strip and the ⤢ Enlarge button.
+consoleCanvas.addEventListener("click", (ev) => {
+  if (enlargeRequested) { enlargeRequested = false; return; }
+  if (consoleGeom && tlPos(ev).inside) ev.stopPropagation();
+});
+
+el("consoleEnlarge").addEventListener("click", () => {
+  if (!consoleCanvas.classList.contains("zoomable")) return;
+  enlargeRequested = true;
+  consoleCanvas.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+});
+
+async function startCorrection(opts) {
+  if (!(await supportsCorrections())) {
+    eventsNote.textContent = "Corrections are stored in the local database: start the page with "
+      + "scripts/serve_local.py (web/start_demo.bat).";
+    return;
+  }
+  openCorrection(opts);
+}
+
+// ---------------------------------------------------------------------------
+// Recommended corrections
+// ---------------------------------------------------------------------------
+
+const suggestBlock = el("suggestBlock"), suggestNote = el("suggestNote"), suggestList = el("suggestList");
+const SUGGEST_SHOWN = 12;
+const KIND_LABEL = { missed: "MISSED", false_alarm: "FALSE ALARM", wrong_class: "MIXED UP", uncertain: "UNSURE" };
+
+function renderSuggestions() {
+  const { source, items } = session.suggestions;
+  const esc = t => String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  suggestBlock.hidden = false;
+  if (source === "truth") {
+    suggestNote.textContent = items.length
+      ? `${items.length} stretch${items.length === 1 ? "" : "es"} where the model disagrees with the ground truth `
+        + "(the dashed boxes). Review opens the correction form pre-filled; you check it and submit. "
+        + "A dashed box marks when an emitter was switched on: a pulsed radar is silent between pulses, "
+        + "so a short \"miss\" inside a radar box can be correct."
+      : "The model agrees with the ground truth everywhere in this capture. Nothing to correct.";
+  } else {
+    suggestNote.textContent = items.length
+      ? "No ground truth for this capture, so nothing can say the model is wrong. These are the "
+        + "detections it was least sure about (below 40%): check them against the waterfall."
+      : "No ground truth for this capture, and every detection is confident (40% or more).";
+  }
+  suggestList.innerHTML = items.slice(0, SUGGEST_SHOWN).map((s, i) =>
+    `<div class="sugg" data-sugg="${i}"><span class="sugg-kind ${s.kind}">${KIND_LABEL[s.kind]}</span>`
+    + `<span class="sugg-time">${(s.startS * 1000).toFixed(2)}–${(s.endS * 1000).toFixed(2)} ms</span>`
+    + `<span class="sugg-text">${esc(s.text)}</span>`
+    + `<button class="mini" data-review-sugg="${i}">Review</button></div>`).join("")
+    + (items.length > SUGGEST_SHOWN ? `<div class="note">+${items.length - SUGGEST_SHOWN} more, shorter or later in the capture</div>` : "");
+}
+
+suggestList.addEventListener("mouseover", (ev) => {
+  const row = ev.target.closest("[data-sugg]");
+  if (!row || !session?.suggestions) return;
+  const s = session.suggestions.items[Number(row.dataset.sugg)];
+  showSpan(s.startS * 1000, s.endS * 1000);
+});
+suggestList.addEventListener("mouseleave", () => { if (!tlDrag) tlSel.hidden = true; });
+
+suggestList.addEventListener("click", (ev) => {
+  const btn = ev.target.closest("button[data-review-sugg]");
+  if (!btn || !session?.suggestions) return;
+  const s = session.suggestions.items[Number(btn.dataset.reviewSugg)];
+  startCorrection({ predicted: s.predicted, startS: s.startS, endS: s.endS, suggested: s.suggested,
+                    reason: s.reason, missed: !s.predicted.length, title: `Review: ${s.text}` });
 });
 
 // ---------------------------------------------------------------------------
@@ -691,6 +868,9 @@ async function store(file, sess = session) {
       fileName: primary?.name || null,
       fileBytes: primary?.size ?? null,
     });
+    // Which model produced it, down to the retrained version: a result that
+    // cannot be traced to its model cannot be trusted or re-checked later.
+    if (sess.which === "single" && activeSingleVersion) record.model = `single:${activeSingleVersion}`;
     const { record: saved, backend, warning } = await saveAnalysis(record, file);
     sess.record = saved;
     sess.recordBackend = backend;
@@ -827,7 +1007,156 @@ async function renderModel() {
     }
   }
   box.innerHTML = modelCardHtml(modelCard, modelSel.value);
+  renderRetrain();
 }
+
+// ---------------------------------------------------------------------------
+// Model page: retraining from human feedback
+// ---------------------------------------------------------------------------
+
+const rtReason = el("rtReason"), rtOverride = el("rtOverride"), rtOperator = el("rtOperator");
+const rtMsg = el("rtMsg"), rtJob = el("rtJob"), rtJobHead = el("rtJobHead"), rtLog = el("rtLog");
+const rtModels = el("rtModels"), rtActive = el("rtActive");
+let rtPolling = null;
+const escH = t => String(t ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+/** The "Single" option names the model it will actually run. */
+function labelSingleOption(active) {
+  activeSingleVersion = active ? active.version : null;
+  const opt = modelSel.querySelector('option[value="single"]');
+  if (opt) opt.textContent = active ? `Single, retrained ${active.version}` : "Single, best_model.pt";
+}
+
+function recallCell(m, cls) {
+  const g = m.metrics?.gate;
+  const b = g?.before?.recall?.[cls], a = g?.after?.recall?.[cls];
+  if (b == null || a == null) return "—";
+  const d = (a - b) * 100;
+  return `${(b * 100).toFixed(1)} → <strong>${(a * 100).toFixed(1)}</strong> <span class="${d < -0.05 ? "down" : d > 0.05 ? "up" : ""}">(${d >= 0 ? "+" : ""}${d.toFixed(1)})</span>`;
+}
+
+async function renderRetrain() {
+  const block = el("retrainBlock");
+  await detectServer();
+  if (readConfig().backend !== "server") { block.hidden = true; return; }
+  block.hidden = false;
+  rtOperator.value = operatorName();
+  const st = await renderTrigger(el("modelTrigger"));
+  el("rtOverrideRow").hidden = !!st?.recommended;
+  try {
+    const [models, jobs] = await Promise.all([listModels(), listJobs()]);
+    const active = models.find(m => m.status === "active") || null;
+    labelSingleOption(active);
+    rtActive.innerHTML = active
+      ? `Single model in use: <strong>${escH(active.version)}</strong> (retrained, approved by ${escH(active.approved_by)}). `
+        + `<button class="mini" id="rtRollback">↺ Roll back to shipped model</button>`
+      : "Single model in use: <strong>shipped best_model.pt</strong>. The 5-model ensemble (the competition submission) is never changed by retraining.";
+    rtModels.innerHTML = models.length ? `<table><thead><tr><th>Version</th><th>Trained on</th><th>Exam</th>`
+      + `<th>LFM_RADAR</th><th>FHSS</th><th>JAMMING</th><th>Noise false alarms</th><th>Gate</th><th>Status</th><th></th></tr></thead><tbody>`
+      + models.map(m => {
+        const g = m.metrics?.gate || {}, tr = m.metrics?.train || {};
+        const fa = g.before?.noise_false_alarm != null
+          ? `${(g.before.noise_false_alarm * 100).toFixed(1)} → <strong>${(g.after.noise_false_alarm * 100).toFixed(1)}</strong>` : "—";
+        const rules = (g.rules || []).map(r => `<li class="${r.met ? "met" : "unmet"}"><span>${r.met ? "✔" : "✖"}</span> ${escH(r.text)}</li>`).join("");
+        const actions = m.status === "candidate"
+          ? (g.passed ? `<button class="mini" data-model="approve" data-v="${escH(m.version)}">✔ Approve &amp; activate</button> ` : "")
+            + `<button class="mini" data-model="reject" data-v="${escH(m.version)}">✖ Reject</button>` : "";
+        return `<tr><td><strong>${escH(m.version)}</strong><div class="note">${escH(new Date(m.created_at).toLocaleString())}</div></td>`
+          + `<td>${(tr.corrections_used || []).length} corrections (${tr.correction_windows} windows) + ${tr.replay_windows} replay`
+          + `<div class="note">${tr.epochs} epoch(s), ${tr.seconds} s</div></td>`
+          + `<td><span class="pill ${g.kind === "dataset" ? "approved" : "pending"}">${g.kind === "dataset" ? "real test split" : "synthetic"}</span></td>`
+          + `<td>${recallCell(m, "LFM_RADAR")}</td><td>${recallCell(m, "FHSS")}</td><td>${recallCell(m, "JAMMING")}</td><td>${fa}</td>`
+          + `<td><details><summary><span class="pill ${g.passed ? "approved" : "rejected"}">${g.passed ? "PASSED" : "FAILED"}</span></summary>`
+          + `<ul class="checklist">${rules}</ul><div class="note">${escH(g.set || "")}</div></details></td>`
+          + `<td><span class="pill ${m.status === "active" ? "approved" : m.status === "candidate" ? "pending" : "rejected"}">${m.status}</span>`
+          + (m.approved_by ? `<div class="note">by ${escH(m.approved_by)}</div>` : "") + `</td>`
+          + `<td class="row-actions">${actions}</td></tr>`;
+      }).join("") + `</tbody></table>`
+      : `<div class="note">No retrained versions yet.</div>`;
+    const running = jobs.find(j => j.status === "queued" || j.status === "running");
+    if (running && !rtPolling) pollJob(running.id);
+    else if (!running && jobs[0] && !rtPolling) showJob(await getJob(jobs[0].id));
+  } catch (e) {
+    rtModels.textContent = `Could not read model versions: ${e.message}`;
+  }
+}
+
+function showJob(job) {
+  rtJob.hidden = false;
+  const state = { queued: "QUEUED", running: "RUNNING", succeeded: "FINISHED", failed: "FAILED" }[job.status];
+  rtJobHead.innerHTML = `<span class="pill ${job.status === "failed" ? "rejected" : job.status === "succeeded" ? "approved" : "pending"}">${state}</span> `
+    + `Retrain started by <strong>${escH(job.started_by)}</strong>${job.override ? " (override)" : ""}: “${escH(job.reason)}”`
+    + (job.model_version ? ` → candidate <strong>${escH(job.model_version)}</strong>` : "");
+  // Library chatter (export progress, warnings) hidden; the run's own lines stay.
+  rtLog.textContent = (job.log || "").replace(
+    /^.*(torchvision|UserWarning|Warning:|torch\.onnx|\[torch\.onnx\]|return cls|rename_mapping|warnings\.warn).*$\n?/gm, "");
+  rtLog.scrollTop = rtLog.scrollHeight;
+}
+
+function pollJob(id) {
+  clearInterval(rtPolling);
+  const tick = async () => {
+    try {
+      const job = await getJob(id);
+      showJob(job);
+      if (job.status === "succeeded" || job.status === "failed") {
+        clearInterval(rtPolling);
+        rtPolling = null;
+        el("rtStart").disabled = false;
+        await renderRetrain();
+        renderAudit();
+      }
+    } catch (e) { rtMsg.textContent = e.message; }
+  };
+  rtPolling = setInterval(tick, 2000);
+  tick();
+}
+
+el("rtStart").addEventListener("click", async () => {
+  setOperatorName(rtOperator.value);
+  rtMsg.textContent = "Checking the training packages and starting…";
+  el("rtStart").disabled = true;
+  try {
+    const job = await startRetrain(rtReason.value, rtOverride.checked);
+    rtMsg.textContent = "Retraining started. It runs in the background; this panel follows it.";
+    rtReason.value = "";
+    rtOverride.checked = false;
+    pollJob(job.id);
+  } catch (e) {
+    rtMsg.textContent = e.message.replace(/^Local database retrain start failed \(\d+\)\. /, "");
+    el("rtStart").disabled = false;
+  }
+});
+
+el("retrainBlock").addEventListener("click", async (ev) => {
+  const btn = ev.target.closest("button[data-model], #rtRollback");
+  if (!btn) return;
+  setOperatorName(rtOperator.value);
+  rtMsg.textContent = "";
+  try {
+    if (btn.id === "rtRollback") {
+      const note = window.prompt(`Roll back to the shipped model as ${operatorName()}? Reason:`, "");
+      if (note === null) return;
+      await rollbackModel(note);
+      rtMsg.textContent = "Rolled back: the shipped best_model.pt is in use again.";
+    } else {
+      const decision = btn.dataset.model;
+      const note = window.prompt(decision === "approve"
+        ? `Approve and activate ${btn.dataset.v} as ${operatorName()}? Optional note:`
+        : `Reject ${btn.dataset.v} as ${operatorName()}. Why? (required)`, "");
+      if (note === null) return;
+      await reviewModel(btn.dataset.v, decision, note);
+      rtMsg.textContent = decision === "approve"
+        ? `${btn.dataset.v} is now the single model. Choose Model: Single on RF Replay to use it.`
+        : `${btn.dataset.v} rejected.`;
+    }
+    modelCache.delete("single");          // the next "Single" analysis loads the newly served file
+    await renderRetrain();
+    renderAudit();
+  } catch (e) {
+    rtMsg.textContent = e.message.replace(/^Local database [a-z ]+ failed \(\d+\)\. /, "");
+  }
+});
 
 // Checked ONCE at startup, not per question: a slow/absent Ollama should not
 // add its own timeout to every message once we already know the answer. If
@@ -857,6 +1186,7 @@ const histClassBars = el("histClassBars"), histSnrBars = el("histSnrBars");
 const histDayBars = el("histDayBars"), histTable = el("histTable");
 const histTier = el("histTier"), histClassSel = el("histClass");
 const histSource = el("histSource"), histQuery = el("histQuery");
+const histFrom = el("histFrom"), histTo = el("histTo");
 const histBackendNote = el("histBackendNote");
 
 let histRecords = [];
@@ -885,6 +1215,7 @@ function paintHistory() {
   const filtered = applyFilters(histRecords, {
     tier: histTier.value, cls: histClassSel.value,
     source: histSource.value, query: histQuery.value,
+    from: histFrom.value, to: histTo.value,
   });
   const s = summarise(filtered);
   histSummary.innerHTML = histSummaryHtml(s);
@@ -894,6 +1225,7 @@ function paintHistory() {
     { empty: "No capture carries a known SNR.", sort: false });
   histDayBars.innerHTML = barsHtml(s.byDay, { empty: "Nothing stored yet.", sort: false });
   histTable.innerHTML = tableHtml(filtered, { canDelete: canDelete() });
+  paintReportBuilder(filtered.length);
   histStatus.textContent = filtered.length === histRecords.length
     ? `${histRecords.length} stored`
     : `${filtered.length} of ${histRecords.length} stored`;
@@ -911,6 +1243,7 @@ async function renderHistory() {
         + "Start the page with scripts/serve_local.py (web/start_demo.bat) to use the local database.";
   renderAudit();
   renderCorrections();
+  renderTrigger(el("histTrigger"));
   histStatus.textContent = "Loading…";
   try {
     const { records, warning } = await listAnalyses();
@@ -923,30 +1256,100 @@ async function renderHistory() {
   }
 }
 
-for (const node of [histTier, histClassSel, histSource]) {
+for (const node of [histTier, histClassSel, histSource, histFrom, histTo]) {
   node.addEventListener("change", paintHistory);
 }
 histQuery.addEventListener("input", paintHistory);
 el("histRefresh").addEventListener("click", renderHistory);
 
-el("histPdfAll").addEventListener("click", async () => {
-  const filtered = applyFilters(histRecords, {
-    tier: histTier.value, cls: histClassSel.value,
-    source: histSource.value, query: histQuery.value,
-  });
-  if (!filtered.length) { histStatus.textContent = "Nothing to report."; return; }
-  histStatus.textContent = "Building PDF…";
+// ---------------------------------------------------------------------------
+// Report builder: filters (above) -> sections -> format -> file
+// ---------------------------------------------------------------------------
+
+const rbMsg = el("rbMsg"), rbBanner = el("rbBanner"), rbCount = el("rbCount");
+
+function currentFilters() {
+  return { tier: histTier.value, cls: histClassSel.value, source: histSource.value,
+           query: histQuery.value, from: histFrom.value, to: histTo.value };
+}
+
+/** "tier Hostile · from 2026-09-25" -- written into the report, so a reader
+ *  knows it is a selection and not everything. */
+function describeFilters(f) {
+  const parts = [];
+  if (f.tier) parts.push(`verdict ${f.tier}`);
+  if (f.cls) parts.push(`class ${f.cls}`);
+  if (f.source) parts.push(`source ${f.source}`);
+  if (f.query) parts.push(`search "${f.query}"`);
+  if (f.from) parts.push(`from ${f.from}`);
+  if (f.to) parts.push(`to ${f.to}`);
+  return parts.join(" · ");
+}
+
+function saveBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
+el("rbBuild").addEventListener("click", async () => {
+  const filters = currentFilters();
+  const records = applyFilters(histRecords, filters);
+  const sections = [...document.querySelectorAll("#rbSections input:checked")].map(b => b.value);
+  const format = document.querySelector("input[name=rbFormat]:checked").value;
+  if (!records.length) { rbMsg.textContent = "No captures match the filters above."; return; }
+  if (["pdf", "csv", "xlsx", "json"].includes(format) && !sections.length) {
+    rbMsg.textContent = "Tick at least one section."; return;
+  }
+  rbMsg.textContent = "Building…";
+  el("rbBuild").disabled = true;
   try {
-    await buildCombined(filtered, summarise(filtered), {
-      title: filtered.length === histRecords.length
-        ? "All analysed signals" : "Analysed signals (filtered)",
-    });
-    logEvent("report_export", { format: "pdf", scope: "combined", captures: filtered.length });
-    histStatus.textContent = `${filtered.length} captures exported.`;
+    const banner = rbBanner.value.trim();
+    if (format === "pdf") {
+      const ids = new Set(records.map(r => r.id));
+      const server = readConfig().backend === "server";
+      const corrections = server ? (await listCorrections()).filter(c => ids.has(c.analysis_id)) : [];
+      const targets = new Set([...ids, ...corrections.map(c => c.id)]);
+      const audit = server ? (await listAudit(1000)).filter(e => targets.has(e.target_id)).reverse() : [];
+      const reportId = await buildReport({
+        records, summary: summarise(records), corrections, audit, modelCard, sections, banner,
+        generatedBy: operatorName(), filters: describeFilters(filters),
+      });
+      logEvent("report_export", { format: "pdf", scope: "report builder", captures: records.length,
+        sections, classification: banner, report_id: reportId });
+      rbMsg.textContent = `${reportId}.pdf downloaded (${records.length} captures).`;
+    } else {
+      const { blob, filename } = await exportReport({
+        ids: records.map(r => r.id), sections, format, banner, filters: describeFilters(filters),
+      });
+      saveBlob(blob, filename);
+      rbMsg.textContent = `${filename} downloaded (${(blob.size / 1024).toFixed(0)} KB, ${records.length} captures). `
+        + "The export is recorded in the audit trail.";
+    }
+    await renderAudit();
   } catch (e) {
-    histStatus.textContent = `PDF failed: ${e.message}`;
+    rbMsg.textContent = `Report failed: ${e.message}`;
+  } finally {
+    el("rbBuild").disabled = false;
   }
 });
+
+// Formats the server builds need the local server; say so instead of failing.
+function paintReportBuilder(nFiltered) {
+  const server = readConfig().backend === "server";
+  for (const r of document.querySelectorAll("input[name=rbFormat]")) {
+    const needsServer = r.value !== "pdf";
+    r.disabled = needsServer && !server;
+    if (r.disabled && r.checked) document.querySelector("input[name=rbFormat][value=pdf]").checked = true;
+  }
+  el("rbServerNote").hidden = server;
+  rbCount.textContent = `${nFiltered} capture${nFiltered === 1 ? "" : "s"}`;
+}
 
 // ---------------------------------------------------------------------------
 // Audit trail (History page): who did what, and proof nobody edited it since
@@ -970,6 +1373,13 @@ const AUDIT_LABEL = {
   "correction.create": "Correction submitted",
   "correction.approve": "Correction approved",
   "correction.reject": "Correction rejected",
+  "retrain.start": "Retraining started",
+  "retrain.finish": "Retraining finished",
+  "retrain.fail": "Retraining failed",
+  "model.approve": "Model approved & activated",
+  "model.reject": "Model rejected",
+  "model.rollback": "Model rolled back",
+  "report.export": "Report exported",
   "client.receiver_connect": "Receiver connected",
   "client.receiver_disconnect": "Receiver disconnected",
 };
@@ -990,6 +1400,18 @@ function auditSummary(e) {
     case "correction.approve":
     case "correction.reject":
       return `submitted by ${d.submitted_by} · ${(d.corrected || []).join(" + ")}${d.note ? ` · “${d.note}”` : ""}`;
+    case "retrain.start":
+      return `“${d.reason}”${d.override ? " · OVERRIDE (rules not all met)" : ""} · correction rate ${(d.correction_rate * 100).toFixed(1)}%`;
+    case "retrain.finish":
+      return `candidate ${d.candidate} · gate ${d.gate_passed ? "passed" : "FAILED"}`;
+    case "retrain.fail":
+      return d.error || "";
+    case "model.approve":
+    case "model.reject":
+    case "model.rollback":
+      return `${e.target_id}${d.note ? ` · “${d.note}”` : ""}`;
+    case "report.export":
+      return `${(d.format || "").toUpperCase()} · ${d.captures} captures · ${d.classification || ""} · sha256 ${String(d.sha256 || "").slice(0, 12)}…`;
     case "client.receiver_connect":
       return `${d.source} · dwell ${d.dwell_ms} ms · ${d.model} model · hop ${d.hop}`;
     case "client.receiver_disconnect":
@@ -1014,6 +1436,38 @@ async function renderAudit() {
       + `</tbody></table>`;
   } catch (e) {
     auditTable.textContent = `Could not read the audit trail: ${e.message}`;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Retraining trigger: the gauge and the checklist (History and Model pages)
+// ---------------------------------------------------------------------------
+
+/** Draws the trigger into `box`. Returns the status (or null without the
+ *  local server, when the box is hidden). */
+async function renderTrigger(box) {
+  const block = box.closest(".block");
+  if (readConfig().backend !== "server") { block.hidden = true; return null; }
+  block.hidden = false;
+  try {
+    const st = await retrainStatus();
+    const scaleMax = Math.max(st.rules.max_rate * 2, st.rate * 1.1);
+    const pct = x => `${Math.min(100, x / scaleMax * 100).toFixed(1)}%`;
+    const state = st.recommended ? "go" : st.triggered ? "warn" : "ok";
+    box.innerHTML =
+      `<div class="gauge-head"><span class="gauge-state ${state}">${st.recommended ? "RETRAIN RECOMMENDED"
+        : st.triggered ? "TRIGGERED" : "NOT TRIGGERED"}</span><span>${st.summary}</span></div>`
+      + `<div class="gauge" role="img" aria-label="Correction rate ${(st.rate * 100).toFixed(1)} percent, threshold ${(st.rules.max_rate * 100).toFixed(0)} percent">`
+      + `<div class="gauge-fill ${st.rate > st.rules.max_rate ? "over" : ""}" style="width:${pct(st.rate)}"></div>`
+      + `<div class="gauge-mark" style="left:${pct(st.rules.max_rate)}"><span>${(st.rules.max_rate * 100).toFixed(0)}% trigger</span></div></div>`
+      + `<div class="note">Correction rate, last ${st.rules.window_days} days: <strong>${(st.rate * 100).toFixed(1)}%</strong> `
+      + `(${st.corrected} of ${st.analysed} analysed captures had a correction that was not rejected).</div>`
+      + `<ul class="checklist">${st.conditions.map(c =>
+        `<li class="${c.met ? "met" : "unmet"}"><span aria-hidden="true">${c.met ? "✔" : "✖"}</span> ${c.text}</li>`).join("")}</ul>`;
+    return st;
+  } catch (e) {
+    box.textContent = `Could not read the retraining trigger: ${e.message}`;
+    return null;
   }
 }
 
@@ -1070,6 +1524,7 @@ corrTable.addEventListener("click", async (ev) => {
     corrMsg.textContent = `Correction ${decision === "approve" ? "approved" : "rejected"} by ${operatorName()}.`;
     await renderCorrections();
     await renderAudit();
+    await renderTrigger(el("histTrigger"));
   } catch (e) {
     corrMsg.textContent = e.message.replace(/^Local database review failed \(\d+\)\. /, "");
   }
