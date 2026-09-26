@@ -1,12 +1,19 @@
-// Rule-based assistant for the OMNI demo. No model, no network: it reads a
-// question, spots keywords, looks the facts up in the saved upload history and
-// fills in a sentence. Mirrors src/chatbot/bot.py; web/test/chatbot_check.mjs
-// pins the two together.
+// Rule-based assistant for the OMNI/NEXA demo. No model, no network: it reads
+// a question, spots keywords, looks the facts up and fills in a sentence.
+// Mirrors src/chatbot/bot.py; web/test/chatbot_check.mjs pins the two
+// together (that Python mirror still uses its own simplified upload shape --
+// only this file talks to storage.js).
 //
-// History persists in the browser's IndexedDB, so it survives closing the page
+// Uploads/analyses are NOT stored by this module. They come from
+// storage.js's listAnalyses(), the same records the History page reads --
+// one source of truth, so the assistant answers from whatever backend the
+// team has configured (this browser, or the shared Supabase project) with no
+// extra wiring here. Only the CHAT LOG (the questions asked and answers
+// given) is this module's own: storage.js has no concept of a conversation.
+// That log lives in the browser's IndexedDB, so it survives closing the page
 // and works with the Wi-Fi off. If IndexedDB is unavailable (private window,
 // blocked storage) it falls back to memory: the assistant still works, but
-// history is lost on reload.
+// the log is lost on reload.
 
 const ALIASES = [
   ["fhss", "FHSS"], ["hopping", "FHSS"], ["hop", "FHSS"],
@@ -44,23 +51,51 @@ function findClass(text) {
   return null;
 }
 
-function fmtCounts(counts) {
-  const items = Object.entries(counts || {}).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]);
-  return items.length ? items.map(([c, n]) => `${c}: ${n}`).join(", ") : "nothing detected";
+/** storage.js's record shape has no per-class window COUNT (it stores peak
+ * probability per class instead, to keep rows small -- see buildRecord's own
+ * comment). "Detected" here means "the peak probability reached this class's
+ * threshold at some point", which is exactly classes_detected. */
+function fmtDetected(rec) {
+  const classes = rec.classes_detected || [];
+  if (!classes.length) return "nothing detected";
+  return classes.map(c => {
+    const p = rec.peak_probability?.[c];
+    return p == null ? c : `${c} (peak ${p.toFixed(2)})`;
+  }).join(", ");
 }
 
-function summaryLine(u) {
-  return `#${u.id} ${u.name} (${u.time}): ${u.windows} windows. Detected ${fmtCounts(u.counts)}.`;
+function fmtName(rec) {
+  return rec.file_name || rec.case_note || (rec.source === "upload" ? "uploaded capture" : "synthetic capture");
 }
 
-/** Pure function: no DOM, no storage. `uploads` oldest first; `chat` is the
- * list of earlier {q, a} pairs, not including this question. */
-export function answer(question, uploads, chat = []) {
+function fmtTime(rec) {
+  return (rec.created_at || "").slice(0, 16).replace("T", " ") || "unknown time";
+}
+
+function summaryLine(n, rec) {
+  return `#${n} ${fmtName(rec)} (${fmtTime(rec)}): ${rec.n_windows} windows, verdict ${rec.verdict}. `
+    + `Detected ${fmtDetected(rec)}.`;
+}
+
+/** Chronological, oldest first, each tagged with the position number a user
+ * would say ("upload 1", "my last upload"). storage.js returns newest first
+ * (it's built for a dashboard reading top-down), so this is the one place
+ * that reverses it for the assistant's own, conversational numbering. */
+function numbered(records) {
+  return [...records].sort((a, b) => (a.created_at < b.created_at ? -1 : 1))
+    .map((rec, i) => ({ n: i + 1, rec }));
+}
+
+/** Pure function: no DOM, no storage. `records` are storage.js rows, any
+ * order; `chat` is the list of earlier {q, a} pairs, not including this
+ * question. */
+export function answer(question, records, chat = []) {
   const q = question.trim().toLowerCase();
   if (!q || q === "help" || q === "?") return HELP;
 
+  const rows = numbered(records);
   const nums = (q.match(/\b\d+\b/g) || []).map(Number);
-  const byId = id => uploads.find(u => u.id === id);
+  const byNumber = n => rows.find(r => r.n === n);
 
   if (/\b(what|which)\b.*\b(ask|asked|said)\b|\bchat history\b|\bearlier questions\b/.test(q)) {
     const prev = chat.slice(-5);
@@ -70,35 +105,37 @@ export function answer(question, uploads, chat = []) {
 
   if (q.includes("compare")) {
     if (nums.length < 2) return "Tell me two upload numbers, for example 'compare upload 1 and 3'.";
-    const a = byId(nums[0]), b = byId(nums[1]);
+    const a = byNumber(nums[0]), b = byNumber(nums[1]);
     if (!a || !b) return "I could not find one of those uploads. Try 'list uploads'.";
-    return `A) ${summaryLine(a)}\nB) ${summaryLine(b)}`;
+    return `A) ${summaryLine(a.n, a.rec)}\nB) ${summaryLine(b.n, b.rec)}`;
   }
 
   if (/\bhow many\b/.test(q) && q.includes("upload")) {
-    return `There ${uploads.length === 1 ? "is 1 upload" : `are ${uploads.length} uploads`} saved.`;
+    return `There ${rows.length === 1 ? "is 1 upload" : `are ${rows.length} uploads`} saved.`;
   }
 
   if (/\b(last|latest|recent)\b/.test(q)) {
-    return uploads.length ? summaryLine(uploads[uploads.length - 1]) : "There are no uploads yet.";
+    if (!rows.length) return "There are no uploads yet.";
+    const last = rows[rows.length - 1];
+    return summaryLine(last.n, last.rec);
   }
 
   if (/\b(list|all|history)\b/.test(q) && q.includes("upload")) {
-    return uploads.length ? uploads.map(summaryLine).join("\n") : "There are no uploads yet.";
+    return rows.length ? rows.map(r => summaryLine(r.n, r.rec)).join("\n") : "There are no uploads yet.";
   }
 
   if (q.includes("summary") || (nums.length && q.includes("upload"))) {
     if (!nums.length) return "Which upload number? Try 'summary of upload 2'.";
-    const u = byId(nums[0]);
-    return u ? summaryLine(u) : `I could not find upload ${nums[0]}.`;
+    const r = byNumber(nums[0]);
+    return r ? summaryLine(r.n, r.rec) : `I could not find upload ${nums[0]}.`;
   }
 
   const cls = findClass(q);
   const asksHistory = /\b(which|had|has|with|contain|contained|found|show)\b/.test(q) && q.includes("upload");
   if (cls && asksHistory) {
-    const hits = uploads.filter(u => (u.counts?.[cls] || 0) > 0);
+    const hits = rows.filter(r => (r.rec.classes_detected || []).includes(cls));
     if (!hits.length) return `No upload has ${cls} detected.`;
-    return `Uploads with ${cls}: ` + hits.map(u => `#${u.id} ${u.name} (${u.counts[cls]} windows)`).join("; ");
+    return `Uploads with ${cls}: ` + hits.map(r => `#${r.n} ${fmtName(r.rec)}`).join("; ");
   }
 
   if (cls && FAQ[cls]) return FAQ[cls];
@@ -107,85 +144,70 @@ export function answer(question, uploads, chat = []) {
   return "Sorry, I did not understand that. " + HELP;
 }
 
-/** One upload record from a finished analysis. `events` are the resolved
- * detections (analysis.js:resolveSession(...).events); counts are windows per
- * class, the same figures the RF Replay page shows. */
-export function summarizeUpload({ name, source, caseNote = "", snrDb = null, nWindows, hop, durationMs, events, model }) {
-  const counts = {};
-  for (const e of events) {
-    const n = e.endWindow - e.startWindow + 1;
-    for (const c of e.classes) counts[c] = (counts[c] || 0) + n;
-  }
-  const d = new Date();
-  const pad = n => String(n).padStart(2, "0");
-  return {
-    name, source, caseNote, snrDb, windows: nWindows, hop, durationMs, model, counts,
-    time: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`,
-  };
-}
-
 // ---------------------------------------------------------------------------
-// Storage: IndexedDB with a memory fallback. Same async interface for both.
+// Chat log storage: IndexedDB with a memory fallback. The uploads themselves
+// are NOT stored here -- see the file header. Same async interface either
+// way, so callers never need to know which one is live.
 // ---------------------------------------------------------------------------
 
-function memoryStore() {
-  const uploads = [], chat = [];
-  let uid = 0, cid = 0;
+function memoryChatLog() {
+  const chat = [];
+  let cid = 0;
   return {
     persistent: false,
-    async addUpload(u) { u = { ...u, id: ++uid }; uploads.push(u); return u; },
-    async listUploads() { return uploads.slice(); },
     async addChat(c) { chat.push({ ...c, id: ++cid }); },
     async listChat() { return chat.slice(); },
-    async clearAll() { uploads.length = 0; chat.length = 0; },
+    async clearChat() { chat.length = 0; },
   };
 }
 
-function idbStore(db) {
-  const tx = (store, mode, fn) => new Promise((resolve, reject) => {
-    const t = db.transaction(store, mode);
-    const req = fn(t.objectStore(store));
+function idbChatLog(db) {
+  const tx = (mode, fn) => new Promise((resolve, reject) => {
+    const t = db.transaction("chat", mode);
+    const req = fn(t.objectStore("chat"));
     t.oncomplete = () => resolve(req && req.result);
     t.onerror = t.onabort = () => reject(t.error);
   });
   return {
     persistent: true,
-    async addUpload(u) { const id = await tx("uploads", "readwrite", s => s.add(u)); return { ...u, id }; },
-    listUploads: () => tx("uploads", "readonly", s => s.getAll()),
-    addChat: c => tx("chat", "readwrite", s => s.add(c)),
-    listChat: () => tx("chat", "readonly", s => s.getAll()),
-    async clearAll() {
-      await tx("uploads", "readwrite", s => s.clear());
-      await tx("chat", "readwrite", s => s.clear());
-    },
+    addChat: c => tx("readwrite", s => s.add(c)),
+    listChat: () => tx("readonly", s => s.getAll()),
+    clearChat: () => tx("readwrite", s => s.clear()),
   };
 }
 
-export async function openStore() {
+/** Bumped to v2 and renamed from the assistant's first version, which also
+ * kept its own "uploads" object store -- dropped now that storage.js is the
+ * one source of truth for analyses. Anyone with the old omni-assistant
+ * database keeps it (harmless, just unused); this is a fresh database. */
+export async function openChatLog() {
   try {
-    if (typeof indexedDB === "undefined") return memoryStore();
+    if (typeof indexedDB === "undefined") return memoryChatLog();
     const db = await new Promise((resolve, reject) => {
-      const req = indexedDB.open("omni-assistant", 1);
+      const req = indexedDB.open("omni-assistant-chat", 1);
       req.onupgradeneeded = () => {
-        req.result.createObjectStore("uploads", { keyPath: "id", autoIncrement: true });
         req.result.createObjectStore("chat", { keyPath: "id", autoIncrement: true });
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
       req.onblocked = () => reject(new Error("blocked"));
     });
-    return idbStore(db);
+    return idbChatLog(db);
   } catch (e) {
-    console.warn("Assistant history storage unavailable, using memory:", e);
-    return memoryStore();
+    console.warn("Assistant chat log unavailable, using memory:", e);
+    return memoryChatLog();
   }
 }
 
-/** One question through the whole loop: read history, answer, save the pair. */
-export async function ask(store, question) {
-  const [uploads, chat] = await Promise.all([store.listUploads(), store.listChat()]);
-  const a = answer(question, uploads, chat);
-  await store.addChat({ q: question, a, t: Date.now() });
+/** One question through the whole loop: read the current uploads (fresh,
+ * every time -- an analysis saved a moment ago must be answerable straight
+ * away) and this session's chat log, answer, then save the pair. `listRecords`
+ * is storage.js's listAnalyses, injected rather than imported directly so
+ * this module (and its tests) do not need a DOM or a Supabase project to run. */
+export async function ask(chatLog, listRecords, question) {
+  const [{ records }, chat] = await Promise.all([listRecords(), chatLog.listChat()]);
+  const a = answer(question, records, chat);
+  await chatLog.addChat({ q: question, a, t: Date.now() });
   return a;
 }
 
@@ -193,18 +215,18 @@ export async function ask(store, question) {
 // Page wiring
 // ---------------------------------------------------------------------------
 
-export async function initAssistant({ store, logEl, formEl, inputEl, suggestEl, clearBtn, noteEl }) {
+export async function initAssistant({ chatLog, listRecords, logEl, formEl, inputEl, suggestEl, clearBtn, noteEl }) {
   const add = (text, who) => {
     const div = document.createElement("div");
     div.className = `chat-msg ${who}`;
-    div.textContent = text;          // textContent, never innerHTML: uploaded file names are user input
+    div.textContent = text;          // textContent, never innerHTML: file names and case notes are user/data-derived
     logEl.appendChild(div);
     logEl.scrollTop = logEl.scrollHeight;
   };
 
   async function reload() {
     logEl.textContent = "";
-    const chat = await store.listChat();
+    const chat = await chatLog.listChat();
     if (!chat.length) add("Hello. I can look up your saved uploads and explain the terms. " + HELP, "bot");
     for (const c of chat) { add(c.q, "user"); add(c.a, "bot"); }
   }
@@ -212,7 +234,7 @@ export async function initAssistant({ store, logEl, formEl, inputEl, suggestEl, 
   async function send(text) {
     if (!text.trim()) return;
     add(text, "user");
-    add(await ask(store, text), "bot");
+    add(await ask(chatLog, listRecords, text), "bot");
   }
 
   formEl.addEventListener("submit", async e => {
@@ -229,14 +251,15 @@ export async function initAssistant({ store, logEl, formEl, inputEl, suggestEl, 
     suggestEl.appendChild(b);
   }
   clearBtn.addEventListener("click", async () => {
-    if (!confirm("Delete all saved uploads and chat history on this computer?")) return;
-    await store.clearAll();
+    if (!confirm("Delete this assistant's saved chat log on this computer? "
+      + "Stored analyses are not affected -- delete those from the History page.")) return;
+    await chatLog.clearChat();
     await reload();
   });
   if (noteEl) {
-    noteEl.textContent = store.persistent
-      ? "History is saved in this browser on this computer and works offline."
-      : "Storage is unavailable here, so history is kept only until the page is closed.";
+    noteEl.textContent = chatLog.persistent
+      ? "Your questions are saved in this browser and work offline. Uploads are read from wherever the History page stores them."
+      : "Chat storage is unavailable here, so questions are kept only until the page is closed.";
   }
   await reload();
 }
