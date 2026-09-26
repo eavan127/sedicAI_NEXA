@@ -191,6 +191,10 @@ def build_data():
     # judged-class recalls: if they agree to the last digit it was the same
     # model, because two different models do not produce identical recalls on
     # 3060 windows by chance.
+    # src.evaluate records this directly now (scorecard.json's `provenance`
+    # block), so prefer it and stop guessing.
+    prov = (scorecard or {}).get("provenance") or {}
+
     same_as_ensemble = False
     if scorecard and ensemble_scorecard and ensemble_scorecard.get("ensemble"):
         per_class = scorecard.get("per_class", {})
@@ -198,13 +202,32 @@ def build_data():
             cls in per_class
             and abs(per_class[cls]["recall"] - recall) < 1e-9
             for cls, recall in ensemble_scorecard["ensemble"].items())
-    scorecard_source = (
-        "evals/scorecard.json — recalls match evals/ensemble_scorecard.json, "
-        f"so this is the {ensemble_scorecard['n_models']}-model ensemble "
-        "(src.evaluate --ensemble)"
-        if same_as_ensemble else
-        "evals/scorecard.json — differs from the ensemble scorecard, so this is "
-        "src.evaluate's default: the single checkpoint (best_model.pt)")
+
+    if "ensemble" in prov:
+        n = len(prov.get("checkpoints") or []) or "?"
+        scorecard_source = (
+            f"evals/scorecard.json — provenance says {n}-model ensemble "
+            f"({', '.join(prov['checkpoints'])})"
+            if prov["ensemble"] else
+            f"evals/scorecard.json — provenance says single checkpoint "
+            f"({', '.join(prov.get('checkpoints') or ['best_model.pt'])})")
+    elif same_as_ensemble:
+        scorecard_source = (
+            "evals/scorecard.json — recalls match evals/ensemble_scorecard.json, "
+            f"so this is the {ensemble_scorecard['n_models']}-model ensemble "
+            "(src.evaluate --ensemble)")
+    elif ensemble_scorecard:
+        scorecard_source = (
+            "evals/scorecard.json — differs from the ensemble scorecard, so this is "
+            "src.evaluate's default: the single checkpoint (best_model.pt)")
+    else:
+        # Previously this branch asserted "single checkpoint", which is a guess
+        # and was wrong for a scorecard written by src.evaluate --ensemble with
+        # no ensemble_scorecard.json beside it. Say what is known instead.
+        scorecard_source = (
+            "evals/scorecard.json — no ensemble_scorecard.json and no provenance "
+            "block, so which checkpoint wrote it is not recorded. Re-run "
+            "python -m src.evaluate to stamp it.")
     # The figures src/evaluate.py writes. Copied rather than redrawn: they are
     # the evaluation's own output, and a chart the browser drew from the same
     # numbers would be a second rendering that could disagree with the one the

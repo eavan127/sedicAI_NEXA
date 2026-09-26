@@ -1,10 +1,10 @@
 {
  "architecture": "EnsembleModel",
  "member_architecture": "AMC_CNN",
- "parameters": 148938,
+ "parameters": 181898,
  "branches": {
   "iq_branch": 87680,
-  "stft_branch": 9600
+  "stft_branch": 42560
  },
  "classes": [
   "BPSK",
@@ -19,14 +19,14 @@
  "window_len": 512,
  "fs": 3200000,
  "thresholds": {
-  "LFM_RADAR": 0.22,
-  "FHSS": 0.25,
-  "JAMMING": 0.87,
-  "BPSK": 0.33,
-  "QPSK": 0.265,
-  "16QAM": 0.265,
-  "64QAM": 0.275,
-  "NOISE_FLOOR": 0.265
+  "LFM_RADAR": 0.24,
+  "FHSS": 0.24,
+  "JAMMING": 0.89,
+  "BPSK": 0.16,
+  "QPSK": 0.16,
+  "16QAM": 0.19,
+  "64QAM": 0.2,
+  "NOISE_FLOOR": 0.16
  },
  "benchmark_recall": 0.8,
  "judged_classes": [

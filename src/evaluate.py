@@ -15,7 +15,9 @@ Usage:
 """
 import argparse
 import csv
+import hashlib
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import matplotlib
@@ -414,12 +416,38 @@ def evaluate(ensemble=False, n_models=5, checkpoint=None):
         "FHSS_fp_that_are_true_LFM_RADAR": confusion_between(y_test, preds, "FHSS", "LFM_RADAR"),
     }
 
+    # Provenance. A scorecard without it cannot be checked against the
+    # checkpoints it claims to describe, and this project has already been
+    # bitten: results_keep_c2 shipped a scorecard.json measured at the OLD
+    # thresholds beside checkpoints calibrated to new ones, and nothing in
+    # the file said so. The tell had to be inferred from the numbers (QPSK
+    # at 0.477 recall / 0.792 precision is a high threshold; the calibrated
+    # value gives 0.847 / 0.393).
+    #
+    # dataset_fingerprint hashes the LABELS, not X: y.npy is ~4 MB so it is
+    # cheap, and two dataset builds that differ at all differ here -- which
+    # is what distinguishes an eavan-retrain scorecard from a RadChar-fix
+    # one, the difference that made LFM_RADAR read 0.8082 instead of 0.8415.
+    provenance = {
+        "thresholds": {c: float(t) for c, t in zip(CLASSES, thresholds)},
+        "checkpoints": [str(p.name) for p in ckpt_paths],
+        "ensemble": bool(ensemble),
+        "architecture": _arch_flags_for(ckpt_paths[0]) or {
+            k: CFG.get("model", {}).get(k, False)
+            for k in ("stft_freq_summary", "stft_keep_rows", "cumulant_features")},
+        "parameters": sum(p.numel() for p in models[0].parameters()),
+        "dataset_fingerprint": hashlib.sha1(np.ascontiguousarray(y)).hexdigest()[:16],
+        "n_test": int(len(y_test)),
+        "generated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+
     with open(evals_dir / "scorecard.json", "w") as f:
         json.dump({"per_class": report, "benchmark": scorecard,
                     "coarse_tier": coarse, "comms_vs_jamming": cvj,
                     "radar_fhss_confusion": radar_fhss_confusion,
                     "recall_in_context": ric,
-                    "dense_qam_recall": dense_qam}, f, indent=2)
+                    "dense_qam_recall": dense_qam,
+                    "provenance": provenance}, f, indent=2)
 
     # Flat CSVs alongside the JSON/PNG artifacts — Power BI (and Excel) read
     # CSV directly via Get Data > Text/CSV, no JSON connector needed. Same

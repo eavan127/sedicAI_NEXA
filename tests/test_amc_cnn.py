@@ -101,17 +101,33 @@ def test_existing_checkpoint_still_loads_with_flag_off():
         pytest.skip("no trained checkpoint present (results/best_model.pt or "
                      "ensemble_0.pt) -- nothing to guard against yet")
 
-    # Every experimental flag forced off explicitly. Reading them from the
-    # config instead would make this guard depend on whatever experiment the
-    # config currently selects -- it failed exactly that way once the team set
-    # stft_keep_rows: true, reporting a missing-key error that says nothing
-    # about the guard's real question: does the FLAG-OFF architecture still
-    # load a shipped checkpoint?
-    model = AMC_CNN(num_classes=len(CLASSES), input_len=WINDOW_LEN,
-                     stft_freq_summary=False, stft_keep_rows=False,
-                     cumulant_features=False)
+    # Built from the CONFIG, deliberately.
+    #
+    # This used to force every flag off and assert a shipped checkpoint loaded
+    # into the flag-off architecture. That premise died when the team shipped
+    # the C2 (stft_keep_rows) ensemble: results/ now holds 181,898-parameter
+    # checkpoints, so a flag-off model cannot load them and the guard failed
+    # while nothing was actually wrong.
+    #
+    # The invariant worth protecting is not "flag off loads" -- it is that the
+    # config and the shipped checkpoints AGREE. That is what src/evaluate.py,
+    # calibrate_thresholds.py, the UI console and web/build.py all depend on:
+    # each constructs a model from the config and loads results/*.pt into it.
+    # A disagreement breaks every one of them, and it has happened twice.
+    cfg_flags = {k: CFG.get("model", {}).get(k, False)
+                 for k in ("stft_freq_summary", "stft_keep_rows", "cumulant_features")}
+    model = AMC_CNN(num_classes=len(CLASSES), input_len=WINDOW_LEN, **cfg_flags)
     state_dict = torch.load(ckpt_path, map_location="cpu")
-    model.load_state_dict(state_dict, strict=True)  # must not raise
+    try:
+        model.load_state_dict(state_dict, strict=True)
+    except RuntimeError as exc:
+        pytest.fail(
+            f"{ckpt_path} does not match the architecture configs/default.yaml "
+            f"selects.\n  config flags : {cfg_flags}\n"
+            f"  config model : {sum(p.numel() for p in model.parameters()):,} parameters\n"
+            f"  checkpoint   : {sum(v.numel() for v in state_dict.values()):,} parameters\n"
+            f"Fix by setting the flags to match the checkpoint, or by installing "
+            f"checkpoints trained with these flags -- they move together.\n\n{exc}")
 
 
 def test_flag_off_is_the_config_default():
@@ -279,17 +295,30 @@ def test_cumulant_flag_off_fc1_unchanged_and_forward_shape_unchanged():
     assert model(x).shape == (2, len(CLASSES))
 
 
-def test_existing_checkpoint_still_loads_with_cumulant_flag_off():
-    """The guard that protects the submission: results/best_model.pt was
-    trained against today's architecture (no cumulant branch). Flag off
-    must keep AMC_CNN's state_dict shape-compatible with it -- the
-    CumulantFeatures branch must not even be constructed, let alone add
-    parameters/buffers, when the flag is off."""
-    model = AMC_CNN(num_classes=len(CLASSES), input_len=WINDOW_LEN,
-                     stft_freq_summary=False, stft_keep_rows=False,
-                     cumulant_features=False)
-    state_dict = torch.load("results/best_model.pt", map_location="cpu")
-    model.load_state_dict(state_dict, strict=True)  # must not raise
+def test_cumulant_flag_off_adds_no_state_dict_entries():
+    """Flag off must leave the state_dict byte-identical to a model that
+    never heard of cumulants -- the CumulantFeatures branch must not even be
+    constructed, let alone contribute parameters or buffers.
+
+    Checked structurally rather than by loading results/best_model.pt: the
+    shipped checkpoints track whichever architecture the team is submitting
+    (they are C2/stft_keep_rows today), so a test pinned to them measures the
+    submission rather than this flag. test_existing_checkpoint_still_loads_with_flag_off
+    covers config-vs-checkpoint agreement; this covers the flag itself."""
+    off = AMC_CNN(num_classes=len(CLASSES), input_len=WINDOW_LEN,
+                   stft_freq_summary=False, stft_keep_rows=False,
+                   cumulant_features=False)
+    on = AMC_CNN(num_classes=len(CLASSES), input_len=WINDOW_LEN,
+                  stft_freq_summary=False, stft_keep_rows=False,
+                  cumulant_features=True)
+
+    assert off.cumulant_branch is None
+    assert on.cumulant_branch is not None
+    assert not any("cumulant" in k for k in off.state_dict())
+    # fc1 is the only shape the flag may touch: +3 inputs, nothing else.
+    assert on.fc1.in_features == off.fc1.in_features + 3
+    off_keys, on_keys = set(off.state_dict()), set(on.state_dict())
+    assert off_keys <= on_keys, "flag off must not introduce keys the flag-on model lacks"
 
 
 def test_cumulant_flag_on_adds_exactly_three_fc1_inputs():
