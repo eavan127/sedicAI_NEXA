@@ -51,4 +51,20 @@ const r2 = await ask(chatLog, listRecords, "what did I ask before");
 ok("ask() remembers its own chat log", () => assert.match(r2, /list uploads/));
 await chatLog.clearChat();
 ok("clearChat empties the log", async () => assert.equal((await chatLog.listChat()).length, 0));
+
+// ask() with a rewriteFn (the Ollama path), faked here -- ollama_check.mjs
+// covers rewrite()'s own network/whitelist behaviour; this checks ask() wires
+// a rewrite in correctly and, just as importantly, logs the ORIGINAL question
+// the person typed, not the rewritten one, so the chat transcript stays
+// honest about what was actually asked.
+const r3 = await ask(chatLog, listRecords, "did anything jam that capture", async () => "which uploads had jamming");
+ok("ask() uses the rewrite to match, when given one", () => assert.match(r3, /case `Radar`/));
+const logged = await chatLog.listChat();
+ok("ask() logs the ORIGINAL text, not the rewrite", () => assert.equal(logged.at(-1).q, "did anything jam that capture"));
+const r4 = await ask(chatLog, listRecords, "list uploads", async () => null);
+ok("ask() falls back to the original text when rewriteFn returns null", () => assert.match(r4, /capture1\.iq/));
+const r5 = await ask(chatLog, listRecords, "list uploads", async () => { throw new Error("ollama down"); });
+ok("ask() survives a throwing rewriteFn", () => assert.match(r5, /capture1\.iq/));
+await chatLog.clearChat();
+
 console.log(`\n${n} checks passed`);

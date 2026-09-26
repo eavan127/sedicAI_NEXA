@@ -13,6 +13,7 @@ import {
 import { civilianWindows, drawConstellation } from "./constellation.js";
 import { THRESHOLDS } from "./analysis.js";
 import { initAssistant, openChatLog } from "./chatbot.js";
+import { isAvailable as ollamaAvailable, rewrite as ollamaRewrite, warmUp as ollamaWarmUp } from "./ollama.js";
 import {
   buildRecord, deleteAnalysis, listAnalyses, readConfig, saveAnalysis, usingSupabase,
 } from "./storage.js";
@@ -461,11 +462,21 @@ async function renderModel() {
   box.innerHTML = modelCardHtml(modelCard, modelSel.value);
 }
 
-chatLogPromise.then(chatLog => initAssistant({
+// Checked ONCE at startup, not per question: a slow/absent Ollama should not
+// add its own timeout to every message once we already know the answer. If
+// it starts up mid-session it is picked up on the next page load.
+const ollamaCheck = ollamaAvailable().catch(() => false);
+
+Promise.all([chatLogPromise, ollamaCheck]).then(([chatLog, hasOllama]) => initAssistant({
   chatLog, listRecords: listAnalyses,
   logEl: el("chatLog"), formEl: el("chatForm"), inputEl: el("chatInput"),
   suggestEl: el("chatSuggest"), clearBtn: el("chatClear"), noteEl: el("chatNote"),
+  rewriteFn: hasOllama ? ollamaRewrite : null,
 })).catch(e => console.error("Assistant failed to start:", e));
+
+// Pays Ollama's cold-load cost (seconds, sometimes tens of seconds) during
+// page load instead of on whoever's first question -- see ollama.js:warmUp.
+ollamaCheck.then(has => { if (has) ollamaWarmUp(); });
 
 init();
 

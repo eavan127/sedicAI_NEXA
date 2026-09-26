@@ -203,10 +203,21 @@ export async function openChatLog() {
  * every time -- an analysis saved a moment ago must be answerable straight
  * away) and this session's chat log, answer, then save the pair. `listRecords`
  * is storage.js's listAnalyses, injected rather than imported directly so
- * this module (and its tests) do not need a DOM or a Supabase project to run. */
-export async function ask(chatLog, listRecords, question) {
+ * this module (and its tests) do not need a DOM or a Supabase project to run.
+ *
+ * `rewriteFn`, when given, is ollama.js's rewrite(): an OPTIONAL local model
+ * that only ever picks one of the fixed phrasings answer() already handles
+ * (see ollama.js's own header for why). It runs first; if it returns a
+ * canonical line, that replaces `question` for matching purposes only -- the
+ * ORIGINAL text is still what gets shown in the chat log and in "what did I
+ * ask before", so a garbled rewrite never surfaces to the person reading the
+ * transcript. A null return (not running, timed out, or no confident match)
+ * falls straight through to today's plain keyword matching on the original
+ * text, unchanged. */
+export async function ask(chatLog, listRecords, question, rewriteFn = null) {
   const [{ records }, chat] = await Promise.all([listRecords(), chatLog.listChat()]);
-  const a = answer(question, records, chat);
+  const matchOn = (rewriteFn && await rewriteFn(question).catch(() => null)) || question;
+  const a = answer(matchOn, records, chat);
   await chatLog.addChat({ q: question, a, t: Date.now() });
   return a;
 }
@@ -215,7 +226,7 @@ export async function ask(chatLog, listRecords, question) {
 // Page wiring
 // ---------------------------------------------------------------------------
 
-export async function initAssistant({ chatLog, listRecords, logEl, formEl, inputEl, suggestEl, clearBtn, noteEl }) {
+export async function initAssistant({ chatLog, listRecords, logEl, formEl, inputEl, suggestEl, clearBtn, noteEl, rewriteFn = null }) {
   const add = (text, who) => {
     const div = document.createElement("div");
     div.className = `chat-msg ${who}`;
@@ -234,7 +245,7 @@ export async function initAssistant({ chatLog, listRecords, logEl, formEl, input
   async function send(text) {
     if (!text.trim()) return;
     add(text, "user");
-    add(await ask(chatLog, listRecords, text), "bot");
+    add(await ask(chatLog, listRecords, text, rewriteFn), "bot");
   }
 
   formEl.addEventListener("submit", async e => {
@@ -257,9 +268,13 @@ export async function initAssistant({ chatLog, listRecords, logEl, formEl, input
     await reload();
   });
   if (noteEl) {
-    noteEl.textContent = chatLog.persistent
-      ? "Your questions are saved in this browser and work offline. Uploads are read from wherever the History page stores them."
+    const storageNote = chatLog.persistent
+      ? "Your questions are saved in this browser and work offline."
       : "Chat storage is unavailable here, so questions are kept only until the page is closed.";
+    const ollamaNote = rewriteFn
+      ? " A local Ollama model is helping understand differently-worded questions; it never invents facts, only picks a known question type."
+      : " (Ollama not detected -- exact-phrase matching only. See the Assistant page's suggested questions.)";
+    noteEl.textContent = storageNote + " Uploads are read from wherever the History page stores them." + ollamaNote;
   }
   await reload();
 }
