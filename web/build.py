@@ -382,6 +382,23 @@ def build_data():
 
 
 if __name__ == "__main__":
+    import argparse
+
+    # Editing the page and refreshing its DATA are different jobs, and running
+    # the second by accident is expensive: build_data() rewrites
+    # web/data/performance.json and copies evals/*.png, so on a checkout whose
+    # evals/ is older than the deployed numbers it silently REPLACES good
+    # figures with stale ones. That happened during a page edit -- the
+    # Performance page went back to a 28 Aug scorecard from a smaller dataset,
+    # NOISE_FLOOR recall included, and the diff is a wall of JSON and PNG bytes
+    # that nobody reads before committing.
+    ap = argparse.ArgumentParser(
+        description="Build web/ from the template and the evaluation artifacts.")
+    ap.add_argument("--page-only", action="store_true",
+                    help="rebuild index.html, thresholds and models but leave web/data/ "
+                         "alone -- use this for any change to the page itself")
+    args = ap.parse_args()
+
     print("building web/")
     build_html()
     # Before the data steps: thresholds come from the config alone, so they
@@ -395,7 +412,10 @@ if __name__ == "__main__":
     # either one is reported as a warning against the files it would have
     # refreshed, not as a traceback after index.html has already been written.
     try:
-        build_data()
+        if args.page_only:
+            print("  --page-only: web/data/ left untouched")
+        else:
+            build_data()
     except FileNotFoundError as e:
         print(f"  warning: page data NOT refreshed -- {e.filename or e}")
         print("           run scripts/build_dataset.py, or ignore this when only "
