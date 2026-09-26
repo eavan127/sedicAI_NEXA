@@ -49,7 +49,7 @@ export const HELP = "You can ask: 'show my last upload', 'list uploads', 'how ma
 
 export const SUGGESTIONS = [
   "Show my last upload", "List uploads", "Which uploads had jamming?",
-  "Compare upload 1 and 2", "What did I ask before?", "What is FHSS?",
+  "Compare upload 1 and 2", "What did I ask before?",
 ];
 
 function findClass(text) {
