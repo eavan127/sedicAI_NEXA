@@ -438,6 +438,58 @@ export async function logEvent(action, details = {}, target = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// Human corrections (local server only)
+// ---------------------------------------------------------------------------
+
+/** Corrections live in the local database only: they become training labels,
+ *  so they need its audit trail, its raw IQ and its review rules. */
+export async function supportsCorrections() {
+  await detectServer();
+  return !!serverInfo;
+}
+
+async function serverJson(path, what, init = {}) {
+  const res = await fetch(path, { cache: "no-store", ...init });
+  await serverCheck(res, what);
+  return res.json();
+}
+
+/** body: {analysis_id, start_s, end_s, predicted_labels, corrected_labels, reason, model} */
+export function submitCorrection(body) {
+  return serverJson("/api/corrections", "correction", {
+    method: "POST", headers: serverHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+}
+
+export function listCorrections({ status = "", analysisId = "" } = {}) {
+  const q = new URLSearchParams();
+  if (status) q.set("status", status);
+  if (analysisId) q.set("analysis_id", analysisId);
+  return serverJson(`/api/corrections?${q}`, "corrections read");
+}
+
+export function correctionStats() {
+  return serverJson("/api/corrections/stats", "correction stats");
+}
+
+/** decision: "approve" | "reject". The server enforces the four-eyes rule. */
+export function reviewCorrection(id, decision, note = "") {
+  return serverJson(`/api/corrections/${encodeURIComponent(id)}/review`, "review", {
+    method: "POST", headers: serverHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ decision, note }),
+  });
+}
+
+/** Store raw IQ for a capture that was saved without it (e.g. a synthesized
+ *  scenario), so a correction to it has evidence to point at. */
+export async function attachCapture(recordId, file) {
+  await detectServer();
+  if (!serverInfo) throw new Error("Raw IQ can only be attached through the local server.");
+  return serverBackend.putFile(file, recordId);
+}
+
+// ---------------------------------------------------------------------------
 // Public interface
 // ---------------------------------------------------------------------------
 

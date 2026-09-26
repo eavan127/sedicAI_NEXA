@@ -38,7 +38,7 @@ export function channelState(tiers) {
 }
 
 /** rf_replay.py:_render's `head` markdown line. */
-export function headerLine({ source, snrKnown, trueSnrDb, snrCapped, requestedSnrDb,
+export function headerLine({ mode = "REPLAY", source, snrKnown, trueSnrDb, snrCapped, requestedSnrDb,
                               modelLabel, caseNote, durationMs, nWindows, hop, nEvents, tiers }) {
   // "capped from X dB" says what was requested AND what was delivered: a
   // civilian recording carries noise at its own bin, so a cleaner SNR than
@@ -48,7 +48,7 @@ export function headerLine({ source, snrKnown, trueSnrDb, snrCapped, requestedSn
   const snrNote = (snrKnown && trueSnrDb !== null && trueSnrDb !== undefined)
     ? `SNR ${trueSnrDb.toFixed(1)} dB KNOWN${capNote} &nbsp;·&nbsp; ` : "";
   return (
-    `<strong>● REPLAY</strong> &nbsp; source <code>${source}</code> &nbsp;·&nbsp; ` +
+    `<strong>● ${mode === "LIVE" ? "LIVE" : "REPLAY"}</strong> &nbsp; source <code>${source}</code> &nbsp;·&nbsp; ` +
     `BASEBAND · fs 3.2 MHz &nbsp;·&nbsp; ${snrNote}` +
     `${modelLabel} &nbsp;·&nbsp; ` +
     (caseNote ? `${caseNote} &nbsp;·&nbsp; ` : "") +

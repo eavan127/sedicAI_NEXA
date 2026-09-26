@@ -436,7 +436,7 @@ model:
   # before ever being turned on for a submission.
   stft_freq_summary: false
 
-  # EXPERIMENTAL, off by default (variant "C2", docs/POST_STAGE1_FIXES.md, E5).
+  # Variant "C2" (docs/POST_STAGE1_FIXES.md, E5) -- ON: the shipped ensemble.
   # The more direct answer to the same problem: instead of adding three
   # hand-built side channels, stop averaging the frequency axis at all.
   # STFTBranch's `f.mean(dim=2)` becomes a learned 1x1 layer over the whole
@@ -447,9 +447,11 @@ model:
   # with stft_freq_summary, which keeps 16 rows). Also shifts the spectrogram
   # rows into frequency order. Composes with stft_freq_summary.
   #
-  # Default false: the five checkpoints in results/ were trained flag-off and must
-  # keep loading strict=True. Turning it on means a retrain.
-  stft_keep_rows: false
+  # MUST be true: the five checkpoints in results/ (and web/models/*.onnx) are the
+  # C2 ensemble, trained flag-on (commit 7a9cb1c), and load strict=True -- with
+  # false they fail to load at all. Changing it means a retrain. It was once
+  # flipped back to false by a merge (509251c); tests/test_amc_cnn.py catches that.
+  stft_keep_rows: true
 
   # EXPERIMENTAL, off by default. The classifier cannot tell 16QAM from
   # 64QAM at all -- measured on the held-out test split with the 5-model

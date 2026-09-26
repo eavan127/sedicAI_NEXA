@@ -5,6 +5,7 @@ import {
 } from "./analysis.js";
 import { drawConsole } from "./console.js";
 import { describe, isSigmfName, readSigmf } from "./sigmf.js";
+import { FileReplay, SimulatedReceiver, dwellLevel, shouldStore, toInterleavedF32 } from "./receiver.js";
 import { eventRows, headerLine, latestBlock, printHeaderHtml, statusBlock } from "./panels.js";
 import {
   breakdownTableHtml, drawAttention, drawBreakdown, animateBreakdown, drawPerClassRecall,
@@ -16,8 +17,9 @@ import { THRESHOLDS } from "./analysis.js";
 import { initAssistant, openChatLog } from "./chatbot.js";
 import { isAvailable as ollamaAvailable, rewrite as ollamaRewrite, warmUp as ollamaWarmUp } from "./ollama.js";
 import {
-  buildRecord, canDelete, deleteAnalysis, detectServer, listAnalyses, listAudit, logEvent,
-  operatorName, readConfig, saveAnalysis, setOperatorName, usingSupabase, verifyAudit,
+  attachCapture, buildRecord, canDelete, correctionStats, deleteAnalysis, detectServer,
+  listAnalyses, listAudit, listCorrections, logEvent, operatorName, readConfig, reviewCorrection,
+  saveAnalysis, setOperatorName, submitCorrection, supportsCorrections, usingSupabase, verifyAudit,
 } from "./storage.js";
 import { applyFilters, barsHtml, summarise, summaryHtml as histSummaryHtml, tableHtml } from "./history.js";
 import { buildCombined, buildSingle } from "./report.js";
@@ -75,6 +77,15 @@ async function getModel(which) {
 async function init() {
   try {
     ort.env.wasm.wasmPaths = new URL("./vendor/ort/", document.baseURI).href;   // bundled copy: the demo must run with no internet
+    // Speed. proxy: inference runs in a Web Worker, so the page never
+    // freezes while a capture is classified. numThreads: several cores per
+    // model -- only possible when the server sends the cross-origin
+    // isolation headers (scripts/serve_local.py, web/vercel.json); without
+    // them the browser forces one thread and this is a no-op.
+    ort.env.wasm.proxy = true;
+    if (globalThis.crossOriginIsolated) {
+      ort.env.wasm.numThreads = Math.min(8, Math.max(1, (navigator.hardwareConcurrency || 2) - 2));
+    }
     // The constellation panel needs the C42 calibration constants, so the
     // card is loaded up front rather than lazily on the Model page.
     modelCard = await (await fetch("./data/model_card.json")).json();
@@ -97,7 +108,7 @@ function modelLabel(which) {
  * where smoothing.change only re-renders. */
 function render() {
   const { capture, result, source, caseNote, truth, snrDb, which,
-           snrCapped, requestedSnrDb } = session;
+           snrCapped, requestedSnrDb, mode } = session;
   const smoothed = smoothingChoice === "Smoothed";
   const resolved = resolveSession(result, smoothed);
   const events = resolved.emitterEvents;
@@ -106,7 +117,7 @@ function render() {
   const durationMs = capture.re.length / FS * 1000;
 
   headlineEl.innerHTML = headerLine({
-    source, snrKnown: source === "scenario", trueSnrDb: snrDb,
+    mode, source, snrKnown: source === "scenario", trueSnrDb: snrDb,
     snrCapped, requestedSnrDb,
     modelLabel: modelLabel(which), caseNote, durationMs,
     nWindows: result.nWindows, hop: result.hop, nEvents: events.length, tiers,
@@ -156,15 +167,19 @@ function render() {
   constellationBlock.hidden = !drew;
 
   tbody.innerHTML = "";
-  for (const row of eventRows(events)) {
+  eventRows(events).forEach((row, i) => {
     const tr = document.createElement("tr");
     for (const cell of row) {
       const td = document.createElement("td");
       td.textContent = cell;
       tr.appendChild(td);
     }
+    const td = document.createElement("td");
+    td.innerHTML = `<button class="mini" data-correct="${i}" title="Tell the system what is really there">✎ Correct</button>`;
+    tr.appendChild(td);
     tbody.appendChild(tr);
-  }
+  });
+  session.events = events;
 }
 
 /** Everything a capture needs that does NOT depend on the model or the
@@ -179,8 +194,15 @@ function measureCapture(re, im) {
   };
 }
 
+/**
+ * Classify one capture and draw it. `live` is set by the receiver loop: the
+ * headline says LIVE, the result is NOT stored here (the loop decides which
+ * dwells are worth keeping), and the manual buttons stay locked while the
+ * stream runs. Returns the elapsed inference seconds, or null on failure.
+ */
 async function analyze(re, im, { source, caseNote = "", truth = null, snrDb = null,
-                                  snrCapped = false, requestedSnrDb = null }) {
+                                  snrCapped = false, requestedSnrDb = null, live = false,
+                                  signal = null }) {
   synthBtn.disabled = uploadBtn.disabled = true;
   try {
     const which = modelSel.value;
@@ -193,26 +215,30 @@ async function analyze(re, im, { source, caseNote = "", truth = null, snrDb = nu
 
     const t0 = performance.now();
     const result = await classifyCapture(sessions, re, im, {
-      hop,
+      hop, signal,
       onProgress: (d, t) => { statusEl.textContent = `Running inference… ${d}/${t} windows`; },
     });
     const elapsed = ((performance.now() - t0) / 1000).toFixed(2);
 
     session = { capture, result, source, caseNote, truth, snrDb, which,
-                 snrCapped, requestedSnrDb };
+                 snrCapped, requestedSnrDb, mode: live ? "LIVE" : "REPLAY" };
     render();
     statusEl.textContent = `${result.nWindows} windows classified in ${elapsed}s.`;
+    if (live) return Number(elapsed);
     // Stored AFTER render: a storage backend that is slow, full or
     // misconfigured must not delay the picture the operator is waiting for,
     // and must not lose it either -- store() reports its own failures and
     // falls back to the local store.
-    store(pendingFile);
+    session.storing = store(pendingFile);
     pendingFile = null;
+    return Number(elapsed);
   } catch (e) {
+    if (e.name === "AbortError") { statusEl.textContent = "Stopped."; return null; }
     statusEl.textContent = `Error: ${e.message}`;
     console.error(e);
+    return null;
   } finally {
-    synthBtn.disabled = uploadBtn.disabled = false;
+    if (!rx) synthBtn.disabled = uploadBtn.disabled = false;
   }
 }
 
@@ -249,46 +275,49 @@ synthBtn.addEventListener("click", async () => {
 
 uploadBtn.addEventListener("click", () => fileInput.click());
 
+/**
+ * Selected files -> {re, im, truth, name, meta, note, warnings}. A SigMF
+ * recording (archive, or meta + data pair) or a raw interleaved-float32 file.
+ * Shared by "Select & Analyze" and the receiver's File replay.
+ */
+async function readUpload(files) {
+  if (files.some(f => isSigmfName(f.name))) {
+    const rec = await readSigmf(files);
+    if (rec.re.length < WINDOW_LEN) throw new Error(
+      `Recording is ${rec.re.length} complex samples; at least ${WINDOW_LEN} are needed for one window.`);
+    // An annotated recording carries its own ground truth (rec.truth).
+    return { ...rec, note: describe(rec.meta) };
+  }
+  // Interleaved float32 I,Q,I,Q,... -- the same contract as
+  // src/infer.py and src/ui/session.py:load_upload.
+  const file = files[0];
+  let raw = new Float32Array(await file.arrayBuffer());
+  if (raw.length < 2) throw new Error(
+    "File contains no complex samples. Expected interleaved float32 I,Q,I,Q,... with at least 2 values.");
+  if (raw.length % 2) raw = raw.subarray(0, raw.length - 1);
+  const n = raw.length / 2;
+  if (n < WINDOW_LEN) throw new Error(
+    `Capture is ${n} complex samples; at least ${WINDOW_LEN} are needed for one window.`);
+  const re = new Float64Array(n), im = new Float64Array(n);
+  for (let i = 0; i < n; i++) { re[i] = raw[2 * i]; im[i] = raw[2 * i + 1]; }
+  // No truth: never render a TRUTH overlay over data we do not actually have
+  // ground truth for (session.py:analyze).
+  return { re, im, truth: null, name: file.name, meta: null, note: "", warnings: [] };
+}
+
 fileInput.addEventListener("change", async () => {
   const files = [...(fileInput.files || [])];
-  const file = files[0];
-  if (!file) return;
+  if (!files.length) return;
   statusEl.textContent = `Reading ${files.map(f => f.name).join(" + ")}…`;
   try {
-    if (files.some(f => isSigmfName(f.name))) {
-      const rec = await readSigmf(files);
-      if (rec.re.length < WINDOW_LEN) throw new Error(
-        `Recording is ${rec.re.length} complex samples; at least ${WINDOW_LEN} are needed for one window.`);
-      // Store the data file (not the meta) so the record's size is the IQ's.
-      pendingFile = files;
-      const note = describe(rec.meta);
-      await analyze(rec.re, rec.im, {
-        source: "upload",
-        caseNote: rec.warnings.length ? `${note} · WARNING: ${rec.warnings.join(" ")}` : note,
-        // An annotated recording carries its own ground truth; anything
-        // else stays truth-free, as for a .bin upload.
-        truth: rec.truth,
-      });
-      if (rec.warnings.length) statusEl.textContent += `  ⚠ ${rec.warnings.join(" ")}`;
-      return;
-    }
-
-    // Interleaved float32 I,Q,I,Q,... -- the same contract as
-    // src/infer.py and src/ui/session.py:load_upload.
-    const buf = await file.arrayBuffer();
-    let raw = new Float32Array(buf);
-    if (raw.length < 2) throw new Error(
-      "File contains no complex samples. Expected interleaved float32 I,Q,I,Q,... with at least 2 values.");
-    if (raw.length % 2) raw = raw.subarray(0, raw.length - 1);
-    const n = raw.length / 2;
-    if (n < WINDOW_LEN) throw new Error(
-      `Capture is ${n} complex samples; at least ${WINDOW_LEN} are needed for one window.`);
-    const re = new Float64Array(n), im = new Float64Array(n);
-    for (let i = 0; i < n; i++) { re[i] = raw[2 * i]; im[i] = raw[2 * i + 1]; }
-    // truth is scenario-only: never render a TRUTH overlay over data we do
-    // not actually have ground truth for (session.py:analyze).
-    pendingFile = file;
-    await analyze(re, im, { source: "upload" });
+    const rec = await readUpload(files);
+    // Every selected file is kept (a SigMF pair is two); the record names the data.
+    pendingFile = files;
+    await analyze(rec.re, rec.im, {
+      source: "upload", truth: rec.truth,
+      caseNote: rec.warnings.length ? `${rec.note} · WARNING: ${rec.warnings.join(" ")}` : rec.note,
+    });
+    if (rec.warnings.length) statusEl.textContent += `  ⚠ ${rec.warnings.join(" ")}`;
   } catch (e) {
     statusEl.textContent = `Error: ${e.message}`;
     console.error(e);
@@ -297,8 +326,297 @@ fileInput.addEventListener("change", async () => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// Human correction: "the model said X here, it is really Y"
+// ---------------------------------------------------------------------------
+
+const corrDialog = el("corrDialog"), corrForm = el("corrForm"), corrTitle = el("corrTitle");
+const corrModelSaid = el("corrModelSaid"), corrClasses = el("corrClasses");
+const corrStart = el("corrStart"), corrEnd = el("corrEnd"), corrReason = el("corrReason");
+const corrOperator = el("corrOperator"), corrError = el("corrError"), corrSubmit = el("corrSubmit");
+
+const CLASS_GROUPS = [
+  ["Civilian", ["BPSK", "QPSK", "16QAM", "64QAM"]],
+  ["Military", ["LFM_RADAR", "FHSS"]],
+  ["Hostile", ["JAMMING"]],
+  ["Nothing", ["NOISE_FLOOR"]],
+];
+corrClasses.innerHTML = CLASS_GROUPS.map(([group, classes]) =>
+  `<fieldset><legend>${group}</legend>` + classes.map(c =>
+    `<label><input type="checkbox" value="${c}"> ${c === "NOISE_FLOOR" ? "Nothing here (noise only)" : c}</label>`).join("")
+  + `</fieldset>`).join("");
+
+// The session a correction is about: captured when the form opens, because a
+// live stream replaces the on-screen session every dwell.
+let corrCtx = null;
+const eventsNote = el("eventsNote");
+
+function openCorrection({ predicted, startS, endS, missed }) {
+  corrCtx = { sess: session, predicted };
+  const durS = session.capture.re.length / FS;
+  corrTitle.textContent = missed ? "Report a signal the model missed" : "Correct this detection";
+  corrModelSaid.textContent = predicted.length ? predicted.join(" + ") : "nothing (missed signal)";
+  corrStart.value = (startS * 1000).toFixed(2);
+  corrEnd.value = (Math.min(endS, durS) * 1000).toFixed(2);
+  corrStart.max = corrEnd.max = (durS * 1000).toFixed(2);
+  for (const box of corrClasses.querySelectorAll("input")) box.checked = predicted.includes(box.value);
+  corrReason.value = "";
+  corrOperator.value = operatorName();
+  corrError.textContent = "";
+  corrSubmit.disabled = false;
+  corrDialog.showModal();
+  corrReason.focus();
+}
+
+tbody.addEventListener("click", async (ev) => {
+  const btn = ev.target.closest("button[data-correct]");
+  if (!btn || !session?.events) return;
+  if (!(await supportsCorrections())) {
+    eventsNote.textContent = "Corrections are stored in the local database: start the page with "
+      + "scripts/serve_local.py (web/start_demo.bat).";
+    return;
+  }
+  const e = session.events[Number(btn.dataset.correct)];
+  openCorrection({ predicted: e.classes.filter(c => c !== "NOISE_FLOOR"),
+                   startS: e.startUs / 1e6, endS: e.endUs / 1e6, missed: false });
+});
+
+el("corrMissed").addEventListener("click", async () => {
+  if (!session) { eventsNote.textContent = "Analyse a capture first."; return; }
+  if (!(await supportsCorrections())) {
+    eventsNote.textContent = "Corrections need the local server (scripts/serve_local.py).";
+    return;
+  }
+  openCorrection({ predicted: [], startS: 0, endS: session.capture.re.length / FS, missed: true });
+});
+
+el("corrCancel").addEventListener("click", () => corrDialog.close());
+
+/** Make sure the capture being corrected is stored WITH its raw IQ: a live
+ *  dwell that was not stored is stored now, and a synthesized scenario (saved
+ *  without IQ) gets its samples attached. A correction nobody could retrain
+ *  on or re-check would be an opinion, not evidence. */
+async function ensureEvidence(sess) {
+  const iqFile = () => new File([toInterleavedF32(sess.capture.re, sess.capture.im).buffer], "capture.f32");
+  let rec = sess.record || (sess.storing && await sess.storing);
+  if (!rec) rec = await store(iqFile(), sess);
+  if (!rec || sess.recordBackend !== "server") throw new Error("the capture could not be saved to the local database");
+  if (!rec.file_path && !sess.iqAttached) {
+    await attachCapture(rec.id, iqFile());
+    sess.iqAttached = true;
+  }
+  return rec;
+}
+
+corrForm.addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const corrected = [...corrClasses.querySelectorAll("input:checked")].map(b => b.value);
+  corrError.textContent = "";
+  corrSubmit.disabled = true;
+  try {
+    setOperatorName(corrOperator.value);
+    const rec = await ensureEvidence(corrCtx.sess);
+    await submitCorrection({
+      analysis_id: rec.id,
+      start_s: Number(corrStart.value) / 1000, end_s: Number(corrEnd.value) / 1000,
+      predicted_labels: corrCtx.predicted, corrected_labels: corrected,
+      reason: corrReason.value, model: corrCtx.sess.which,
+    });
+    corrDialog.close();
+    eventsNote.textContent = `Correction submitted by ${operatorName()}: `
+      + `${corrCtx.predicted.join(" + ") || "nothing"} → ${corrected.join(" + ")}. `
+      + "It waits in History ▸ Human corrections until another person approves it.";
+    if (operatorInput) operatorInput.value = operatorName();
+  } catch (e) {
+    corrError.textContent = e.message.replace(/^Local database correction failed \(\d+\)\. /, "");
+    corrSubmit.disabled = false;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Receiver: live streaming from a simulated SDR or a replayed recording
+// ---------------------------------------------------------------------------
+
+const rxLight = el("rxLight"), rxState = el("rxState"), rxSourceSel = el("rxSource");
+const rxDwellSel = el("rxDwell"), rxConnectBtn = el("rxConnect"), rxStopBtn = el("rxStop");
+const rxReadouts = el("rxReadouts"), rxNote = el("rxNote"), rxFileInput = el("rxFileInput");
+const rxLog = el("rxLog");
+
+/** One line in the receiver's event log (newest last, last 8 kept). */
+function rxLogLine(text) {
+  const t = new Date().toLocaleTimeString([], { hour12: false });
+  const line = document.createElement("div");
+  line.textContent = `[${t}] ${text}`;
+  rxLog.append(line);
+  while (rxLog.childElementCount > 8) rxLog.firstElementChild.remove();
+  rxLog.hidden = false;
+}
+
+// null when disconnected; otherwise the running stream's state.
+let rx = null;
+
+function rxSetState(state, text) {
+  rxLight.className = `rx-light ${state}`;
+  rxState.textContent = text;
+}
+
+const fmtHz = hz => hz == null ? "—" : hz >= 1e9 ? `${(hz / 1e9).toFixed(3)} GHz` : `${(hz / 1e6).toFixed(3)} MHz`;
+
+const fmtDb = x => (x == null || !Number.isFinite(x) ? "—" : `${x >= 0 ? "+" : ""}${x.toFixed(1)} dB`);
+const fmtClock = s => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+
+function rxPaint() {
+  if (!rx) return;
+  const d = rx.info;
+  const wallS = (performance.now() - rx.startedAt) / 1000;
+  const sim = d.simulated ? " (sim)" : "";
+  const cells = [
+    ["Hardware", d.serial ? `${d.hardware} · ${d.serial}` : d.hardware],
+    ["Link", d.link],
+    ["Centre freq", d.centreHz == null ? "not recorded" : fmtHz(d.centreHz) + sim],
+    ["Sample rate", `${(d.sampleRate / 1e6).toFixed(1)} MS/s`],
+    ["Gain", d.gainDb == null ? "n/a" : `${d.gainDb} dB${sim}`],
+    ["Uptime", rx.streaming ? fmtClock(wallS) : "—"],
+    ["Samples in", rx.samples.toLocaleString()],
+    ["Signal level", `${fmtDb(rx.level?.powerDb)} avg · ${fmtDb(rx.level?.peakDb)} peak`],
+    ["Dwells", String(rx.dwells)],
+    ["Stored", String(rx.stored)],
+    ["Last dwell", rx.lastProcS == null ? "—" : `${rx.lastProcS.toFixed(2)} s to classify`],
+  ];
+  if (d.kind === "file") {
+    const { doneS, totalS } = rx.source.progress;
+    cells.push(["Progress", `${(doneS * 1000).toFixed(1)} / ${(totalS * 1000).toFixed(1)} ms`]);
+  } else {
+    // Share of air time actually examined: seconds of IQ classified per
+    // second of wall clock. The rest went by unexamined between dwells.
+    cells.push(["Coverage", wallS > 0 ? `${Math.min(100, rx.airS / wallS * 100).toFixed(1)}% of air time` : "—"]);
+  }
+  rxReadouts.innerHTML = cells.map(([k, v]) =>
+    `<div><span class="rx-k">${k}</span><span class="rx-v">${v}</span></div>`).join("");
+}
+
+async function rxStart(source) {
+  rx = {
+    source, info: source.describe(), dwells: 0, stored: 0, airS: 0, samples: 0, level: null,
+    lastProcS: null, prevClasses: null, startedAt: performance.now(), stopReason: null,
+    streaming: false, timer: null, abort: new AbortController(),
+  };
+  rxLog.replaceChildren();
+  synthBtn.disabled = uploadBtn.disabled = true;
+  rxConnectBtn.disabled = true;
+  rxStopBtn.disabled = false;
+  rxSourceSel.disabled = rxDwellSel.disabled = true;
+  rxSetState("connecting", "RECEIVER · CONNECTING");
+  rxPaint();
+  const me = rx;
+  await source.connect(step => { if (rx === me) rxLogLine(step); });
+  if (rx !== me || me.stopReason) return;       // Stop pressed mid-handshake
+  me.streaming = true;
+  me.startedAt = performance.now();
+  // Ticks between dwells too, so the panel visibly runs while a dwell is
+  // still being classified.
+  me.timer = setInterval(rxPaint, 500);
+  logEvent("receiver_connect", { source: rx.info.name, hardware: rx.info.hardware,
+    dwell_ms: Number(rxDwellSel.value) * 1000, model: modelSel.value, hop: Number(hopSel.value) });
+  rxSetState("on", `RECEIVER · STREAMING · ${rx.info.name}${rx.info.simulated ? " (SIMULATED)" : ""}`);
+  rxNote.textContent = rx.info.kind === "sim"
+    ? "Each dwell is a fresh slice of simulated air. Change the scenario case or SNR below at any "
+      + "time and the next dwell follows. A dwell is stored only when what is detected changes."
+    : "Streaming the recording dwell by dwell, every sample in order. A dwell is stored only when "
+      + "what is detected changes.";
+  rxPaint();
+  rxLoop();
+}
+
+async function rxLoop() {
+  const me = rx;
+  while (rx === me && !me.stopReason) {
+    let block;
+    try {
+      block = await me.source.next();
+    } catch (e) {
+      rxStop(`source error: ${e.message}`);
+      return;
+    }
+    if (!block) { rxStop("end of recording"); return; }
+    if (me.stopReason) break;
+
+    const elapsed = await analyze(block.re, block.im, { ...block, live: true, signal: me.abort.signal });
+    if (rx !== me || me.stopReason) return;
+    if (elapsed == null) { rxStop("classification failed"); return; }
+    me.dwells++;
+    me.airS += block.re.length / FS;
+    me.samples += block.re.length;
+    me.level = dwellLevel(block.re, block.im);
+    me.lastProcS = elapsed;
+
+    const resolved = resolveSession(session.result, smoothingChoice === "Smoothed");
+    const classes = [...new Set(resolved.emitterEvents.flatMap(e => e.classes))];
+    if (shouldStore(me.prevClasses, classes)) {
+      me.stored++;
+      rxLogLine(`Dwell ${block.index + 1}: ${classes.join(" + ")} detected, stored`);
+      const bytes = toInterleavedF32(block.re, block.im);
+      session.storing = store(new File([bytes.buffer], `dwell-${String(block.index + 1).padStart(5, "0")}.f32`));
+      await session.storing;
+    }
+    me.prevClasses = classes;
+    rxPaint();
+    // Let the page breathe between dwells (clicks, Stop, redraws).
+    await new Promise(r => setTimeout(r, 30));
+  }
+}
+
+function rxStop(reason = "stopped by operator") {
+  if (!rx) return;
+  const me = rx;
+  me.stopReason = reason;
+  me.abort.abort();          // cut the dwell being classified short
+  clearInterval(me.timer);
+  me.source.disconnect();
+  rxLogLine(`Stream closed: ${reason}`);
+  logEvent("receiver_disconnect", { source: me.info.name, reason, dwells: me.dwells,
+    stored: me.stored, seconds: +((performance.now() - me.startedAt) / 1000).toFixed(1) });
+  rxPaint();
+  rx = null;
+  const ended = reason === "end of recording";
+  rxSetState(ended ? "done" : reason.startsWith("stopped") ? "off" : "error",
+    ended ? "RECEIVER · END OF RECORDING" : reason.startsWith("stopped")
+      ? "RECEIVER · DISCONNECTED" : `RECEIVER · ERROR (${reason})`);
+  rxNote.textContent = `${me.dwells} dwells classified, ${me.stored} stored. ${reason[0].toUpperCase()}${reason.slice(1)}.`;
+  rxConnectBtn.disabled = false;
+  rxStopBtn.disabled = true;
+  rxSourceSel.disabled = rxDwellSel.disabled = false;
+  synthBtn.disabled = uploadBtn.disabled = false;
+}
+
+rxConnectBtn.addEventListener("click", () => {
+  const dwellS = Number(rxDwellSel.value);
+  if (rxSourceSel.value === "file") { rxFileInput.click(); return; }
+  rxStart(new SimulatedReceiver({
+    dwellS,
+    getSettings: () => ({ caseName: caseSel.value, snrDb: Number(snrSel.value) }),
+    getLibrary: () => loadCivilianLibrary("./data"),
+  }));
+});
+
+rxFileInput.addEventListener("change", async () => {
+  const files = [...(rxFileInput.files || [])];
+  rxFileInput.value = "";
+  if (!files.length) return;
+  try {
+    const rec = await readUpload(files);
+    rec.note = rec.warnings.length ? `${rec.note} · WARNING: ${rec.warnings.join(" ")}` : rec.note;
+    rxStart(new FileReplay({ rec, dwellS: Number(rxDwellSel.value) }));
+  } catch (e) {
+    rxSetState("error", "RECEIVER · COULD NOT OPEN FILE");
+    rxNote.textContent = e.message;
+  }
+});
+
+rxStopBtn.addEventListener("click", () => rxStop());
+
 modelSel.addEventListener("change", async () => {
-  if (!session) return;
+  if (!session || rx) return;
   await analyze(session.capture.re, session.capture.im, {
     source: session.source, caseNote: session.caseNote,
     truth: session.truth, snrDb: session.snrDb,
@@ -306,7 +624,7 @@ modelSel.addEventListener("change", async () => {
 });
 
 hopSel.addEventListener("change", async () => {
-  if (!session) return;
+  if (!session || rx) return;
   await analyze(session.capture.re, session.capture.im, {
     source: session.source, caseNote: session.caseNote,
     truth: session.truth, snrDb: session.snrDb,
@@ -359,18 +677,23 @@ new ResizeObserver(() => {
 let pendingFile = null;
 let lastRecord = null;
 
-async function store(file) {
+/** Save the analysis of `sess` (the current session by default). Returns the
+ *  saved record, or null if it could not be stored; remembers it on the
+ *  session so a later correction knows which capture it is about. */
+async function store(file, sess = session) {
   try {
-    const resolved = resolveSession(session.result, smoothingChoice === "Smoothed");
+    const resolved = resolveSession(sess.result, smoothingChoice === "Smoothed");
     // A SigMF pair arrives as [meta, data]: the record describes the data.
     const primary = Array.isArray(file)
       ? file.find(f => !/\.sigmf-meta$/i.test(f.name)) || file[0] : file;
-    const record = buildRecord(session, resolved, {
+    const record = buildRecord(sess, resolved, {
       classes: CLASSES,
       fileName: primary?.name || null,
       fileBytes: primary?.size ?? null,
     });
     const { record: saved, backend, warning } = await saveAnalysis(record, file);
+    sess.record = saved;
+    sess.recordBackend = backend;
     lastRecord = saved;
     printBtn.disabled = false;
     if (warning) statusEl.textContent += `  Storage: ${warning}`;
@@ -383,7 +706,9 @@ async function store(file) {
     // whether or not it could be written down.
     statusEl.textContent += `  Not stored: ${e.message}`;
     console.error(e);
+    return null;
   }
+  return sess.record;
 }
 
 // ---------------------------------------------------------------------------
@@ -585,6 +910,7 @@ async function renderHistory() {
       : "No local server and no Supabase key, so analyses are kept in this browser only. "
         + "Start the page with scripts/serve_local.py (web/start_demo.bat) to use the local database.";
   renderAudit();
+  renderCorrections();
   histStatus.textContent = "Loading…";
   try {
     const { records, warning } = await listAnalyses();
@@ -641,6 +967,11 @@ const AUDIT_LABEL = {
   "analysis.clear": "History cleared",
   "iq.store": "Raw IQ stored",
   "client.report_export": "Report exported",
+  "correction.create": "Correction submitted",
+  "correction.approve": "Correction approved",
+  "correction.reject": "Correction rejected",
+  "client.receiver_connect": "Receiver connected",
+  "client.receiver_disconnect": "Receiver disconnected",
 };
 
 function auditSummary(e) {
@@ -654,6 +985,15 @@ function auditSummary(e) {
     case "iq.store": return `${d.name} · ${(d.bytes / 1024).toFixed(0)} KB · sha256 ${String(d.sha256).slice(0, 12)}…`;
     case "client.report_export": return `${(d.format || "").toUpperCase()} · ${d.scope || ""}`
       + (d.captures ? ` · ${d.captures} captures` : "");
+    case "correction.create":
+      return `${(d.predicted || []).join(" + ") || "nothing"} → ${(d.corrected || []).join(" + ")} · “${d.reason}”`;
+    case "correction.approve":
+    case "correction.reject":
+      return `submitted by ${d.submitted_by} · ${(d.corrected || []).join(" + ")}${d.note ? ` · “${d.note}”` : ""}`;
+    case "client.receiver_connect":
+      return `${d.source} · dwell ${d.dwell_ms} ms · ${d.model} model · hop ${d.hop}`;
+    case "client.receiver_disconnect":
+      return `${d.source} · ${d.reason} · ${d.dwells} dwells, ${d.stored} stored · ${d.seconds} s`;
     default: return "";
   }
 }
@@ -676,6 +1016,64 @@ async function renderAudit() {
     auditTable.textContent = `Could not read the audit trail: ${e.message}`;
   }
 }
+
+const corrBlock = el("corrBlock"), corrTable = el("corrTable"), corrStats = el("corrStats");
+const corrStatusSel = el("corrStatusSel"), corrMsg = el("corrMsg");
+let corrRows = [];
+
+async function renderCorrections() {
+  corrBlock.hidden = readConfig().backend !== "server";
+  if (corrBlock.hidden) return;
+  const esc = t => String(t ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  try {
+    const [rows, s] = await Promise.all([listCorrections({ status: corrStatusSel.value }), correctionStats()]);
+    corrRows = rows;
+    const perClass = Object.entries(s.approved_per_class).filter(([, n]) => n)
+      .map(([c, n]) => `${c} ${n}`).join(" · ") || "none yet";
+    corrStats.textContent = `${s.pending} waiting for review · ${s.approved} approved · ${s.rejected} rejected. `
+      + `Approved labels ready for retraining: ${perClass}.`;
+    const byId = new Map(histRecords.map(r => [r.id, r]));
+    corrTable.innerHTML = rows.length ? `<table><thead><tr><th>Submitted</th><th>Capture · span</th>`
+      + `<th>Model said → human says</th><th>Reason</th><th>By</th><th>Status</th><th></th></tr></thead><tbody>`
+      + rows.map(c => {
+        const cap = byId.get(c.analysis_id);
+        const span = `${(c.start_s * 1000).toFixed(1)}–${(c.end_s * 1000).toFixed(1)} ms`;
+        const status = c.status === "pending" ? `<span class="pill pending">pending</span>`
+          : `<span class="pill ${c.status}">${c.status}</span><div class="note">by ${esc(c.reviewed_by)}${c.review_note ? `: “${esc(c.review_note)}”` : ""}</div>`;
+        const actions = c.status === "pending"
+          ? `<button class="mini" data-review="approve" data-id="${esc(c.id)}">✔ Approve</button> `
+            + `<button class="mini" data-review="reject" data-id="${esc(c.id)}">✖ Reject</button>` : "";
+        return `<tr><td>${esc(new Date(c.created_at).toLocaleString())}</td>`
+          + `<td>${esc(cap?.file_name || cap?.case_note?.slice(0, 40) || c.analysis_id.slice(0, 8))}<div class="note">${span}</div></td>`
+          + `<td><s>${esc(c.predicted_labels.join(" + ") || "nothing")}</s> → <strong>${esc(c.corrected_labels.join(" + "))}</strong></td>`
+          + `<td>${esc(c.reason)}</td><td>${esc(c.operator)}</td><td>${status}</td><td class="row-actions">${actions}</td></tr>`;
+      }).join("") + `</tbody></table>`
+      : `<div class="note">No ${corrStatusSel.value || ""} corrections.</div>`;
+  } catch (e) {
+    corrTable.textContent = `Could not read corrections: ${e.message}`;
+  }
+}
+
+corrStatusSel.addEventListener("change", renderCorrections);
+
+corrTable.addEventListener("click", async (ev) => {
+  const btn = ev.target.closest("button[data-review]");
+  if (!btn) return;
+  const decision = btn.dataset.review;
+  const note = window.prompt(decision === "approve"
+    ? `Approve as ${operatorName()}? Optional note:`
+    : `Reject as ${operatorName()}. Why? (required)`, "");
+  if (note === null) return;
+  corrMsg.textContent = "";
+  try {
+    await reviewCorrection(btn.dataset.id, decision, note);
+    corrMsg.textContent = `Correction ${decision === "approve" ? "approved" : "rejected"} by ${operatorName()}.`;
+    await renderCorrections();
+    await renderAudit();
+  } catch (e) {
+    corrMsg.textContent = e.message.replace(/^Local database review failed \(\d+\)\. /, "");
+  }
+});
 
 el("auditVerify").addEventListener("click", async () => {
   auditStatus.textContent = "Checking every entry…";

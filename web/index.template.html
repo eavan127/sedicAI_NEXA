@@ -110,7 +110,7 @@
 
     .print-only { display: block; }
     /* Controls, navigation and live status are interaction, not content. */
-    nav, .grow, #status, h3.page-title, .note { display: none !important; }
+    nav, .grow, #status, h3.page-title, .note, .receiver, #corrMissed, #eventsTable button { display: none !important; }
     header { margin-bottom: 10px; }
     .layout { display: block; }
     main { width: 100%; }
@@ -170,8 +170,39 @@
   button.mini:hover { background: var(--brand-olive-tint); }
   td.row-actions { display: flex; gap: 6px; }
   td.num, th.num { text-align: right; font-family: var(--mono); }
+  .receiver { border: 1px solid var(--grid); border-radius: 8px; background: var(--panel); padding: 12px 14px; margin: 4px 0 12px; }
+  .rx-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .rx-state { font-family: var(--mono); font-size: 13px; font-weight: 700; letter-spacing: 0.04em; color: var(--text); }
+  .rx-light { width: 12px; height: 12px; border-radius: 50%; flex: none; background: #9AA3A8; box-shadow: 0 0 0 3px rgba(154,163,168,0.25); }
+  .rx-light.connecting { background: #D49A1F; box-shadow: 0 0 0 3px rgba(212,154,31,0.3); }
+  .rx-light.on { background: #2E9E4F; box-shadow: 0 0 0 3px rgba(46,158,79,0.3); animation: rx-pulse 1.4s ease-in-out infinite; }
+  .rx-light.done { background: #3B6FB6; box-shadow: 0 0 0 3px rgba(59,111,182,0.25); }
+  .rx-light.error { background: #B3261E; box-shadow: 0 0 0 3px rgba(179,38,30,0.25); }
+  @keyframes rx-pulse { 50% { box-shadow: 0 0 0 6px rgba(46,158,79,0.08); } }
+  @media (prefers-reduced-motion: reduce) { .rx-light.on { animation: none; } }
+  .rx-readouts { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px 14px; }
+  .rx-readouts > div { display: flex; flex-direction: column; min-width: 0; }
+  .rx-k { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; }
+  .rx-v { font-family: var(--mono); font-size: 13px; color: var(--text); overflow-wrap: anywhere; }
+  .rx-log { font-family: var(--mono); font-size: 12px; color: var(--text-dim); background: var(--bg); border: 1px solid var(--grid); border-radius: 6px; padding: 6px 10px; margin: 8px 0 0; max-height: 9.5em; overflow-y: auto; }
   .note.audit-ok { color: #2E7D32; font-weight: 600; }
   .note.audit-bad { color: #B3261E; font-weight: 600; }
+  dialog#corrDialog { border: 1px solid var(--grid); border-radius: 10px; padding: 18px 20px; width: min(560px, calc(100vw - 32px)); background: var(--panel); color: var(--text); font-family: var(--font); }
+  dialog#corrDialog::backdrop { background: rgba(18, 28, 39, 0.45); }
+  .corr-span { display: flex; gap: 12px; margin-bottom: 10px; }
+  .corr-span label, .corr-block { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-dim); }
+  .corr-block { margin-top: 10px; }
+  .corr-span input, .corr-block input, .corr-block textarea { font-family: var(--font); font-size: 13px; padding: 7px 9px; border: 1px solid var(--grid); border-radius: 6px; background: var(--panel); color: var(--text); }
+  .corr-classes { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 8px; }
+  .corr-classes fieldset { border: 1px solid var(--grid); border-radius: 6px; padding: 6px 8px; margin: 0; }
+  .corr-classes legend { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; }
+  .corr-classes label { display: flex; align-items: center; gap: 6px; font-size: 13px; padding: 2px 0; }
+  .corr-error { color: #B3261E; font-size: 13px; min-height: 1.2em; margin-top: 8px; }
+  .corr-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+  .pill { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; }
+  .pill.pending { background: #FFF3D6; color: #8A5A00; }
+  .pill.approved { background: #E3F4E8; color: #1E6B35; }
+  .pill.rejected { background: #FBE4E2; color: #8C1D18; }
   /* The global table rule is table-layout: fixed, which suits the two-column
      panels elsewhere. Eight columns under it wrapped every cell to two or
      three lines ("Milita/r/y") and clipped the row buttons, so this table
@@ -270,6 +301,43 @@
         </div>
       </div>
 
+      <!-- Receiver: live streaming (web/receiver.js). The status light is the
+           "is the receiver plugged in and delivering IQ" indicator an
+           operator console always shows. -->
+      <div class="receiver" id="receiverPanel">
+        <div class="rx-head">
+          <span class="rx-light off" id="rxLight" aria-hidden="true"></span>
+          <span class="rx-state" id="rxState">RECEIVER · DISCONNECTED</span>
+        </div>
+        <div class="grow" style="margin-bottom:8px;">
+          <div class="field" style="flex:3;min-width:220px;">
+            <label for="rxSource">Receiver source</label>
+            <select id="rxSource">
+              <option value="sim" selected>Simulated receiver (virtual SDR)</option>
+              <option value="file">File replay (.bin or SigMF, as if live)</option>
+            </select>
+          </div>
+          <div class="field" style="flex:1;min-width:110px;">
+            <label for="rxDwell">Dwell</label>
+            <select id="rxDwell">
+              <option value="0.02">20 ms</option>
+              <option value="0.05" selected>50 ms</option>
+            </select>
+          </div>
+          <button class="primary" id="rxConnect" style="flex:2;min-width:170px;">▶ Connect &amp; stream</button>
+          <button class="secondary" id="rxStop" style="flex:1;min-width:110px;" disabled>■ Stop</button>
+          <input type="file" id="rxFileInput" multiple accept=".bin,.f32,.cf32,.cfile,.iq,.dat,.raw,.sigmf,.sigmf-meta,.sigmf-data" style="display:none">
+        </div>
+        <div class="rx-readouts" id="rxReadouts">
+          <div><span class="rx-k">Hardware</span><span class="rx-v">none connected, press Connect to start the simulated receiver</span></div>
+        </div>
+        <div class="rx-log" id="rxLog" hidden aria-live="polite"></div>
+        <div class="note" id="rxNote" style="margin-top:6px;">
+          Connect to stream: the console classifies one dwell at a time and updates as each arrives.
+          For the fastest updates choose the single model and no-overlap hop.
+        </div>
+      </div>
+
       <!-- Source input -->
       <div class="grow">
         <button class="primary full" id="uploadBtn" disabled>📁 Select &amp; Analyze Source File</button>
@@ -318,11 +386,15 @@
       </div>
 
       <div class="block" style="padding:0;">
-        <div class="block-label" style="padding:12px 12px 0;">Detection events</div>
+        <div class="block-label" style="padding:12px 12px 0;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          Detection events
+          <button class="mini" id="corrMissed" title="The model missed something: say what and where">＋ Report a missed signal</button>
+        </div>
+        <div class="note" id="eventsNote" role="status" style="padding:0 12px;"></div>
         <div class="table-wrap">
           <table id="eventsTable">
-            <colgroup><col style="width:5%"><col style="width:12%"><col style="width:14%"><col style="width:69%"></colgroup>
-            <thead><tr><th>#</th><th>Start (ms)</th><th>Duration (ms)</th><th>Detected (peak confidence)</th></tr></thead>
+            <colgroup><col style="width:5%"><col style="width:12%"><col style="width:14%"><col style="width:57%"><col style="width:12%"></colgroup>
+            <thead><tr><th>#</th><th>Start (ms)</th><th>Duration (ms)</th><th>Detected (peak confidence)</th><th>Human review</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -401,6 +473,24 @@
       <div class="block">
         <div class="block-label">Storage</div>
         <div class="note" id="histBackendNote"></div>
+      </div>
+
+      <div class="block" id="corrBlock" hidden>
+        <div class="block-label">Human corrections: review queue</div>
+        <div class="note">Operators correct detections on the RF Replay page. Each correction must be
+          approved by a <strong>different</strong> named person (four-eyes rule) before it can become
+          training data, and is read-only once reviewed. Set your name in the Operator box below.</div>
+        <div class="filters" style="margin-top:8px;">
+          <select id="corrStatusSel">
+            <option value="pending" selected>Waiting for review</option>
+            <option value="approved">Approved</option>
+            <option value="rejected">Rejected</option>
+            <option value="">All</option>
+          </select>
+          <span class="note" id="corrStats"></span>
+        </div>
+        <div class="note" id="corrMsg" role="status"></div>
+        <div class="table-wrap" id="corrTable"></div>
       </div>
 
       <div class="block" id="auditBlock" hidden>
@@ -492,6 +582,29 @@
   <script>window.NEXA_SUPABASE = { url: "__SUPABASE_URL__", anonKey: "__SUPABASE_ANON_KEY__" };</script>
   <!-- Bundled copy, not the CDN: the finale's offline rule means this demo
        must start with no internet reachable at all. -->
+  <!-- Human correction form (main.js: openCorrection). -->
+  <dialog id="corrDialog" aria-labelledby="corrTitle">
+    <form id="corrForm" method="dialog">
+      <h3 id="corrTitle" style="margin:0 0 6px;">Correct this detection</h3>
+      <div class="note" style="margin-bottom:10px;">The model said <strong id="corrModelSaid"></strong>.
+        Tick what is <em>really</em> there. Your correction waits for a second person to approve it
+        before it can be used to retrain the model.</div>
+      <div class="corr-span">
+        <label>From (ms) <input id="corrStart" type="number" step="0.01" min="0" required></label>
+        <label>To (ms) <input id="corrEnd" type="number" step="0.01" min="0" required></label>
+      </div>
+      <div class="corr-classes" id="corrClasses"></div>
+      <label class="corr-block">Why? (required: what you see or know)
+        <textarea id="corrReason" rows="3" required minlength="5"
+          placeholder="e.g. the waterfall shows discrete hops, not a chirp"></textarea></label>
+      <label class="corr-block">Your name <input id="corrOperator" maxlength="64" required></label>
+      <div class="corr-error" id="corrError" role="alert"></div>
+      <div class="corr-actions">
+        <button type="button" class="secondary" id="corrCancel">Cancel</button>
+        <button type="submit" class="primary" id="corrSubmit">Submit correction</button>
+      </div>
+    </form>
+  </dialog>
   <script src="./vendor/ort/ort.min.js"></script>
   <script type="module" src="./main.js"></script>
 </body>

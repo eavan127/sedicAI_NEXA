@@ -18,6 +18,10 @@ API (JSON)
     DELETE /api/analyses/<id>          refused if corrections depend on it
     DELETE /api/analyses               delete all that no correction depends on
     PUT    /api/captures/<id>?name=f   raw IQ bytes for analysis <id>
+    POST   /api/corrections            a human's correction to a capture
+    GET    /api/corrections?status=pending&analysis_id=<id>
+    GET    /api/corrections/stats      counts, approved labels per class
+    POST   /api/corrections/<id>/review   {decision: approve|reject, note}
     GET    /api/audit?limit=200        audit trail, newest first
     GET    /api/audit/verify           recompute the hash chain
     POST   /api/audit                  log a client-side event (e.g. report export)
@@ -174,6 +178,20 @@ class Handler(SimpleHTTPRequestHandler):
             if method == "DELETE" and len(parts) == 1:
                 return self._send_json({"deleted": self.db.clear_analyses(self._actor())})
 
+        if head == "corrections":
+            if method == "POST" and len(parts) == 1:
+                return self._send_json(self.db.create_correction(self._read_json(), self._actor()),
+                                       HTTPStatus.CREATED)
+            if method == "GET" and len(parts) == 1:
+                return self._send_json(self.db.list_corrections(
+                    (query.get("status") or [None])[0], (query.get("analysis_id") or [None])[0], limit))
+            if method == "GET" and parts[1:] == ["stats"]:
+                return self._send_json(self.db.correction_stats())
+            if method == "POST" and len(parts) == 3 and parts[2] == "review":
+                body = self._read_json()
+                return self._send_json(self.db.review_correction(
+                    parts[1], str(body.get("decision") or ""), body.get("note"), self._actor()))
+
         if head == "captures" and method == "PUT" and len(parts) == 2:
             return self._put_capture(parts[1], (query.get("name") or [""])[0])
 
@@ -226,6 +244,21 @@ class Handler(SimpleHTTPRequestHandler):
         self.db.record_file(analysis_id, name, rel, n, digest, self._actor())
         return self._send_json({"file_path": rel, "file_sha256": digest, "bytes": n},
                                HTTPStatus.CREATED)
+
+    def end_headers(self):
+        # Static files: always revalidate (a cheap 304 when unchanged), so a
+        # page edited on disk is what the browser runs on the next reload --
+        # not a heuristically cached mix of old and new modules.
+        if not self.path.startswith("/api/"):
+            self.send_header("Cache-Control", "no-cache")
+        # Cross-origin isolation: without these two headers the browser will
+        # not give the page SharedArrayBuffer, and onnxruntime-web then runs
+        # every model on ONE core. "credentialless" (rather than
+        # "require-corp") still lets the lazily loaded PDF library come from
+        # its CDN.
+        self.send_header("Cross-Origin-Opener-Policy", "same-origin")
+        self.send_header("Cross-Origin-Embedder-Policy", "credentialless")
+        super().end_headers()
 
     def log_message(self, fmt, *args):
         # Quiet for static files; API calls are the interesting lines.

@@ -208,3 +208,124 @@ def test_static_modules_served_as_javascript(server):
     base, _ = server
     status, headers, _ = call(base + "/main.js")
     assert status == 200 and headers["Content-Type"].startswith("text/javascript")
+
+
+# --- corrections (human in the loop) --------------------------------------------
+
+EXPERT = Actor("jessy", "operator", "127.0.0.1")
+
+
+def _with_iq(db, i="c1"):
+    db.save_analysis(record(i, duration_s=0.05, file_path=f"iq/{i}/x.f32", file_sha256="ab" * 32), ME)
+    return i
+
+
+def correction(analysis_id, **over):
+    return {"analysis_id": analysis_id, "start_s": 0.01, "end_s": 0.02,
+            "predicted_labels": ["LFM_RADAR"], "corrected_labels": ["FHSS"],
+            "reason": "hops visible on the waterfall", **over}
+
+
+def test_classes_match_the_model_config():
+    from src.config import CLASSES as cfg_classes
+    from src.localdb import CLASSES
+    assert list(CLASSES) == list(cfg_classes)
+
+
+def test_correction_created_with_evidence_and_audited(db):
+    c = db.create_correction(correction(_with_iq(db)), ME)
+    assert c["status"] == "pending" and c["operator"] == "eavan"
+    assert c["corrected_labels"] == ["FHSS"] and c["iq_path"] == "iq/c1/x.f32"
+    entry = db.audit(limit=1)[0]
+    assert entry["action"] == "correction.create" and entry["details"]["reason"].startswith("hops")
+
+
+@pytest.mark.parametrize("over, msg", [
+    ({"corrected_labels": []}, "at least one class"),
+    ({"corrected_labels": ["LFM_RADAR"]}, "already said"),
+    ({"corrected_labels": ["TANK"]}, "unknown class"),
+    ({"reason": ""}, "reason is required"),
+    ({"start_s": 0.03, "end_s": 0.02}, "start < end"),
+    ({"end_s": 9.0}, "past the end"),
+])
+def test_bad_corrections_refused(db, over, msg):
+    with pytest.raises(ValueError, match=msg):
+        db.create_correction(correction(_with_iq(db), **over), ME)
+
+
+def test_correction_needs_raw_iq(db):
+    db.save_analysis(record("noiq", duration_s=0.05), ME)
+    with pytest.raises(ValueError, match="no stored raw IQ"):
+        db.create_correction(correction("noiq"), ME)
+    # ...unless the IQ was uploaded for it afterwards
+    db.record_file("noiq", "capture.f32", "iq/noiq/capture.f32", 10, "cd" * 32, ME)
+    assert db.create_correction(correction("noiq"), ME)["iq_sha256"] == "cd" * 32
+
+
+def test_four_eyes_rule(db):
+    c = db.create_correction(correction(_with_iq(db)), ME)
+    with pytest.raises(PermissionError, match="Four-eyes"):
+        db.review_correction(c["id"], "approve", "", ME)
+    with pytest.raises(PermissionError, match="Set your name"):
+        db.review_correction(c["id"], "approve", "", Actor("operator"))
+    done = db.review_correction(c["id"], "approve", "agreed", EXPERT)
+    assert done["status"] == "approved" and done["reviewed_by"] == "jessy"
+    assert db.audit(limit=1)[0]["action"] == "correction.approve"
+
+
+def test_reviewed_once_and_content_frozen(db):
+    c = db.create_correction(correction(_with_iq(db)), ME)
+    db.review_correction(c["id"], "reject", "not convinced", EXPERT)
+    with pytest.raises(PermissionError, match="already rejected"):
+        db.review_correction(c["id"], "approve", "", Actor("chua"))
+    with sqlite3.connect(db.path) as con:
+        with pytest.raises(sqlite3.IntegrityError, match="read-only"):
+            con.execute("UPDATE corrections SET status = 'approved'")
+    c2 = db.create_correction(correction(_with_iq(db, "c2")), ME)
+    with sqlite3.connect(db.path) as con:
+        with pytest.raises(sqlite3.IntegrityError, match="cannot be edited"):
+            con.execute("UPDATE corrections SET corrected_labels = '[\"JAMMING\"]' WHERE id = ?", (c2["id"],))
+
+
+def test_reject_needs_a_reason(db):
+    c = db.create_correction(correction(_with_iq(db)), ME)
+    with pytest.raises(ValueError, match="why"):
+        db.review_correction(c["id"], "reject", "", EXPERT)
+
+
+def test_stats_count_approved_labels(db):
+    a = db.create_correction(correction(_with_iq(db, "s1")), ME)
+    db.create_correction(correction(_with_iq(db, "s2")), ME)
+    db.review_correction(a["id"], "approve", "", EXPERT)
+    s = db.correction_stats()
+    assert s["pending"] == 1 and s["approved"] == 1 and s["approved_per_class"]["FHSS"] == 1
+
+
+def test_v1_database_migrates_in_place(tmp_path):
+    path = tmp_path / "old.db"
+    with sqlite3.connect(path) as con:            # a schema-v1 corrections table
+        con.execute("CREATE TABLE corrections (id TEXT PRIMARY KEY, analysis_id TEXT NOT NULL,"
+                    " created_at TEXT NOT NULL, operator TEXT NOT NULL, start_s REAL, end_s REAL,"
+                    " predicted_labels TEXT NOT NULL DEFAULT '[]', corrected_labels TEXT NOT NULL"
+                    " DEFAULT '[]', reason TEXT DEFAULT '', model TEXT, status TEXT NOT NULL"
+                    " DEFAULT 'pending', reviewed_by TEXT, reviewed_at TEXT, review_note TEXT)")
+    db = LocalDB(path)
+    with sqlite3.connect(path) as con:
+        cols = {r[1] for r in con.execute("PRAGMA table_info(corrections)")}
+    assert {"iq_path", "iq_sha256"} <= cols and db.verify_audit()["ok"]
+
+
+def test_corrections_over_http(server):
+    base, _ = server
+    call(base + "/api/analyses", "POST", record("h9", duration_s=0.05, file_path="iq/h9/a.f32"))
+    status, _, body = call(base + "/api/corrections", "POST", correction("h9"),
+                           headers={"X-NEXA-Operator": "eavan"})
+    assert status == 201
+    cid = json.loads(body)["id"]
+    status, _, body = call(base + f"/api/corrections/{cid}/review", "POST", {"decision": "approve"},
+                           headers={"X-NEXA-Operator": "eavan"})
+    assert status == 409 and "Four-eyes" in json.loads(body)["error"]
+    status, _, _ = call(base + f"/api/corrections/{cid}/review", "POST", {"decision": "approve"},
+                        headers={"X-NEXA-Operator": "jessy"})
+    assert status == 200
+    assert json.loads(call(base + "/api/corrections/stats")[2])["approved"] == 1

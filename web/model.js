@@ -74,7 +74,8 @@ export function preprocessWindow(wRe, wIm, outRe, outIm) {
  * display-layer rules live in analysis.js, exactly as src/timeline.py keeps
  * them out of classify_capture.
  */
-export async function classifyCapture(sessions, iqRe, iqIm, { hop = WINDOW_LEN, batchSize = 64, onProgress = null } = {}) {
+export async function classifyCapture(sessions, iqRe, iqIm,
+                                       { hop = WINDOW_LEN, batchSize = 64, onProgress = null, signal = null } = {}) {
   const n = iqRe.length;
   const nWindows = 1 + Math.floor(Math.max(n - WINDOW_LEN, 0) / hop);
   const starts = new Int32Array(nWindows);
@@ -91,6 +92,9 @@ export async function classifyCapture(sessions, iqRe, iqIm, { hop = WINDOW_LEN, 
   const normRe = new Float64Array(WINDOW_LEN), normIm = new Float64Array(WINDOW_LEN);
 
   for (let b0 = 0; b0 < nWindows; b0 += batchSize) {
+    // Checked between batches: Stop takes effect within one batch instead of
+    // after the whole capture.
+    if (signal?.aborted) throw new DOMException("Inference cancelled", "AbortError");
     const b1 = Math.min(b0 + batchSize, nWindows);
     const batchN = b1 - b0;
 
@@ -111,11 +115,15 @@ export async function classifyCapture(sessions, iqRe, iqIm, { hop = WINDOW_LEN, 
       magData.set(mag, bi * N_FFT * N_STFT_FRAMES);
     }
 
-    const iqTensor = new ort.Tensor("float32", iqData, [batchN, 2, WINDOW_LEN]);
-    const magTensor = new ort.Tensor("float32", magData, [batchN, 1, N_FFT, N_STFT_FRAMES]);
-
     const memberProbs = [];
     for (let m = 0; m < sessions.length; m++) {
+      // Fresh tensors per member: with ort.env.wasm.proxy on, run() hands
+      // the input buffers to the inference worker (they arrive detached on
+      // this side), so a tensor cannot be fed to a second ensemble member.
+      // Copy for every member but the last, which may take the originals.
+      const last = m === sessions.length - 1;
+      const iqTensor = new ort.Tensor("float32", last ? iqData : iqData.slice(), [batchN, 2, WINDOW_LEN]);
+      const magTensor = new ort.Tensor("float32", last ? magData : magData.slice(), [batchN, 1, N_FFT, N_STFT_FRAMES]);
       const out = await sessions[m].run({ iq: iqTensor, stft_mag: magTensor });
       const logits = out.logits.data;
       const p = new Float32Array(logits.length);
@@ -131,6 +139,10 @@ export async function classifyCapture(sessions, iqRe, iqIm, { hop = WINDOW_LEN, 
       }
     }
     if (onProgress) onProgress(b1, nWindows);
+    // Hand the event loop a turn between batches: clicks, the receiver's
+    // clock and redraws get through even when inference is not proxied to
+    // a worker (e.g. a browser without cross-origin isolation).
+    await new Promise(r => setTimeout(r, 0));
   }
 
   return { starts, probs, attn, nWindows, nClasses, hop, windowLen: WINDOW_LEN, fs: FS };

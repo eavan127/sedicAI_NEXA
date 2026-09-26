@@ -27,12 +27,19 @@ import hashlib
 import json
 import sqlite3
 import threading
+import uuid
 from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 GENESIS_HASH = "0" * 64
+
+# The model's classes, in its output order. Duplicated from configs/default.yaml
+# (via src.config) so this module stays standard-library only;
+# tests/test_localdb.py fails if the two ever disagree.
+CLASSES = ("BPSK", "QPSK", "16QAM", "64QAM", "LFM_RADAR", "FHSS", "JAMMING", "NOISE_FLOOR")
+REVIEW_DECISIONS = {"approve": "approved", "reject": "rejected"}
 
 # Columns the page may write, and how each is stored. JSON columns hold lists
 # and objects as text; the rest are plain SQLite values.
@@ -136,7 +143,28 @@ CREATE TRIGGER IF NOT EXISTS audit_log_no_delete BEFORE DELETE ON audit_log
 BEGIN SELECT RAISE(ABORT, 'audit_log is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS corrections_no_delete BEFORE DELETE ON corrections
 BEGIN SELECT RAISE(ABORT, 'corrections are never deleted; reject them instead'); END;
+
+-- A correction is written once and reviewed once. After that it is evidence:
+-- the database itself refuses a second review or any edit to what the human
+-- said, so a label cannot quietly change after it was approved for training.
+CREATE TRIGGER IF NOT EXISTS corrections_review_once BEFORE UPDATE ON corrections
+WHEN OLD.status != 'pending'
+BEGIN SELECT RAISE(ABORT, 'this correction was already reviewed and is now read-only'); END;
+CREATE TRIGGER IF NOT EXISTS corrections_content_fixed BEFORE UPDATE ON corrections
+WHEN NEW.analysis_id IS NOT OLD.analysis_id OR NEW.created_at IS NOT OLD.created_at
+  OR NEW.operator IS NOT OLD.operator OR NEW.start_s IS NOT OLD.start_s
+  OR NEW.end_s IS NOT OLD.end_s OR NEW.predicted_labels IS NOT OLD.predicted_labels
+  OR NEW.corrected_labels IS NOT OLD.corrected_labels OR NEW.reason IS NOT OLD.reason
+  OR NEW.model IS NOT OLD.model
+BEGIN SELECT RAISE(ABORT, 'what a human said in a correction cannot be edited'); END;
 """
+
+# Columns added after schema v1 shipped: (table, column, type). Added in
+# place on open, so an existing nexa.db keeps its rows and its audit chain.
+MIGRATIONS = [
+    ("corrections", "iq_path", "TEXT"),
+    ("corrections", "iq_sha256", "TEXT"),
+]
 
 
 def now_iso() -> str:
@@ -182,7 +210,11 @@ class LocalDB:
         self._lock = threading.Lock()
         with closing(self._connect()) as con:
             con.executescript(SCHEMA)
-            con.execute("INSERT OR IGNORE INTO meta VALUES ('schema_version', ?)",
+            for table, col, kind in MIGRATIONS:
+                have = {r["name"] for r in con.execute(f"PRAGMA table_info({table})")}
+                if col not in have:
+                    con.execute(f"ALTER TABLE {table} ADD COLUMN {col} {kind}")
+            con.execute("INSERT OR REPLACE INTO meta VALUES ('schema_version', ?)",
                         (str(SCHEMA_VERSION),))
         if not self.audit(limit=1):
             with self._write() as con:
@@ -328,6 +360,146 @@ class LocalDB:
         with self._write() as con:
             self._append_audit(con, actor, "iq.store", "analysis", analysis_id,
                                {"name": name, "path": rel_path, "bytes": n_bytes, "sha256": sha256})
+
+    # -- corrections (human in the loop) -------------------------------------
+
+    @staticmethod
+    def _labels(value, what) -> list[str]:
+        if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+            raise ValueError(f"{what} must be a list of class names")
+        unknown = [v for v in value if v not in CLASSES]
+        if unknown:
+            raise ValueError(f"{what}: unknown class {', '.join(unknown)}")
+        return sorted(set(value), key=CLASSES.index)
+
+    @staticmethod
+    def _correction_row(row) -> dict:
+        d = dict(row)
+        for k in ("predicted_labels", "corrected_labels"):
+            d[k] = json.loads(d[k])
+        return d
+
+    def create_correction(self, body: dict, actor: Actor) -> dict:
+        """A human says what was really there in [start_s, end_s) of a capture.
+
+        predicted_labels: what the model reported there ([] for a missed signal).
+        corrected_labels: what the human says is there (["NOISE_FLOOR"] = nothing).
+        The raw IQ the correction is about is found from the capture's stored
+        file, or the file uploaded for it -- a correction nobody could retrain
+        on or re-check would be an opinion, not evidence.
+        """
+        analysis_id = str(body.get("analysis_id") or "")
+        predicted = self._labels(body.get("predicted_labels", []), "predicted_labels")
+        corrected = self._labels(body.get("corrected_labels", []), "corrected_labels")
+        if not corrected:
+            raise ValueError("say what is really there: tick at least one class (NOISE_FLOOR if nothing)")
+        if corrected == predicted:
+            raise ValueError("that is what the model already said -- nothing to correct")
+        reason = str(body.get("reason") or "").strip()
+        if len(reason) < 5:
+            raise ValueError("a reason is required (at least a few words)")
+        start_s, end_s = body.get("start_s"), body.get("end_s")
+        try:
+            start_s, end_s = float(start_s), float(end_s)
+        except (TypeError, ValueError):
+            raise ValueError("start_s and end_s must be numbers") from None
+        if not (0 <= start_s < end_s):
+            raise ValueError("the corrected span must have start < end")
+
+        with self._write() as con:
+            a = con.execute("SELECT * FROM analyses WHERE id = ?", (analysis_id,)).fetchone()
+            if not a:
+                raise ValueError("no such capture")
+            if end_s > (a["duration_s"] or float("inf")) + 1e-3:
+                raise ValueError("the corrected span runs past the end of the capture")
+            iq_path, iq_sha = a["file_path"], a["file_sha256"]
+            if not iq_path:
+                last = con.execute(
+                    "SELECT details FROM audit_log WHERE action = 'iq.store' AND target_id = ?"
+                    " ORDER BY seq DESC LIMIT 1", (analysis_id,)).fetchone()
+                if last:
+                    d = json.loads(last["details"])
+                    iq_path, iq_sha = d.get("path"), d.get("sha256")
+            if not iq_path:
+                raise ValueError("this capture has no stored raw IQ; upload it before correcting")
+            row = {
+                "id": str(uuid.uuid4()), "analysis_id": analysis_id, "created_at": now_iso(),
+                "operator": actor.name, "start_s": start_s, "end_s": end_s,
+                "predicted_labels": json.dumps(predicted), "corrected_labels": json.dumps(corrected),
+                "reason": reason, "model": body.get("model") or a["model"],
+                "iq_path": iq_path, "iq_sha256": iq_sha,
+            }
+            con.execute(f"INSERT INTO corrections ({', '.join(row)}) VALUES "
+                        f"({', '.join(':' + k for k in row)})", row)
+            self._append_audit(con, actor, "correction.create", "correction", row["id"], {
+                "analysis_id": analysis_id, "span_s": [start_s, end_s],
+                "predicted": predicted, "corrected": corrected, "reason": reason,
+                "iq_sha256": iq_sha,
+            })
+        return self.get_correction(row["id"])
+
+    def get_correction(self, correction_id: str) -> dict | None:
+        with closing(self._connect()) as con:
+            row = con.execute("SELECT * FROM corrections WHERE id = ?", (correction_id,)).fetchone()
+        return self._correction_row(row) if row else None
+
+    def list_corrections(self, status: str | None = None, analysis_id: str | None = None,
+                         limit: int = 500) -> list[dict]:
+        q, args = "SELECT * FROM corrections WHERE 1=1", []
+        if status:
+            q += " AND status = ?"
+            args.append(status)
+        if analysis_id:
+            q += " AND analysis_id = ?"
+            args.append(analysis_id)
+        q += " ORDER BY created_at DESC LIMIT ?"
+        args.append(int(limit))
+        with closing(self._connect()) as con:
+            return [self._correction_row(r) for r in con.execute(q, args)]
+
+    def review_correction(self, correction_id: str, decision: str, note: str,
+                          actor: Actor) -> dict:
+        """Approve or reject a pending correction.
+
+        Four-eyes rule: the reviewer must be a named person other than whoever
+        submitted it. Nobody marks their own homework, and "operator" (the
+        default nobody bothered to change) is not a name.
+        """
+        status = REVIEW_DECISIONS.get(decision)
+        if not status:
+            raise ValueError("decision must be 'approve' or 'reject'")
+        if actor.name.lower() == "operator":
+            raise PermissionError("Set your name (Operator box on the History page) before reviewing.")
+        note = str(note or "").strip()
+        if status == "rejected" and len(note) < 3:
+            raise ValueError("say why it is rejected")
+        with self._write() as con:
+            row = con.execute("SELECT * FROM corrections WHERE id = ?", (correction_id,)).fetchone()
+            if not row:
+                raise ValueError("no such correction")
+            if row["status"] != "pending":
+                raise PermissionError(f"already {row['status']} by {row['reviewed_by']}")
+            if row["operator"].lower() == actor.name.lower():
+                raise PermissionError("Four-eyes rule: a correction must be reviewed by someone "
+                                      "other than the person who submitted it.")
+            con.execute("UPDATE corrections SET status = ?, reviewed_by = ?, reviewed_at = ?,"
+                        " review_note = ? WHERE id = ?",
+                        (status, actor.name, now_iso(), note, correction_id))
+            self._append_audit(con, actor, f"correction.{decision}", "correction", correction_id, {
+                "analysis_id": row["analysis_id"], "submitted_by": row["operator"],
+                "corrected": json.loads(row["corrected_labels"]), "note": note,
+            })
+        return self.get_correction(correction_id)
+
+    def correction_stats(self) -> dict:
+        with closing(self._connect()) as con:
+            by_status = dict(con.execute("SELECT status, COUNT(*) FROM corrections GROUP BY status").fetchall())
+            per_class = {c: 0 for c in CLASSES}
+            for (labels,) in con.execute("SELECT corrected_labels FROM corrections WHERE status = 'approved'"):
+                for c in json.loads(labels):
+                    per_class[c] += 1
+        return {"pending": by_status.get("pending", 0), "approved": by_status.get("approved", 0),
+                "rejected": by_status.get("rejected", 0), "approved_per_class": per_class}
 
     def log(self, actor: Actor, action: str, target_type=None, target_id=None, details=None) -> dict:
         """An audited event with no row of its own (e.g. a report export)."""
