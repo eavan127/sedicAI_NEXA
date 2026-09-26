@@ -34,6 +34,11 @@ ok("compare by chronological number", () => { const r = a("compare upload 1 and 
 ok("missing upload", () => assert.match(a("summary of upload 99"), /could not find/));
 ok("how many", () => assert.match(a("how many uploads do I have"), /3 uploads/));
 ok("faq", () => assert.match(a("what is FHSS"), /frequency-hopping/));
+ok("faq covers the tiers, not just the 8 model classes", () => {
+  assert.match(a("what is civilian class"), /Civilian is the tier/);
+  assert.match(a("what is military"), /Military is the tier/);
+  assert.match(a("what is hostile"), /Hostile is the tier/);
+});
 ok("unknown", () => assert.match(a("what is the weather"), /Sorry/));
 ok("empty history", () => assert.match(answer("last upload", []), /no uploads/));
 ok("asked before", () => assert.match(answer("what did I ask before", R, [{ q: "list uploads", a: "" }]), /list uploads/));

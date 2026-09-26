@@ -22,7 +22,8 @@ const ALIASES = [
   ["noise", "NOISE_FLOOR"],
   ["bpsk", "BPSK"], ["qpsk", "QPSK"], ["16qam", "16QAM"], ["64qam", "64QAM"],
 ];
-const EXTRA_TERMS = [["snr", "SNR"], ["window", "WINDOW"], ["threshold", "THRESHOLD"]];
+const EXTRA_TERMS = [["snr", "SNR"], ["window", "WINDOW"], ["threshold", "THRESHOLD"],
+  ["civilian", "TIER_CIVILIAN"], ["military", "TIER_MILITARY"], ["hostile", "TIER_HOSTILE"], ["tier", "TIER_INFO"]];
 
 const CIVILIAN = "BPSK, QPSK, 16QAM and 64QAM are ordinary civilian digital modulations.";
 export const FAQ = {
@@ -34,6 +35,13 @@ export const FAQ = {
   SNR: "SNR (signal-to-noise ratio) is how far a signal sits above the background noise, in dB. Higher is easier to detect; at -10 dB the signal is below the noise.",
   WINDOW: "The model looks at one window at a time: 512 samples at 3.2 MHz, which is 160 microseconds.",
   THRESHOLD: "A class is reported when its score is above that class's threshold. Each class has its own calibrated threshold.",
+  // Tiers group the 8 classes into what a window's verdict is displayed as
+  // (analysis.js:TIER_OF/TIER_PRIORITY) -- these are the words used on
+  // screen, not classes the model itself outputs.
+  TIER_CIVILIAN: `Civilian is the tier for ordinary traffic: ${CIVILIAN.replace(" are ordinary civilian digital modulations.", "")}.`,
+  TIER_MILITARY: "Military is the tier for LFM_RADAR and FHSS: emitters that are not hostile by themselves, but are not ordinary civilian traffic either.",
+  TIER_HOSTILE: "Hostile is the tier for JAMMING, and it always wins: a window with jamming plus anything else is still reported as Hostile.",
+  TIER_INFO: "A window's tier is the most serious thing found in it: Hostile beats Military, which beats Civilian, which beats Empty (no signal, NOISE_FLOOR).",
 };
 
 export const HELP = "You can ask: 'show my last upload', 'list uploads', 'how many uploads', 'which uploads had jamming', "

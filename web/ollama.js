@@ -24,7 +24,7 @@ const DEFAULT_TIMEOUT_MS = 6000;
 // exactly -- the rewritten line has to use a word the existing matcher
 // already recognises, or the rewrite is wasted effort.
 const CLASS_WORDS = ["fhss", "radar", "jamming", "noise", "bpsk", "qpsk", "16qam", "64qam"];
-const TERM_WORDS = [...CLASS_WORDS, "snr", "window", "threshold"];
+const TERM_WORDS = [...CLASS_WORDS, "snr", "window", "threshold", "civilian", "military", "hostile", "tier"];
 
 const CANONICAL = [
   /^show my last upload$/,
@@ -48,7 +48,7 @@ which uploads had CLASS   (CLASS is exactly one of: fhss, radar, jamming, noise,
 summary of upload N
 compare upload N and N
 what did i ask before
-what is TERM   (TERM is exactly one of: fhss, radar, jamming, noise, bpsk, qpsk, 16qam, 64qam, snr, window, threshold)
+what is TERM   (TERM is exactly one of: fhss, radar, jamming, noise, bpsk, qpsk, 16qam, 64qam, snr, window, threshold, civilian, military, hostile, tier)
 unknown   (use this if nothing above is a reasonable match)
 
 Examples:
@@ -64,6 +64,10 @@ Q: how confident are you about upload 1
 A: summary of upload 1
 Q: how sure are you about upload 2
 A: summary of upload 2
+Q: what does the civilian tier mean
+A: what is civilian
+Q: what counts as a military signal
+A: what is military
 Q: whats the weather like
 A: unknown
 
