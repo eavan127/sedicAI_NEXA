@@ -12,6 +12,12 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "http.server", "8099", "--directory", "web"],
       "port": 8099
+    },
+    {
+      "name": "nexa-local",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["scripts/serve_local.py", "--port", "8097", "--no-browser"],
+      "port": 8097
     }
   ]
 }

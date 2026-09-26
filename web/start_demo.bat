@@ -1,6 +1,11 @@
 @echo off
-rem Starts the OMNI demo from this folder with no internet needed, then opens it.
-rem Keep this window open while presenting; close it to stop the demo.
-cd /d "%~dp0"
-start "" http://localhost:8080/index.html
-python -m http.server 8080
+rem Starts NEXA with its local database: no internet needed, nothing leaves
+rem this machine. The browser opens by itself once the server is up.
+rem Keep this window open while presenting; close it (or Ctrl+C) to stop.
+rem
+rem Analyses, uploaded raw IQ and the audit trail are kept in data\local\.
+cd /d "%~dp0.."
+set "PY=python"
+if exist ".venv\Scripts\python.exe" set "PY=.venv\Scripts\python.exe"
+"%PY%" scripts\serve_local.py %*
+if errorlevel 1 pause

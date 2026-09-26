@@ -4,6 +4,7 @@ import {
   noiseFloorPower, occupancy, powerSpectrumDb, resolveSession, scipyStft,
 } from "./analysis.js";
 import { drawConsole } from "./console.js";
+import { describe, isSigmfName, readSigmf } from "./sigmf.js";
 import { eventRows, headerLine, latestBlock, printHeaderHtml, statusBlock } from "./panels.js";
 import {
   breakdownTableHtml, drawAttention, drawBreakdown, animateBreakdown, drawPerClassRecall,
@@ -15,7 +16,8 @@ import { THRESHOLDS } from "./analysis.js";
 import { initAssistant, openChatLog } from "./chatbot.js";
 import { isAvailable as ollamaAvailable, rewrite as ollamaRewrite, warmUp as ollamaWarmUp } from "./ollama.js";
 import {
-  buildRecord, deleteAnalysis, listAnalyses, readConfig, saveAnalysis, usingSupabase,
+  buildRecord, canDelete, deleteAnalysis, detectServer, listAnalyses, listAudit, logEvent,
+  operatorName, readConfig, saveAnalysis, setOperatorName, usingSupabase, verifyAudit,
 } from "./storage.js";
 import { applyFilters, barsHtml, summarise, summaryHtml as histSummaryHtml, tableHtml } from "./history.js";
 import { buildCombined, buildSingle } from "./report.js";
@@ -248,10 +250,29 @@ synthBtn.addEventListener("click", async () => {
 uploadBtn.addEventListener("click", () => fileInput.click());
 
 fileInput.addEventListener("change", async () => {
-  const file = fileInput.files?.[0];
+  const files = [...(fileInput.files || [])];
+  const file = files[0];
   if (!file) return;
-  statusEl.textContent = `Reading ${file.name}…`;
+  statusEl.textContent = `Reading ${files.map(f => f.name).join(" + ")}…`;
   try {
+    if (files.some(f => isSigmfName(f.name))) {
+      const rec = await readSigmf(files);
+      if (rec.re.length < WINDOW_LEN) throw new Error(
+        `Recording is ${rec.re.length} complex samples; at least ${WINDOW_LEN} are needed for one window.`);
+      // Store the data file (not the meta) so the record's size is the IQ's.
+      pendingFile = files;
+      const note = describe(rec.meta);
+      await analyze(rec.re, rec.im, {
+        source: "upload",
+        caseNote: rec.warnings.length ? `${note} · WARNING: ${rec.warnings.join(" ")}` : note,
+        // An annotated recording carries its own ground truth; anything
+        // else stays truth-free, as for a .bin upload.
+        truth: rec.truth,
+      });
+      if (rec.warnings.length) statusEl.textContent += `  ⚠ ${rec.warnings.join(" ")}`;
+      return;
+    }
+
     // Interleaved float32 I,Q,I,Q,... -- the same contract as
     // src/infer.py and src/ui/session.py:load_upload.
     const buf = await file.arrayBuffer();
@@ -300,6 +321,8 @@ printBtn.addEventListener("click", async () => {
   printBtn.disabled = true;
   try {
     await buildSingle(lastRecord, { classes: CLASSES });
+    logEvent("report_export", { format: "pdf", scope: "single" },
+      { target_type: "analysis", target_id: lastRecord.id });
     statusEl.textContent += "  Report downloaded.";
   } catch (e) {
     statusEl.textContent = `PDF library unavailable (${e.message}) — using the print dialog.`;
@@ -339,17 +362,22 @@ let lastRecord = null;
 async function store(file) {
   try {
     const resolved = resolveSession(session.result, smoothingChoice === "Smoothed");
+    // A SigMF pair arrives as [meta, data]: the record describes the data.
+    const primary = Array.isArray(file)
+      ? file.find(f => !/\.sigmf-meta$/i.test(f.name)) || file[0] : file;
     const record = buildRecord(session, resolved, {
       classes: CLASSES,
-      fileName: file?.name || null,
-      fileBytes: file?.size ?? null,
+      fileName: primary?.name || null,
+      fileBytes: primary?.size ?? null,
     });
     const { record: saved, backend, warning } = await saveAnalysis(record, file);
     lastRecord = saved;
     printBtn.disabled = false;
     if (warning) statusEl.textContent += `  Storage: ${warning}`;
-    else statusEl.textContent += backend === "supabase"
-      ? "  Saved to Supabase." : "  Saved to this browser.";
+    else statusEl.textContent += {
+      server: saved.file_path ? "  Saved to the local database, with its raw IQ." : "  Saved to the local database.",
+      supabase: "  Saved to Supabase.",
+    }[backend] || "  Saved to this browser.";
   } catch (e) {
     // Never throw into the analyse path: the analysis on screen is valid
     // whether or not it could be written down.
@@ -540,18 +568,23 @@ function paintHistory() {
   histSnrBars.innerHTML = barsHtml(s.snr.map(b => [b.label, b.count]),
     { empty: "No capture carries a known SNR.", sort: false });
   histDayBars.innerHTML = barsHtml(s.byDay, { empty: "Nothing stored yet.", sort: false });
-  histTable.innerHTML = tableHtml(filtered, { canDelete: !usingSupabase() });
+  histTable.innerHTML = tableHtml(filtered, { canDelete: canDelete() });
   histStatus.textContent = filtered.length === histRecords.length
     ? `${histRecords.length} stored`
     : `${filtered.length} of ${histRecords.length} stored`;
 }
 
 async function renderHistory() {
+  await detectServer();
   const cfg = readConfig();
-  histBackendNote.textContent = usingSupabase(cfg)
-    ? `Every analysis is stored in ${cfg.url} and read back from it.`
-    : "No Supabase key reached this page, so analyses are kept in this browser only. "
-      + "See web/supabase/schema.sql for how the key is supplied.";
+  histBackendNote.textContent = cfg.backend === "server"
+    ? `Stored in the local NEXA database (${cfg.server.db}) on this machine, with uploaded raw IQ `
+      + "beside it. Nothing leaves this machine, and every change is written to the audit trail below."
+    : usingSupabase(cfg)
+      ? `Every analysis is stored in ${cfg.url} and read back from it.`
+      : "No local server and no Supabase key, so analyses are kept in this browser only. "
+        + "Start the page with scripts/serve_local.py (web/start_demo.bat) to use the local database.";
+  renderAudit();
   histStatus.textContent = "Loading…";
   try {
     const { records, warning } = await listAnalyses();
@@ -582,9 +615,79 @@ el("histPdfAll").addEventListener("click", async () => {
       title: filtered.length === histRecords.length
         ? "All analysed signals" : "Analysed signals (filtered)",
     });
+    logEvent("report_export", { format: "pdf", scope: "combined", captures: filtered.length });
     histStatus.textContent = `${filtered.length} captures exported.`;
   } catch (e) {
     histStatus.textContent = `PDF failed: ${e.message}`;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Audit trail (History page): who did what, and proof nobody edited it since
+// ---------------------------------------------------------------------------
+
+const auditBlock = el("auditBlock"), auditTable = el("auditTable");
+const auditStatus = el("auditStatus"), operatorInput = el("operatorInput");
+operatorInput.value = operatorName();
+operatorInput.addEventListener("change", () => {
+  setOperatorName(operatorInput.value);
+  operatorInput.value = operatorName();
+});
+
+const AUDIT_LABEL = {
+  "db.create": "Database created",
+  "analysis.create": "Capture analysed",
+  "analysis.delete": "Capture deleted",
+  "analysis.clear": "History cleared",
+  "iq.store": "Raw IQ stored",
+  "client.report_export": "Report exported",
+};
+
+function auditSummary(e) {
+  const d = e.details || {};
+  switch (e.action) {
+    case "analysis.create":
+      return `${d.verdict || "?"} · ${(d.classes_detected || []).join(", ") || "nothing detected"}`
+        + (d.file_name ? ` · ${d.file_name}` : "");
+    case "analysis.delete": return d.deleted?.file_name || d.deleted?.case_note || "";
+    case "analysis.clear": return `${(d.deleted_ids || []).length} deleted, ${d.kept_with_corrections || 0} kept`;
+    case "iq.store": return `${d.name} · ${(d.bytes / 1024).toFixed(0)} KB · sha256 ${String(d.sha256).slice(0, 12)}…`;
+    case "client.report_export": return `${(d.format || "").toUpperCase()} · ${d.scope || ""}`
+      + (d.captures ? ` · ${d.captures} captures` : "");
+    default: return "";
+  }
+}
+
+async function renderAudit() {
+  const cfg = readConfig();
+  auditBlock.hidden = cfg.backend !== "server";
+  if (auditBlock.hidden) return;
+  try {
+    const rows = await listAudit(100);
+    const esc = t => String(t ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    auditTable.innerHTML = `<table><thead><tr><th>#</th><th>Time (local)</th><th>Who</th><th>Action</th>`
+      + `<th>Details</th><th>Hash</th></tr></thead><tbody>`
+      + rows.map(e => `<tr><td>${e.seq}</td><td>${esc(new Date(e.ts).toLocaleString())}</td>`
+        + `<td>${esc(e.actor)}<div class="note">${esc(e.client || "")}</div></td>`
+        + `<td>${esc(AUDIT_LABEL[e.action] || e.action)}</td><td style="min-width:260px;">${esc(auditSummary(e))}</td>`
+        + `<td><code title="${esc(e.hash)}">${esc(e.hash.slice(0, 10))}…</code></td></tr>`).join("")
+      + `</tbody></table>`;
+  } catch (e) {
+    auditTable.textContent = `Could not read the audit trail: ${e.message}`;
+  }
+}
+
+el("auditVerify").addEventListener("click", async () => {
+  auditStatus.textContent = "Checking every entry…";
+  auditStatus.className = "note";
+  try {
+    const v = await verifyAudit();
+    auditStatus.textContent = v.ok
+      ? `✔ Intact: all ${v.entries} entries match their hashes; nothing has been edited or removed.`
+      : `✖ TAMPERED: entry #${v.broken_at} ${v.reason}. Treat everything from #${v.broken_at} on as untrusted.`;
+    auditStatus.className = v.ok ? "note audit-ok" : "note audit-bad";
+  } catch (e) {
+    auditStatus.textContent = `Verify failed: ${e.message}`;
   }
 });
 
@@ -599,6 +702,8 @@ histTable.addEventListener("click", async (ev) => {
     histStatus.textContent = "Building PDF…";
     try {
       await buildSingle(record, { classes: CLASSES });
+      logEvent("report_export", { format: "pdf", scope: "single" },
+        { target_type: "analysis", target_id: record.id });
       histStatus.textContent = "PDF downloaded.";
     } catch (e) {
       histStatus.textContent = `PDF failed: ${e.message}`;
@@ -609,7 +714,7 @@ histTable.addEventListener("click", async (ev) => {
     if (!confirm("Delete this stored analysis? This cannot be undone.")) return;
     try {
       await deleteAnalysis(record.id);
-      await renderHistory();
+      await renderHistory();   // also redraws the audit trail
     } catch (e) {
       histStatus.textContent = `Delete failed: ${e.message}`;
     }

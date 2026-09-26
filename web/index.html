@@ -170,6 +170,8 @@
   button.mini:hover { background: var(--brand-olive-tint); }
   td.row-actions { display: flex; gap: 6px; }
   td.num, th.num { text-align: right; font-family: var(--mono); }
+  .note.audit-ok { color: #2E7D32; font-weight: 600; }
+  .note.audit-bad { color: #B3261E; font-weight: 600; }
   /* The global table rule is table-layout: fixed, which suits the two-column
      panels elsewhere. Eight columns under it wrapped every cell to two or
      three lines ("Milita/r/y") and clipped the row buttons, so this table
@@ -271,7 +273,7 @@
       <!-- Source input -->
       <div class="grow">
         <button class="primary full" id="uploadBtn" disabled>📁 Select &amp; Analyze Source File</button>
-        <input type="file" id="fileInput" style="display:none">
+        <input type="file" id="fileInput" multiple accept=".bin,.f32,.cf32,.cfile,.iq,.dat,.raw,.sigmf,.sigmf-meta,.sigmf-data" style="display:none">
       </div>
 
       <!-- Synthesize scenario -->
@@ -399,6 +401,20 @@
       <div class="block">
         <div class="block-label">Storage</div>
         <div class="note" id="histBackendNote"></div>
+      </div>
+
+      <div class="block" id="auditBlock" hidden>
+        <div class="block-label">Audit trail</div>
+        <div class="note">Every analysis, stored raw IQ file, deletion and report export, newest first.
+          Entries can never be edited or deleted, and each carries a fingerprint (hash) of the one
+          before it, so any later change to the database file breaks the chain.</div>
+        <div class="filters" style="margin-top:8px;">
+          <label class="note" for="operatorInput" style="margin:0;">Operator</label>
+          <input id="operatorInput" maxlength="64" style="width:160px;" title="Recorded on every action you take">
+          <button class="secondary" id="auditVerify">Verify integrity</button>
+        </div>
+        <div class="note" id="auditStatus"></div>
+        <div class="table-wrap" id="auditTable"></div>
       </div>
     </section>
 

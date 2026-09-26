@@ -19,10 +19,13 @@ For that, use `python -m src.evaluate`, which scores the whole split properly.
 Usage:
     python scripts/export_verification_pack.py --out verification_pack
     python scripts/export_verification_pack.py --out pack --snr -10 --windows 40
+    python scripts/export_verification_pack.py --out pack --format sigmf
 """
 import argparse
 import json
 import sys
+import tarfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -59,7 +62,49 @@ def write_iq(path, iq):
     return raw.nbytes
 
 
-def main(out_dir, n_windows, snr_filter, seed):
+def write_sigmf(base, iq, segments, description):
+    """SigMF recording: base.sigmf-data + base.sigmf-meta, plus base.sigmf
+    (the same two files in one tar, the spec's single-file form).
+
+    cf32_le is byte-for-byte the interleaved float32 write_iq produces; the
+    meta adds what a bare .f32 cannot say -- sample rate, datatype, and one
+    annotation per true-class segment, which the console draws as TRUTH.
+    `segments` are (class, start_sample, sample_count).
+    """
+    base = Path(base)
+    data = base.with_name(base.name + ".sigmf-data")
+    meta = base.with_name(base.name + ".sigmf-meta")
+    size = write_iq(data, iq)
+    meta.write_text(json.dumps({
+        "global": {
+            "core:datatype": "cf32_le",
+            "core:sample_rate": float(CFG["signal"]["fs"]),
+            "core:version": "1.2.0",
+            "core:description": description,
+            "core:author": "NEXA (SEDIC 2026)",
+            "core:recorder": "export_verification_pack.py (held-out test split)",
+            "core:license": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+        },
+        "captures": [{
+            "core:sample_start": 0,
+            "core:datetime": datetime.now(timezone.utc)
+                                     .strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+        }],
+        "annotations": [
+            {"core:sample_start": int(s), "core:sample_count": int(n),
+             "core:label": cls}
+            for cls, s, n in segments
+        ],
+    }, indent=2))
+    archive = base.with_name(base.name + ".sigmf")
+    with tarfile.open(archive, "w") as tar:
+        # Spec: the archive holds one directory named after the recording.
+        for f in (meta, data):
+            tar.add(f, arcname=f"{base.name}/{f.name}")
+    return size
+
+
+def main(out_dir, n_windows, snr_filter, seed, fmt="f32"):
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     rng = np.random.default_rng(seed)
@@ -87,7 +132,13 @@ def main(out_dir, n_windows, snr_filter, seed):
         iq = np.concatenate([X[i][0] + 1j * X[i][1] for i in take])
         tag = cls.lower() + (f"_{int(snr_filter):+d}dB" if snr_filter is not None else "")
         path = out / f"{tag}.f32"
-        size = write_iq(path, iq)
+        if fmt in ("f32", "both"):
+            size = write_iq(path, iq)
+        if fmt in ("sigmf", "both"):
+            size = write_sigmf(out / tag, iq, [(cls, 0, len(iq))],
+                               f"{cls}: {len(take)} held-out test windows")
+            if fmt == "sigmf":
+                path = out / f"{tag}.sigmf"
 
         snrs = sorted({float(snr_labels[i]) for i in take})
         manifest.append({
@@ -114,7 +165,16 @@ def main(out_dir, n_windows, snr_filter, seed):
     if parts:
         iq = np.concatenate(parts)
         path = out / "mixed_sequence.f32"
-        size = write_iq(path, iq)
+        if fmt in ("f32", "both"):
+            size = write_iq(path, iq)
+        if fmt in ("sigmf", "both"):
+            size = write_sigmf(
+                out / "mixed_sequence", iq,
+                [(s["class"], s["start_sample"], s["end_sample"] - s["start_sample"])
+                 for s in spans],
+                "Held-out test windows, several classes back to back")
+            if fmt == "sigmf":
+                path = out / "mixed_sequence.sigmf"
         manifest.append({"file": path.name, "true_class": "SEQUENCE",
                           "windows": int(pos // CFG["signal"]["window_len"]),
                           "samples": int(pos), "bytes": size,
@@ -125,7 +185,10 @@ def main(out_dir, n_windows, snr_filter, seed):
     (out / "manifest.json").write_text(json.dumps({
         "source": "held-out test split (never trained on, never used for "
                    "threshold selection)",
-        "format": "raw interleaved float32 I,Q,I,Q,...",
+        "format": {"f32": "raw interleaved float32 I,Q,I,Q,...",
+                   "sigmf": "SigMF cf32_le (.sigmf-meta + .sigmf-data, "
+                            "and the same pair as one .sigmf archive)",
+                   "both": "both of the above"}[fmt],
         "sample_rate_hz": CFG["signal"]["fs"],
         "window_len": CFG["signal"]["window_len"],
         "caveat": "windows are independent captures concatenated back to "
@@ -136,8 +199,8 @@ def main(out_dir, n_windows, snr_filter, seed):
         "files": manifest,
     }, indent=2))
     print(f"\nmanifest -> {out / 'manifest.json'}")
-    print("Upload any .f32 through RF Replay -> 'Upload raw IQ' -> "
-          "'Analyze upload'.")
+    print("Upload a .f32, a .sigmf archive, or a .sigmf-meta + .sigmf-data "
+          "pair through 'Select & Analyze Source File'.")
 
 
 if __name__ == "__main__":
@@ -148,5 +211,7 @@ if __name__ == "__main__":
     p.add_argument("--snr", type=float, default=None,
                     help="restrict to one SNR bin, e.g. -10")
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--format", choices=["f32", "sigmf", "both"], default="f32",
+                    help="raw .f32 (default), SigMF recordings, or both")
     a = p.parse_args()
-    main(a.out, a.windows, a.snr, a.seed)
+    main(a.out, a.windows, a.snr, a.seed, a.format)

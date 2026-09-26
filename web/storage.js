@@ -5,10 +5,15 @@
 // looked at last week. This module stores one row per analysed capture and,
 // optionally, the uploaded file that produced it.
 //
-// Two backends behind one interface, chosen by what is configured:
+// Three backends behind one interface, chosen by what is available:
 //
+//   server    The NEXA local server (scripts/serve_local.py): one SQLite file
+//             on this machine, with the raw IQ beside it and every change in
+//             a hash-chained audit log. Used whenever the page is served by
+//             that server -- the source of truth for field use, and the only
+//             backend the training scripts can read.
 //   local     IndexedDB in the browser. Always available, nothing to set up,
-//             never leaves the machine. The default.
+//             never leaves the machine. The fallback.
 //   supabase  A Supabase project (Postgres + Storage) over its REST API,
 //             used only when a URL and key have been entered on the History
 //             page. Records are then shared across machines and operators.
@@ -152,7 +157,53 @@ function cryptoId() {
  *  deployment, not a default. */
 export function readConfig() {
   const { url, key } = injected();
+  if (serverInfo) return { backend: "server", url: "", key: "", storeFiles: true, server: serverInfo };
   return { backend: key ? "supabase" : "local", url, key, storeFiles: false };
+}
+
+// ---------------------------------------------------------------------------
+// Local server detection
+// ---------------------------------------------------------------------------
+
+// Set once, by detectServer(): the /api/health reply when this page was
+// served by scripts/serve_local.py, null otherwise (a static host, Vercel,
+// `python -m http.server`, or a file:// open).
+let serverInfo = null;
+let detecting = null;
+
+/** Is the NEXA local server behind this page? Asked once per page load; a
+ *  static host answers /api/health with a 404 in milliseconds. */
+export function detectServer({ timeoutMs = 1500 } = {}) {
+  if (detecting) return detecting;
+  detecting = (async () => {
+    if (!globalThis.location?.protocol?.startsWith("http")) return null;
+    try {
+      const res = await fetch("/api/health", {
+        cache: "no-store", signal: AbortSignal.timeout(timeoutMs),
+      });
+      const body = res.ok ? await res.json() : null;
+      serverInfo = body?.app === "nexa-local" ? body : null;
+    } catch { serverInfo = null; }
+    return serverInfo;
+  })();
+  return detecting;
+}
+
+/** Who is operating, sent with every write so the audit log can name them.
+ *  Kept per browser until the login step replaces it. */
+export function operatorName() {
+  try { return localStorage.getItem("nexa-operator") || "operator"; } catch { return "operator"; }
+}
+
+export function setOperatorName(name) {
+  try { localStorage.setItem("nexa-operator", String(name || "").trim().slice(0, 64) || "operator"); }
+  catch { /* storage blocked: the default name is used */ }
+}
+
+/** Deleting is allowed everywhere except the shared Supabase table, whose
+ *  anon key has no delete policy (web/supabase/schema.sql). */
+export function canDelete(cfg = readConfig()) {
+  return !usingSupabase(cfg);
 }
 
 export function usingSupabase(cfg = readConfig()) {
@@ -293,12 +344,111 @@ function supabaseBackend(cfg) {
 }
 
 // ---------------------------------------------------------------------------
+// Local server backend: scripts/serve_local.py over fetch
+// ---------------------------------------------------------------------------
+
+// X-NEXA-Client on every write: the server refuses writes without it, and a
+// page on another website cannot add a custom header without a CORS
+// preflight the server never approves. X-NEXA-Operator names who did it.
+function serverHeaders(extra = {}) {
+  return { "X-NEXA-Client": "1", "X-NEXA-Operator": operatorName(), ...extra };
+}
+
+async function serverCheck(res, what) {
+  if (res.ok) return res;
+  let detail = "";
+  try { detail = (await res.json()).error || ""; } catch { /* not JSON */ }
+  throw new Error(`Local database ${what} failed (${res.status}). ${detail}`);
+}
+
+const serverBackend = {
+  name: "server",
+  async save(record) {
+    const res = await fetch("/api/analyses", {
+      method: "POST",
+      headers: serverHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(record),
+    });
+    await serverCheck(res, "insert");
+    return res.json();
+  },
+  async list(limit = 500) {
+    const res = await fetch(`/api/analyses?limit=${limit}`, { cache: "no-store" });
+    await serverCheck(res, "read");
+    return res.json();
+  },
+  async remove(id) {
+    const res = await fetch(`/api/analyses/${encodeURIComponent(id)}`,
+      { method: "DELETE", headers: serverHeaders() });
+    await serverCheck(res, "delete");
+  },
+  async clear() {
+    const res = await fetch("/api/analyses", { method: "DELETE", headers: serverHeaders() });
+    await serverCheck(res, "delete all");
+  },
+  /** Raw IQ goes to data/local/iq/<id>/ on this machine; the server logs its
+   *  SHA-256 so a later swap of the file is detectable. */
+  async putFile(file, id) {
+    const res = await fetch(`/api/captures/${encodeURIComponent(id)}?name=${encodeURIComponent(file.name)}`, {
+      method: "PUT",
+      headers: serverHeaders({ "Content-Type": "application/octet-stream" }),
+      body: file,
+    });
+    await serverCheck(res, "file upload");
+    const { file_path, file_sha256 } = await res.json();
+    return { file_path, file_sha256 };
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Audit log (local server only)
+// ---------------------------------------------------------------------------
+
+/** Newest first. [] when there is no local server: the browser and Supabase
+ *  backends keep no audit trail. */
+export async function listAudit(limit = 200) {
+  await detectServer();
+  if (!serverInfo) return [];
+  const res = await fetch(`/api/audit?limit=${limit}`, { cache: "no-store" });
+  await serverCheck(res, "audit read");
+  return res.json();
+}
+
+/** Recompute the audit hash chain on the server: {ok, entries, broken_at, reason}. */
+export async function verifyAudit() {
+  await detectServer();
+  if (!serverInfo) throw new Error("The audit log needs the local server (scripts/serve_local.py).");
+  const res = await fetch("/api/audit/verify", { cache: "no-store" });
+  await serverCheck(res, "audit verify");
+  return res.json();
+}
+
+/** Record something only the page knows happened (a report export, say).
+ *  Best effort: never blocks or fails the action being logged. */
+export async function logEvent(action, details = {}, target = {}) {
+  try {
+    await detectServer();
+    if (!serverInfo) return;
+    await fetch("/api/audit", {
+      method: "POST",
+      headers: serverHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ action: `client.${action}`, details, ...target }),
+    });
+  } catch (e) { console.warn("audit log:", e); }
+}
+
+// ---------------------------------------------------------------------------
 // Public interface
 // ---------------------------------------------------------------------------
 
 export function backendFor(cfg = readConfig()) {
+  if (cfg.backend === "server") return serverBackend;
   return usingSupabase(cfg) ? supabaseBackend(cfg) : localBackend;
 }
+
+// Captures larger than this are analysed but not copied to disk: a copy that
+// size is a deliberate archiving decision, not a side effect of looking.
+const MAX_STORED_FILE = 512 * 1024 * 1024;
 
 /**
  * Store one analysis. Returns {record, backend, warning}.
@@ -308,17 +458,33 @@ export function backendFor(cfg = readConfig()) {
  * reason instead of throwing into the analyse path.
  */
 export async function saveAnalysis(record, file = null) {
+  await detectServer();
   const cfg = readConfig();
   const backend = backendFor(cfg);
+  // `file` may be several files (a SigMF .sigmf-meta + .sigmf-data pair):
+  // all are kept together, and the record names the data file.
+  const files = Array.isArray(file) ? file : file ? [file] : [];
+  let warning = null;
   try {
-    if (file && cfg.storeFiles && backend.name === "supabase") {
-      record = { ...record, file_path: await backend.putFile(file, record.id) };
+    if (files.length && cfg.storeFiles && backend.name !== "local") {
+      const total = files.reduce((n, f) => n + (f.size || 0), 0);
+      if (total > MAX_STORED_FILE) {
+        warning = `Raw IQ not kept: ${(total / 2 ** 20).toFixed(0)} MB is over the ${MAX_STORED_FILE / 2 ** 20} MB limit.`;
+      } else {
+        let patch = {};
+        for (const f of files) {
+          const stored = await backend.putFile(f, record.id);
+          const asPatch = typeof stored === "string" ? { file_path: stored } : stored;
+          if (!/\.sigmf-meta$/i.test(f.name) || !patch.file_path) patch = asPatch;
+        }
+        record = { ...record, ...patch };
+      }
     }
-    return { record: await backend.save(record), backend: backend.name, warning: null };
+    return { record: await backend.save(record), backend: backend.name, warning };
   } catch (e) {
-    if (backend.name === "supabase") {
+    if (backend.name !== "local") {
       const saved = await localBackend.save(record);
-      return { record: saved, backend: "local", warning: `${e.message} Saved locally instead.` };
+      return { record: saved, backend: "local", warning: `${e.message} Saved in this browser instead.` };
     }
     throw e;
   }
@@ -333,11 +499,12 @@ export async function saveAnalysis(record, file = null) {
  * claimed they did not.
  */
 export async function listAnalyses() {
+  await detectServer();
   const backend = backendFor();
   try {
     return { records: await backend.list(), backend: backend.name, warning: null };
   } catch (e) {
-    if (backend.name !== "supabase") throw e;
+    if (backend.name === "local") throw e;
     return {
       records: await localBackend.list(),
       backend: "local",
@@ -347,10 +514,12 @@ export async function listAnalyses() {
 }
 
 export async function deleteAnalysis(id) {
+  await detectServer();
   return backendFor().remove(id);
 }
 
 export async function clearAnalyses() {
+  await detectServer();
   return backendFor().clear();
 }
 
