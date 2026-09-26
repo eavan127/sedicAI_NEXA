@@ -10,13 +10,15 @@
 import { fft, hannWindow } from "./dsp.js";
 import { CLASSES } from "./model.js";
 
-// configs/default.yaml:multilabel_thresholds_per_class. Calibrated for this
-// specific 5-checkpoint ensemble -- re-run scripts/calibrate_thresholds.py
-// --ensemble after any retrain and update this table with it.
-export const THRESHOLDS = {
-  BPSK: 0.33, QPSK: 0.265, "16QAM": 0.265, "64QAM": 0.275,
-  LFM_RADAR: 0.22, FHSS: 0.25, JAMMING: 0.87, NOISE_FLOOR: 0.265,
-};
+// configs/default.yaml:multilabel_thresholds_per_class, GENERATED into
+// thresholds.js by web/build.py.
+//
+// This used to be a literal table here with a "keep it in sync" comment, and
+// it drifted: the C2 ensemble was calibrated to 0.24/0.24/0.89 while this file
+// still said 0.22/0.25/0.87, so the page decided at the old operating point
+// using the new checkpoints. Re-exported rather than moved so main.js and
+// pages.js keep importing THRESHOLDS from analysis.js.
+export { THRESHOLDS } from "./thresholds.js";
 
 // src/config.py:TIERS
 export const TIER_OF = {
