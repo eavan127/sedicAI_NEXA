@@ -198,6 +198,17 @@
   tbody td { padding: 6px 10px; border-bottom: 1px solid var(--grid); background: var(--panel); color: var(--text); word-wrap: break-word; }
   tbody tr:nth-child(odd) td { background: var(--bg); color: var(--text); }
   tbody tr:hover td { background: var(--brand-olive-tint); color: var(--text); }
+
+  /* Assistant page */
+  #chatLog { height: 380px; overflow-y: auto; background: var(--panel); border: 1px solid var(--grid); border-radius: 6px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+  .chat-msg { max-width: 78%; padding: 8px 12px; border-radius: 8px; font-size: 14px; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .chat-msg.user { align-self: flex-end; background: var(--brand-olive); color: #fff; }
+  .chat-msg.bot { align-self: flex-start; background: var(--brand-olive-tint); color: var(--text); }
+  #chatSuggest { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+  #chatSuggest button, #chatClear, #chatForm button { font-family: var(--font); font-size: 13px; border-radius: 6px; border: 1px solid var(--grid); padding: 6px 10px; cursor: pointer; background: var(--panel); color: var(--text); }
+  #chatForm { display: flex; gap: 8px; }
+  #chatForm input { flex: 1; font-family: var(--font); font-size: 14px; padding: 8px 10px; border: 1px solid var(--grid); border-radius: 6px; }
+  #chatForm button { background: var(--brand-olive); border-color: var(--brand-olive-dark); color: #fff; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -217,6 +228,7 @@
       <button data-page="history">History</button>
       <button data-page="performance">Performance</button>
       <button data-page="model">Model</button>
+      <button data-page="assistant">Assistant</button>
     </nav>
 
     <main>
@@ -441,6 +453,17 @@
       <h3 class="page-title">Model</h3>
       <div id="modelCardBox"></div>
     </section>
+    <section id="page-assistant" hidden>
+      <h3 class="page-title">Assistant</h3>
+      <div id="chatLog"></div>
+      <div id="chatSuggest"></div>
+      <form id="chatForm" autocomplete="off">
+        <input id="chatInput" type="text" placeholder="Ask about your uploads or a term, e.g. which uploads had jamming?">
+        <button type="submit">Ask</button>
+      </form>
+      <div class="note" id="chatNote" style="margin-top:8px;"></div>
+      <div style="margin-top:8px;"><button id="chatClear" type="button">Clear saved history</button></div>
+    </section>
     </main>
   </div>
 
@@ -451,7 +474,9 @@
        is in Supabase is what the live site actually saw. The key is never
        committed -- this repository is public. -->
   <script>window.NEXA_SUPABASE = { url: "https://yoirhstytgrhvfunxvlc.supabase.co", anonKey: "" };</script>
-  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+  <!-- Bundled copy, not the CDN: the finale's offline rule means this demo
+       must start with no internet reachable at all. -->
+  <script src="./vendor/ort/ort.min.js"></script>
   <script type="module" src="./main.js"></script>
 </body>
 </html>

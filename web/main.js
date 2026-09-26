@@ -12,6 +12,8 @@ import {
 } from "./pages.js";
 import { civilianWindows, drawConstellation } from "./constellation.js";
 import { THRESHOLDS } from "./analysis.js";
+import { initAssistant, openChatLog } from "./chatbot.js";
+import { isAvailable as ollamaAvailable, rewrite as ollamaRewrite, warmUp as ollamaWarmUp } from "./ollama.js";
 import {
   buildRecord, deleteAnalysis, listAnalyses, readConfig, saveAnalysis, usingSupabase,
 } from "./storage.js";
@@ -70,7 +72,7 @@ async function getModel(which) {
 
 async function init() {
   try {
-    ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/";
+    ort.env.wasm.wasmPaths = new URL("./vendor/ort/", document.baseURI).href;   // bundled copy: the demo must run with no internet
     // The constellation panel needs the C42 calibration constants, so the
     // card is loaded up front rather than lazily on the Model page.
     modelCard = await (await fetch("./data/model_card.json")).json();
@@ -364,6 +366,7 @@ const winSlider = el("winSlider"), winReadout = el("winReadout");
 const probsBox = el("probsBox"), winMetaBox = el("winMetaBox");
 const attnCanvas = el("attnCanvas"), breakdownCanvas = el("breakdownCanvas");
 let currentPage = "replay";
+const chatLogPromise = openChatLog();
 let perfData = null, modelCard = null;
 
 function showPage(page) {
@@ -472,6 +475,22 @@ async function renderModel() {
   }
   box.innerHTML = modelCardHtml(modelCard, modelSel.value);
 }
+
+// Checked ONCE at startup, not per question: a slow/absent Ollama should not
+// add its own timeout to every message once we already know the answer. If
+// it starts up mid-session it is picked up on the next page load.
+const ollamaCheck = ollamaAvailable().catch(() => false);
+
+Promise.all([chatLogPromise, ollamaCheck]).then(([chatLog, hasOllama]) => initAssistant({
+  chatLog, listRecords: listAnalyses,
+  logEl: el("chatLog"), formEl: el("chatForm"), inputEl: el("chatInput"),
+  suggestEl: el("chatSuggest"), clearBtn: el("chatClear"), noteEl: el("chatNote"),
+  rewriteFn: hasOllama ? ollamaRewrite : null,
+})).catch(e => console.error("Assistant failed to start:", e));
+
+// Pays Ollama's cold-load cost (seconds, sometimes tens of seconds) during
+// page load instead of on whoever's first question -- see ollama.js:warmUp.
+ollamaCheck.then(has => { if (has) ollamaWarmUp(); });
 
 init();
 
