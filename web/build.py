@@ -41,20 +41,17 @@ def build_html():
         src = ""
     out = template.replace("__LOGO_BASE64__", src)
 
-    # Supabase credentials for the deployed site. The URL is public; the key
-    # is not committed (this repository is public and the anon key can delete
-    # rows), so it is read from the environment at build time -- set
-    # SUPABASE_ANON_KEY in the host's build settings. Left as the placeholder
-    # when unset, which storage.js reads as "no key" and falls back to storing
-    # analyses in the browser.
+    # Supabase credentials. Only the DEPLOYED site gets a key: analyses from
+    # the live app go to the shared table, while a development run stays in
+    # the developer's own browser. The table is then a record of what the live
+    # site actually saw, not a mix of that and everyone's experiments.
+    #
+    # A local build therefore always leaves the key empty, which storage.js
+    # reads as "no key". The deploy fills it in from SUPABASE_ANON_KEY (see
+    # web/vercel-build.mjs), so nothing a developer builds and commits can
+    # carry a key into this public repository.
     key = os.environ.get("SUPABASE_ANON_KEY", "")
     url = os.environ.get("SUPABASE_URL", "https://yoirhstytgrhvfunxvlc.supabase.co")
-    # The local-config <script> is emitted only when the file is there: a tag
-    # pointing at a file that does not exist logs a 404 in every visitor's
-    # console, including on the deployed site, which never has this file.
-    local_cfg = WEB / "supabase-config.js"
-    local_tag = '  <script src="./supabase-config.js"></script>\n'
-    out = out.replace("__SUPABASE_LOCAL_CONFIG__", local_tag if local_cfg.is_file() else "")
     out = out.replace("__SUPABASE_URL__", url)
     out = out.replace("__SUPABASE_ANON_KEY__", key)
     print("  supabase   " + ("key injected from SUPABASE_ANON_KEY"

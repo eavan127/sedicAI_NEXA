@@ -431,13 +431,14 @@
     </main>
   </div>
 
-  <!-- Supabase credentials, in this order:
-         1. web/supabase-config.js, a gitignored local file (dev machines)
-         2. the block below, written by web/build.py from SUPABASE_ANON_KEY
-       Neither is required: with no key the app stores analyses in the
-       browser. The key is never committed -- this repository is public. -->
+  <!-- Supabase credentials for the DEPLOYED site only, written here by
+       web/vercel-build.mjs from the SUPABASE_ANON_KEY environment variable.
+       A local build leaves the key empty on purpose: development runs stay in
+       the developer's own browser and never reach the shared table, so what
+       is in Supabase is what the live site actually saw. The key is never
+       committed -- this repository is public. -->
   <script>window.NEXA_SUPABASE = { url: "__SUPABASE_URL__", anonKey: "__SUPABASE_ANON_KEY__" };</script>
-__SUPABASE_LOCAL_CONFIG__  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
   <script type="module" src="./main.js"></script>
 </body>
 </html>
