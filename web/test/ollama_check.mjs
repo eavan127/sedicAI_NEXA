@@ -83,6 +83,21 @@ await okA("rewrite returns null on a timeout without hanging the caller", async 
   try { assert.equal(await rewrite("anything", { timeoutMs: 50 }), null); } finally { restore(); }
 });
 
+await okA("rewrite asks Ollama to keep the model loaded well past its 5-minute default", async () => {
+  let sentBody = null;
+  const restore = mockFetch(async (url, opts) => { sentBody = JSON.parse(opts.body); return respond({ response: "list uploads" }); });
+  try {
+    await rewrite("show everything");
+    assert.equal(sentBody.keep_alive, "30m");
+  } finally { restore(); }
+});
+
+await okA("warmUp also asks Ollama to keep the model loaded", async () => {
+  let sentBody = null;
+  const restore = mockFetch(async (url, opts) => { sentBody = JSON.parse(opts.body); return respond({}); });
+  try { warmUp(); await wait(10); assert.equal(sentBody.keep_alive, "30m"); } finally { restore(); }
+});
+
 await okA("warmUp fires a request and does not throw even if the server is down", async () => {
   const restore = mockFetch(async () => { throw new Error("ECONNREFUSED"); });
   try { warmUp(); await wait(10); } finally { restore(); }   // fire-and-forget: must not reject into the caller

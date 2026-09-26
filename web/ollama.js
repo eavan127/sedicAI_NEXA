@@ -19,6 +19,7 @@
 const DEFAULT_BASE_URL = "http://localhost:11434";
 const DEFAULT_MODEL = "llama3.2:3b";
 const DEFAULT_TIMEOUT_MS = 6000;
+const KEEP_ALIVE = "30m";   // Ollama's own default is "5m"; see rewrite()'s comment
 
 // One alias word per class/term, matching chatbot.js's own ALIASES/EXTRA_TERMS
 // exactly -- the rewritten line has to use a word the existing matcher
@@ -106,6 +107,12 @@ export async function rewrite(question, { baseUrl = DEFAULT_BASE_URL, model = DE
         prompt: PROMPT.replace("{QUESTION}", question.replace(/\n/g, " ").slice(0, 300)),
         stream: false,
         options: { temperature: 0, num_predict: 20 },
+        // Ollama's own default is to unload an idle model after 5 minutes,
+        // which then costs a fresh multi-second (measured up to ~43s for a
+        // bigger model) reload on whoever asks the next question -- keep it
+        // loaded for the length of a demo session instead. warmUp() below
+        // asks for the same duration, so the FIRST load already gets it.
+        keep_alive: KEEP_ALIVE,
       }),
     });
     if (!res.ok) return null;
@@ -135,6 +142,6 @@ export const OLLAMA_DEFAULTS = { baseUrl: DEFAULT_BASE_URL, model: DEFAULT_MODEL
 export function warmUp({ baseUrl = DEFAULT_BASE_URL, model = DEFAULT_MODEL } = {}) {
   fetch(`${baseUrl}/api/generate`, {
     method: "POST",
-    body: JSON.stringify({ model, prompt: "hi", stream: false, options: { num_predict: 1 } }),
+    body: JSON.stringify({ model, prompt: "hi", stream: false, options: { num_predict: 1 }, keep_alive: KEEP_ALIVE }),
   }).catch(() => {});   // deliberately not awaited by the caller -- see above
 }
