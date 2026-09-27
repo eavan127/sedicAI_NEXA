@@ -6,18 +6,22 @@
 // 40 captures we analysed this week", and it cannot be handed to someone as
 // a file without them driving a dialog. So this module writes a real .pdf.
 //
-// jsPDF is loaded lazily from the same CDN the page already uses for
-// onnxruntime-web, and only when a report is actually requested -- a report
-// nobody asks for should not cost every visitor a download. If the CDN is
-// unreachable (offline demo, blocked network), buildSingle/buildCombined
-// throw and the caller falls back to window.print(), which still produces a
-// PDF through the browser.
+// jsPDF is loaded lazily, only when a report is actually requested -- a
+// report nobody asks for should not cost every visitor a download. It comes
+// from web/vendor/ first, so a PDF can be built on a laptop with no internet
+// (the local server's whole point), and from the CDN only if that file is
+// missing. Both are the same jsPDF 2.5.1 build (MIT licence). If neither
+// loads, buildSingle/buildCombined throw and the caller falls back to
+// window.print(), which still produces a PDF through the browser.
 //
 // Text is laid out directly rather than screenshotting the page: the tables
 // stay selectable and searchable in the PDF, and the file stays ~20 KB
 // instead of several MB of canvas bitmap.
 
-const JSPDF_URL = "https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js";
+const JSPDF_URLS = [
+  new URL("./vendor/jspdf/jspdf.umd.min.js", import.meta.url).href,
+  "https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js",
+];
 
 const OLIVE = [98, 113, 67];       // --brand-olive, so the PDF matches the app
 const SLATE = [18, 28, 39];        // --brand-slate
@@ -29,13 +33,19 @@ let jsPDFPromise = null;
 async function getJsPDF() {
   if (globalThis.jspdf?.jsPDF) return globalThis.jspdf.jsPDF;
   if (!jsPDFPromise) {
-    jsPDFPromise = new Promise((resolve, reject) => {
+    const load = src => new Promise((resolve, reject) => {
       const s = document.createElement("script");
-      s.src = JSPDF_URL;
+      s.src = src;
       s.onload = () => resolve();
-      s.onerror = () => reject(new Error("Could not load the PDF library (offline?)."));
+      s.onerror = () => { s.remove(); reject(new Error(`could not load ${src}`)); };
       document.head.appendChild(s);
-    }).finally(() => { jsPDFPromise = null; });
+    });
+    jsPDFPromise = (async () => {
+      for (const src of JSPDF_URLS) {
+        try { await load(src); if (globalThis.jspdf?.jsPDF) return; } catch { /* try the next one */ }
+      }
+      throw new Error("Could not load the PDF library (web/vendor/jspdf is missing and the CDN is unreachable).");
+    })().finally(() => { jsPDFPromise = null; });
   }
   await jsPDFPromise;
   if (!globalThis.jspdf?.jsPDF) throw new Error("PDF library loaded but did not register.");
