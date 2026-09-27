@@ -11,10 +11,10 @@ import { eventRows, headerLine, latestBlock, printHeaderHtml, statusBlock } from
 import {
   breakdownTableHtml, drawAttention, drawBreakdown, animateBreakdown, drawPerClassRecall,
   denseQamHtml, modelCardHtml, probabilityHtml, provenanceHtml, scorecardHtml, summaryHtml,
-  windowMetadataHtml,
+  windowMetadataHtml, CLASS_COLOR,
 } from "./pages.js";
 import { civilianWindows, drawConstellation } from "./constellation.js";
-import { THRESHOLDS } from "./analysis.js";
+import { THRESHOLDS, TIER_COLOR } from "./analysis.js";
 import { initAssistant, openChatLog } from "./chatbot.js";
 import { isAvailable as ollamaAvailable, rewrite as ollamaRewrite, warmUp as ollamaWarmUp } from "./ollama.js";
 import {
@@ -361,8 +361,9 @@ corrClasses.innerHTML = CLASS_GROUPS.map(([group, classes]) =>
 let corrCtx = null;
 const eventsNote = el("eventsNote");
 
-function openCorrection({ predicted, startS, endS, missed, suggested = null, reason = "", title = null }) {
-  corrCtx = { sess: session, predicted };
+function openCorrection({ predicted, startS, endS, missed, suggested = null, reason = "", title = null,
+                          suggIndex = null }) {
+  corrCtx = { sess: session, predicted, suggIndex };
   const durS = session.capture.re.length / FS;
   corrTitle.textContent = title || (missed ? "Report a signal the model missed" : "Correct this detection");
   corrModelSaid.textContent = predicted.length ? predicted.join(" + ") : "nothing (missed signal)";
@@ -436,9 +437,19 @@ corrForm.addEventListener("submit", async (ev) => {
       reason: corrReason.value, model: corrCtx.sess.which,
     });
     corrDialog.close();
-    eventsNote.textContent = `Correction submitted by ${operatorName()}: `
+    const done = `Correction submitted by ${operatorName()}: `
       + `${corrCtx.predicted.join(" + ") || "nothing"} → ${corrected.join(" + ")}. `
       + "It waits in History ▸ Human corrections until another person approves it.";
+    eventsNote.textContent = done;
+    // Opened from a recommended correction: mark that row, where the operator
+    // is looking, so it is not reviewed (and submitted) a second time.
+    const sugg = corrCtx.suggIndex !== null && corrCtx.sess === session
+      ? session.suggestions?.items[corrCtx.suggIndex] : null;
+    if (sugg) {
+      sugg.submitted = true;
+      renderSuggestions();
+      suggestStatus.textContent = done;
+    }
     if (operatorInput) operatorInput.value = operatorName();
   } catch (e) {
     corrError.textContent = e.message.replace(/^Local database correction failed \(\d+\)\. /, "");
@@ -566,6 +577,7 @@ async function startCorrection(opts) {
 // ---------------------------------------------------------------------------
 
 const suggestBlock = el("suggestBlock"), suggestNote = el("suggestNote"), suggestList = el("suggestList");
+const suggestStatus = el("suggestStatus");
 const SUGGEST_SHOWN = 12;
 const KIND_LABEL = { missed: "MISSED", false_alarm: "FALSE ALARM", wrong_class: "MIXED UP", uncertain: "UNSURE" };
 
@@ -573,6 +585,7 @@ function renderSuggestions() {
   const { source, items } = session.suggestions;
   const esc = t => String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   suggestBlock.hidden = false;
+  suggestStatus.textContent = "";
   if (source === "truth") {
     suggestNote.textContent = items.length
       ? `${items.length} stretch${items.length === 1 ? "" : "es"} where the model disagrees with the ground truth `
@@ -590,7 +603,8 @@ function renderSuggestions() {
     `<div class="sugg" data-sugg="${i}"><span class="sugg-kind ${s.kind}">${KIND_LABEL[s.kind]}</span>`
     + `<span class="sugg-time">${(s.startS * 1000).toFixed(2)}–${(s.endS * 1000).toFixed(2)} ms</span>`
     + `<span class="sugg-text">${esc(s.text)}</span>`
-    + `<button class="mini" data-review-sugg="${i}">Review</button></div>`).join("")
+    + (s.submitted ? `<span class="sugg-done">✓ Submitted</span>`
+                   : `<button class="mini" data-review-sugg="${i}">Review</button>`) + `</div>`).join("")
     + (items.length > SUGGEST_SHOWN ? `<div class="note">+${items.length - SUGGEST_SHOWN} more, shorter or later in the capture</div>` : "");
 }
 
@@ -607,7 +621,8 @@ suggestList.addEventListener("click", (ev) => {
   if (!btn || !session?.suggestions) return;
   const s = session.suggestions.items[Number(btn.dataset.reviewSugg)];
   startCorrection({ predicted: s.predicted, startS: s.startS, endS: s.endS, suggested: s.suggested,
-                    reason: s.reason, missed: !s.predicted.length, title: `Review: ${s.text}` });
+                    reason: s.reason, missed: !s.predicted.length, title: `Review: ${s.text}`,
+                    suggIndex: Number(btn.dataset.reviewSugg) });
 });
 
 // ---------------------------------------------------------------------------
@@ -912,7 +927,7 @@ function showPage(page) {
   }
   // Canvases cannot be sized while hidden, so each page draws on entry.
   if (page === "signal") renderSignal();
-  if (page === "history") renderHistory();
+  if (page === "history") return renderHistory();
   if (page === "performance") renderPerformance();
   if (page === "model") renderModel();
   if (page === "replay" && session) render();
@@ -1168,6 +1183,14 @@ Promise.all([chatLogPromise, ollamaCheck]).then(([chatLog, hasOllama]) => initAs
   logEl: el("chatLog"), formEl: el("chatForm"), inputEl: el("chatInput"),
   suggestEl: el("chatSuggest"), clearBtn: el("chatClear"), noteEl: el("chatNote"),
   rewriteFn: hasOllama ? ollamaRewrite : null,
+  tierColor: TIER_COLOR, classColor: CLASS_COLOR,
+  // "Open in History": the History page, filtered down to this capture.
+  onOpenRecord: async (rec) => {
+    for (const node of [histTier, histClassSel, histSource, histFrom, histTo]) node.value = "";
+    histQuery.value = rec.file_name || rec.case_note || "";
+    await showPage("history");            // the table exists only once History has drawn
+    el("histTable").scrollIntoView({ behavior: "smooth", block: "center" });
+  },
 })).catch(e => console.error("Assistant failed to start:", e));
 
 // Pays Ollama's cold-load cost (seconds, sometimes tens of seconds) during

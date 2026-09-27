@@ -227,9 +227,13 @@ class Handler(SimpleHTTPRequestHandler):
         if head == "retrain" and method == "POST" and parts[1:] == ["start"]:
             body = self._read_json()
             self._check_training_deps(self.training_python())
-            job = self.db.start_retrain(body.get("reason"), bool(body.get("override")), self._actor())
-            return self._send_json(self._launch(job), HTTPStatus.ACCEPTED)
+            with Handler._jobs_lock:
+                self._reap_jobs()
+                job = self.db.start_retrain(body.get("reason"), bool(body.get("override")), self._actor())
+                return self._send_json(self._launch(job), HTTPStatus.ACCEPTED)
         if head == "retrain" and method == "GET" and parts[1:2] == ["jobs"]:
+            with Handler._jobs_lock:
+                self._reap_jobs()
             if len(parts) == 2:
                 return self._send_json(self.db.list_jobs())
             job = self.db.get_job(parts[2])
@@ -297,6 +301,25 @@ class Handler(SimpleHTTPRequestHandler):
                                   f"Install them into {py}:  pip install -r requirements.txt")
         Handler._deps_ok[py] = True
 
+    # Training processes this server started, by job id.
+    _procs: dict = {}
+    _jobs_lock = threading.Lock()
+
+    def _reap_jobs(self) -> None:
+        """A job left 'queued'/'running' whose process is gone (killed, crashed
+        before it could report, or started by a server that has since been
+        restarted) would block every later retrain. Mark it failed."""
+        for job in self.db.list_jobs():
+            if job["status"] not in ("queued", "running"):
+                continue
+            proc = Handler._procs.get(job["id"])
+            if proc is None or proc.poll() is not None:
+                why = ("the training process exited without reporting a result"
+                       f" (exit code {proc.returncode})" if proc is not None else
+                       "the training process is no longer running (the server was restarted)")
+                self.db.finish_job(job["id"], False, {"error": why})
+                Handler._procs.pop(job["id"], None)
+
     def _launch(self, job):
         """Run the training script in the background; its output is the job log."""
         jobs = self.db.path.parent / "jobs"
@@ -311,6 +334,7 @@ class Handler(SimpleHTTPRequestHandler):
                 env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         finally:
             log.close()
+        Handler._procs[job["id"]] = proc
         self.db.update_job(job["id"], log_path=log_rel, pid=proc.pid)
         return self.db.get_job(job["id"])
 

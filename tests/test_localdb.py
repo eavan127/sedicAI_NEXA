@@ -262,6 +262,29 @@ def test_correction_needs_raw_iq(db):
     assert db.create_correction(correction("noiq"), ME)["iq_sha256"] == "cd" * 32
 
 
+def test_iq_attached_afterwards_is_recorded_on_the_capture(db):
+    """A synthesized scenario is saved without IQ and gets it when someone
+    corrects it. The row must then name the file, or the report builder's
+    SigMF and raw-IQ bundles leave out exactly the corrected captures."""
+    db.save_analysis(record("late", file_name=None), ME)
+    db.record_file("late", "capture.f32", "iq/late/capture.f32", 10, "ef" * 32, ME)
+    row = db.get_analysis("late")
+    assert (row["file_path"], row["file_sha256"], row["file_bytes"]) == ("iq/late/capture.f32", "ef" * 32, 10)
+    # a later upload for the same id does not repoint a capture that has its file
+    db.record_file("late", "other.f32", "iq/late/other.f32", 20, "00" * 32, ME)
+    assert db.get_analysis("late")["file_path"] == "iq/late/capture.f32"
+
+
+def test_attached_iq_backfilled_when_an_older_database_opens(tmp_path):
+    db = LocalDB(tmp_path / "nexa.db")
+    db.save_analysis(record("old", file_name=None), ME)
+    db.record_file("old", "capture.f32", "iq/old/capture.f32", 10, "ab" * 32, ME)
+    _force(db, "UPDATE analyses SET file_path = NULL, file_sha256 = NULL, file_bytes = NULL")
+    row = LocalDB(tmp_path / "nexa.db").get_analysis("old")
+    assert (row["file_path"], row["file_sha256"]) == ("iq/old/capture.f32", "ab" * 32)
+    assert db.verify_audit()["ok"]
+
+
 def test_four_eyes_rule(db):
     c = db.create_correction(correction(_with_iq(db)), ME)
     with pytest.raises(PermissionError, match="Four-eyes"):
@@ -369,3 +392,15 @@ def test_trigger_status_over_http(server):
     base, _ = server
     s = json.loads(call(base + "/api/retrain/status")[2])
     assert "conditions" in s and s["rules"]["max_rate"] == 0.15
+
+
+def test_a_dead_retrain_job_does_not_block_the_next_one(server):
+    """A job whose training process is gone (server restarted, process
+    killed) is marked failed instead of refusing every later retrain."""
+    base, tmp = server
+    db = LocalDB(tmp / "nexa.db")
+    job = db.start_retrain("stuck from before a restart", True, ME)
+    db.update_job(job["id"], status="running")
+    jobs = json.loads(call(base + "/api/retrain/jobs")[2])
+    assert jobs[0]["status"] == "failed" and "no longer running" in jobs[0]["result"]["error"]
+    assert db.start_retrain("try again", True, ME)["status"] == "queued"

@@ -248,6 +248,17 @@ class LocalDB:
                     con.execute(f"ALTER TABLE {table} ADD COLUMN {col} {kind}")
             con.execute("INSERT OR REPLACE INTO meta VALUES ('schema_version', ?)",
                         (str(SCHEMA_VERSION),))
+            # Databases written before record_file() pointed the row at IQ
+            # attached after the fact: recover the path from the audit trail,
+            # which is where it was recorded.
+            for row in con.execute(
+                    "SELECT a.id, l.details FROM analyses a JOIN audit_log l"
+                    " ON l.action = 'iq.store' AND l.target_id = a.id"
+                    " WHERE a.file_path IS NULL ORDER BY l.seq DESC").fetchall():
+                d = json.loads(row["details"])
+                con.execute("UPDATE analyses SET file_path = ?, file_sha256 = ?,"
+                            " file_bytes = COALESCE(file_bytes, ?) WHERE id = ? AND file_path IS NULL",
+                            (d.get("path"), d.get("sha256"), d.get("bytes"), row["id"]))
         if not self.audit(limit=1):
             with self._write() as con:
                 self._append_audit(con, SYSTEM, "db.create", "database", str(self.path.name),
@@ -388,8 +399,16 @@ class LocalDB:
     def record_file(self, analysis_id: str, name: str, rel_path: str, n_bytes: int,
                     sha256: str, actor: Actor) -> None:
         """A raw IQ file was written to disk: log its fingerprint, so a later
-        swap of the file on disk is detectable against the audit trail."""
+        swap of the file on disk is detectable against the audit trail.
+
+        An upload stores its file BEFORE the record exists (the record then
+        carries file_path itself). A capture saved without IQ -- a synthesized
+        scenario that someone corrects -- gets it attached afterwards; the row
+        is pointed at it here, or the report exports would say it has none."""
         with self._write() as con:
+            con.execute("UPDATE analyses SET file_path = ?, file_sha256 = ?,"
+                        " file_bytes = COALESCE(file_bytes, ?) WHERE id = ? AND file_path IS NULL",
+                        (rel_path, sha256, n_bytes, analysis_id))
             self._append_audit(con, actor, "iq.store", "analysis", analysis_id,
                                {"name": name, "path": rel_path, "bytes": n_bytes, "sha256": sha256})
 

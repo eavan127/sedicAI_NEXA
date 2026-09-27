@@ -2,7 +2,7 @@
 // output), not a private one -- so this catches drift if storage.js's field
 // names ever change. Run: node web/test/chatbot_check.mjs
 import assert from "node:assert/strict";
-import { answer, ask, openChatLog } from "../chatbot.js";
+import { answer, ask, askRich, explain, openChatLog, suggestionsFor } from "../chatbot.js";
 
 // Same shape buildRecord() in storage.js produces, newest first (as
 // listAnalyses returns it) -- created_at strings a day apart so numbering by
@@ -70,6 +70,41 @@ const r4 = await ask(chatLog, listRecords, "list uploads", async () => null);
 ok("ask() falls back to the original text when rewriteFn returns null", () => assert.match(r4, /capture1\.iq/));
 const r5 = await ask(chatLog, listRecords, "list uploads", async () => { throw new Error("ollama down"); });
 ok("ask() survives a throwing rewriteFn", () => assert.match(r5, /capture1\.iq/));
+
+// explain(): the structure the page draws cards and follow-up chips from.
+// Every follow-up and suggestion must be a question answer() understands,
+// or clicking it would get "Sorry, I did not understand".
+const x = q => explain(q, R, []);
+ok("explain() text is exactly answer()", () => {
+  for (const q of ["list uploads", "compare upload 1 and 3", "what is FHSS", "nonsense"]) assert.equal(x(q).text, a(q));
+});
+ok("explain() returns the uploads an answer is about", () => {
+  assert.deepEqual(x("list uploads").rows.map(r => r.n), [1, 2, 3]);
+  assert.deepEqual(x("Which uploads had jamming?").rows.map(r => r.rec.id), ["c1", "c3"]);
+  assert.equal(x("Which uploads had jamming?").cls, "JAMMING");
+  assert.deepEqual(x("compare upload 1 and 3").rows.map(r => r.n), [1, 3]);
+  assert.equal(x("show my last upload").rows[0].rec.id, "c3");
+});
+ok("explain() offers re-asking earlier questions", () =>
+  assert.deepEqual(explain("what did I ask before", R, [{ q: "list uploads", a: "" }]).reask, ["list uploads"]));
+ok("every follow-up and suggestion is understood", () => {
+  const offered = new Set([...suggestionsFor(R), ...suggestionsFor([])]);
+  for (const q of ["list uploads", "how many uploads", "show my last upload", "summary of upload 2",
+                   "compare upload 1 and 3", "Which uploads had jamming?", "what is FHSS", "what is snr", "nonsense"]) {
+    for (const f of x(q).followUps) offered.add(f);
+  }
+  for (const q of offered) assert.doesNotMatch(a(q), /did not understand/, q);
+});
+ok("suggestions use the stored data", () => {
+  const s = suggestionsFor(R);
+  assert.ok(s.includes("Which uploads had JAMMING?") && s.includes("Compare upload 2 and 3"), s.join(" | "));
+});
+const rich = await askRich(chatLog, listRecords, "list uploads");
+const richLogged = (await chatLog.listChat()).at(-1);
+ok("askRich() returns rows and logs the plain text", () => {
+  assert.equal(rich.rows.length, 3);
+  assert.equal(richLogged.a, rich.text);
+});
 await chatLog.clearChat();
 
 console.log(`\n${n} checks passed`);

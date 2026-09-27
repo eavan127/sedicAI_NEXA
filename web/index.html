@@ -217,6 +217,7 @@
   .sugg-kind.uncertain { background: #E6EDF5; color: #2C4F7C; }
   .sugg-time { font-family: var(--mono); font-size: 12px; color: var(--text); flex: none; min-width: 9.5em; }
   .sugg-text { flex: 1; min-width: 12em; }
+  .sugg-done { font-size: 12px; font-weight: 600; color: #2E6B34; flex: none; }
   .gauge-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 8px 0; font-size: 13px; }
   .gauge-state { font-size: 11px; font-weight: 700; letter-spacing: 0.05em; padding: 3px 9px; border-radius: 4px; }
   .gauge-state.ok { background: #E3F4E8; color: #1E6B35; }
@@ -268,7 +269,7 @@
   tbody tr:hover td { background: var(--brand-olive-tint); color: var(--text); }
 
   /* Assistant page */
-  #chatLog { height: 380px; overflow-y: auto; background: var(--panel); border: 1px solid var(--grid); border-radius: 6px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+  #chatLog { height: min(62vh, 560px); min-height: 320px; overflow-y: auto; background: var(--panel); border: 1px solid var(--grid); border-radius: 6px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
   .chat-msg { max-width: 78%; padding: 8px 12px; border-radius: 8px; font-size: 14px; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; }
   .chat-msg.user { align-self: flex-end; background: var(--brand-olive); color: #fff; }
   .chat-msg.bot { align-self: flex-start; background: var(--brand-olive-tint); color: var(--text); }
@@ -277,6 +278,42 @@
   #chatForm { display: flex; gap: 8px; }
   #chatForm input { flex: 1; font-family: var(--font); font-size: 14px; padding: 8px 10px; border: 1px solid var(--grid); border-radius: 6px; }
   #chatForm button { background: var(--brand-olive); border-color: var(--brand-olive-dark); color: #fff; font-weight: 600; }
+  .chat-msg.rich { max-width: 92%; white-space: normal; display: flex; flex-direction: column; gap: 8px; }
+  .chat-msg.typing { display: flex; gap: 4px; padding: 12px 14px; }
+  .chat-msg.typing span { width: 7px; height: 7px; border-radius: 50%; background: var(--brand-olive); opacity: 0.3; animation: chatDot 1s infinite; }
+  .chat-msg.typing span:nth-child(2) { animation-delay: 0.15s; }
+  .chat-msg.typing span:nth-child(3) { animation-delay: 0.3s; }
+  @keyframes chatDot { 0%, 60%, 100% { opacity: 0.3; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
+  @media (prefers-reduced-motion: reduce) { .chat-msg.typing span { animation: none; opacity: 0.6; } }
+  .chat-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
+  .chat-card { background: var(--panel); border: 1px solid var(--grid); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 6px; transition: border-color 0.15s, box-shadow 0.15s; }
+  .chat-card:hover { border-color: var(--brand-olive); }
+  .chat-card.picked { border-color: var(--brand-olive); box-shadow: 0 0 0 2px var(--brand-olive-tint); }
+  .chat-card-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .chat-num { font-family: var(--mono); font-size: 12px; font-weight: 700; color: var(--brand-olive); flex: none; }
+  .chat-name { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chat-verdict { color: #fff; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; padding: 2px 8px; border-radius: 10px; flex: none; }
+  .chat-meta { font-size: 12px; color: var(--text-dim); }
+  .chat-classes { display: flex; flex-wrap: wrap; gap: 4px; }
+  .chat-class { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font); font-size: 12px; padding: 2px 7px; border: 1px solid var(--grid); border-radius: 12px; background: var(--panel); color: var(--text); cursor: pointer; }
+  .chat-class:hover, .chat-class.hl { background: var(--brand-olive-tint); }
+  .chat-class.hl { font-weight: 700; }
+  .chat-class .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .chat-class .bar { width: 34px; height: 4px; background: var(--grid); border-radius: 2px; overflow: hidden; }
+  .chat-class .bar span { display: block; height: 100%; }
+  .chat-class .pct { font-family: var(--mono); font-size: 11px; color: var(--text-dim); }
+  .chat-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chat-msg .mini, .chat-chip { font-family: var(--font); font-size: 12px; border-radius: 6px; border: 1px solid var(--grid); padding: 4px 9px; cursor: pointer; background: var(--panel); color: var(--text); }
+  .chat-msg .mini:hover, .chat-chip:hover, #chatSuggest button:hover { border-color: var(--brand-olive); background: var(--brand-olive-tint); }
+  .chat-follow { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chat-next { align-self: flex-start; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: -2px 0 4px; }
+  .chat-next-label { font-size: 12px; color: var(--text-dim); }
+  .chat-compare { border-collapse: collapse; font-size: 13px; background: var(--panel); border-radius: 6px; overflow: hidden; }
+  .chat-compare th, .chat-compare td { text-align: left; padding: 5px 10px; border-bottom: 1px solid var(--grid); vertical-align: middle; }
+  .chat-compare thead th { font-size: 12px; color: var(--text-dim); }
+  .chat-compare tr.diff td, .chat-compare tr.diff th { background: #FFF3D6; }
+  .chat-compare td.dim { color: var(--text-dim); }
+  .chat-link { font: inherit; font-weight: 600; background: none; border: 0; padding: 0; color: var(--brand-olive-dark); text-decoration: underline; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -428,6 +465,7 @@
         <div class="block-label">Recommended corrections</div>
         <div class="note" id="suggestNote"></div>
         <div id="suggestList"></div>
+        <div class="note" id="suggestStatus" role="status"></div>
       </div>
 
       <div class="block" id="constellationBlock" hidden>
@@ -676,7 +714,7 @@
     </section>
     <section id="page-assistant" hidden>
       <h3 class="page-title">Assistant</h3>
-      <div id="chatLog"></div>
+      <div id="chatLog" role="log" aria-live="polite"></div>
       <div id="chatSuggest"></div>
       <form id="chatForm" autocomplete="off">
         <input id="chatInput" type="text" placeholder="Ask about your uploads or a term, e.g. which uploads had jamming?">
