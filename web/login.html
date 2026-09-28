@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NEXA: Sign in</title>
+<!-- The only page scripts/serve_local.py serves to someone who is not signed
+     in. It shows nothing of the system: no data, no models, no menu. Self-
+     contained (no other file but the logo) so it works with no internet. -->
+<style>
+  :root {
+    --brand-olive: #627143; --brand-olive-dark: #4A552F; --brand-olive-tint: #EEF1E6;
+    --brand-slate: #121C27; --bg: #F7F8F5; --panel: #FFFFFF; --grid: #DFE3D9;
+    --text: #121C27; --text-dim: #5F6B72; --error: #B3261E;
+    --font: "Inter", "Segoe UI", "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
+  body {
+    font-family: var(--font); color: var(--text); background: var(--bg);
+    min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 24px 16px; border-top: 4px solid var(--brand-olive);
+  }
+  .card {
+    width: min(400px, 100%); background: var(--panel); border: 1px solid var(--grid); border-radius: 12px;
+    padding: 28px 28px 24px; box-shadow: 0 8px 30px rgba(18, 28, 39, 0.08);
+  }
+  .brand { display: flex; align-items: center; gap: 16px; padding-bottom: 18px; margin-bottom: 20px;
+           border-bottom: 2px solid var(--brand-olive); }
+  .brand img { height: 46px; width: auto; display: block; }
+  .brand .name { font-size: 22px; font-weight: 700; letter-spacing: 0.16em; color: var(--brand-slate); line-height: 1.1; }
+  .brand .tag { font-size: 12px; color: var(--text-dim); margin-top: 3px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .note { font-size: 13px; color: var(--text-dim); line-height: 1.45; margin: 0 0 16px; }
+  label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; color: var(--text-dim); margin-bottom: 12px; }
+  input {
+    font-family: var(--font); font-size: 14px; padding: 9px 11px; border: 1px solid var(--grid); border-radius: 7px;
+    background: var(--panel); color: var(--text);
+  }
+  input:focus-visible, button:focus-visible { outline: 2px solid var(--brand-olive); outline-offset: 1px; border-color: var(--brand-olive); }
+  button {
+    width: 100%; margin-top: 4px; font-family: var(--font); font-size: 14px; font-weight: 600; padding: 10px 14px;
+    border-radius: 7px; border: 1px solid var(--brand-olive-dark); background: var(--brand-olive); color: #fff; cursor: pointer;
+  }
+  button:hover { background: var(--brand-olive-dark); }
+  button:disabled { opacity: 0.6; cursor: progress; }
+  .error { color: var(--error); font-size: 13px; min-height: 1.3em; margin: 2px 0 8px; }
+  .first-run { background: var(--brand-olive-tint); border-radius: 7px; padding: 10px 12px; }
+  .foot { margin-top: 16px; font-size: 12px; color: var(--text-dim); text-align: center; max-width: 400px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+  <main class="card">
+    <div class="brand">
+      <img src="/brand/logo.png" alt="SEDIC 26">
+      <div>
+        <div class="name">NEXA</div>
+        <div class="tag">AI-Powered RF Spectrum Intelligence</div>
+      </div>
+    </div>
+
+    <h1 id="title">Sign in</h1>
+    <p class="note" id="note">Sign in with your NEXA account.</p>
+
+    <form id="form" autocomplete="on" hidden>
+      <label>Username <input id="user" autocomplete="username" required maxlength="32" autocapitalize="none" spellcheck="false"></label>
+      <label>Password <input id="pass" type="password" autocomplete="current-password" required></label>
+      <label id="pass2Row" hidden>Password again <input id="pass2" type="password" autocomplete="new-password"></label>
+      <div class="error" id="error" role="alert"></div>
+      <button type="submit" id="submit">Sign in</button>
+    </form>
+  </main>
+  <p class="foot">Authorised users only. Every sign-in, and every failed attempt, is recorded in the audit trail.</p>
+
+<script type="module">
+const $ = id => document.getElementById(id);
+const form = $("form"), user = $("user"), pass = $("pass"), pass2 = $("pass2");
+const error = $("error"), submit = $("submit");
+let setup = false;
+
+// Where to go after signing in: a path on THIS server only.
+function destination() {
+  const next = new URLSearchParams(location.search).get("next") || "";
+  return /^\/(?!\/)[\w\-./]*$/.test(next) && next !== "/login.html" ? next : "/index.html";
+}
+
+async function start() {
+  let me;
+  try {
+    const res = await fetch("/api/auth/me", { cache: "no-store" });
+    me = await res.json();
+  } catch {
+    $("note").textContent = "The NEXA server is not running. Start it with web\\start_demo.bat "
+      + "(or python scripts/serve_local.py) and open the address it prints.";
+    return;
+  }
+  if (me.user) { location.replace(destination()); return; }
+  if (!me.auth_enabled) {
+    if (!me.can_setup) {
+      $("title").textContent = "Not set up yet";
+      $("note").textContent = "No accounts exist yet. Create the first admin account on the computer "
+        + "running the NEXA server, then sign in here.";
+      return;
+    }
+    setup = true;
+    $("title").textContent = "Create the admin account";
+    $("note").className = "note first-run";
+    $("note").textContent = "First run: no accounts exist yet. Create the admin account. The admin then "
+      + "adds everyone else (Users page). Accounts are stored on this computer only.";
+    $("pass2Row").hidden = false;
+    pass2.required = true;
+    pass.autocomplete = "new-password";
+    submit.textContent = "Create admin and sign in";
+  }
+  form.hidden = false;
+  user.focus();
+}
+
+form.addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  error.textContent = "";
+  if (setup && pass.value.length < 8) { error.textContent = "Use at least 8 characters."; return; }
+  if (setup && pass.value !== pass2.value) { error.textContent = "The two passwords are different."; return; }
+  submit.disabled = true;
+  try {
+    const res = await fetch(setup ? "/api/auth/setup" : "/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-NEXA-Client": "1" },
+      body: JSON.stringify({ username: user.value.trim().toLowerCase(), password: pass.value }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || `Sign-in failed (${res.status}).`);
+    location.replace(destination());
+  } catch (e) {
+    error.textContent = e.message;
+    pass.value = "";
+    pass.focus();
+    submit.disabled = false;
+  }
+});
+
+start();
+</script>
+</body>
+</html>

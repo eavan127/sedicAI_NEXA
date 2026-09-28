@@ -34,8 +34,10 @@ Double-click `web\start_demo.bat`, or:
 python scripts/serve_local.py
 ```
 
-The browser opens at `http://localhost:8099/index.html`. If 8099 is busy, the
-server takes the next free port and prints it. Keep the window open, and use
+The browser opens at `http://localhost:8099/index.html`, which sends you to
+the login page first (see G below). If 8099 is busy, the server takes the
+next free port and prints it. Do not also run `python -m http.server`: it
+serves the page without the database or sign-in. Keep the window open, and use
 Ctrl+C to stop. Useful options:
 
 | Option | What it does |
@@ -54,8 +56,8 @@ old files. Press **Ctrl+Shift+R** once.
 
 ## 3. What to try, in order
 
-Use two names, for example **Eavan** and **Jessy**. The four-eyes rule needs a
-second person.
+Sign in first (G below). The four-eyes rule needs a second person, so
+create two accounts, for example **eavan** and **jessy**.
 
 **A. Analyse a signal (RF Replay page)**
 1. Scenario case **All three**, SNR **+2 dB**, then **Synthesize Scenario**.
@@ -79,7 +81,7 @@ second person.
    correction**.
 
 **D. Approve it (History page, as the other person)**
-1. Type the other name in the **Operator** box (Audit trail section).
+1. **Log out** (bottom of the menu, or top right) and sign in as the other person.
 2. **Human corrections: review queue**, then **✔ Approve**. Approving your own
    correction is refused (four-eyes).
 3. **Model health: retraining trigger** shows the correction rate and the
@@ -107,6 +109,34 @@ A candidate that FAILS its gate cannot be activated. That is the safety net
 working, not a bug: on the real test split, one or two corrections are rarely
 enough to improve every class at once.
 
+**G. Sign-in and roles**
+
+Sign-in is always on: nothing of the system (pages, scripts, models, data) is
+served until you sign in on the separate login page. It works fully offline:
+accounts live in `nexa.db` on this machine.
+
+1. **First run** (a database with no accounts): the login page asks you to
+   create the admin account. This only works on the machine running the
+   server, so nobody on the network can claim it first.
+2. **Users** (menu, admins only): add an account for each teammate and pick
+   its role. They then sign in with their own username and password.
+
+| Role | Can |
+|---|---|
+| Operator | analyse, store captures, submit corrections, build reports |
+| Analyst | + approve/reject corrections and retrained models, delete a capture |
+| Admin | + start retraining, roll back the model, clear history, manage users |
+
+For the four-eyes steps above, make two accounts: for example **eavan**
+(admin) and **jessy** (analyst). **Log out** (bottom of the menu) and sign in as the
+other person instead of typing a name: the name boxes are locked to the
+signed-in account, and the server records who did what. Five wrong passwords
+lock an account for five minutes; an admin's **Reset password** unlocks it.
+Sessions last 12 hours.
+
+A fresh database starts with no accounts, e.g. for a clean demo:
+`python scripts/serve_local.py --db data\local\demo.db`.
+
 ## 4. Rules the system enforces
 
 - Corrections need a reason, raw IQ evidence, and approval by a *different*
@@ -120,6 +150,9 @@ enough to improve every class at once.
   person approves it. The 5-model ensemble is never changed.
 - Every report export is logged with the SHA-256 of the file that was handed
   out.
+- With sign-in on: every action is recorded under the signed-in account and
+  its role, every sign-in (and every failed attempt) is audited, and
+  passwords are stored only as salted PBKDF2 hashes.
 
 ## 5. Tests
 

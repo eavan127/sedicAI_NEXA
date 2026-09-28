@@ -146,12 +146,14 @@ def test_bad_requests(setup, fmt, kwargs, msg):
 def test_export_over_http_is_audited(setup):
     db, tmp, _ = setup
     srv = serve_local.make_server(db.path, "127.0.0.1", 0)
+    db.setup_admin("chua", "chua-pass-12")
+    token, _ = db.login("chua", "chua-pass-12")
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
         req = urllib.request.Request(
             f"http://127.0.0.1:{srv.server_address[1]}/api/export", method="POST",
             data=json.dumps({"ids": ["a-f32"], "sections": ["captures"], "format": "json"}).encode(),
-            headers={"X-NEXA-Client": "1", "X-NEXA-Operator": "chua", "Content-Type": "application/json"})
+            headers={"X-NEXA-Client": "1", "Cookie": f"nexa_session={token}", "Content-Type": "application/json"})
         with urllib.request.urlopen(req) as r:
             assert r.headers["Content-Disposition"].startswith("attachment")
             body = r.read()

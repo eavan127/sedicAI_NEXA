@@ -134,9 +134,21 @@ def test_deleted_entry_is_detected(db):
 
 # --- server ----------------------------------------------------------------------
 
+# Sign-in is always on: these tests act as real signed-in accounts. `call`
+# sends the session of the account named in X-NEXA-Operator (eavan by
+# default); the header itself means nothing to the server any more.
+SESSIONS: dict[str, str] = {}
+
+
 @pytest.fixture
 def server(tmp_path):
     srv = serve_local.make_server(tmp_path / "nexa.db", "127.0.0.1", 0)
+    db = srv.nexa_db
+    db.setup_admin("eavan", "eavan-pass-1")
+    db.create_user("jessy", "jessy-pass-1", "analyst", Actor("eavan", "admin"))
+    SESSIONS.clear()
+    for name in ("eavan", "jessy"):
+        SESSIONS[name] = db.login(name, f"{name}-pass-1")[0]
     t = threading.Thread(target=srv.serve_forever, daemon=True)
     t.start()
     yield f"http://127.0.0.1:{srv.server_address[1]}", tmp_path
@@ -146,7 +158,9 @@ def server(tmp_path):
 
 def call(url, method="GET", body=None, headers=None, raw=None):
     data = raw if raw is not None else (json.dumps(body).encode() if body is not None else None)
-    h = {"X-NEXA-Client": "1", "Content-Type": "application/json", **(headers or {})}
+    who = (headers or {}).get("X-NEXA-Operator", "eavan")
+    h = {"X-NEXA-Client": "1", "Content-Type": "application/json",
+         **({"Cookie": f"nexa_session={SESSIONS[who]}"} if who in SESSIONS else {}), **(headers or {})}
     req = urllib.request.Request(url, data=data, method=method, headers=h)
     try:
         with urllib.request.urlopen(req) as r:
