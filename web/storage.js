@@ -189,16 +189,60 @@ export function detectServer({ timeoutMs = 1500 } = {}) {
   return detecting;
 }
 
-/** Who is operating, sent with every write so the audit log can name them.
- *  Kept per browser until the login step replaces it. */
+/** Who is operating. With the local server: the signed-in account (the
+ *  server takes it from the session; nothing the page sends can change it).
+ *  The deployed static site has no accounts and keeps a typed name. */
 export function operatorName() {
+  if (authInfo.user) return authInfo.user.username;
   try { return localStorage.getItem("nexa-operator") || "operator"; } catch { return "operator"; }
 }
 
 export function setOperatorName(name) {
+  if (authInfo.user) return;                    // signed in: the account is the name
   try { localStorage.setItem("nexa-operator", String(name || "").trim().slice(0, 64) || "operator"); }
   catch { /* storage blocked: the default name is used */ }
 }
+
+// ---------------------------------------------------------------------------
+// Sign-in (local server only; see scripts/serve_local.py "Sign-in")
+// ---------------------------------------------------------------------------
+
+// {auth_enabled, user: {username, role} | null, can_setup}, from the server.
+let authInfo = { auth_enabled: false, user: null, can_setup: false };
+
+export const ROLE_LABEL = { operator: "Operator", analyst: "Analyst", admin: "Admin" };
+
+/** Ask the server whether sign-in is on and who is signed in. */
+export async function loadAuth() {
+  await detectServer();
+  if (!serverInfo) return authInfo;
+  try {
+    const res = await fetch("/api/auth/me", { cache: "no-store" });
+    if (res.ok) authInfo = await res.json();
+  } catch { /* server gone: keep what we had */ }
+  return authInfo;
+}
+
+export function currentAuth() { return authInfo; }
+
+async function authCall(path, body, method = "POST") {
+  const res = await fetch(path, {
+    method, headers: serverHeaders({ "Content-Type": "application/json" }),
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!res.ok) {
+    let detail = "";
+    try { detail = (await res.json()).error || ""; } catch { /* not JSON */ }
+    throw new Error(detail || `request failed (${res.status})`);
+  }
+  return res.json();
+}
+
+export const signOut = () => authCall("/api/auth/logout", {});
+export const listUsers = () => authCall("/api/users", undefined, "GET");
+export const createUser = (username, password, role) => authCall("/api/users", { username, password, role });
+/** changes: {role?, disabled?, password?} */
+export const updateUser = (username, changes) => authCall(`/api/users/${encodeURIComponent(username)}`, changes);
 
 /** Deleting is allowed everywhere except the shared Supabase table, whose
  *  anon key has no delete policy (web/supabase/schema.sql). */
@@ -356,6 +400,8 @@ function serverHeaders(extra = {}) {
 
 async function serverCheck(res, what) {
   if (res.ok) return res;
+  // Signed out, or the session expired (12 h): the page goes to the login page.
+  if (res.status === 401) globalThis.dispatchEvent?.(new CustomEvent("nexa-auth-required"));
   let detail = "";
   try { detail = (await res.json()).error || ""; } catch { /* not JSON */ }
   throw new Error(`Local database ${what} failed (${res.status}). ${detail}`);

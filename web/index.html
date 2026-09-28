@@ -110,7 +110,7 @@
 
     .print-only { display: block; }
     /* Controls, navigation and live status are interaction, not content. */
-    nav, .grow, #status, h3.page-title, .note, .receiver, #corrMissed, #eventsTable button, #consoleEnlarge, #suggestBlock, .tl-cursor, .tl-sel { display: none !important; }
+    nav, .grow, #status, h3.page-title, .note, .receiver, #corrMissed, #eventsTable button, #consoleEnlarge, #suggestBlock, .tl-cursor, .tl-sel, #authChip { display: none !important; }
     header { margin-bottom: 10px; }
     .layout { display: block; }
     main { width: 100%; }
@@ -200,6 +200,19 @@
   .corr-error { color: #B3261E; font-size: 15px; min-height: 1.2em; margin-top: 8px; }
   .corr-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
   .pill { display: inline-block; font-size: 12.5px; font-weight: 600; padding: 2px 8px; border-radius: 999px; }
+  .auth-chip { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; font-size: 13px; color: var(--text-dim); }
+  .auth-chip strong { color: var(--text); }
+  .auth-chip[hidden] { display: none; }   /* its display rule would override [hidden] */
+  .auth-role { font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; padding: 2px 8px; border-radius: 10px; background: var(--brand-olive-tint); color: var(--brand-olive-dark); }
+  .auth-chip button, .user-row-actions button { font-family: var(--font); font-size: 12px; border-radius: 6px; border: 1px solid var(--grid); padding: 4px 10px; cursor: pointer; background: var(--panel); color: var(--text); }
+  .auth-chip button:hover, .user-row-actions button:hover { border-color: var(--brand-olive); background: var(--brand-olive-tint); }
+  .user-add { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+  .user-add label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-dim); }
+  .user-add input, .user-add select, .user-row-actions input, #usersTable select { font-family: var(--font); font-size: 13px; padding: 6px 8px; border: 1px solid var(--grid); border-radius: 6px; background: var(--panel); color: var(--text); }
+  .user-row-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .user-status.off { color: #B3261E; font-weight: 600; }
+  .user-status.locked { color: #8A5A00; font-weight: 600; }
+  .pill { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; }
   .pill.pending { background: #FFF3D6; color: #8A5A00; }
   .pill.approved { background: #E3F4E8; color: #1E6B35; }
   .pill.rejected { background: #FBE4E2; color: #8C1D18; }
@@ -334,6 +347,8 @@
       <div class="name">NEXA</div>
       <div class="tag">AI-Powered RF Spectrum Intelligence</div>
     </div>
+    <!-- Who is signed in (main.js: applyAuth). Hidden without the local server. -->
+    <div class="auth-chip" id="authChip" hidden></div>
   </header>
 
   <div class="layout">
@@ -345,6 +360,7 @@
       <button data-page="performance">Performance</button>
       <button data-page="model">Model</button>
       <button data-page="assistant">Assistant</button>
+      <button data-page="users" hidden>Users</button>
     </nav>
 
     <main>
@@ -752,6 +768,31 @@
       </form>
       <div class="note" id="chatNote" style="margin-top:8px;"></div>
       <div style="margin-top:8px;"><button id="chatClear" type="button">Clear saved history</button></div>
+    </section>
+
+    <!-- Accounts (admins only; main.js: renderUsers). -->
+    <section id="page-users" hidden>
+      <h3 class="page-title">Users</h3>
+      <div class="block">
+        <div class="block-label">Accounts</div>
+        <div class="note">Operators analyse captures and submit corrections. Analysts can also approve corrections
+          and retrained models, and delete a capture. Admins can also start retraining, roll back the model, clear
+          the history and manage accounts. Every change here is written to the audit trail.</div>
+        <div class="table-wrap" id="usersTable"></div>
+        <div class="note" id="usersMsg" role="status"></div>
+      </div>
+      <div class="block">
+        <div class="block-label">Add an account</div>
+        <form id="userAddForm" class="user-add" autocomplete="off">
+          <label>Username <input id="uaName" required maxlength="32" pattern="[a-z0-9][a-z0-9._\-]{1,31}"
+            title="2-32 characters: lowercase letters, digits, . _ or -"></label>
+          <label>Password <input id="uaPass" type="password" required minlength="8" autocomplete="new-password"></label>
+          <label>Role <select id="uaRole">
+            <option value="operator">Operator</option><option value="analyst">Analyst</option><option value="admin">Admin</option>
+          </select></label>
+          <button type="submit" class="primary">Add account</button>
+        </form>
+      </div>
     </section>
     </main>
   </div>

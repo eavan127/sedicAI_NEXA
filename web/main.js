@@ -22,6 +22,7 @@ import {
   activateModel, getJob, listJobs, listModels, retrainHistory, reviewModel, rollbackModel, startRetrain,
   listAnalyses, listAudit, listCorrections, logEvent, operatorName, readConfig, reviewCorrection,
   saveAnalysis, setOperatorName, submitCorrection, supportsCorrections, usingSupabase, verifyAudit,
+  ROLE_LABEL, createUser, currentAuth, listUsers, loadAuth, signOut, updateUser,
 } from "./storage.js";
 import { applyFilters, barsHtml, summarise, summaryHtml as histSummaryHtml, tableHtml } from "./history.js";
 import { buildReport, buildSingle } from "./report.js";
@@ -936,6 +937,7 @@ function showPage(page) {
   if (page === "history") return renderHistory();
   if (page === "performance") renderPerformance();
   if (page === "model") renderModel();
+  if (page === "users") renderUsers();
   if (page === "replay" && session) render();
 }
 
@@ -1713,5 +1715,129 @@ histTable.addEventListener("click", async (ev) => {
     } catch (e) {
       histStatus.textContent = `Delete failed: ${e.message}`;
     }
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Sign-in (local server; scripts/serve_local.py "Sign-in")
+// ---------------------------------------------------------------------------
+// The server only hands this page to a signed-in browser (web/login.html is
+// the way in), so here it is just: show who is signed in, lock the name boxes
+// to that account, and go back to the login page when the session ends.
+
+const authChip = el("authChip");
+
+async function logOut() {
+  try { await signOut(); } finally { location.replace("/login.html"); }
+}
+
+function toLogin() {
+  location.replace(`/login.html?next=${encodeURIComponent(location.pathname)}`);
+}
+
+function applyAuth(a) {
+  if (readConfig().backend !== "server") return;        // deployed static site: no accounts
+  if (!a.user) { toLogin(); return; }
+  const who = document.createElement("strong");
+  who.textContent = a.user.username;
+  const role = document.createElement("span");
+  role.className = "auth-role";
+  role.textContent = ROLE_LABEL[a.user.role] || a.user.role;
+  const out = document.createElement("button");
+  out.type = "button";
+  out.textContent = "Log out";
+  out.addEventListener("click", logOut);
+  authChip.replaceChildren("Signed in as ", who, role, out);
+  authChip.hidden = false;
+  document.querySelector('nav button[data-page="users"]').hidden = a.user.role !== "admin";
+  for (const input of [operatorInput, corrOperator, rtOperator]) {
+    input.value = a.user.username;
+    input.readOnly = true;
+    input.title = `Signed in as ${a.user.username}. Log out to change.`;
+  }
+}
+
+// Any API call refused for want of a session (signed out in another tab, or
+// the 12-hour session ran out) goes back to the login page.
+window.addEventListener("nexa-auth-required", toLogin);
+
+loadAuth().then(applyAuth).catch(e => console.error("Sign-in check failed:", e));
+
+// --- Users page (admins) -------------------------------------------------------
+
+const usersTable = el("usersTable"), usersMsg = el("usersMsg");
+const uaName = el("uaName"), uaPass = el("uaPass"), uaRole = el("uaRole");
+
+function chipButton(text, onclick) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.textContent = text;
+  b.addEventListener("click", onclick);
+  return b;
+}
+
+async function renderUsers() {
+  let users;
+  try {
+    users = await listUsers();
+  } catch (e) {
+    usersTable.textContent = `Could not read accounts: ${e.message}`;
+    return;
+  }
+  const me = currentAuth().user?.username;
+  const table = document.createElement("table");
+  table.innerHTML = "<thead><tr><th>Account</th><th>Role</th><th>Status</th><th>Created</th><th></th></tr></thead>";
+  const tbody = document.createElement("tbody");
+  for (const u of users) {
+    const tr = document.createElement("tr");
+    const cell = (...content) => { const td = document.createElement("td"); td.append(...content); tr.append(td); };
+    cell(u.username + (u.username === me ? " (you)" : ""));
+    const role = document.createElement("select");
+    role.setAttribute("aria-label", `Role of ${u.username}`);
+    for (const r of ["operator", "analyst", "admin"]) role.add(new Option(ROLE_LABEL[r], r, false, r === u.role));
+    role.addEventListener("change", () => changeUser(u.username, { role: role.value },
+      `${u.username} is now ${ROLE_LABEL[role.value]}.`));
+    cell(role);
+    const status = document.createElement("span");
+    status.className = `user-status${u.disabled ? " off" : u.locked ? " locked" : ""}`;
+    status.textContent = u.disabled ? "Disabled" : u.locked ? "Locked (too many wrong passwords)" : "Active";
+    cell(status);
+    cell(`${new Date(u.created_at).toLocaleDateString()}${u.created_by ? ` by ${u.created_by}` : ""}`);
+    const actions = document.createElement("div");
+    actions.className = "user-row-actions";
+    const pw = document.createElement("input");
+    Object.assign(pw, { type: "password", placeholder: "new password (8+)", autocomplete: "new-password", hidden: true });
+    pw.setAttribute("aria-label", `New password for ${u.username}`);
+    const reset = chipButton("Reset password", () => {
+      if (pw.hidden) { pw.hidden = false; reset.textContent = "Save password"; pw.focus(); return; }
+      changeUser(u.username, { password: pw.value },
+        `Password for ${u.username} reset. Any session they had open was signed out.`);
+    });
+    actions.append(chipButton(u.disabled ? "Enable" : "Disable", () => changeUser(u.username, { disabled: !u.disabled },
+      u.disabled ? `${u.username} can sign in again.` : `${u.username} is disabled and was signed out.`)), pw, reset);
+    cell(actions);
+    tbody.append(tr);
+  }
+  table.append(tbody);
+  usersTable.replaceChildren(table);
+}
+
+async function changeUser(username, changes, done) {
+  let msg = done;
+  try { await updateUser(username, changes); } catch (e) { msg = e.message; }
+  await renderUsers();
+  usersMsg.textContent = msg;
+}
+
+el("userAddForm").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const name = uaName.value.trim().toLowerCase(), role = uaRole.value;
+  try {
+    await createUser(name, uaPass.value, role);
+    uaName.value = uaPass.value = "";
+    await renderUsers();
+    usersMsg.textContent = `Account ${name} created as ${ROLE_LABEL[role]}. They can sign in now.`;
+  } catch (e) {
+    usersMsg.textContent = e.message;
   }
 });

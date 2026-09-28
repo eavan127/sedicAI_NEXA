@@ -125,17 +125,20 @@ def test_server_swaps_in_the_active_model_and_rollback_restores(trained):
     db, tmp, job, _ = trained
     version = db.get_job(job["id"])["model_version"]
     srv = serve_local.make_server(db.path, "127.0.0.1", 0)
+    db.setup_admin("chua", "chua-pass-12")
+    cookie = {"Cookie": f"nexa_session={db.login('chua', 'chua-pass-12')[0]}"}
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{srv.server_address[1]}"
+    get = lambda path: urllib.request.urlopen(urllib.request.Request(base + path, headers=cookie))  # noqa: E731
     try:
-        with urllib.request.urlopen(base + "/models/best_model.onnx") as r:
+        with get("/models/best_model.onnx") as r:
             assert r.headers["X-NEXA-Model"] == version
             assert r.read() == (tmp / db.get_model(version)["path"]).read_bytes()
-        assert json.loads(urllib.request.urlopen(base + "/api/health").read())["active_model"] == version
+        assert json.loads(get("/api/health").read())["active_model"] == version
         req = urllib.request.Request(base + "/api/models/rollback", method="POST", data=b'{"note":"test"}',
-                                     headers={"X-NEXA-Client": "1", "X-NEXA-Operator": "chua"})
+                                     headers={"X-NEXA-Client": "1", **cookie})
         assert json.loads(urllib.request.urlopen(req).read())["retired"] == version
-        with urllib.request.urlopen(base + "/models/best_model.onnx") as r:
+        with get("/models/best_model.onnx") as r:
             assert r.headers.get("X-NEXA-Model") is None
             assert r.read() == (ROOT / "web" / "models" / "best_model.onnx").read_bytes()
     finally:

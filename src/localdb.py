@@ -24,7 +24,10 @@ it, so the app itself can never rewrite history even by mistake.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
+import re
+import secrets
 import sqlite3
 import threading
 import uuid
@@ -32,7 +35,7 @@ from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 GENESIS_HASH = "0" * 64
 
 # The model's classes, in its output order. Duplicated from configs/default.yaml
@@ -55,6 +58,18 @@ RETRAIN_RULES = {
     "cooldown_days": 7,        # since the last retrain
 }
 JUDGED = ("LFM_RADAR", "FHSS", "JAMMING")
+
+# Sign-in. Each role can do everything the one before it can:
+#   operator  analyse, store captures, submit corrections, export reports
+#   analyst   + approve/reject corrections and candidate models, delete a capture
+#   admin     + start retraining, roll back the model, clear history, manage users
+ROLES = ("operator", "analyst", "admin")
+USERNAME_RE = re.compile(r"[a-z0-9][a-z0-9._-]{1,31}")
+MIN_PASSWORD = 8
+PBKDF2_ITERATIONS = 200_000
+SESSION_HOURS = 12            # one shift
+MAX_FAILED_LOGINS = 5         # then the account is locked for LOCKOUT_MINUTES
+LOCKOUT_MINUTES = 5
 
 # Columns the page may write, and how each is stored. JSON columns hold lists
 # and objects as text; the rest are plain SQLite values.
@@ -189,6 +204,32 @@ WHEN NEW.analysis_id IS NOT OLD.analysis_id OR NEW.created_at IS NOT OLD.created
   OR NEW.corrected_labels IS NOT OLD.corrected_labels OR NEW.reason IS NOT OLD.reason
   OR NEW.model IS NOT OLD.model
 BEGIN SELECT RAISE(ABORT, 'what a human said in a correction cannot be edited'); END;
+
+-- Sign-in (optional). While this table is empty the app runs in open demo
+-- mode, exactly as before accounts existed: the page names its operator.
+-- Once the first admin is created, every API call needs a signed-in session
+-- and the SERVER decides who did it. Passwords are stored as salted
+-- PBKDF2-SHA256 hashes, never as text.
+CREATE TABLE IF NOT EXISTS users (
+    username        TEXT PRIMARY KEY,
+    role            TEXT NOT NULL CHECK (role IN ('operator', 'analyst', 'admin')),
+    pw_salt         TEXT NOT NULL,
+    pw_hash         TEXT NOT NULL,
+    created_at      TEXT NOT NULL,
+    created_by      TEXT,
+    disabled        INTEGER NOT NULL DEFAULT 0,
+    failed_logins   INTEGER NOT NULL DEFAULT 0,
+    locked_until    TEXT
+);
+
+-- Only a hash of each session token is stored: a copy of the database file
+-- is not a way to sign in as anyone.
+CREATE TABLE IF NOT EXISTS sessions (
+    token_hash  TEXT PRIMARY KEY,
+    username    TEXT NOT NULL REFERENCES users(username),
+    created_at  TEXT NOT NULL,
+    expires_at  TEXT NOT NULL
+);
 """
 
 # Columns added after schema v1 shipped: (table, column, type). Added in
@@ -229,9 +270,10 @@ def entry_hash(prev_hash: str, entry: dict) -> str:
 
 
 class Actor:
-    """Who did it. Until the login step lands, the page names its operator
-    itself (X-NEXA-Operator header) and everyone is role 'operator'; the log
-    still records the machine the request came from."""
+    """Who did it. With sign-in on, the server takes this from the session;
+    in open demo mode (no accounts yet) the page names its operator itself
+    (X-NEXA-Operator header) and everyone is role 'operator'. Either way the
+    log also records the machine the request came from."""
 
     def __init__(self, name: str = "operator", role: str = "operator", client: str | None = None):
         self.name = (name or "operator").strip()[:64] or "operator"
@@ -240,6 +282,15 @@ class Actor:
 
 
 SYSTEM = Actor("system", "system", "localhost")
+
+
+def role_at_least(role: str | None, needed: str) -> bool:
+    return role in ROLES and ROLES.index(role) >= ROLES.index(needed)
+
+
+def _password_hash(password: str, salt: str) -> str:
+    return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt),
+                               PBKDF2_ITERATIONS).hex()
 
 
 class LocalDB:
@@ -916,6 +967,176 @@ class LocalDB:
                             "reason": "contents changed after it was written"}
                 prev = entry["hash"]
         return {"ok": True, "entries": n, "broken_at": None, "reason": None}
+
+    # -- sign-in ----------------------------------------------------------------
+
+    def auth_enabled(self) -> bool:
+        """True once any account exists: from then on every request needs a session."""
+        with closing(self._connect()) as con:
+            return con.execute("SELECT 1 FROM users LIMIT 1").fetchone() is not None
+
+    @staticmethod
+    def _user_row(row) -> dict:
+        return {"username": row["username"], "role": row["role"], "created_at": row["created_at"],
+                "created_by": row["created_by"], "disabled": bool(row["disabled"]),
+                "locked": bool(row["locked_until"] and row["locked_until"] > now_iso())}
+
+    @staticmethod
+    def _check_new_account(username: str, password: str, role: str) -> str:
+        username = str(username or "").strip().lower()
+        if not USERNAME_RE.fullmatch(username):
+            raise ValueError("username: 2-32 characters, lowercase letters, digits, . _ or -")
+        if username in ("operator", "system"):
+            raise ValueError(f"'{username}' is reserved; pick a person's name")
+        if role not in ROLES:
+            raise ValueError(f"role must be one of {', '.join(ROLES)}")
+        if len(str(password or "")) < MIN_PASSWORD:
+            raise ValueError(f"password must be at least {MIN_PASSWORD} characters")
+        return username
+
+    def _insert_user(self, con, username, password, role, created_by):
+        salt = secrets.token_hex(16)
+        con.execute("INSERT INTO users (username, role, pw_salt, pw_hash, created_at, created_by)"
+                    " VALUES (?, ?, ?, ?, ?, ?)",
+                    (username, role, salt, _password_hash(password, salt), now_iso(), created_by))
+
+    def setup_admin(self, username: str, password: str, client: str | None = None) -> dict:
+        """The first account, which turns sign-in on. Only possible while there
+        are no accounts at all; it is always an admin."""
+        username = self._check_new_account(username, password, "admin")
+        with self._write() as con:
+            if con.execute("SELECT 1 FROM users LIMIT 1").fetchone():
+                raise PermissionError("Sign-in is already set up; ask an admin for an account.")
+            self._insert_user(con, username, password, "admin", None)
+            self._append_audit(con, Actor(username, "admin", client), "user.setup", "user", username,
+                               {"role": "admin", "note": "first account: sign-in is now required"})
+        return self.get_user(username)
+
+    def create_user(self, username: str, password: str, role: str, actor: Actor) -> dict:
+        if not role_at_least(actor.role, "admin"):
+            raise PermissionError("Only an admin can create accounts.")
+        username = self._check_new_account(username, password, role)
+        with self._write() as con:
+            if con.execute("SELECT 1 FROM users WHERE username = ?", (username,)).fetchone():
+                raise ValueError(f"'{username}' already exists")
+            self._insert_user(con, username, password, role, actor.name)
+            self._append_audit(con, actor, "user.create", "user", username, {"role": role})
+        return self.get_user(username)
+
+    def get_user(self, username: str) -> dict | None:
+        with closing(self._connect()) as con:
+            row = con.execute("SELECT * FROM users WHERE username = ?",
+                              (str(username or "").lower(),)).fetchone()
+        return self._user_row(row) if row else None
+
+    def list_users(self) -> list[dict]:
+        with closing(self._connect()) as con:
+            return [self._user_row(r) for r in con.execute("SELECT * FROM users ORDER BY username")]
+
+    def update_user(self, username: str, actor: Actor, *, role: str | None = None,
+                    disabled: bool | None = None, password: str | None = None) -> dict:
+        """Change an account's role, disable/enable it, or reset its password.
+        Admin only. The last active admin cannot be demoted or disabled (that
+        would lock everyone out of user management), and nobody disables
+        themselves."""
+        if not role_at_least(actor.role, "admin"):
+            raise PermissionError("Only an admin can change accounts.")
+        username = str(username or "").lower()
+        with self._write() as con:
+            row = con.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+            if not row:
+                raise ValueError("no such account")
+            changes = {}
+            if role is not None and role != row["role"]:
+                if role not in ROLES:
+                    raise ValueError(f"role must be one of {', '.join(ROLES)}")
+                changes["role"] = role
+            if disabled is not None and bool(disabled) != bool(row["disabled"]):
+                if disabled and username == actor.name.lower():
+                    raise PermissionError("You cannot disable your own account.")
+                changes["disabled"] = 1 if disabled else 0
+            losing_admin = row["role"] == "admin" and not row["disabled"] and (
+                changes.get("role", "admin") != "admin" or changes.get("disabled"))
+            if losing_admin and con.execute(
+                    "SELECT COUNT(*) FROM users WHERE role = 'admin' AND disabled = 0").fetchone()[0] <= 1:
+                raise PermissionError("This is the last active admin; make another admin first.")
+            if password is not None:
+                if len(password) < MIN_PASSWORD:
+                    raise ValueError(f"password must be at least {MIN_PASSWORD} characters")
+                salt = secrets.token_hex(16)
+                changes.update(pw_salt=salt, pw_hash=_password_hash(password, salt),
+                               failed_logins=0, locked_until=None)
+            if not changes:
+                return self._user_row(row)
+            con.execute(f"UPDATE users SET {', '.join(f'{k} = ?' for k in changes)} WHERE username = ?",
+                        (*changes.values(), username))
+            if "disabled" in changes or "pw_hash" in changes:
+                # A disabled account or a reset password ends every open session.
+                con.execute("DELETE FROM sessions WHERE username = ?", (username,))
+            self._append_audit(con, actor, "user.update", "user", username, {
+                **({"role": [row["role"], changes["role"]]} if "role" in changes else {}),
+                **({"disabled": bool(changes["disabled"])} if "disabled" in changes else {}),
+                **({"password_reset": True} if "pw_hash" in changes else {}),
+            })
+        return self.get_user(username)
+
+    def login(self, username: str, password: str, client: str | None = None) -> tuple[str, dict]:
+        """(session token, user) for the right password. Every attempt is
+        audited; five wrong passwords lock the account for five minutes."""
+        username = str(username or "").strip().lower()
+        # The refusal is raised AFTER the transaction commits: raising inside
+        # it would roll back the audit entry and the failed-attempt count.
+        error = None
+        with self._write() as con:
+            row = con.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+            who = Actor(username or "unknown", row["role"] if row else "none", client)
+            if not row:
+                error, why = PermissionError("Wrong username or password."), {"why": "no such account"}
+            elif row["disabled"]:
+                error, why = PermissionError("This account is disabled; ask an admin."), {"why": "disabled"}
+            elif row["locked_until"] and row["locked_until"] > now_iso():
+                error, why = (PermissionError(f"Too many wrong passwords; try again in {LOCKOUT_MINUTES} minutes."),
+                              {"why": "locked"})
+            elif not hmac.compare_digest(_password_hash(str(password or ""), row["pw_salt"]), row["pw_hash"]):
+                n = row["failed_logins"] + 1
+                lock = n >= MAX_FAILED_LOGINS
+                until = (datetime.now(timezone.utc) + timedelta(minutes=LOCKOUT_MINUTES)
+                         ).strftime("%Y-%m-%dT%H:%M:%S.%fZ") if lock else None
+                con.execute("UPDATE users SET failed_logins = ?, locked_until = ? WHERE username = ?",
+                            (0 if lock else n, until, username))
+                error = PermissionError("Wrong username or password.")
+                why = {"why": "wrong password", **({"locked_minutes": LOCKOUT_MINUTES} if lock else {})}
+            if error:
+                self._append_audit(con, who, "user.login_failed", "user", username, why)
+            else:
+                token = secrets.token_urlsafe(32)
+                expires = (datetime.now(timezone.utc) + timedelta(hours=SESSION_HOURS)
+                           ).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+                con.execute("UPDATE users SET failed_logins = 0, locked_until = NULL WHERE username = ?", (username,))
+                con.execute("DELETE FROM sessions WHERE expires_at < ?", (now_iso(),))
+                con.execute("INSERT INTO sessions VALUES (?, ?, ?, ?)",
+                            (hashlib.sha256(token.encode()).hexdigest(), username, now_iso(), expires))
+                self._append_audit(con, who, "user.login", "user", username, {"session_hours": SESSION_HOURS})
+        if error:
+            raise error
+        return token, self.get_user(username)
+
+    def session_actor(self, token: str | None, client: str | None = None) -> Actor | None:
+        """The signed-in person for a session token, or None (missing, expired,
+        or the account was disabled)."""
+        if not token:
+            return None
+        with closing(self._connect()) as con:
+            row = con.execute(
+                "SELECT u.username, u.role FROM sessions s JOIN users u ON u.username = s.username"
+                " WHERE s.token_hash = ? AND s.expires_at > ? AND u.disabled = 0",
+                (hashlib.sha256(token.encode()).hexdigest(), now_iso())).fetchone()
+        return Actor(row["username"], row["role"], client) if row else None
+
+    def logout(self, token: str, actor: Actor) -> None:
+        with self._write() as con:
+            con.execute("DELETE FROM sessions WHERE token_hash = ?", (hashlib.sha256(token.encode()).hexdigest(),))
+            self._append_audit(con, actor, "user.logout", "user", actor.name, {})
 
     def counts(self) -> dict:
         with closing(self._connect()) as con:
