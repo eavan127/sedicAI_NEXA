@@ -920,7 +920,7 @@ let perfData = null, modelCard = null;
 
 function showPage(page) {
   currentPage = page;
-  for (const btn of document.querySelectorAll("nav button[data-page]")) {
+  for (const btn of document.querySelectorAll("nav button")) {
     btn.classList.toggle("active", btn.dataset.page === page);
   }
   for (const sec of document.querySelectorAll("main section")) {
@@ -935,7 +935,7 @@ function showPage(page) {
   if (page === "replay" && session) render();
 }
 
-for (const btn of document.querySelectorAll("nav button[data-page]")) {
+for (const btn of document.querySelectorAll("nav button")) {
   btn.addEventListener("click", () => showPage(btn.dataset.page));
 }
 
@@ -1606,12 +1606,11 @@ histTable.addEventListener("click", async (ev) => {
 // the way in), so here it is just: show who is signed in, lock the name boxes
 // to that account, and go back to the login page when the session ends.
 
-const authChip = el("authChip"), navUser = el("navUser"), navLogout = el("navLogout");
+const authChip = el("authChip");
 
 async function logOut() {
   try { await signOut(); } finally { location.replace("/login.html"); }
 }
-navLogout.addEventListener("click", logOut);
 
 function toLogin() {
   location.replace(`/login.html?next=${encodeURIComponent(location.pathname)}`);
@@ -1631,10 +1630,6 @@ function applyAuth(a) {
   out.addEventListener("click", logOut);
   authChip.replaceChildren("Signed in as ", who, role, out);
   authChip.hidden = false;
-  const me = document.createElement("strong");
-  me.textContent = a.user.username;
-  navUser.replaceChildren("Signed in as ", me);
-  navUser.hidden = navLogout.hidden = false;
   document.querySelector('nav button[data-page="users"]').hidden = a.user.role !== "admin";
   for (const input of [operatorInput, corrOperator, rtOperator]) {
     input.value = a.user.username;

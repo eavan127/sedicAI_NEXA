@@ -49,13 +49,6 @@
   }
   nav button.active { background: var(--brand-olive); border-color: var(--brand-olive-dark); color: #fff; }
   nav button:disabled { color: var(--text-dim); cursor: not-allowed; opacity: 0.75; }
-  /* Log out sits apart from the pages, under a rule, so it is not mistaken for one. */
-  nav #navLogout { margin-top: 10px; display: flex; align-items: center; gap: 8px; color: #8C1D18; border-color: #E8C9C6; }
-  nav #navLogout:hover { background: #FBE4E2; border-color: #B3261E; }
-  nav #navLogout[hidden] { display: none; }
-  nav .nav-user { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--grid); font-size: 12px; color: var(--text-dim); overflow-wrap: anywhere; }
-  nav .nav-user[hidden] { display: none; }
-  nav .nav-user strong { color: var(--text); }
 
   main { flex: 1; min-width: 0; }
   h3.page-title { font-size: 18px; font-weight: 700; margin: 2px 0 14px; }
@@ -117,7 +110,7 @@
 
     .print-only { display: block; }
     /* Controls, navigation and live status are interaction, not content. */
-    nav, .grow, #status, h3.page-title, .note, .receiver, #corrMissed, #eventsTable button, #consoleEnlarge, #suggestBlock, .tl-cursor, .tl-sel, #authChip, #navLogout, #navUser { display: none !important; }
+    nav, .grow, #status, h3.page-title, .note, .receiver, #corrMissed, #eventsTable button, #consoleEnlarge, #suggestBlock, .tl-cursor, .tl-sel, #authChip { display: none !important; }
     header { margin-bottom: 10px; }
     .layout { display: block; }
     main { width: 100%; }
@@ -356,8 +349,6 @@
       <button data-page="model">Model</button>
       <button data-page="assistant">Assistant</button>
       <button data-page="users" hidden>Users</button>
-      <div class="nav-user" id="navUser" hidden></div>
-      <button type="button" id="navLogout" hidden><span aria-hidden="true">⏻</span> Log out</button>
     </nav>
 
     <main>

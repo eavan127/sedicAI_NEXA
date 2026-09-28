@@ -81,7 +81,7 @@ create two accounts, for example **eavan** and **jessy**.
    correction**.
 
 **D. Approve it (History page, as the other person)**
-1. **Log out** (bottom of the menu, or top right) and sign in as the other person.
+1. **Log out** (top right) and sign in as the other person.
 2. **Human corrections: review queue**, then **✔ Approve**. Approving your own
    correction is refused (four-eyes).
 3. **Model health: retraining trigger** shows the correction rate and the
@@ -128,7 +128,7 @@ accounts live in `nexa.db` on this machine.
 | Admin | + start retraining, roll back the model, clear history, manage users |
 
 For the four-eyes steps above, make two accounts: for example **eavan**
-(admin) and **jessy** (analyst). **Log out** (bottom of the menu) and sign in as the
+(admin) and **jessy** (analyst). **Log out** (top right) and sign in as the
 other person instead of typing a name: the name boxes are locked to the
 signed-in account, and the server records who did what. Five wrong passwords
 lock an account for five minutes; an admin's **Reset password** unlocks it.
