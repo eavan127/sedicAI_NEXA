@@ -941,7 +941,7 @@ function showPage(page) {
   if (page === "replay" && session) render();
 }
 
-for (const btn of document.querySelectorAll("nav button")) {
+for (const btn of document.querySelectorAll("nav button[data-page]")) {
   btn.addEventListener("click", () => showPage(btn.dataset.page));
 }
 
@@ -1515,6 +1515,12 @@ const AUDIT_LABEL = {
   "model.rollback": "Model rolled back",
   "model.restore": "Model version restored",
   "model.override": "Model activated by OVERRIDE",
+  "user.setup": "Sign-in set up (first admin)",
+  "user.create": "Account created",
+  "user.update": "Account changed",
+  "user.login": "Signed in",
+  "user.login_failed": "Failed sign-in",
+  "user.logout": "Signed out",
   "report.export": "Report exported",
   "client.receiver_connect": "Receiver connected",
   "client.receiver_disconnect": "Receiver disconnected",
@@ -1556,6 +1562,14 @@ function auditSummary(e) {
         + (d.replaced ? ` · replaced ${d.replaced}` : "") + (d.now_using ? ` · now using ${d.now_using}` : "");
     case "report.export":
       return `${(d.format || "").toUpperCase()} · ${d.captures} captures · ${d.classification || ""} · sha256 ${String(d.sha256 || "").slice(0, 12)}…`;
+    case "user.setup":
+    case "user.create":
+      return `${e.target_id}${d.role ? ` · ${d.role}` : ""}${d.note ? ` · ${d.note}` : ""}`;
+    case "user.update":
+      return `${e.target_id}${d.role ? ` · role ${d.role[0]} → ${d.role[1]}` : ""}`
+        + `${d.disabled != null ? ` · ${d.disabled ? "disabled" : "enabled"}` : ""}${d.password_reset ? " · password reset" : ""}`;
+    case "user.login_failed":
+      return `${e.target_id} · ${d.why || ""}${d.locked_minutes ? ` · locked ${d.locked_minutes} min` : ""}`;
     case "client.receiver_connect":
       return `${d.source} · dwell ${d.dwell_ms} ms · ${d.model} model · hop ${d.hop}`;
     case "client.receiver_disconnect":
@@ -1750,6 +1764,9 @@ function applyAuth(a) {
   authChip.replaceChildren("Signed in as ", who, role, out);
   authChip.hidden = false;
   document.querySelector('nav button[data-page="users"]').hidden = a.user.role !== "admin";
+  // Every prompt and message that names "you" reads operatorName(): make it
+  // the signed-in account, not whatever name this browser last typed.
+  setOperatorName(a.user.username);
   for (const input of [operatorInput, corrOperator, rtOperator]) {
     input.value = a.user.username;
     input.readOnly = true;

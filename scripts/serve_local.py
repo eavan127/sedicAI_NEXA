@@ -115,6 +115,11 @@ def required_role(method: str, parts: list[str]) -> str:
         return "analyst"
     if method == "POST" and head in ("corrections", "models") and len(parts) == 3 and parts[2] == "review":
         return "analyst"
+    # Putting a model version into use (approve / restore) is an analyst's
+    # decision, like approving one; overriding a FAILED exam is checked
+    # separately in the route and needs an admin.
+    if method == "POST" and head == "models" and len(parts) == 3 and parts[2] == "activate":
+        return "analyst"
     return "operator"
 
 
@@ -220,7 +225,6 @@ class Handler(SimpleHTTPRequestHandler):
             return self._error(HTTPStatus.FORBIDDEN, "unexpected Host header")
         url = urlparse(self.path)
         if not url.path.startswith("/api/"):
-            if method in ("GET", "HEAD") and MODEL_FILE.fullmatch(url.path) and self._serve_active_model(url.path):
             # The system itself is only for signed-in people: a page request
             # goes to the login page, anything else (scripts, models, data)
             # is refused.
@@ -234,7 +238,9 @@ class Handler(SimpleHTTPRequestHandler):
                 return self._error(HTTPStatus.UNAUTHORIZED, "Sign in first.")
             if method in ("GET", "HEAD") and url.path == "/brand/logo.png":
                 return self._send_static(LOGO, "image/png")
-            if method in ("GET", "HEAD") and url.path == "/models/best_model.onnx" and self._serve_active_model():
+            # An approved retrained version (single model or ensemble) is
+            # served in place of the shipped file; otherwise fall through.
+            if method in ("GET", "HEAD") and MODEL_FILE.fullmatch(url.path) and self._serve_active_model(url.path):
                 return None
             if method == "GET":
                 return super().do_GET()
@@ -359,6 +365,9 @@ class Handler(SimpleHTTPRequestHandler):
                     parts[1], str(body.get("decision") or ""), body.get("note"), self._actor()))
             if method == "POST" and len(parts) == 3 and parts[2] == "activate":
                 body = self._read_json()
+                if body.get("override") and not role_at_least(self._actor().role, "admin"):
+                    raise PermissionError("Activating a version that failed its exam or was rejected "
+                                          "is an override and needs the admin role.")
                 return self._send_json(self.db.activate_model(
                     parts[1], body.get("note"), self._actor(), override=bool(body.get("override"))))
 
@@ -502,6 +511,17 @@ class Handler(SimpleHTTPRequestHandler):
             active = self.db.active_model("ensemble")
             file = (self.db.path.parent / active["path"] / name) if active else None
         if not file or not file.exists():
+            return False
+        body = file.read_bytes()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("X-NEXA-Model", active["version"])
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
+        return True
+
     def _send_static(self, path: Path, content_type: str):
         if not path.exists():
             return self._error(HTTPStatus.NOT_FOUND, "not found")
@@ -513,23 +533,6 @@ class Handler(SimpleHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(body)
         return None
-
-    def _serve_active_model(self):
-        """GET /models/best_model.onnx: the ACTIVE retrained model when one was
-        approved, else the shipped file. The ensemble files are never swapped."""
-        active = self.db.active_model()
-        path = (self.db.path.parent / active["path"]) if active else None
-        if not path or not path.exists():
-            return False
-        body = file.read_bytes()
-        self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", "application/octet-stream")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("X-NEXA-Model", active["version"])
-        self.end_headers()
-        if self.command != "HEAD":
-            self.wfile.write(body)
-        return True
 
     def _export(self, body):
         card_path = WEB / "data" / "model_card.json"

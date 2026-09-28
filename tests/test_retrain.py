@@ -5,6 +5,7 @@ import json
 import subprocess
 import sys
 import threading
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -210,19 +211,22 @@ def test_single_and_ensemble_activate_and_roll_back_independently(trained_both):
     assert db.active_model("ensemble")["version"] == ens_v          # activating single left it alone
 
     srv = serve_local.make_server(db.path, "127.0.0.1", 0)
+    db.setup_admin("chua", "chua-pass-12")                  # sign-in is always on: an admin rolls back
+    cookie = {"Cookie": f"nexa_session={db.login('chua', 'chua-pass-12')[0]}"}
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{srv.server_address[1]}"
+    get = lambda path: urllib.request.urlopen(urllib.request.Request(base + path, headers=cookie))  # noqa: E731
     try:
-        with urllib.request.urlopen(base + "/models/ensemble_2.onnx") as r:
+        with get("/models/ensemble_2.onnx") as r:
             assert r.headers["X-NEXA-Model"] == ens_v
             assert r.read() == (tmp / db.get_model(ens_v)["path"] / "ensemble_2.onnx").read_bytes()
-        health = json.loads(urllib.request.urlopen(base + "/api/health").read())
+        health = json.loads(get("/api/health").read())
         assert health["active_ensemble"] == ens_v and health["active_model"] == single_v
         req = urllib.request.Request(base + "/api/models/rollback", method="POST",
                                      data=b'{"note":"back to the submission","kind":"ensemble"}',
-                                     headers={"X-NEXA-Client": "1", "X-NEXA-Operator": "chua"})
+                                     headers={"X-NEXA-Client": "1", **cookie})
         assert json.loads(urllib.request.urlopen(req).read())["retired"] == ens_v
-        with urllib.request.urlopen(base + "/models/ensemble_2.onnx") as r:
+        with get("/models/ensemble_2.onnx") as r:
             assert r.headers.get("X-NEXA-Model") is None                # the shipped submission again
             assert r.read() == (ROOT / "web" / "models" / "ensemble_2.onnx").read_bytes()
     finally:
@@ -290,17 +294,34 @@ def test_history_shows_who_did_what_to_each_version(db):
 def test_history_and_activate_over_http(tmp_path):
     db = LocalDB(tmp_path / "nexa.db")
     _, (v,) = _fake_run(db, EAVAN, [False])
+    db.setup_admin("jessy", "jessy-pass-12")
+    db.create_user("ana", "ana-pass-123", "analyst", Actor("jessy", "admin"))
     srv = serve_local.make_server(db.path, "127.0.0.1", 0)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{srv.server_address[1]}"
-    try:
+
+    def activate(user, pw, override):
+        cookie = f"nexa_session={db.login(user, pw)[0]}"
         req = urllib.request.Request(base + f"/api/models/{v}/activate", method="POST",
                                      data=json.dumps({"note": "operational need, tested in the field",
-                                                      "override": True}).encode(),
-                                     headers={"X-NEXA-Client": "1", "X-NEXA-Operator": "jessy"})
-        assert json.loads(urllib.request.urlopen(req).read())["status"] == "active"
-        hist = json.loads(urllib.request.urlopen(base + "/api/retrain/history").read())
+                                                      "override": override}).encode(),
+                                     headers={"X-NEXA-Client": "1", "Cookie": cookie})
+        try:
+            with urllib.request.urlopen(req) as r:
+                return r.status, json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read())
+    try:
+        # an analyst may activate, but not OVERRIDE a failed exam: that is an admin's call
+        status, body = activate("ana", "ana-pass-123", True)
+        assert status == 409 and "admin role" in body["error"]
+        status, body = activate("jessy", "jessy-pass-12", True)
+        assert status == 200 and body["status"] == "active"
+        cookie = {"Cookie": f"nexa_session={db.login('jessy', 'jessy-pass-12')[0]}"}
+        hist = json.loads(urllib.request.urlopen(urllib.request.Request(
+            base + "/api/retrain/history", headers=cookie)).read())
         assert hist[0]["candidates"][0]["events"][0]["action"] == "model.override"
+        assert hist[0]["candidates"][0]["events"][0]["actor"] == "jessy"   # the SESSION names who did it
     finally:
         srv.shutdown()
         srv.server_close()
