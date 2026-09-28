@@ -239,6 +239,17 @@
   .rt-log { font-family: var(--mono); font-size: 11.5px; background: #121C27; color: #D8E0D0; border-radius: 6px; padding: 10px 12px; max-height: 18em; overflow: auto; white-space: pre-wrap; margin: 0; }
   #rtModels .up { color: #1E6B35; } #rtModels .down { color: #B3261E; }
   #rtModels details summary { cursor: pointer; list-style: none; }
+  .rt-scope { border: 1px solid var(--grid); border-radius: 6px; padding: 8px 12px; margin: 10px 0 0; }
+  .rt-scope legend { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; }
+  .rt-scope label { display: flex; gap: 8px; align-items: baseline; font-size: 13px; padding: 3px 0; }
+  .pill.neutral { background: var(--bg); color: var(--text-dim); border: 1px solid var(--grid); }
+  button.mini.warn { border-color: #D49A1F; color: #8A5A00; }
+  tr.shipped td { background: var(--brand-olive-tint); }
+  .hist-job { border: 1px solid var(--grid); border-radius: 8px; padding: 10px 12px; margin: 10px 0; }
+  .hist-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 13px; }
+  .hist-events { list-style: none; margin: 0; padding: 0; font-size: 12.5px; }
+  .hist-events li { padding: 1px 0; }
+  .bad { color: #B3261E; }
   /* The global table rule is table-layout: fixed, which suits the two-column
      panels elsewhere. Eight columns under it wrapped every cell to two or
      three lines ("Milita/r/y") and clipped the row buttons, so this table
@@ -687,16 +698,26 @@
       <h3 class="page-title">Model</h3>
       <div class="block" id="retrainBlock" hidden>
         <div class="block-label">Retraining from human feedback</div>
-        <div class="note">Approved corrections become training data. A retrain fine-tunes the <strong>single</strong>
-          model on them (mixed with original training data so it does not forget), then sits a fixed exam: the new
-          model is only allowed to replace the old one if it does not get worse on LFM_RADAR, FHSS or JAMMING, and
-          only after a second person approves it. The 5-model ensemble is never changed.</div>
+        <div class="note">Approved corrections become training data. A retrain fine-tunes the single model, and
+          optionally all 5 ensemble members, on them (mixed with original training data so they do not forget), then
+          sits a fixed exam against the version in use: a new version is only offered for activation if it does not get
+          worse on LFM_RADAR, FHSS or JAMMING, and only a second person can activate it. <strong>Every version is
+          kept</strong>, including ones that failed or were rejected, so any of them, or the shipped files, can be
+          brought back at any time.</div>
         <div id="modelTrigger"></div>
         <div class="note" id="rtActive" style="margin-top:10px;"></div>
         <label class="corr-block">Why retrain now? (required, recorded in the audit trail)
           <textarea id="rtReason" rows="2" placeholder="e.g. operators keep correcting FHSS as LFM_RADAR on the new captures"></textarea></label>
         <label class="note" id="rtOverrideRow" style="display:flex;gap:6px;align-items:center;margin-top:6px;">
           <input type="checkbox" id="rtOverride"> Override: start even though the retraining rules are not all met (recorded)</label>
+        <fieldset class="rt-scope">
+          <legend>What to retrain</legend>
+          <label><input type="radio" name="rtScope" id="rtScopeSingle" value="single" checked>
+            <span><strong>Single model</strong> · about 4 minutes on a laptop</span></label>
+          <label><input type="radio" name="rtScope" id="rtScopeBoth" value="both">
+            <span><strong>Single model + the 5-model ensemble</strong> · about 20 minutes · the ensemble is the
+            submitted model, so a new version of it is examined as a whole and needs its own approval</span></label>
+        </fieldset>
         <div class="filters" style="margin-top:8px;">
           <label class="note" for="rtOperator" style="margin:0;">Your name</label>
           <input id="rtOperator" maxlength="64" style="width:160px;">
@@ -707,8 +728,17 @@
           <div id="rtJobHead" style="font-size:13px;margin-bottom:6px;"></div>
           <pre class="rt-log" id="rtLog"></pre>
         </div>
-        <div class="block-label" style="margin-top:14px;">Model versions</div>
+        <div class="block-label" style="margin-top:14px;">Model versions (all kept)</div>
         <div class="table-wrap" id="rtModels"></div>
+      </div>
+
+      <div class="block" id="historyBlock" hidden>
+        <div class="block-label">Fine-tuning history</div>
+        <div class="note">Every retrain, newest first: when and by whom it was started and why, which models it
+          fine-tuned and from what, whether it passed its exam, and every decision taken since (approved, rejected,
+          restored, activated by override, rolled back), by whom and when. The same events are in the audit trail
+          on the History page, where Verify integrity proves none were edited.</div>
+        <div id="rtHistory"></div>
       </div>
       <div id="modelCardBox"></div>
     </section>

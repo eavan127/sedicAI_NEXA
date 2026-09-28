@@ -196,7 +196,16 @@ BEGIN SELECT RAISE(ABORT, 'what a human said in a correction cannot be edited');
 MIGRATIONS = [
     ("corrections", "iq_path", "TEXT"),
     ("corrections", "iq_sha256", "TEXT"),
+    # A retrain can now update the single model or the single model AND the
+    # 5-model ensemble; each model version says which it is. Rows written
+    # before this were single-model versions, hence the default.
+    ("models", "kind", "TEXT NOT NULL DEFAULT 'single'"),
+    ("jobs", "scope", "TEXT NOT NULL DEFAULT 'single'"),
 ]
+
+MODEL_KINDS = ("single", "ensemble")
+RETRAIN_SCOPES = ("single", "both")
+SHIPPED = {"single": "shipped best_model.pt", "ensemble": "shipped 5-model ensemble (the submission)"}
 
 
 def now_iso() -> str:
@@ -618,7 +627,7 @@ class LocalDB:
         d["override"] = bool(d["override"])
         return d
 
-    def start_retrain(self, reason: str, override: bool, actor: Actor) -> dict:
+    def start_retrain(self, reason: str, override: bool, actor: Actor, scope: str = "single") -> dict:
         """Queue a retrain. A named person starts it, with a reason. When the
         trigger's rules are not all met, it takes an explicit override (logged
         with the rule status at that moment) -- an expert may order an urgent
@@ -628,6 +637,8 @@ class LocalDB:
         reason = str(reason or "").strip()
         if len(reason) < 5:
             raise ValueError("say why you are retraining (at least a few words)")
+        if scope not in RETRAIN_SCOPES:
+            raise ValueError("scope must be 'single' or 'both'")
         status = self.retrain_status()
         if not status["recommended"] and not override:
             raise PermissionError("The retraining rules are not all met. Tick 'override' to start anyway; "
@@ -637,11 +648,11 @@ class LocalDB:
             if busy:
                 raise PermissionError(f"A retrain is already running (job {busy['id'][:8]}).")
             job = {"id": str(uuid.uuid4()), "created_at": now_iso(), "started_by": actor.name,
-                   "reason": reason, "override": 1 if override else 0}
-            con.execute("INSERT INTO jobs (id, created_at, started_by, reason, override) VALUES "
-                        "(:id, :created_at, :started_by, :reason, :override)", job)
+                   "reason": reason, "override": 1 if override else 0, "scope": scope}
+            con.execute("INSERT INTO jobs (id, created_at, started_by, reason, override, scope) VALUES "
+                        "(:id, :created_at, :started_by, :reason, :override, :scope)", job)
             self._append_audit(con, actor, "retrain.start", "job", job["id"], {
-                "reason": reason, "override": bool(override),
+                "reason": reason, "override": bool(override), "scope": scope,
                 "rules_met": {c["id"]: c["met"] for c in status["conditions"]},
                 "correction_rate": round(status["rate"], 4),
             })
@@ -666,23 +677,30 @@ class LocalDB:
             con.execute(f"UPDATE jobs SET {', '.join(f'{k} = :{k}' for k in sets)} WHERE id = :id",
                         {**sets, "id": job_id})
 
-    def finish_job(self, job_id: str, ok: bool, result: dict, candidate: dict | None = None) -> None:
-        """Called by the training script. A successful run registers its model
-        as a CANDIDATE: nothing replaces the running model until a second
-        person approves it."""
+    def finish_job(self, job_id: str, ok: bool, result: dict, candidate: dict | None = None,
+                   candidates: list | None = None) -> None:
+        """Called by the training script. A successful run registers its
+        model(s) -- the single model, and the ensemble when the job's scope
+        included it -- as CANDIDATES: nothing replaces a running model until
+        a second person approves it."""
+        cands = list(candidates or []) + ([candidate] if candidate else [])
         with self._write() as con:
-            if candidate:
+            for c in cands:
+                kind = c.get("kind", "single")
+                if kind not in MODEL_KINDS:
+                    raise ValueError(f"unknown model kind {kind}")
                 con.execute(
-                    "INSERT INTO models (version, created_at, path, source, metrics, status, notes)"
-                    " VALUES (?, ?, ?, ?, ?, 'candidate', ?)",
-                    (candidate["version"], now_iso(), candidate["path"], json.dumps(candidate["source"]),
-                     json.dumps(candidate["metrics"]), candidate.get("notes", "")))
+                    "INSERT INTO models (version, created_at, path, source, metrics, status, notes, kind)"
+                    " VALUES (?, ?, ?, ?, ?, 'candidate', ?, ?)",
+                    (c["version"], now_iso(), c["path"], json.dumps(c["source"]),
+                     json.dumps(c["metrics"]), c.get("notes", ""), kind))
             con.execute("UPDATE jobs SET status = ?, finished_at = ?, result = ?, model_version = ?"
                         " WHERE id = ?", ("succeeded" if ok else "failed", now_iso(), json.dumps(result),
-                                          candidate["version"] if candidate else None, job_id))
+                                          ",".join(c["version"] for c in cands) or None, job_id))
             self._append_audit(con, SYSTEM, "retrain.finish" if ok else "retrain.fail", "job", job_id, {
-                "candidate": candidate["version"] if candidate else None,
-                "gate_passed": (candidate or {}).get("metrics", {}).get("gate", {}).get("passed"),
+                "candidates": {c["version"]: {"kind": c.get("kind", "single"),
+                                              "gate_passed": c.get("metrics", {}).get("gate", {}).get("passed")}
+                               for c in cands},
                 "error": result.get("error"),
             })
 
@@ -697,20 +715,43 @@ class LocalDB:
         with closing(self._connect()) as con:
             return [self._model_row(r) for r in con.execute("SELECT * FROM models ORDER BY created_at DESC")]
 
-    def active_model(self) -> dict | None:
+    def active_model(self, kind: str = "single") -> dict | None:
+        """The approved retrained version of `kind` in use, or None when the
+        shipped files are (best_model.pt / the submitted ensemble)."""
         with closing(self._connect()) as con:
-            row = con.execute("SELECT * FROM models WHERE status = 'active'").fetchone()
+            row = con.execute("SELECT * FROM models WHERE status = 'active' AND kind = ?", (kind,)).fetchone()
         return self._model_row(row) if row else None
 
+    def _started_by(self, con, m: dict) -> str | None:
+        job_id = m["source"].get("job_id") if isinstance(m["source"], dict) else None
+        row = con.execute("SELECT started_by FROM jobs WHERE id = ?", (job_id,)).fetchone() if job_id else None
+        return row["started_by"] if row else None
+
     def review_model(self, version: str, decision: str, note: str, actor: Actor) -> dict:
-        """Approve (and activate) or reject a candidate. Four-eyes: not the
-        person who started the retrain. Only a candidate that PASSED its gate
-        can be activated -- no override for that one."""
+        """Approve (= activate) or reject a candidate. Four-eyes: not the person
+        who started the retrain. A candidate that FAILED its gate is refused
+        here; activating one anyway is activate_model(..., override=True)."""
         if decision not in ("approve", "reject"):
             raise ValueError("decision must be 'approve' or 'reject'")
+        if decision == "approve":
+            m = self.get_model(version)
+            if m:                                   # who is asking comes before what they ask
+                with closing(self._connect()) as con:
+                    starter = self._started_by(con, m)
+                if starter and starter.lower() == actor.name.lower():
+                    raise PermissionError("Four-eyes rule: the model must be approved by someone other "
+                                          "than the person who started the retrain.")
+            if m and m["status"] != "candidate":
+                raise PermissionError(f"{version} is {m['status']}, not a candidate")
+            if m and not m["metrics"].get("gate", {}).get("passed"):
+                raise PermissionError("This candidate failed its gate and cannot be activated "
+                                      "without an override.")
+            return self.activate_model(version, note, actor)
         if actor.name.lower() == "operator":
             raise PermissionError("Set your name before reviewing a model.")
         note = str(note or "").strip()
+        if len(note) < 3:
+            raise ValueError("say why it is rejected")
         with self._write() as con:
             row = con.execute("SELECT * FROM models WHERE version = ?", (version,)).fetchone()
             if not row:
@@ -718,40 +759,123 @@ class LocalDB:
             m = self._model_row(row)
             if m["status"] != "candidate":
                 raise PermissionError(f"{version} is {m['status']}, not a candidate")
-            job = con.execute("SELECT started_by FROM jobs WHERE model_version = ?", (version,)).fetchone()
-            if job and job["started_by"].lower() == actor.name.lower():
-                raise PermissionError("Four-eyes rule: the model must be approved by someone other "
+            starter = self._started_by(con, m)
+            if starter and starter.lower() == actor.name.lower():
+                raise PermissionError("Four-eyes rule: the model must be reviewed by someone other "
                                       "than the person who started the retrain.")
-            if decision == "approve" and not m["metrics"].get("gate", {}).get("passed"):
-                raise PermissionError("This candidate failed its gate and cannot be activated.")
-            if decision == "reject" and len(note) < 3:
-                raise ValueError("say why it is rejected")
-            if decision == "approve":
-                con.execute("UPDATE models SET status = 'retired' WHERE status = 'active'")
-                con.execute("UPDATE models SET status = 'active', approved_by = ?, approved_at = ?, notes = ?"
-                            " WHERE version = ?", (actor.name, now_iso(), note or m.get("notes"), version))
-            else:
-                con.execute("UPDATE models SET status = 'rejected', approved_by = ?, approved_at = ?, notes = ?"
-                            " WHERE version = ?", (actor.name, now_iso(), note, version))
-            self._append_audit(con, actor, f"model.{decision}", "model", version, {"note": note})
+            # Rejected is a verdict, not a deletion: the files and this row stay,
+            # and the version can still be activated later with an override.
+            con.execute("UPDATE models SET status = 'rejected', approved_by = ?, approved_at = ?, notes = ?"
+                        " WHERE version = ?", (actor.name, now_iso(), note, version))
+            self._append_audit(con, actor, "model.reject", "model", version,
+                               {"note": note, "kind": m["kind"]})
         return self.get_model(version)
+
+    def activate_model(self, version: str, note: str, actor: Actor, override: bool = False) -> dict:
+        """Make any SAVED version the one in use: a new candidate, a version used
+        before (restore), or -- with an override -- one that failed its gate or
+        was rejected. Nothing is ever deleted, so every version stays available.
+
+          candidate that passed its gate   -> model.approve
+          retired (was in use before)      -> model.restore    (reason required)
+          failed its gate, or rejected     -> model.override   (override + a real reason)
+
+        Always four-eyes (not the person who started that retrain) and always
+        one active version per kind: activating a single model never touches
+        the ensemble, and vice versa."""
+        if actor.name.lower() == "operator":
+            raise PermissionError("Set your name before activating a model.")
+        note = str(note or "").strip()
+        with self._write() as con:
+            row = con.execute("SELECT * FROM models WHERE version = ?", (version,)).fetchone()
+            if not row:
+                raise ValueError("no such model")
+            m = self._model_row(row)
+            if m["status"] == "active":
+                raise PermissionError(f"{version} is already in use")
+            starter = self._started_by(con, m)
+            if starter and starter.lower() == actor.name.lower():
+                raise PermissionError("Four-eyes rule: the model must be activated by someone other "
+                                      "than the person who started the retrain.")
+            gate_passed = bool(m["metrics"].get("gate", {}).get("passed"))
+            if not gate_passed or m["status"] == "rejected":
+                why = "failed its gate" if not gate_passed else "was rejected"
+                if not override:
+                    raise PermissionError(f"{version} {why}. Activating it needs an override and a reason.")
+                if len(note) < 10:
+                    raise ValueError("an override needs a real reason (at least 10 characters)")
+                action = "model.override"
+            elif m["status"] == "retired":
+                if len(note) < 3:
+                    raise ValueError("say why you are restoring this version")
+                action = "model.restore"
+            else:
+                action = "model.approve"
+            prev = con.execute("SELECT version FROM models WHERE status = 'active' AND kind = ?",
+                               (m["kind"],)).fetchone()
+            con.execute("UPDATE models SET status = 'retired' WHERE status = 'active' AND kind = ?",
+                        (m["kind"],))
+            con.execute("UPDATE models SET status = 'active', approved_by = ?, approved_at = ?, notes = ?"
+                        " WHERE version = ?", (actor.name, now_iso(), note or m.get("notes"), version))
+            self._append_audit(con, actor, action, "model", version, {
+                "note": note, "kind": m["kind"], "gate_passed": gate_passed,
+                "replaced": prev["version"] if prev else SHIPPED[m["kind"]],
+            })
+        return self.get_model(version)
+
+    def retrain_history(self, limit: int = 50) -> list[dict]:
+        """Every retrain, newest first, with what it fine-tuned, whether it
+        worked, and every decision taken on the versions it produced -- the
+        record an auditor reads: who, when, which model, from what, verdict."""
+        models = {m["version"]: m for m in self.list_models()}
+        events: dict[str, list] = {}
+        for e in reversed(self.audit(limit=100000)):
+            if e["action"].startswith("model.") and e.get("target_id"):
+                events.setdefault(e["target_id"], []).append(
+                    {"ts": e["ts"], "actor": e["actor"], "action": e["action"],
+                     "note": e["details"].get("note", ""), "replaced": e["details"].get("replaced"),
+                     "seq": e["seq"]})
+        out = []
+        for job in self.list_jobs(limit):
+            versions = [v for v in (job.get("model_version") or "").split(",") if v]
+            cands = []
+            for v in versions:
+                m = models.get(v)
+                if not m:
+                    continue
+                g = m["metrics"].get("gate", {})
+                cands.append({
+                    "version": v, "kind": m["kind"], "status": m["status"],
+                    "base": m["metrics"].get("base"), "gate_passed": g.get("passed"),
+                    "exam": g.get("kind"), "before": g.get("before"), "after": g.get("after"),
+                    "corrections": len(m["metrics"].get("train", {}).get("corrections_used", [])),
+                    "seconds": m["metrics"].get("train", {}).get("seconds"),
+                    "events": events.get(v, []),
+                })
+            out.append({**job, "candidates": cands})
+        return out
 
     def get_model(self, version: str) -> dict | None:
         with closing(self._connect()) as con:
             row = con.execute("SELECT * FROM models WHERE version = ?", (version,)).fetchone()
         return self._model_row(row) if row else None
 
-    def rollback_model(self, note: str, actor: Actor) -> str | None:
-        """Stop using the active retrained model: back to the shipped one."""
+    def rollback_model(self, note: str, actor: Actor, kind: str = "single") -> str | None:
+        """Stop using the active retrained version of `kind`: back to the
+        shipped files. The shipped ensemble (the submission) is never
+        modified, so this always restores it exactly."""
         if actor.name.lower() == "operator":
             raise PermissionError("Set your name before rolling back.")
+        if kind not in MODEL_KINDS:
+            raise ValueError("kind must be 'single' or 'ensemble'")
         with self._write() as con:
-            row = con.execute("SELECT version FROM models WHERE status = 'active'").fetchone()
+            row = con.execute("SELECT version FROM models WHERE status = 'active' AND kind = ?",
+                              (kind,)).fetchone()
             if not row:
-                raise ValueError("already on the shipped model; nothing to roll back")
+                raise ValueError(f"already on the {SHIPPED[kind]}; nothing to roll back")
             con.execute("UPDATE models SET status = 'retired' WHERE version = ?", (row["version"],))
             self._append_audit(con, actor, "model.rollback", "model", row["version"],
-                               {"note": str(note or "").strip(), "now_using": "shipped best_model.pt"})
+                               {"note": str(note or "").strip(), "kind": kind, "now_using": SHIPPED[kind]})
         return row["version"]
 
     def log(self, actor: Actor, action: str, target_type=None, target_id=None, details=None) -> dict:

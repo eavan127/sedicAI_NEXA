@@ -93,19 +93,28 @@ second person.
    bundle), edit the classification banner, then **⭳ Build report**.
 
 **F. Retrain (Model page)**
-1. Type your name and a reason. Tick **Override** (a small demo never meets
-   the 100-capture rule), then **▶ Start retraining**.
-2. Watch the log. When it finishes, **Model versions** shows before and after
-   for each judged class and the gate result.
-3. As the *other* person: **✔ Approve & activate** (only possible when the
-   gate PASSED), or **✖ Reject**.
-4. On RF Replay, Model becomes **Single, retrained ft-…**. Analyses now use
-   it, and the saved record names the version.
-5. **↺ Roll back to shipped model** returns to `best_model.pt`.
+1. Type your name and a reason. Choose **Single model** (about 4 min) or
+   **Single model + the 5-model ensemble** (about 20 min; about 2 min with
+   `--quick-retrain`). Tick **Override** (a small demo never meets the
+   100-capture rule), then **▶ Start retraining**.
+2. Watch the log. When it finishes, **Model versions (all kept)** lists each
+   new version with before and after recall for each judged class and its exam
+   result (PASSED / FAILED).
+3. As the *other* person: **✔ Approve & activate** a version that passed, or
+   **✖ Reject** it. A version that failed or was rejected can still be used via
+   **⚠ Activate anyway…**, which needs a reason of at least 10 characters and is
+   logged as an OVERRIDE.
+4. On RF Replay the Model dropdown names what is running (e.g. **Ensemble (5
+   models), retrained ens-…**). Every saved result records that version.
+5. **↺ Restore** brings back any version used before; **↺ Use shipped**
+   returns the single model or the ensemble to the shipped files.
+6. **Fine-tuning history** (bottom of the Model page) shows every retrain: who
+   started it and why, what it fine-tuned from, the exam result, and every
+   approve / reject / restore / override / roll back with who and when.
 
-A candidate that FAILS its gate cannot be activated. That is the safety net
-working, not a bug: on the real test split, one or two corrections are rarely
-enough to improve every class at once.
+Nothing is ever deleted: every version stays in `data\local\models\`, and the
+shipped `results\*.pt` and `web\models\*.onnx` are never overwritten, so the
+submitted ensemble can always be restored exactly.
 
 ## 4. Rules the system enforces
 
@@ -116,8 +125,9 @@ enough to improve every class at once.
   any edit or deletion made directly in the database file.
 - Retraining is started by a named person with a reason. Starting it when the
   rules are not met needs an explicit, logged override.
-- A retrained model replaces nothing until it passes the gate *and* a second
-  person approves it. The 5-model ensemble is never changed.
+- A retrained model replaces nothing until a second person activates it. A
+  version that failed its exam or was rejected needs an explicit, logged
+  override. Every version is kept; any can be restored.
 - Every report export is logged with the SHA-256 of the file that was handed
   out.
 

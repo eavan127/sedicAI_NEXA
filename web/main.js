@@ -19,7 +19,7 @@ import { initAssistant, openChatLog } from "./chatbot.js";
 import { isAvailable as ollamaAvailable, rewrite as ollamaRewrite, warmUp as ollamaWarmUp } from "./ollama.js";
 import {
   attachCapture, buildRecord, canDelete, correctionStats, deleteAnalysis, detectServer, exportReport, retrainStatus,
-  getJob, listJobs, listModels, reviewModel, rollbackModel, startRetrain,
+  activateModel, getJob, listJobs, listModels, retrainHistory, reviewModel, rollbackModel, startRetrain,
   listAnalyses, listAudit, listCorrections, logEvent, operatorName, readConfig, reviewCorrection,
   saveAnalysis, setOperatorName, submitCorrection, supportsCorrections, usingSupabase, verifyAudit,
 } from "./storage.js";
@@ -92,7 +92,9 @@ async function init() {
     // card is loaded up front rather than lazily on the Model page.
     modelCard = await (await fetch("./data/model_card.json")).json();
     await getModel("ensemble");
-    detectServer().then(info => labelSingleOption(info?.active_model ? { version: info.active_model } : null));
+    detectServer().then(info => labelModelOptions(
+      info?.active_model ? { version: info.active_model } : null,
+      info?.active_ensemble ? { version: info.active_ensemble } : null));
     statusEl.textContent = "Ready. Synthesize a scenario, or select a capture file.";
     synthBtn.disabled = false;
     uploadBtn.disabled = false;
@@ -104,9 +106,12 @@ async function init() {
 
 // The retrained single model the server is serving, if one was approved.
 let activeSingleVersion = null;
+let activeEnsembleVersion = null;
 
 function modelLabel(which) {
-  if (which === "ensemble") return "5-model ensemble average";
+  if (which === "ensemble") {
+    return activeEnsembleVersion ? `5-model ensemble, retrained ${activeEnsembleVersion}` : "5-model ensemble average";
+  }
   return activeSingleVersion ? `single checkpoint, retrained ${activeSingleVersion}` : "single checkpoint, best_model.pt";
 }
 
@@ -886,6 +891,7 @@ async function store(file, sess = session) {
     // Which model produced it, down to the retrained version: a result that
     // cannot be traced to its model cannot be trusted or re-checked later.
     if (sess.which === "single" && activeSingleVersion) record.model = `single:${activeSingleVersion}`;
+    if (sess.which === "ensemble" && activeEnsembleVersion) record.model = `ensemble:${activeEnsembleVersion}`;
     const { record: saved, backend, warning } = await saveAnalysis(record, file);
     sess.record = saved;
     sess.recordBackend = backend;
@@ -1035,11 +1041,15 @@ const rtModels = el("rtModels"), rtActive = el("rtActive");
 let rtPolling = null;
 const escH = t => String(t ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
-/** The "Single" option names the model it will actually run. */
-function labelSingleOption(active) {
-  activeSingleVersion = active ? active.version : null;
-  const opt = modelSel.querySelector('option[value="single"]');
-  if (opt) opt.textContent = active ? `Single, retrained ${active.version}` : "Single, best_model.pt";
+/** The Model dropdown names the files it will actually run: a retrained
+ *  version when one is active, the shipped files otherwise. */
+function labelModelOptions(single, ensemble) {
+  activeSingleVersion = single ? single.version : null;
+  activeEnsembleVersion = ensemble ? ensemble.version : null;
+  const s = modelSel.querySelector('option[value="single"]');
+  if (s) s.textContent = single ? `Single, retrained ${single.version}` : "Single, best_model.pt";
+  const e = modelSel.querySelector('option[value="ensemble"]');
+  if (e) e.textContent = ensemble ? `Ensemble (5 models), retrained ${ensemble.version}` : "Ensemble (5 models)";
 }
 
 function recallCell(m, cls) {
@@ -1050,49 +1060,127 @@ function recallCell(m, cls) {
   return `${(b * 100).toFixed(1)} → <strong>${(a * 100).toFixed(1)}</strong> <span class="${d < -0.05 ? "down" : d > 0.05 ? "up" : ""}">(${d >= 0 ? "+" : ""}${d.toFixed(1)})</span>`;
 }
 
+const MODEL_KIND_LABEL = { single: "Single", ensemble: "Ensemble ×5" };
+const STATUS_TEXT = { active: "in use", candidate: "waiting for approval", retired: "saved (used before)", rejected: "saved (rejected)" };
+
+/** What can be done with a saved version, and how it is labelled. Every
+ *  version stays on disk forever, so every one of them has a way back. */
+function versionActions(m) {
+  const v = escH(m.version), passed = !!m.metrics?.gate?.passed;
+  if (m.status === "active") return "";
+  if (m.status === "candidate") {
+    return (passed ? `<button class="mini" data-act="approve" data-v="${v}">✔ Approve &amp; activate</button> `
+      : `<button class="mini warn" data-act="override" data-v="${v}">⚠ Activate anyway…</button> `)
+      + `<button class="mini" data-act="reject" data-v="${v}">✖ Reject</button>`;
+  }
+  if (m.status === "retired" && passed) return `<button class="mini" data-act="restore" data-v="${v}">↺ Restore</button>`;
+  return `<button class="mini warn" data-act="override" data-v="${v}">⚠ Activate anyway…</button>`;
+}
+
 async function renderRetrain() {
   const block = el("retrainBlock");
   await detectServer();
-  if (readConfig().backend !== "server") { block.hidden = true; return; }
+  if (readConfig().backend !== "server") { block.hidden = true; el("historyBlock").hidden = true; return; }
   block.hidden = false;
+  el("historyBlock").hidden = false;
   rtOperator.value = operatorName();
   const st = await renderTrigger(el("modelTrigger"));
   el("rtOverrideRow").hidden = !!st?.recommended;
   try {
     const [models, jobs] = await Promise.all([listModels(), listJobs()]);
-    const active = models.find(m => m.status === "active") || null;
-    labelSingleOption(active);
-    rtActive.innerHTML = active
-      ? `Single model in use: <strong>${escH(active.version)}</strong> (retrained, approved by ${escH(active.approved_by)}). `
-        + `<button class="mini" id="rtRollback">↺ Roll back to shipped model</button>`
-      : "Single model in use: <strong>shipped best_model.pt</strong>. The 5-model ensemble (the competition submission) is never changed by retraining.";
-    rtModels.innerHTML = models.length ? `<table><thead><tr><th>Version</th><th>Trained on</th><th>Exam</th>`
-      + `<th>LFM_RADAR</th><th>FHSS</th><th>JAMMING</th><th>Noise false alarms</th><th>Gate</th><th>Status</th><th></th></tr></thead><tbody>`
+    const single = models.find(m => m.status === "active" && m.kind === "single") || null;
+    const ensemble = models.find(m => m.status === "active" && m.kind === "ensemble") || null;
+    labelModelOptions(single, ensemble);
+    const inUse = (m, shipped) => m
+      ? `<strong>${escH(m.version)}</strong> (retrained, activated by ${escH(m.approved_by)})`
+      : `<strong>${shipped}</strong>`;
+    rtActive.innerHTML = `In use now: single model ${inUse(single, "shipped best_model.pt")} · `
+      + `ensemble ${inUse(ensemble, "shipped 5-model submission")}.`;
+
+    // The two shipped baselines head the table: they are versions too, and
+    // "use shipped" is always one click away.
+    const shippedRow = (kind, name, active) =>
+      `<tr class="shipped"><td><strong>${name}</strong><div class="note">shipped with the app, never modified</div></td>`
+      + `<td>${MODEL_KIND_LABEL[kind]}</td><td colspan="6"><span class="note">the version every retrain is measured against first</span></td>`
+      + `<td><span class="pill ${active ? "approved" : "neutral"}">${active ? "in use" : "saved"}</span></td>`
+      + `<td class="row-actions">${active ? "" : `<button class="mini" data-act="shipped" data-kind="${kind}">↺ Use shipped</button>`}</td></tr>`;
+
+    rtModels.innerHTML = `<table><thead><tr><th>Version</th><th>Type</th><th>Fine-tuned from · data</th><th>Exam</th>`
+      + `<th>LFM_RADAR</th><th>FHSS</th><th>JAMMING</th><th>Gate</th><th>Status</th><th></th></tr></thead><tbody>`
+      + shippedRow("ensemble", "Submission ensemble", !ensemble) + shippedRow("single", "best_model.pt", !single)
       + models.map(m => {
         const g = m.metrics?.gate || {}, tr = m.metrics?.train || {};
-        const fa = g.before?.noise_false_alarm != null
-          ? `${(g.before.noise_false_alarm * 100).toFixed(1)} → <strong>${(g.after.noise_false_alarm * 100).toFixed(1)}</strong>` : "—";
         const rules = (g.rules || []).map(r => `<li class="${r.met ? "met" : "unmet"}"><span>${r.met ? "✔" : "✖"}</span> ${escH(r.text)}</li>`).join("");
-        const actions = m.status === "candidate"
-          ? (g.passed ? `<button class="mini" data-model="approve" data-v="${escH(m.version)}">✔ Approve &amp; activate</button> ` : "")
-            + `<button class="mini" data-model="reject" data-v="${escH(m.version)}">✖ Reject</button>` : "";
+        const fa = g.before?.noise_false_alarm != null
+          ? `<li>False alarms on pure noise: ${(g.before.noise_false_alarm * 100).toFixed(1)} → ${(g.after.noise_false_alarm * 100).toFixed(1)}%</li>` : "";
         return `<tr><td><strong>${escH(m.version)}</strong><div class="note">${escH(new Date(m.created_at).toLocaleString())}</div></td>`
-          + `<td>${(tr.corrections_used || []).length} corrections (${tr.correction_windows} windows) + ${tr.replay_windows} replay`
-          + `<div class="note">${tr.epochs} epoch(s), ${tr.seconds} s</div></td>`
+          + `<td>${MODEL_KIND_LABEL[m.kind] || m.kind}</td>`
+          + `<td>${escH(m.metrics?.base || "?")}<div class="note">${(tr.corrections_used || []).length} corrections + ${tr.replay_windows ?? "?"} replay · ${tr.seconds ?? "?"} s</div></td>`
           + `<td><span class="pill ${g.kind === "dataset" ? "approved" : "pending"}">${g.kind === "dataset" ? "real test split" : "synthetic"}</span></td>`
-          + `<td>${recallCell(m, "LFM_RADAR")}</td><td>${recallCell(m, "FHSS")}</td><td>${recallCell(m, "JAMMING")}</td><td>${fa}</td>`
+          + `<td>${recallCell(m, "LFM_RADAR")}</td><td>${recallCell(m, "FHSS")}</td><td>${recallCell(m, "JAMMING")}</td>`
           + `<td><details><summary><span class="pill ${g.passed ? "approved" : "rejected"}">${g.passed ? "PASSED" : "FAILED"}</span></summary>`
-          + `<ul class="checklist">${rules}</ul><div class="note">${escH(g.set || "")}</div></details></td>`
-          + `<td><span class="pill ${m.status === "active" ? "approved" : m.status === "candidate" ? "pending" : "rejected"}">${m.status}</span>`
-          + (m.approved_by ? `<div class="note">by ${escH(m.approved_by)}</div>` : "") + `</td>`
-          + `<td class="row-actions">${actions}</td></tr>`;
+          + `<ul class="checklist">${rules}${fa}</ul><div class="note">${escH(g.set || "")}</div></details></td>`
+          + `<td><span class="pill ${m.status === "active" ? "approved" : m.status === "candidate" ? "pending" : "neutral"}">${STATUS_TEXT[m.status] || m.status}</span>`
+          + (m.approved_by ? `<div class="note">${m.status === "rejected" ? "rejected" : "activated"} by ${escH(m.approved_by)}</div>` : "")
+          + `</td><td class="row-actions">${versionActions(m)}</td></tr>`;
       }).join("") + `</tbody></table>`
-      : `<div class="note">No retrained versions yet.</div>`;
+      + (models.length ? "" : `<div class="note" style="margin-top:6px;">No retrained versions yet.</div>`);
+
     const running = jobs.find(j => j.status === "queued" || j.status === "running");
     if (running && !rtPolling) pollJob(running.id);
     else if (!running && jobs[0] && !rtPolling) showJob(await getJob(jobs[0].id));
+    renderFineTuneHistory();
   } catch (e) {
     rtModels.textContent = `Could not read model versions: ${e.message}`;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Fine-tuning history: who retrained what, when, why, and every verdict since
+// ---------------------------------------------------------------------------
+
+const EVENT_TEXT = {
+  "model.approve": "approved & activated", "model.reject": "rejected", "model.restore": "restored",
+  "model.override": "activated by OVERRIDE", "model.rollback": "rolled back",
+};
+
+async function renderFineTuneHistory() {
+  const box = el("rtHistory");
+  try {
+    const hist = await retrainHistory();
+    if (!hist.length) { box.innerHTML = `<div class="note">No retraining has been run yet.</div>`; return; }
+    box.innerHTML = hist.map(j => {
+      const when = new Date(j.created_at).toLocaleString();
+      const took = j.finished_at ? Math.round((new Date(j.finished_at) - new Date(j.created_at)) / 1000) : null;
+      const state = { queued: "queued", running: "running", succeeded: "succeeded", failed: "FAILED" }[j.status];
+      const head = `<div class="hist-head"><span class="pill ${j.status === "failed" ? "rejected" : j.status === "succeeded" ? "approved" : "pending"}">${state}</span>`
+        + `<strong>${escH(when)}</strong> · started by <strong>${escH(j.started_by)}</strong>`
+        + ` · ${j.scope === "both" ? "single + ensemble" : "single model"}`
+        + (j.override ? ` · <span class="pill rejected">override</span>` : "")
+        + (took != null ? ` · ${Math.floor(took / 60)} min ${took % 60} s` : "") + `</div>`
+        + `<div class="note">Reason: “${escH(j.reason)}”${j.result?.error ? ` · <span class="bad">error: ${escH(j.result.error)}</span>` : ""}</div>`;
+      const rows = j.candidates.map(c => {
+        const judged = ["LFM_RADAR", "FHSS", "JAMMING"].map(k => {
+          const b = c.before?.recall?.[k], a = c.after?.recall?.[k];
+          return b == null ? "" : `${k} ${(b * 100).toFixed(1)}→${(a * 100).toFixed(1)}`;
+        }).filter(Boolean).join(" · ");
+        const events = c.events.length
+          ? c.events.map(e => `<li><strong>${escH(e.actor)}</strong> ${EVENT_TEXT[e.action] || e.action} · ${escH(new Date(e.ts).toLocaleString())}`
+            + (e.note ? ` · “${escH(e.note)}”` : "") + (e.replaced ? ` <span class="note">(replaced ${escH(e.replaced)})</span>` : "") + `</li>`).join("")
+          : `<li class="note">no decision yet</li>`;
+        return `<tr><td><strong>${escH(c.version)}</strong><div class="note">${MODEL_KIND_LABEL[c.kind] || c.kind}</div></td>`
+          + `<td>${escH(c.base || "?")}<div class="note">${c.corrections} corrections · ${c.exam === "dataset" ? "real test split" : "synthetic exam"}</div></td>`
+          + `<td><span class="pill ${c.gate_passed ? "approved" : "rejected"}">${c.gate_passed ? "PASSED" : "FAILED"}</span><div class="note">${judged}</div></td>`
+          + `<td><ul class="hist-events">${events}</ul></td>`
+          + `<td><span class="pill ${c.status === "active" ? "approved" : c.status === "candidate" ? "pending" : "neutral"}">${STATUS_TEXT[c.status] || c.status}</span></td></tr>`;
+      }).join("");
+      return `<div class="hist-job">${head}`
+        + (rows ? `<div class="table-wrap"><table><thead><tr><th>Version</th><th>Fine-tuned from</th><th>Exam</th>`
+          + `<th>Decisions (who · when · note)</th><th>Now</th></tr></thead><tbody>${rows}</tbody></table></div>`
+          : `<div class="note">No model was produced.</div>`) + `</div>`;
+    }).join("");
+  } catch (e) {
+    box.textContent = `Could not read the fine-tuning history: ${e.message}`;
   }
 }
 
@@ -1100,11 +1188,12 @@ function showJob(job) {
   rtJob.hidden = false;
   const state = { queued: "QUEUED", running: "RUNNING", succeeded: "FINISHED", failed: "FAILED" }[job.status];
   rtJobHead.innerHTML = `<span class="pill ${job.status === "failed" ? "rejected" : job.status === "succeeded" ? "approved" : "pending"}">${state}</span> `
-    + `Retrain started by <strong>${escH(job.started_by)}</strong>${job.override ? " (override)" : ""}: “${escH(job.reason)}”`
-    + (job.model_version ? ` → candidate <strong>${escH(job.model_version)}</strong>` : "");
+    + `Retrain (${job.scope === "both" ? "single + ensemble" : "single model"}) started by <strong>${escH(job.started_by)}</strong>`
+    + `${job.override ? " (override)" : ""}: “${escH(job.reason)}”`
+    + (job.model_version ? ` → candidates <strong>${escH(job.model_version.split(",").join(", "))}</strong>` : "");
   // Library chatter (export progress, warnings) hidden; the run's own lines stay.
   rtLog.textContent = (job.log || "").replace(
-    /^.*(torchvision|UserWarning|Warning:|torch\.onnx|\[torch\.onnx\]|return cls|rename_mapping|warnings\.warn).*$\n?/gm, "");
+    /^.*(torchvision|UserWarning|Warning:|torch\.onnx|\[torch\.onnx\]|return cls|rename_mapping|warnings\.warn|== .*\.pt -> .*\.onnx ==|exported \(|batch=\d+ seed=).*$\n?/gm, "");
   rtLog.scrollTop = rtLog.scrollHeight;
 }
 
@@ -1123,17 +1212,20 @@ function pollJob(id) {
       }
     } catch (e) { rtMsg.textContent = e.message; }
   };
-  rtPolling = setInterval(tick, 2000);
+  rtPolling = setInterval(tick, 3000);
   tick();
 }
 
 el("rtStart").addEventListener("click", async () => {
   setOperatorName(rtOperator.value);
+  const scope = document.querySelector("input[name=rtScope]:checked")?.value || "single";
   rtMsg.textContent = "Checking the training packages and starting…";
   el("rtStart").disabled = true;
   try {
-    const job = await startRetrain(rtReason.value, rtOverride.checked);
-    rtMsg.textContent = "Retraining started. It runs in the background; this panel follows it.";
+    const job = await startRetrain(rtReason.value, rtOverride.checked, scope);
+    rtMsg.textContent = scope === "both"
+      ? "Retraining the single model and all 5 ensemble members (about 20 min). This panel follows it; you can keep using the app."
+      : "Retraining the single model (about 4 min). This panel follows it.";
     rtReason.value = "";
     rtOverride.checked = false;
     pollJob(job.id);
@@ -1144,28 +1236,45 @@ el("rtStart").addEventListener("click", async () => {
 });
 
 el("retrainBlock").addEventListener("click", async (ev) => {
-  const btn = ev.target.closest("button[data-model], #rtRollback");
+  const btn = ev.target.closest("button[data-act]");
   if (!btn) return;
   setOperatorName(rtOperator.value);
   rtMsg.textContent = "";
+  const v = btn.dataset.v, act = btn.dataset.act, me = operatorName();
   try {
-    if (btn.id === "rtRollback") {
-      const note = window.prompt(`Roll back to the shipped model as ${operatorName()}? Reason:`, "");
+    let kind = null;
+    if (act === "shipped") {
+      kind = btn.dataset.kind;
+      const note = window.prompt(`Switch the ${kind === "ensemble" ? "ensemble" : "single model"} back to the shipped version as ${me}? Reason:`, "");
       if (note === null) return;
-      await rollbackModel(note);
-      rtMsg.textContent = "Rolled back: the shipped best_model.pt is in use again.";
+      await rollbackModel(note, kind);
+      rtMsg.textContent = `The shipped ${kind === "ensemble" ? "5-model submission" : "best_model.pt"} is in use again. The retrained versions stay saved.`;
+    } else if (act === "reject") {
+      const note = window.prompt(`Reject ${v} as ${me}. Why? (required; the version stays saved)`, "");
+      if (note === null) return;
+      await reviewModel(v, "reject", note);
+      rtMsg.textContent = `${v} rejected. It stays saved and can be activated later with an override.`;
+    } else if (act === "override") {
+      const ok = window.confirm(`${v} did NOT pass its exam (or was rejected). Activating it anyway is recorded `
+        + `as an OVERRIDE under your name (${me}). Continue?`);
+      if (!ok) return;
+      const note = window.prompt("Why must this version be used anyway? (at least 10 characters, recorded)", "");
+      if (note === null) return;
+      const m = await activateModel(v, note, true);
+      kind = m.kind;
+      rtMsg.textContent = `${v} is now in use (override recorded).`;
     } else {
-      const decision = btn.dataset.model;
-      const note = window.prompt(decision === "approve"
-        ? `Approve and activate ${btn.dataset.v} as ${operatorName()}? Optional note:`
-        : `Reject ${btn.dataset.v} as ${operatorName()}. Why? (required)`, "");
+      const note = window.prompt(act === "restore"
+        ? `Restore ${v} as ${me}? Why? (required)`
+        : `Approve and activate ${v} as ${me}? Optional note:`, "");
       if (note === null) return;
-      await reviewModel(btn.dataset.v, decision, note);
-      rtMsg.textContent = decision === "approve"
-        ? `${btn.dataset.v} is now the single model. Choose Model: Single on RF Replay to use it.`
-        : `${btn.dataset.v} rejected.`;
+      const m = act === "approve" ? await reviewModel(v, "approve", note) : await activateModel(v, note, false);
+      kind = m.kind;
+      rtMsg.textContent = `${v} is now the ${m.kind === "ensemble" ? "ensemble" : "single model"} in use.`;
     }
-    modelCache.delete("single");          // the next "Single" analysis loads the newly served file
+    // The next analysis with that model loads the newly served files.
+    if (kind === "ensemble" || kind === null) modelCache.delete("ensemble");
+    if (kind === "single" || kind === null) modelCache.delete("single");
     await renderRetrain();
     renderAudit();
   } catch (e) {
@@ -1402,6 +1511,8 @@ const AUDIT_LABEL = {
   "model.approve": "Model approved & activated",
   "model.reject": "Model rejected",
   "model.rollback": "Model rolled back",
+  "model.restore": "Model version restored",
+  "model.override": "Model activated by OVERRIDE",
   "report.export": "Report exported",
   "client.receiver_connect": "Receiver connected",
   "client.receiver_disconnect": "Receiver disconnected",
@@ -1424,15 +1535,23 @@ function auditSummary(e) {
     case "correction.reject":
       return `submitted by ${d.submitted_by} · ${(d.corrected || []).join(" + ")}${d.note ? ` · “${d.note}”` : ""}`;
     case "retrain.start":
-      return `“${d.reason}”${d.override ? " · OVERRIDE (rules not all met)" : ""} · correction rate ${(d.correction_rate * 100).toFixed(1)}%`;
+      return `${d.scope === "both" ? "single + ensemble" : "single model"} · “${d.reason}”`
+        + `${d.override ? " · OVERRIDE (rules not all met)" : ""} · correction rate ${(d.correction_rate * 100).toFixed(1)}%`;
     case "retrain.finish":
+      // Older entries name one candidate; newer ones list each with its verdict.
+      if (d.candidates) {
+        return Object.entries(d.candidates).map(([v, c]) => `${v} (${c.kind}) gate ${c.gate_passed ? "passed" : "FAILED"}`).join(" · ");
+      }
       return `candidate ${d.candidate} · gate ${d.gate_passed ? "passed" : "FAILED"}`;
     case "retrain.fail":
       return d.error || "";
     case "model.approve":
     case "model.reject":
+    case "model.restore":
+    case "model.override":
     case "model.rollback":
-      return `${e.target_id}${d.note ? ` · “${d.note}”` : ""}`;
+      return `${e.target_id}${d.kind ? ` (${d.kind})` : ""}${d.note ? ` · “${d.note}”` : ""}`
+        + (d.replaced ? ` · replaced ${d.replaced}` : "") + (d.now_using ? ` · now using ${d.now_using}` : "");
     case "report.export":
       return `${(d.format || "").toUpperCase()} · ${d.captures} captures · ${d.classification || ""} · sha256 ${String(d.sha256 || "").slice(0, 12)}…`;
     case "client.receiver_connect":

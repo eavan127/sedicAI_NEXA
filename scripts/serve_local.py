@@ -23,11 +23,15 @@ API (JSON)
     GET    /api/corrections/stats      counts, approved labels per class
     POST   /api/corrections/<id>/review   {decision: approve|reject, note}
     GET    /api/retrain/status         the retraining trigger: numbers + each rule
-    POST   /api/retrain/start          {reason, override} -> runs scripts/retrain_from_feedback.py
+    POST   /api/retrain/start          {reason, override, scope: single|both}
+                                       -> runs scripts/retrain_from_feedback.py
     GET    /api/retrain/jobs[/<id>]    training runs; one job includes the tail of its log
     GET    /api/models                 retrained versions (candidate/active/retired/rejected)
     POST   /api/models/<v>/review      {decision: approve|reject, note} -- four-eyes, gate must pass
-    POST   /api/models/rollback        back to the shipped single model
+    POST   /api/models/<v>/activate    {note, override} -- use ANY saved version again; one that
+                                       failed its gate or was rejected needs override + reason
+    POST   /api/models/rollback        {kind: single|ensemble} back to the shipped files
+    GET    /api/retrain/history        every retrain: who, when, why, what, verdicts, decisions
     POST   /api/export                 report builder: {ids, sections, format, banner, filters}
                                        -> json / csv.zip / xlsx / sigmf.zip / iq.zip
     GET    /api/audit?limit=200        audit trail, newest first
@@ -73,6 +77,8 @@ APP_ID = "nexa-local"
 MAX_JSON = 1 << 20            # 1 MB: a record is ~2 KB
 MAX_CAPTURE = 1 << 30         # 1 GB: ~40 s of 3.2 MS/s float32
 LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "[::1]", "::1"}
+# The model files the page loads; an approved retrained version replaces them.
+MODEL_FILE = re.compile(r"/models/(best_model|ensemble_[0-4])\.onnx")
 
 
 def safe_name(name: str) -> str:
@@ -144,7 +150,7 @@ class Handler(SimpleHTTPRequestHandler):
             return self._error(HTTPStatus.FORBIDDEN, "unexpected Host header")
         url = urlparse(self.path)
         if not url.path.startswith("/api/"):
-            if method in ("GET", "HEAD") and url.path == "/models/best_model.onnx" and self._serve_active_model():
+            if method in ("GET", "HEAD") and MODEL_FILE.fullmatch(url.path) and self._serve_active_model(url.path):
                 return None
             if method == "GET":
                 return super().do_GET()
@@ -187,10 +193,11 @@ class Handler(SimpleHTTPRequestHandler):
         head = parts[0] if parts else ""
 
         if head == "health" and method == "GET":
-            active = self.db.active_model()
+            single, ens = self.db.active_model("single"), self.db.active_model("ensemble")
             return self._send_json({"app": APP_ID, "ok": True, "db": self.db.path.name,
                                     "counts": self.db.counts(),
-                                    "active_model": active["version"] if active else None})
+                                    "active_model": single["version"] if single else None,
+                                    "active_ensemble": ens["version"] if ens else None})
 
         if head == "analyses":
             if method == "GET" and len(parts) == 1:
@@ -229,8 +236,13 @@ class Handler(SimpleHTTPRequestHandler):
             self._check_training_deps(self.training_python())
             with Handler._jobs_lock:
                 self._reap_jobs()
-                job = self.db.start_retrain(body.get("reason"), bool(body.get("override")), self._actor())
+                job = self.db.start_retrain(body.get("reason"), bool(body.get("override")), self._actor(),
+                                            scope=str(body.get("scope") or "single"))
                 return self._send_json(self._launch(job), HTTPStatus.ACCEPTED)
+        if head == "retrain" and method == "GET" and parts[1:] == ["history"]:
+            with Handler._jobs_lock:
+                self._reap_jobs()
+            return self._send_json(self.db.retrain_history())
         if head == "retrain" and method == "GET" and parts[1:2] == ["jobs"]:
             with Handler._jobs_lock:
                 self._reap_jobs()
@@ -248,11 +260,16 @@ class Handler(SimpleHTTPRequestHandler):
                 return self._send_json(self.db.list_models())
             if method == "POST" and parts[1:] == ["rollback"]:
                 body = self._read_json()
-                return self._send_json({"retired": self.db.rollback_model(body.get("note"), self._actor())})
+                return self._send_json({"retired": self.db.rollback_model(
+                    body.get("note"), self._actor(), kind=str(body.get("kind") or "single"))})
             if method == "POST" and len(parts) == 3 and parts[2] == "review":
                 body = self._read_json()
                 return self._send_json(self.db.review_model(
                     parts[1], str(body.get("decision") or ""), body.get("note"), self._actor()))
+            if method == "POST" and len(parts) == 3 and parts[2] == "activate":
+                body = self._read_json()
+                return self._send_json(self.db.activate_model(
+                    parts[1], body.get("note"), self._actor(), override=bool(body.get("override"))))
 
         if head == "captures" and method == "PUT" and len(parts) == 2:
             return self._put_capture(parts[1], (query.get("name") or [""])[0])
@@ -338,14 +355,21 @@ class Handler(SimpleHTTPRequestHandler):
         self.db.update_job(job["id"], log_path=log_rel, pid=proc.pid)
         return self.db.get_job(job["id"])
 
-    def _serve_active_model(self):
-        """GET /models/best_model.onnx: the ACTIVE retrained model when one was
-        approved, else the shipped file. The ensemble files are never swapped."""
-        active = self.db.active_model()
-        path = (self.db.path.parent / active["path"]) if active else None
-        if not path or not path.exists():
+    def _serve_active_model(self, path: str) -> bool:
+        """/models/best_model.onnx and /models/ensemble_<i>.onnx: the ACTIVE
+        approved retrained version when there is one, else the shipped file
+        (return False and the static handler serves it). The shipped files in
+        web/models/ are never overwritten, so roll back is exact."""
+        name = path.rsplit("/", 1)[-1]
+        if name == "best_model.onnx":
+            active = self.db.active_model("single")
+            file = (self.db.path.parent / active["path"]) if active else None
+        else:
+            active = self.db.active_model("ensemble")
+            file = (self.db.path.parent / active["path"] / name) if active else None
+        if not file or not file.exists():
             return False
-        body = path.read_bytes()
+        body = file.read_bytes()
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "application/octet-stream")
         self.send_header("Content-Length", str(len(body)))
@@ -363,7 +387,7 @@ class Handler(SimpleHTTPRequestHandler):
             self.db, self.db.path.parent, ids=list(body.get("ids") or []),
             sections=list(body.get("sections") or []), fmt=str(body.get("format") or ""),
             banner=str(body.get("banner") or ""), generated_by=actor.name,
-            model_card=card, active_model=getattr(self.db, "active_model", lambda: None)(),
+            model_card=card, active_model=self.db.active_model("single"),
             filters=str(body.get("filters") or "")[:300])
         # Logged by the server, with a fingerprint of the exact file handed
         # out: "who took which data off this machine" is the question an

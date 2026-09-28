@@ -64,7 +64,7 @@ def test_start_needs_name_reason_and_override(db):
 
 
 def test_rollback_with_nothing_active(db):
-    with pytest.raises(ValueError, match="already on the shipped model"):
+    with pytest.raises(ValueError, match="already on the shipped best_model.pt"):
         db.rollback_model("", EAVAN)
 
 
@@ -100,7 +100,7 @@ def test_script_registers_a_candidate(trained):
     g = m["metrics"]["gate"]
     assert g["kind"] == "synthetic" and "SYNTHETIC" in g["set"] and g["rules"]
     assert m["metrics"]["corrections_fit"]["windows"] > 0
-    assert "[4/5] The gate" in proc.stdout and "Done in" in proc.stdout
+    assert "Single model GATE" in proc.stdout and "Done in" in proc.stdout
     assert db.audit(limit=1)[0]["action"] == "retrain.finish"
 
 
@@ -142,3 +142,162 @@ def test_server_swaps_in_the_active_model_and_rollback_restores(trained):
         srv.shutdown()
         srv.server_close()
     assert db.audit(limit=1)[0]["action"] == "model.rollback"
+
+
+# --- single + 5-model ensemble in one retrain -------------------------------------------
+
+def test_scope_is_validated_and_logged(db):
+    with pytest.raises(ValueError, match="scope"):
+        db.start_retrain("urgent new threat", True, EAVAN, scope="everything")
+    job = db.start_retrain("urgent new threat", True, EAVAN, scope="both")
+    assert job["scope"] == "both" and db.audit(limit=1)[0]["details"]["scope"] == "both"
+
+
+@pytest.fixture(scope="module")
+def trained_both(tmp_path_factory):
+    tmp = tmp_path_factory.mktemp("retrain_both")
+    db = LocalDB(tmp / "nexa.db")
+    seed_feedback(db, tmp)
+    job = db.start_retrain("ensemble test run", True, EAVAN, scope="both")
+    proc = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "retrain_from_feedback.py"), "--db", str(db.path),
+         "--job", job["id"], "--epochs", "1", "--replay", "100", "--gate", "synthetic",
+         "--synthetic-per-class", "10"],
+        cwd=ROOT, capture_output=True, text=True, timeout=1800)
+    return db, tmp, job, proc
+
+
+def test_both_scope_registers_single_and_ensemble(trained_both):
+    db, tmp, job, proc = trained_both
+    assert proc.returncode == 0, proc.stdout[-3000:] + proc.stderr[-3000:]
+    done = db.get_job(job["id"])
+    versions = done["model_version"].split(",")
+    assert done["status"] == "succeeded" and len(versions) == 2
+    single, ens = (db.get_model(v) for v in versions)
+    assert single["kind"] == "single" and single["version"].startswith("ft-")
+    assert ens["kind"] == "ensemble" and ens["version"].startswith("ens-")
+    folder = tmp / ens["path"]
+    for i in range(5):
+        assert (folder / f"ensemble_{i}.onnx").exists() and (folder / f"ensemble_{i}.pt").exists()
+        assert not (folder / f"ensemble_{i}.onnx.data").exists()      # browser-loadable
+    assert ens["metrics"]["train"]["members"] == 5 and ens["metrics"]["gate"]["rules"]
+    assert "member 5/5" in proc.stdout and "Ensemble GATE" in proc.stdout
+    # the five members were fine-tuned on DIFFERENT replay samples, so they differ
+    import torch
+    w = [torch.load(folder / f"ensemble_{i}.pt")["fc2.weight"] for i in range(2)]
+    assert not torch.equal(w[0], w[1])
+    finish = db.audit(limit=1)[0]
+    assert finish["action"] == "retrain.finish" and set(finish["details"]["candidates"]) == set(versions)
+
+
+def test_single_and_ensemble_activate_and_roll_back_independently(trained_both):
+    db, tmp, job, _ = trained_both
+    single_v, ens_v = db.get_job(job["id"])["model_version"].split(",")
+    import sqlite3
+    with sqlite3.connect(db.path) as con:          # gate outcome is random on tiny data: force a pass
+        for v in (single_v, ens_v):
+            m = db.get_model(v)
+            m["metrics"]["gate"]["passed"] = True
+            con.execute("UPDATE models SET metrics = ? WHERE version = ?", (json.dumps(m["metrics"]), v))
+    with pytest.raises(PermissionError, match="Four-eyes"):
+        db.review_model(ens_v, "approve", "", EAVAN)
+    db.review_model(ens_v, "approve", "ok", JESSY)
+    assert db.active_model("ensemble")["version"] == ens_v and db.active_model("single") is None
+    db.review_model(single_v, "approve", "ok", JESSY)
+    assert db.active_model("ensemble")["version"] == ens_v          # activating single left it alone
+
+    srv = serve_local.make_server(db.path, "127.0.0.1", 0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    try:
+        with urllib.request.urlopen(base + "/models/ensemble_2.onnx") as r:
+            assert r.headers["X-NEXA-Model"] == ens_v
+            assert r.read() == (tmp / db.get_model(ens_v)["path"] / "ensemble_2.onnx").read_bytes()
+        health = json.loads(urllib.request.urlopen(base + "/api/health").read())
+        assert health["active_ensemble"] == ens_v and health["active_model"] == single_v
+        req = urllib.request.Request(base + "/api/models/rollback", method="POST",
+                                     data=b'{"note":"back to the submission","kind":"ensemble"}',
+                                     headers={"X-NEXA-Client": "1", "X-NEXA-Operator": "chua"})
+        assert json.loads(urllib.request.urlopen(req).read())["retired"] == ens_v
+        with urllib.request.urlopen(base + "/models/ensemble_2.onnx") as r:
+            assert r.headers.get("X-NEXA-Model") is None                # the shipped submission again
+            assert r.read() == (ROOT / "web" / "models" / "ensemble_2.onnx").read_bytes()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+    assert db.active_model("single")["version"] == single_v             # rolling back the ensemble left single alone
+    assert db.audit(limit=1)[0]["details"]["kind"] == "ensemble"
+
+
+# --- every version kept; activate / restore / override; history ----------------------
+
+def _fake_run(db, starter, passed_flags, kind="single"):
+    """A finished retrain with made-up candidates (no training needed)."""
+    job = db.start_retrain("history test", True, starter, scope="single")
+    cands = [{"version": f"ft-test-{job['id'][:4]}-{i}", "kind": kind, "path": f"models/x{i}/best_model.onnx",
+              "source": {"job_id": job["id"]}, "metrics": {"gate": {"passed": ok, "kind": "synthetic"},
+                                                          "train": {"corrections_used": ["c"]}}}
+             for i, ok in enumerate(passed_flags)]
+    db.finish_job(job["id"], True, {}, candidates=cands)
+    return job, [c["version"] for c in cands]
+
+
+def test_every_version_can_be_activated_with_the_right_justification(db):
+    _, (good, bad) = _fake_run(db, EAVAN, [True, False])
+    db.activate_model(good, "", JESSY)                                   # passed: plain approval
+    assert db.active_model()["version"] == good
+    with pytest.raises(PermissionError, match="override"):
+        db.activate_model(bad, "trying", JESSY)                          # failed gate, no override
+    with pytest.raises(ValueError, match="real reason"):
+        db.activate_model(bad, "because", JESSY, override=True)          # reason too short
+    db.activate_model(bad, "field test showed it handles the new hopper", JESSY, override=True)
+    assert db.active_model()["version"] == bad and db.get_model(good)["status"] == "retired"
+    assert db.audit(limit=1)[0]["action"] == "model.override"
+    with pytest.raises(ValueError, match="restoring"):
+        db.activate_model(good, "", CHUA)                                # restore needs a reason
+    db.activate_model(good, "back to the version that passed", CHUA)
+    assert db.active_model()["version"] == good and db.audit(limit=1)[0]["action"] == "model.restore"
+    assert db.audit(limit=1)[0]["details"]["replaced"] == bad
+    with pytest.raises(PermissionError, match="Four-eyes"):
+        db.activate_model(bad, "the starter should not decide this", EAVAN, override=True)
+
+
+def test_rejected_versions_are_kept_and_can_come_back(db):
+    _, (v,) = _fake_run(db, EAVAN, [True])
+    db.review_model(v, "reject", "not needed yet", JESSY)
+    assert db.get_model(v)["status"] == "rejected"                       # kept, not deleted
+    with pytest.raises(PermissionError, match="override"):
+        db.activate_model(v, "changed our mind", JESSY)
+    db.activate_model(v, "new threat appeared, this version handles it", JESSY, override=True)
+    assert db.active_model()["version"] == v
+
+
+def test_history_shows_who_did_what_to_each_version(db):
+    job, (good, bad) = _fake_run(db, EAVAN, [True, False])
+    db.activate_model(good, "", JESSY)
+    db.review_model(bad, "reject", "failed its exam", JESSY)
+    h = db.retrain_history()[0]
+    assert h["id"] == job["id"] and h["started_by"] == "eavan" and h["reason"] == "history test"
+    by_v = {c["version"]: c for c in h["candidates"]}
+    assert by_v[good]["gate_passed"] is True and by_v[good]["status"] == "active"
+    assert [(e["actor"], e["action"]) for e in by_v[good]["events"]] == [("jessy", "model.approve")]
+    assert by_v[bad]["events"][0]["action"] == "model.reject" and by_v[bad]["gate_passed"] is False
+
+
+def test_history_and_activate_over_http(tmp_path):
+    db = LocalDB(tmp_path / "nexa.db")
+    _, (v,) = _fake_run(db, EAVAN, [False])
+    srv = serve_local.make_server(db.path, "127.0.0.1", 0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    try:
+        req = urllib.request.Request(base + f"/api/models/{v}/activate", method="POST",
+                                     data=json.dumps({"note": "operational need, tested in the field",
+                                                      "override": True}).encode(),
+                                     headers={"X-NEXA-Client": "1", "X-NEXA-Operator": "jessy"})
+        assert json.loads(urllib.request.urlopen(req).read())["status"] == "active"
+        hist = json.loads(urllib.request.urlopen(base + "/api/retrain/history").read())
+        assert hist[0]["candidates"][0]["events"][0]["action"] == "model.override"
+    finally:
+        srv.shutdown()
+        srv.server_close()

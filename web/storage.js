@@ -486,12 +486,25 @@ export async function exportReport(body) {
 // Retraining and model versions (local server only)
 // ---------------------------------------------------------------------------
 
-export function startRetrain(reason, override) {
+/** scope: "single" (about 4 min) or "both" (single + the 5 ensemble members, about 20 min). */
+export function startRetrain(reason, override, scope = "single") {
   return serverJson("/api/retrain/start", "retrain start", {
     method: "POST", headers: serverHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ reason, override }),
+    body: JSON.stringify({ reason, override, scope }),
   });
 }
+
+/** Use ANY saved version again. One that failed its exam or was rejected
+ *  needs override = true and a reason of 10+ characters (recorded). */
+export function activateModel(version, note = "", override = false) {
+  return serverJson(`/api/models/${encodeURIComponent(version)}/activate`, "activate", {
+    method: "POST", headers: serverHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ note, override }),
+  });
+}
+
+/** Every retrain with its candidates and every decision taken on them. */
+export const retrainHistory = () => serverJson("/api/retrain/history", "history read");
 
 export const listJobs = () => serverJson("/api/retrain/jobs", "jobs read");
 export const getJob = id => serverJson(`/api/retrain/jobs/${encodeURIComponent(id)}`, "job read");
@@ -505,10 +518,11 @@ export function reviewModel(version, decision, note = "") {
   });
 }
 
-export function rollbackModel(note = "") {
+/** kind: "single" | "ensemble" -- back to the shipped files; nothing is deleted. */
+export function rollbackModel(note = "", kind = "single") {
   return serverJson("/api/models/rollback", "roll back", {
     method: "POST", headers: serverHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ note }),
+    body: JSON.stringify({ note, kind }),
   });
 }
 

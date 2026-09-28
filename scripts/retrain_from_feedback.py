@@ -27,8 +27,19 @@ What it does, in order (each step is printed, and the page shows the log):
      as a CANDIDATE. Nothing changes for operators until a second person
      approves it on the Model page.
 
-This retrains the SINGLE model only. The 5-model ensemble and its calibrated
-thresholds are the competition submission and are never touched here.
+Scope (chosen on the Model page, stored on the job):
+  single  the single model only (about 4 minutes on a laptop CPU)
+  both    the single model AND all 5 ensemble members (about 20 minutes).
+          Each member gets its own replay sample and seed so the five stay
+          different; the ensemble sits the exam as the averaged whole, exactly
+          like the submission, and becomes its own candidate needing its own
+          approval.
+
+Nothing here overwrites a shipped file: every version is written to
+data/local/models/<version>/ and kept forever, whether it passed or not. The
+shipped best_model.pt and the submitted ensemble stay untouched in results/
+and web/models/, so "use shipped" always restores them exactly. The calibrated
+thresholds are kept, so old and new are judged at the same decision points.
 """
 from __future__ import annotations
 
@@ -157,17 +168,26 @@ def synthetic_set(n_per_class: int, seed: int):
     return np.stack(X).astype(np.float32), np.stack(y).astype(np.float32)
 
 
-def predict(model, X, batch: int = 512) -> np.ndarray:
+N_MEMBERS = 5
+
+
+def predict(models, X, batch: int = 512) -> np.ndarray:
+    """Sigmoid probabilities averaged over `models` -- one model, or the five
+    ensemble members exactly as the submission averages them."""
     import torch
-    out = []
+    models = models if isinstance(models, (list, tuple)) else [models]
+    total = None
     with torch.no_grad():
-        for i in range(0, len(X), batch):
-            out.append(torch.sigmoid(model(torch.tensor(np.asarray(X[i:i + batch])))).numpy())
-    return np.concatenate(out) if out else np.zeros((0, len(CLASSES)))
+        for m in models:
+            out = [torch.sigmoid(m(torch.tensor(np.asarray(X[i:i + batch])))).numpy()
+                   for i in range(0, len(X), batch)]
+            p = np.concatenate(out) if out else np.zeros((0, len(CLASSES)))
+            total = p if total is None else total + p
+    return total / len(models)
 
 
-def score(model, X, y, thr) -> dict:
-    p = predict(model, X) > thr
+def score(models, X, y, thr) -> dict:
+    p = predict(models, X) > thr
     rec = {}
     for j, c in enumerate(CLASSES):
         pos = y[:, j] > 0.5
@@ -178,11 +198,11 @@ def score(model, X, y, thr) -> dict:
     return {"recall": rec, "noise_false_alarm": fa}
 
 
-def exact_fit(model, X, y, thr) -> float | None:
+def exact_fit(models, X, y, thr) -> float | None:
     """Share of correction windows where the model now says exactly what the human said."""
     if not len(X):
         return None
-    p = predict(model, X) > thr
+    p = predict(models, X) > thr
     return float((p == (y > 0.5)).all(axis=1).mean())
 
 
@@ -203,6 +223,19 @@ def gate(before: dict, after: dict, max_drop: float = 0.01) -> tuple[bool, list]
     return all(r["met"] for r in rules) and bool(rules), rules
 
 
+def export_onnx_file(pt: Path, onnx_path: Path) -> None:
+    """ONNX, verified against PyTorch, as ONE self-contained file: torch writes
+    the weights to a sidecar .onnx.data, which the browser's onnxruntime-web
+    cannot load ("Module.MountedFiles is not available"). Fold them back in,
+    as web/build.py does for the shipped models."""
+    import onnx
+    from export_onnx import export_and_verify
+    if not export_and_verify(pt, onnx_path):
+        raise RuntimeError(f"ONNX export of {pt.name} did not match PyTorch; candidate not registered")
+    onnx.save_model(onnx.load(str(onnx_path)), str(onnx_path), save_as_external_data=False)
+    onnx_path.with_name(onnx_path.name + ".data").unlink(missing_ok=True)
+
+
 def main() -> int:
     # The ONNX exporter prints emoji; a Windows console or a log opened with
     # the ANSI code page cannot encode them, and a print must not kill a run.
@@ -214,8 +247,10 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--db", type=Path, default=ROOT / "data" / "local" / "nexa.db")
     ap.add_argument("--job", required=True)
+    ap.add_argument("--scope", choices=["single", "both"], default=None,
+                    help="single model only, or single + the 5 ensemble members (default: the job's own choice)")
     ap.add_argument("--epochs", type=int, default=2)
-    ap.add_argument("--replay", type=int, default=12000, help="original training windows mixed in")
+    ap.add_argument("--replay", type=int, default=12000, help="original training windows mixed in, per model")
     ap.add_argument("--correction-weight", type=float, default=3.0)
     ap.add_argument("--lr", type=float, default=3e-5,
                     help="fine-tuning step size: small, so the model adjusts rather than relearns")
@@ -232,22 +267,26 @@ def main() -> int:
     if not job:
         print(f"no such job {a.job}", file=sys.stderr)
         return 2
+    scope = a.scope or job.get("scope") or "single"
     db.update_job(a.job, status="running")
     t0 = time.time()
     try:
         import torch
         from torch.utils.data import DataLoader, TensorDataset, WeightedRandomSampler
 
-        from src.config import resolve_multilabel_thresholds
+        from src.config import resolve_class_weight_multipliers, resolve_multilabel_thresholds
         from src.models.amc_cnn import AMC_CNN
+        from src.train import compute_class_weights
 
-        torch.manual_seed(a.seed)
-        rng = np.random.default_rng(a.seed)
         thr = np.asarray(resolve_multilabel_thresholds())
+        n_steps = 5 if scope == "both" else 4
+        step = iter(range(1, n_steps + 1))
         say(f"Retrain job {a.job[:8]} started by {job['started_by']}: \"{job['reason']}\""
             + (" (OVERRIDE: rules not all met)" if job["override"] else ""))
+        say("Scope: " + ("single model + the 5-model ensemble (about 20 min on a laptop CPU)"
+                         if scope == "both" else "single model (about 4 min on a laptop CPU)"))
 
-        say("[1/5] Collecting approved corrections…")
+        say(f"[{next(step)}/{n_steps}] Collecting approved corrections…")
         Xc, yc, used, skipped = correction_windows(db)
         say(f"      {len(used)} corrections -> {len(Xc)} windows"
             + (f"; {len(skipped)} skipped (no usable raw IQ)" if skipped else ""))
@@ -259,71 +298,15 @@ def main() -> int:
         if gate_kind == "dataset" and not have_data:
             raise RuntimeError("--gate dataset needs data/processed/X.npy")
 
-        say("[2/5] Building the training mix…")
-        if have_data and a.replay:
+        say(f"[{next(step)}/{n_steps}] Preparing replay data and the fixed exam…")
+        rng = np.random.default_rng(a.seed)
+        if have_data:
             X, y, train_idx, test_idx = dataset_split()
-            pick = np.sort(rng.choice(train_idx, size=min(a.replay, len(train_idx)), replace=False))
-            Xr, yr = np.asarray(X[pick]), y[pick].astype(np.float32)
-            say(f"      replay: {len(Xr)} windows from the original training split")
-        elif a.replay:
-            Xr, yr = synthetic_set(max(a.replay // 4, 1), seed=a.seed + 1)
-            say(f"      replay: {len(Xr)} SYNTHETIC windows (data/processed not found on this machine)")
+            y_all = np.load(ROOT / "data" / "processed" / "y.npy")
         else:
-            Xr, yr = np.zeros((0, 2, WIN), np.float32), np.zeros((0, len(CLASSES)), np.float32)
-            say("      replay: none (--replay 0): risk of forgetting, the gate will show it")
-        Xt = np.concatenate([Xr, Xc])
-        yt = np.concatenate([yr, yc])
-        w = np.concatenate([np.ones(len(Xr)), np.full(len(Xc), a.correction_weight)])
-
-        active = db.active_model()
-        base_pt = Path(active["path"]).with_suffix(".pt") if active else ROOT / "results" / "best_model.pt"
-        if active and not base_pt.is_absolute():
-            base_pt = db.path.parent / base_pt
-        say(f"[3/5] Fine-tuning from {'retrained ' + active['version'] if active else 'shipped results/best_model.pt'}"
-            f" for {a.epochs} epoch(s) on {len(Xt)} windows…")
-
-        def load(path):
-            m = AMC_CNN(num_classes=len(CLASSES), input_len=WIN)
-            m.load_state_dict(torch.load(path, map_location="cpu"))
-            return m.eval()
-
-        base = load(base_pt)
-        model = load(base_pt)
-        loader = DataLoader(TensorDataset(torch.tensor(Xt), torch.tensor(yt)), batch_size=64,
-                            sampler=WeightedRandomSampler(torch.tensor(w), num_samples=len(Xt), replacement=True))
-        opt = torch.optim.Adam(model.parameters(), lr=a.lr)
-        # The SAME loss the model was trained with (src/train.py): per-class
-        # pos_weight from the full label set. A plain BCE moves every class's
-        # probability scale, and the calibrated thresholds stop fitting.
-        from src.config import resolve_class_weight_multipliers
-        from src.train import compute_class_weights
-        y_all = np.load(ROOT / "data" / "processed" / "y.npy") if have_data else yt
-        loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=compute_class_weights(
-            y_all, len(CLASSES), dampen=resolve_class_weight_multipliers()))
-
-        def train_mode(m):
-            # BatchNorm keeps its learned statistics: a few hundred fine-tuning
-            # batches would otherwise overwrite what 100k windows established.
-            m.train()
-            for mod in m.modules():
-                if isinstance(mod, torch.nn.modules.batchnorm._BatchNorm):
-                    mod.eval()
-
-        for ep in range(a.epochs):
-            train_mode(model)
-            total = 0.0
-            for xb, yb in loader:
-                opt.zero_grad()
-                loss = loss_fn(model(xb), yb)
-                loss.backward()
-                opt.step()
-                total += loss.item() * len(xb)
-            say(f"      epoch {ep + 1}/{a.epochs}: loss {total / len(Xt):.4f}")
-        model.eval()
-
-        say("[4/5] The gate: old vs new on the same fixed exam…")
+            X = y = train_idx = test_idx = None
+            y_all = yc
         if gate_kind == "dataset":
-            X, y, _, test_idx = dataset_split()
             idx = test_idx if not a.gate_limit else np.sort(rng.choice(test_idx, min(a.gate_limit, len(test_idx)), replace=False))
             Xg, yg = np.asarray(X[idx]), y[idx]
             gate_set = f"held-out TEST split of data/processed ({len(idx):,} windows, never trained on)"
@@ -333,47 +316,152 @@ def main() -> int:
             gate_set = (f"SYNTHETIC exam ({len(Xg)} judged-class + noise windows, fixed seed; {why}): "
                         "numbers are NOT comparable to the official scorecard")
         say(f"      exam: {gate_set}")
-        before, after = score(base, Xg, yg, thr), score(model, Xg, yg, thr)
-        passed, rules = gate(before, after, a.max_drop)
-        for r in rules:
-            say(f"      {'PASS' if r['met'] else 'FAIL'}  {r['text']}")
-        fit = {"windows": len(Xc), "before": exact_fit(base, Xc, yc, thr), "after": exact_fit(model, Xc, yc, thr)}
-        say(f"      corrections now matched exactly: {fit['before']:.1%} -> {fit['after']:.1%}")
-        say(f"      GATE {'PASSED' if passed else 'FAILED'}")
+        # The SAME loss the models were trained with (src/train.py): per-class
+        # pos_weight from the full label set. A plain BCE moves every class's
+        # probability scale, and the calibrated thresholds stop fitting.
+        loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=compute_class_weights(
+            y_all, len(CLASSES), dampen=resolve_class_weight_multipliers()))
 
-        version = "ft-" + datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        def replay(seed):
+            """Each model gets its OWN replay sample: five ensemble members
+            fine-tuned on identical data would drift together, and the
+            ensemble helps only because its members make different mistakes."""
+            r = np.random.default_rng(seed)
+            if have_data and a.replay:
+                pick = np.sort(r.choice(train_idx, size=min(a.replay, len(train_idx)), replace=False))
+                return np.asarray(X[pick]), y[pick].astype(np.float32), "original training split"
+            if a.replay:
+                Xs, ys = synthetic_set(max(a.replay // 4, 1), seed=seed)
+                return Xs, ys, "SYNTHETIC (data/processed not found on this machine)"
+            return np.zeros((0, 2, WIN), np.float32), np.zeros((0, len(CLASSES)), np.float32), "none"
+
+        def load(path):
+            m = AMC_CNN(num_classes=len(CLASSES), input_len=WIN)
+            m.load_state_dict(torch.load(path, map_location="cpu"))
+            return m.eval()
+
+        def fine_tune(base_path, seed, label):
+            torch.manual_seed(seed)
+            Xr, yr, src = replay(seed)
+            Xt, yt = np.concatenate([Xr, Xc]), np.concatenate([yr, yc])
+            w = np.concatenate([np.ones(len(Xr)), np.full(len(Xc), a.correction_weight)])
+            model = load(base_path)
+            loader = DataLoader(TensorDataset(torch.tensor(Xt), torch.tensor(yt)), batch_size=64,
+                                sampler=WeightedRandomSampler(torch.tensor(w), num_samples=len(Xt), replacement=True))
+            opt = torch.optim.Adam(model.parameters(), lr=a.lr)
+            for ep in range(a.epochs):
+                model.train()
+                # BatchNorm keeps its learned statistics: a few hundred
+                # fine-tuning batches would otherwise overwrite what 100k
+                # windows established.
+                for mod in model.modules():
+                    if isinstance(mod, torch.nn.modules.batchnorm._BatchNorm):
+                        mod.eval()
+                total = 0.0
+                for xb, yb in loader:
+                    opt.zero_grad()
+                    loss = loss_fn(model(xb), yb)
+                    loss.backward()
+                    opt.step()
+                    total += loss.item() * len(xb)
+                say(f"      {label} epoch {ep + 1}/{a.epochs}: loss {total / len(Xt):.4f}"
+                    f" ({len(Xr)} replay from {src} + {len(Xc)} correction windows)")
+            return model.eval(), len(Xr)
+
+        def judge(base_models, new_models, name):
+            before, after = score(base_models, Xg, yg, thr), score(new_models, Xg, yg, thr)
+            passed, rules = gate(before, after, a.max_drop)
+            for r in rules:
+                say(f"      {'PASS' if r['met'] else 'FAIL'}  {r['text']}")
+            fit = {"windows": len(Xc), "before": exact_fit(base_models, Xc, yc, thr),
+                   "after": exact_fit(new_models, Xc, yc, thr)}
+            say(f"      corrections now matched exactly: {fit['before']:.1%} -> {fit['after']:.1%}")
+            say(f"      {name} GATE {'PASSED' if passed else 'FAILED'}")
+            return {"set": gate_set, "kind": gate_kind, "passed": passed, "rules": rules,
+                    "before": before, "after": after}, fit
+
+        def rel(path):
+            return path.relative_to(ROOT).as_posix() if path.is_relative_to(ROOT) else path.as_posix()
+
+        def verdict(g):
+            return "gate passed: waiting for approval" if g["passed"] else "gate FAILED: cannot be activated"
+
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        candidates = []
+
+        # ---- the single model -------------------------------------------------
+        active = db.active_model("single")
+        base_pt = (db.path.parent / Path(active["path"]).with_suffix(".pt")) if active \
+            else ROOT / "results" / "best_model.pt"
+        say(f"[{next(step)}/{n_steps}] Single model: fine-tuning from "
+            f"{'retrained ' + active['version'] if active else 'shipped results/best_model.pt'}…")
+        t_single = time.time()
+        single, n_replay = fine_tune(base_pt, a.seed, "single")
+        g, fit = judge(load(base_pt), single, "Single model")
+        version = f"ft-{stamp}"
         out = db.path.parent / "models" / version
         out.mkdir(parents=True, exist_ok=True)
-        say(f"[5/5] Saving candidate {version} and exporting ONNX…")
-        torch.save(model.state_dict(), out / "best_model.pt")
-        from export_onnx import export_and_verify
-        if not export_and_verify(out / "best_model.pt", out / "best_model.onnx"):
-            raise RuntimeError("ONNX export did not match PyTorch; candidate not registered")
-        # torch writes the weights to a sidecar best_model.onnx.data, which the
-        # browser's onnxruntime-web cannot load ("Module.MountedFiles is not
-        # available"). Fold them back into one file, as web/build.py does.
-        import onnx
-        onnx.save_model(onnx.load(str(out / "best_model.onnx")), str(out / "best_model.onnx"),
-                        save_as_external_data=False)
-        (out / "best_model.onnx.data").unlink(missing_ok=True)
-        metrics = {
-            "gate": {"set": gate_set, "kind": gate_kind, "passed": passed, "rules": rules,
-                     "before": before, "after": after},
-            "corrections_fit": fit,
-            "train": {"epochs": a.epochs, "lr": a.lr, "replay_windows": int(len(Xr)), "correction_windows": int(len(Xc)),
-                      "corrections_used": used, "seconds": round(time.time() - t0, 1)},
-            "base": str(base_pt.relative_to(ROOT)) if base_pt.is_relative_to(ROOT) else str(base_pt),
-        }
+        torch.save(single.state_dict(), out / "best_model.pt")
+        export_onnx_file(out / "best_model.pt", out / "best_model.onnx")
+        metrics = {"gate": g, "corrections_fit": fit, "base": rel(base_pt),
+                   "train": {"epochs": a.epochs, "lr": a.lr, "replay_windows": n_replay,
+                             "correction_windows": int(len(Xc)), "corrections_used": used,
+                             "seconds": round(time.time() - t_single, 1)}}
         (out / "metrics.json").write_text(json.dumps(metrics, indent=2))
-        db.finish_job(a.job, True, {"seconds": metrics["train"]["seconds"], "gate_passed": passed}, candidate={
-            "version": version, "path": str((out / "best_model.onnx").relative_to(db.path.parent).as_posix()),
-            "source": {"job_id": a.job, "corrections": used, "replay_windows": int(len(Xr)),
-                       "base": metrics["base"]},
-            "metrics": metrics,
-            "notes": "gate passed: waiting for approval" if passed else "gate FAILED: cannot be activated",
-        })
-        say(f"Done in {metrics['train']['seconds']} s. Candidate {version} "
-            + ("is waiting for approval on the Model page." if passed else "FAILED its gate and cannot be activated."))
+        candidates.append({"version": version, "kind": "single",
+                           "path": (out / "best_model.onnx").relative_to(db.path.parent).as_posix(),
+                           "source": {"job_id": a.job, "corrections": used, "replay_windows": n_replay,
+                                      "base": metrics["base"]},
+                           "metrics": metrics, "notes": verdict(g)})
+        say(f"      single model done in {metrics['train']['seconds']} s -> candidate {version}")
+
+        # ---- the 5-model ensemble ----------------------------------------------
+        if scope == "both":
+            active_ens = db.active_model("ensemble")
+            base_dir = (db.path.parent / active_ens["path"]) if active_ens else ROOT / "results"
+            base_paths = [base_dir / f"ensemble_{i}.pt" for i in range(N_MEMBERS)]
+            missing = [p.name for p in base_paths if not p.exists()]
+            if missing:
+                raise RuntimeError(f"Ensemble checkpoints missing in {rel(base_dir)}: {', '.join(missing)}")
+            say(f"[{next(step)}/{n_steps}] Ensemble: fine-tuning all {N_MEMBERS} members from "
+                + (f"retrained {active_ens['version']}" if active_ens
+                   else "the shipped submission (results/ensemble_*.pt)") + "…")
+            t_ens = time.time()
+            members, replays = [], []
+            for i, bp in enumerate(base_paths):
+                m, n = fine_tune(bp, a.seed + 101 * (i + 1), f"member {i + 1}/{N_MEMBERS}")
+                members.append(m)
+                replays.append(n)
+            say("      exam: the averaged 5-model ensemble, old vs new, exactly like the submission")
+            g, fit = judge([load(bp) for bp in base_paths], members, "Ensemble")
+            version = f"ens-{stamp}"
+            out = db.path.parent / "models" / version
+            out.mkdir(parents=True, exist_ok=True)
+            for i, m in enumerate(members):
+                torch.save(m.state_dict(), out / f"ensemble_{i}.pt")
+                export_onnx_file(out / f"ensemble_{i}.pt", out / f"ensemble_{i}.onnx")
+            metrics = {"gate": g, "corrections_fit": fit, "base": rel(base_dir),
+                       "train": {"epochs": a.epochs, "lr": a.lr, "replay_windows": int(sum(replays)),
+                                 "correction_windows": int(len(Xc)), "corrections_used": used,
+                                 "members": N_MEMBERS, "seconds": round(time.time() - t_ens, 1)}}
+            (out / "metrics.json").write_text(json.dumps(metrics, indent=2))
+            candidates.append({"version": version, "kind": "ensemble",
+                               "path": out.relative_to(db.path.parent).as_posix(),
+                               "source": {"job_id": a.job, "corrections": used,
+                                          "replay_windows": int(sum(replays)), "base": metrics["base"]},
+                               "metrics": metrics, "notes": verdict(g)})
+            say(f"      ensemble done in {metrics['train']['seconds']} s -> candidate {version}")
+
+        say(f"[{next(step)}/{n_steps}] Registering candidates…")
+        seconds = round(time.time() - t0, 1)
+        db.finish_job(a.job, True, {"seconds": seconds, "scope": scope,
+                                    "gate_passed": {c["kind"]: c["metrics"]["gate"]["passed"] for c in candidates}},
+                      candidates=candidates)
+        for c in candidates:
+            say(f"      {c['kind']:8s} {c['version']}: "
+                + ("PASSED, waiting for approval on the Model page" if c["metrics"]["gate"]["passed"]
+                   else "FAILED its gate, cannot be activated"))
+        say(f"Done in {seconds} s.")
         return 0
     except Exception as e:                                           # noqa: BLE001
         traceback.print_exc()
