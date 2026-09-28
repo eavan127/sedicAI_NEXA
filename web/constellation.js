@@ -569,11 +569,11 @@ export function drawConstellation(canvas, { picks, capture, starts, windowLen, f
     const rawRe = new Float64Array(n), rawIm = new Float64Array(n);
     for (let i = 0; i < n; i++) { rawRe[i] = wRe[i] * inv; rawIm[i] = wIm[i] * inv; }
 
-    ctx.font = `bold 8px ${FONT}`;
+    ctx.font = `bold 10px ${FONT}`;
     ctx.textAlign = "center";
     ctx.fillStyle = CIVILIAN_TIER;          // the one MODEL element here
     ctx.fillText(`${pick.cls} ${Math.round(pick.prob * 100)}%`, x0 + plotW / 2, 8);
-    ctx.font = `8px ${FONT}`;
+    ctx.font = `10px ${FONT}`;
     ctx.fillStyle = TEXT_DIM;
     ctx.fillText(`win ${pick.index} @ ${(start / fs * 1e3).toFixed(2)} ms`,
                   x0 + plotW / 2, 20);
@@ -599,10 +599,10 @@ export function drawConstellation(canvas, { picks, capture, starts, windowLen, f
       title = `${rec.re.length} symbol points · too few symbols to score at order ${order}`;
     }
     ctx.fillStyle = TEXT_DIM;
-    ctx.font = `7px ${FONT}`;
+    ctx.font = `8.5px ${FONT}`;
     ctx.textAlign = "center";
     ctx.fillText(title, x0 + plotW / 2, y1 + cellH + 9);
-    ctx.font = `8px ${FONT}`;
+    ctx.font = `10px ${FONT}`;
   });
 
   // axis labels: leftmost column only for Q, bottom row only for I
@@ -655,7 +655,7 @@ export function drawConstellation(canvas, { picks, capture, starts, windowLen, f
     `synthesized scene splices independent recordings, so some windows straddle a seam and will not cluster`,
   );
 
-  ctx.font = `7px ${FONT}`;
+  ctx.font = `8.5px ${FONT}`;
   ctx.textAlign = "left";
   ctx.fillStyle = TEXT_DIM;
   let cy = 26 + cellH + 26 + cellH + 34;

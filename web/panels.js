@@ -82,16 +82,16 @@ function detectionList(events) {
     const conf = e.classes.map(c => `${c} ${pct(e.peak[c])}`).join(" · ");
     return `<div style="display:flex;align-items:baseline;gap:8px;padding:3px 0;border-bottom:1px solid ${GRID};">` +
       `<span style="width:8px;height:8px;border-radius:50%;background:${TIER_COLOR[tier]};display:inline-block;flex:0 0 auto;"></span>` +
-      `<span style="color:${TIER_COLOR[tier]};font-weight:600;font-size:12px;min-width:120px;">${conf}</span>` +
-      `<span style="color:${TEXT_DIM};font-family:monospace;font-size:11px;">` +
+      `<span style="color:${TIER_COLOR[tier]};font-weight:600;font-size:14px;min-width:120px;">${conf}</span>` +
+      `<span style="color:${TEXT_DIM};font-family:monospace;font-size:12.5px;">` +
       `${(e.startUs / 1000).toFixed(2)} ms · ${(e.durationUs / 1000).toFixed(2)} ms</span></div>`;
   });
   const hidden = ordered.length - rows.length;
   if (hidden > 0) {
-    rows.push(`<div style="color:${TEXT_DIM};font-size:11px;padding-top:6px;">+${hidden} more, lower priority</div>`);
+    rows.push(`<div style="color:${TEXT_DIM};font-size:12.5px;padding-top:6px;">+${hidden} more, lower priority</div>`);
   }
   return `<div style="margin-top:12px;padding-top:10px;border-top:1px solid ${GRID};">` +
-    `<div style="color:${TEXT_DIM};font-size:11px;margin-bottom:4px;">ALL DETECTIONS · worst tier first</div>` +
+    `<div style="color:${TEXT_DIM};font-size:12.5px;margin-bottom:4px;">ALL DETECTIONS · worst tier first</div>` +
     rows.join("") + `</div>`;
 }
 
@@ -102,7 +102,7 @@ function tierChips(events) {
     counts[t] = (counts[t] ?? 0) + 1;
   }
   return Object.keys(counts).sort().map(t =>
-    `<span style="display:inline-block;margin:4px 8px 0 0;padding:2px 10px;border-radius:9px;font-size:11px;font-weight:600;` +
+    `<span style="display:inline-block;margin:4px 8px 0 0;padding:2px 10px;border-radius:9px;font-size:12.5px;font-weight:600;` +
     `background:${TIER_COLOR[t]}22;color:${TIER_COLOR[t]};">${t} ${counts[t]}</span>`).join("");
 }
 
@@ -117,14 +117,14 @@ export function latestBlock(events, emptyPct, capture) {
     const headline = headlineEvent(events);
     if (headline) {
       const color = TIER_COLOR[tierOfClasses(headline.classes)];
-      extra = `<div style="margin-top:12px;padding-top:10px;border-top:1px solid ${GRID};color:${TEXT_DIM};font-size:12px;">` +
+      extra = `<div style="margin-top:12px;padding-top:10px;border-top:1px solid ${GRID};color:${TEXT_DIM};font-size:14px;">` +
         `Isolated detection, not sustained: <span style="color:${color};font-weight:600;">${headline.label}</span> at ` +
         `${(headline.startUs / 1000).toFixed(2)} ms for ${(headline.durationUs / 1000).toFixed(2)} ms</div>`;
     }
     return `<div style="background:${PANEL};padding:16px;border-radius:6px;color:${TEXT};">` +
-      `<div style="color:${TEXT_DIM};font-size:11px;">CHANNEL STATE</div>` +
-      `<div style="font-size:22px;font-weight:700;color:${BRAND_OLIVE};margin:6px 0;">EMPTY</div>` +
-      `<div style="color:${TEXT_DIM};font-family:monospace;font-size:12px;">${emptyPct.toFixed(0)}% of windows report no emitter</div>` +
+      `<div style="color:${TEXT_DIM};font-size:12.5px;">CHANNEL STATE</div>` +
+      `<div style="font-size:24px;font-weight:700;color:${BRAND_OLIVE};margin:6px 0;">EMPTY</div>` +
+      `<div style="color:${TEXT_DIM};font-family:monospace;font-size:14px;">${emptyPct.toFixed(0)}% of windows report no emitter</div>` +
       `${extra}</div>`;
   }
 
@@ -135,12 +135,12 @@ export function latestBlock(events, emptyPct, capture) {
   const e = headlineEvent(events);
   const color = TIER_COLOR[tierOfClasses(e.classes)];
   const caveat = headlineIsConfident(events) ? "" :
-    `<div style="color:${TEXT_DIM};font-size:11px;margin-top:6px;">nothing in this capture cleared 50% on the class setting its tier. Showing the strongest available</div>`;
+    `<div style="color:${TEXT_DIM};font-size:12.5px;margin-top:6px;">nothing in this capture cleared 50% on the class setting its tier. Showing the strongest available</div>`;
 
   return `<div style="background:${PANEL};padding:16px;border-radius:6px;color:${TEXT};">` +
-    `<div style="color:${TEXT_DIM};font-size:11px;">PRIMARY DETECTION</div>` +
-    `<div style="font-size:20px;font-weight:600;color:${color};margin:6px 0;">${e.label}</div>` +
-    `<div style="color:${TEXT_DIM};font-family:monospace;font-size:12px;">` +
+    `<div style="color:${TEXT_DIM};font-size:12.5px;">PRIMARY DETECTION</div>` +
+    `<div style="font-size:22px;font-weight:600;color:${color};margin:6px 0;">${e.label}</div>` +
+    `<div style="color:${TEXT_DIM};font-family:monospace;font-size:14px;">` +
     `${(e.startUs / 1000).toFixed(2)} ms · ${(e.durationUs / 1000).toFixed(2)} ms long<br>` +
     e.classes.map(c => `${c} ${pct(e.peak[c])}`).join(" · ") + `</div>` +
     caveat + `<div>${chips}</div>` + detectionList(events) + `</div>`;
@@ -184,35 +184,35 @@ export function printHeaderHtml({ source, caseNote, snrDb, snrKnown, hop, nWindo
   // white-space:nowrap. Two columns need neither override.
   const row = (k, v) =>
     `<tr>` +
-    `<td style="width:190px;color:${TEXT_DIM};font-size:10px;letter-spacing:0.05em;` +
+    `<td style="width:190px;color:${TEXT_DIM};font-size:11.5px;letter-spacing:0.05em;` +
     `padding:3.5px 12px 3.5px 0;vertical-align:top;border-bottom:1px solid ${GRID};">` +
     `${k.toUpperCase()}</td>` +
-    `<td style="font-family:${MONO};font-size:10.5px;color:${TEXT};line-height:1.45;` +
+    `<td style="font-family:${MONO};font-size:12px;color:${TEXT};line-height:1.45;` +
     `padding:3.5px 0;vertical-align:top;border-bottom:1px solid ${GRID};">${v}</td></tr>`;
 
   const heading = (n, t) =>
-    `<div style="font-size:11px;font-weight:700;letter-spacing:0.10em;color:${TEXT};` +
+    `<div style="font-size:12.5px;font-weight:700;letter-spacing:0.10em;color:${TEXT};` +
     `margin:14px 0 5px;">${n}. ${t}</div>`;
 
   return (
     // --- masthead ---
     `<div style="border-top:3px solid ${BRAND_OLIVE};border-bottom:1px solid ${BRAND_OLIVE};` +
     `padding:6px 0;margin-bottom:14px;display:flex;justify-content:space-between;` +
-    `align-items:baseline;font-size:10px;letter-spacing:0.12em;color:${TEXT_DIM};">` +
+    `align-items:baseline;font-size:11.5px;letter-spacing:0.12em;color:${TEXT_DIM};">` +
     `<span>SEDIC 26 &nbsp;·&nbsp; PROJECT NEXA &nbsp;·&nbsp; RF SPECTRUM INTELLIGENCE</span>` +
     `<span style="font-weight:700;color:${TEXT};">UNCLASSIFIED</span></div>` +
 
     `<div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:2px;">` +
-    `<div style="font-size:18px;font-weight:700;letter-spacing:0.06em;color:${TEXT};">` +
+    `<div style="font-size:20px;font-weight:700;letter-spacing:0.06em;color:${TEXT};">` +
     `CAPTURE ANALYSIS REPORT</div>` +
-    `<div style="font-family:${MONO};font-size:10px;color:${TEXT_DIM};text-align:right;">` +
+    `<div style="font-family:${MONO};font-size:11.5px;color:${TEXT_DIM};text-align:right;">` +
     `REF &nbsp;NEXA-CAR-${stamp}<br>ISSUED &nbsp;${issued}</div></div>` +
     `<div style="border-bottom:1px solid ${GRID};margin-bottom:2px;"></div>` +
 
     // --- 1. Scope. The basis-of-data statement a formal report is expected
     //     to carry, in body text rather than as a warning box.
     heading(1, "SCOPE AND BASIS OF DATA") +
-    `<div style="font-size:11px;line-height:1.6;color:${TEXT};">` +
+    `<div style="font-size:12.5px;line-height:1.6;color:${TEXT};">` +
     (synthetic
       ? `This report documents a single synthetic capture generated within the analysis ` +
         `console at the time of issue. Emitter positions, types and timings are therefore ` +

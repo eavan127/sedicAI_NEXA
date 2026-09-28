@@ -102,7 +102,7 @@ export function drawConsole(canvas, {
   const hLanes = Math.max(lanes.length * 0.52, 0.6) * UNIT;
   const hTier = 0.5 * UNIT;
   const HSPACE = 10;
-  const padTop = 8, padBottom = 34, padLeft = 62, padRight = 14;
+  const padTop = 8, padBottom = 40, padLeft = 66, padRight = 14;
 
   const cssH = padTop + hWaterfall + HSPACE + hLanes + HSPACE + hTier + padBottom;
 
@@ -114,7 +114,7 @@ export function drawConsole(canvas, {
 
   ctx.fillStyle = PANEL;
   ctx.fillRect(0, 0, cssW, cssH);
-  ctx.font = `8px ${FONT}`;
+  ctx.font = `10px ${FONT}`;
   ctx.textBaseline = "middle";
 
   // width_ratios [1, 9], wspace 0.02
@@ -208,10 +208,10 @@ export function drawConsole(canvas, {
   ctx.translate(13, (yWfTop + yWfBot) / 2);
   ctx.rotate(-Math.PI / 2);
   ctx.textAlign = "center";
-  ctx.font = `9px ${FONT}`;
+  ctx.font = `11px ${FONT}`;
   ctx.fillText("frequency (MHz), baseband", 0, 0);
   ctx.restore();
-  ctx.font = `8px ${FONT}`;
+  ctx.font = `10px ${FONT}`;
 
   // ---- MODEL overlays on the waterfall: full height, time-bounded --------
   // The classifier has no frequency axis (STFTBranch collapses it), so a box
@@ -246,9 +246,9 @@ export function drawConsole(canvas, {
       if (e.durationUs / 1000 > durationMs * 0.06) {
         ctx.fillStyle = "#ffffff";
         ctx.textAlign = "center";
-        ctx.font = `bold 8px ${FONT}`;
+        ctx.font = `bold 10px ${FONT}`;
         ctx.fillText(`${Math.round(e.peak[cls] * 100)}%`, (x0 + x1) / 2, laneTop + laneH / 2);
-        ctx.font = `8px ${FONT}`;
+        ctx.font = `10px ${FONT}`;
       }
     }
     // TRUTH into the SAME lane, dashed outline over the filled bar
@@ -295,11 +295,11 @@ export function drawConsole(canvas, {
     ctx.lineTo(x, yTierBot + 4);
     ctx.strokeStyle = GRID;
     ctx.stroke();
-    ctx.fillText(ms.toFixed(ms < 10 ? 1 : 0), x, yTierBot + 12);
+    ctx.fillText(ms.toFixed(ms < 10 ? 1 : 0), x, yTierBot + 14);
   }
-  ctx.font = `9px ${FONT}`;
+  ctx.font = `11px ${FONT}`;
   ctx.fillStyle = TEXT_DIM;
-  ctx.fillText("time (ms)", wfX + wfW / 2, yTierBot + 25);
+  ctx.fillText("time (ms)", wfX + wfW / 2, yTierBot + 30);
 
   // Layout in CSS pixels, so the page can turn a mouse position into a time
   // (and a detection lane) for the correction tools in main.js.

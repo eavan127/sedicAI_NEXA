@@ -68,10 +68,10 @@ export function probabilityHtml(result, windowIndex) {
       // 112px, not the Gradio original's 96px: NOISE_FLOOR renders 100px
       // wide in this stack and overflowed its box, colliding with the bar
       // beside it. flex-shrink:0 stops the flex row squeezing it back.
-      `<span style="width:112px;flex:0 0 auto;font-family:${MONO};font-size:12px;color:${text};">${cls}</span>` +
+      `<span style="width:112px;flex:0 0 auto;font-family:${MONO};font-size:14px;color:${text};">${cls}</span>` +
       `<span style="flex:1;background:${BG};height:13px;border-radius:2px;overflow:hidden;">` +
       `<span style="display:block;width:${(p * 100).toFixed(1)}%;height:100%;background:${colour};"></span></span>` +
-      `<span style="width:42px;text-align:right;font-family:${MONO};font-size:12px;color:${text};">${p.toFixed(2)}</span></div>`;
+      `<span style="width:42px;text-align:right;font-family:${MONO};font-size:14px;color:${text};">${p.toFixed(2)}</span></div>`;
   };
 
   const bars = CLASSES.filter(c => c !== "NOISE_FLOOR").map(row).join("");
@@ -81,11 +81,11 @@ export function probabilityHtml(result, windowIndex) {
   // threat class.
   const noiseBlock = `<div style="margin-top:12px;padding-top:10px;border-top:1px solid ${GRID};">` +
     row("NOISE_FLOOR") +
-    `<div style="color:${TEXT_DIM};font-size:11px;margin-left:22px;">` +
+    `<div style="color:${TEXT_DIM};font-size:12.5px;margin-left:22px;">` +
     `Signal state: ${quiet ? "QUIET / NO SIGNAL" : "ACTIVE"}</div></div>`;
 
   return `<div style="background:${PANEL};padding:16px;border-radius:6px;">` +
-    `<div style="color:${TEXT_DIM};font-size:11px;margin-bottom:10px;">` +
+    `<div style="color:${TEXT_DIM};font-size:12.5px;margin-bottom:10px;">` +
     `independent probabilities &middot; multi-label &middot; these do not sum to 100%</div>` +
     bars + noiseBlock + `</div>`;
 }
@@ -133,7 +133,7 @@ export function drawAttention(canvas, session, windowIndex) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.fillStyle = PANEL;
   ctx.fillRect(0, 0, cssW, cssH);
-  ctx.font = `9px ${FONT}`;
+  ctx.font = `11px ${FONT}`;
   ctx.textBaseline = "middle";
 
   const { result, capture } = session;
@@ -277,7 +277,7 @@ export function scorecardHtml(perf) {
     const colour = pass === null ? TEXT_DIM : (pass ? "#0F766E" : "#C1121F");
     return `<tr>` +
       `<td style="font-family:${MONO};color:${isJudged ? TEXT : TEXT_DIM};font-weight:${isJudged ? 600 : 400};">` +
-      `${cls}${isJudged ? ' <span style="font-size:10px;color:' + TEXT_DIM + ';">judged</span>' : ""}</td>` +
+      `${cls}${isJudged ? ' <span style="font-size:11.5px;color:' + TEXT_DIM + ';">judged</span>' : ""}</td>` +
       `<td style="text-align:right;font-family:${MONO};color:${colour};font-weight:${isJudged ? 600 : 400};">${recall.toFixed(1)}%</td>` +
       `<td style="text-align:right;font-family:${MONO};color:${TEXT_DIM};">` +
       `${m.balanced_accuracy === undefined ? "n/a" : (m.balanced_accuracy * 100).toFixed(1) + "%"}</td>` +
@@ -304,26 +304,26 @@ export function scorecardHtml(perf) {
     }).join("");
     ensembleBlock =
       `<div style="margin-top:16px;padding-top:12px;border-top:1px solid ${GRID};">` +
-      `<div style="color:${TEXT_DIM};font-size:11px;margin-bottom:6px;">` +
+      `<div style="color:${TEXT_DIM};font-size:12.5px;margin-bottom:6px;">` +
       `${ens.n_models}-MODEL ENSEMBLE, judged classes only, from evals/ensemble_scorecard.json. ` +
       `This is what the team submits; the table above is a different model.</div>` +
-      `<table style="width:100%;border-collapse:collapse;font-size:12px;">` +
+      `<table style="width:100%;border-collapse:collapse;font-size:14px;">` +
       `<thead><tr><th style="text-align:left;">Class</th><th style="text-align:right;">Recall</th>` +
       `<th style="text-align:right;">Precision</th></tr></thead><tbody>${cells}</tbody></table></div>`;
   }
 
-  return `<div style="color:${TEXT_DIM};font-size:11px;line-height:1.5;margin-bottom:8px;">` +
+  return `<div style="color:${TEXT_DIM};font-size:12.5px;line-height:1.5;margin-bottom:8px;">` +
     `Recall first, then balanced accuracy, then precision and F1 for transparency. Judged ` +
     `classes are marked; the rest are mandatory to classify but are not measured against the ` +
     `pass mark. Every figure is per window, ungated and unsmoothed, so the RF Replay smoothing ` +
     `toggle, the NOISE_FLOOR gate and the event hold never reach this page.</div>` +
-    `<table style="width:100%;border-collapse:collapse;font-size:12px;">` +
+    `<table style="width:100%;border-collapse:collapse;font-size:14px;">` +
     `<thead><tr><th style="text-align:left;">Class</th><th style="text-align:right;">Recall</th>` +
     `<th style="text-align:right;">Bal. acc.</th>` +
     `<th style="text-align:right;">Precision</th><th style="text-align:right;">F1</th>` +
     `<th style="text-align:right;">Support</th></tr></thead><tbody>${rows}</tbody></table>` +
     ensembleBlock +
-    `<div style="color:${TEXT_DIM};font-size:11px;margin-top:8px;border-top:1px solid ${GRID};padding-top:6px;">` +
+    `<div style="color:${TEXT_DIM};font-size:12.5px;margin-top:8px;border-top:1px solid ${GRID};padding-top:6px;">` +
     `Source: ${perf.scorecard_source ?? "evals/scorecard.json"}. ` +
     `Pass mark is ${bar.toFixed(0)}% recall on the judged classes.</div>`;
 }
@@ -352,13 +352,13 @@ export function denseQamHtml(perf) {
     const usable = n >= dq.min_windows;
     return `<tr>` +
       `<td style="font-family:${MONO};color:${usable ? TEXT : TEXT_DIM};">${n} window${n === 1 ? "" : "s"}` +
-      `${usable ? "" : ' <span style="font-size:10px;">below minimum, refused</span>'}</td>` +
+      `${usable ? "" : ' <span style="font-size:11.5px;">below minimum, refused</span>'}</td>` +
       `<td style="text-align:right;font-family:${MONO};font-weight:${usable ? 600 : 400};` +
       `color:${usable ? TEXT : TEXT_DIM};">${acc.toFixed(1)}%</td></tr>`;
   }).join("");
 
   const combined = perWindow
-    ? `<div style="color:${TEXT_DIM};font-size:11px;margin-bottom:8px;">` +
+    ? `<div style="color:${TEXT_DIM};font-size:12.5px;margin-bottom:8px;">` +
       `Per-window, the model's combined dense-QAM recall, meaning did it notice some dense QAM was ` +
       `present regardless of which it named, is ` +
       `<span style="font-family:${MONO};color:${TEXT};">${(perWindow.recall * 100).toFixed(1)}%</span> ` +
@@ -366,17 +366,17 @@ export function denseQamHtml(perf) {
       `that needs pooling.</div>`
     : "";
 
-  return `<div style="color:${TEXT_DIM};font-size:11px;line-height:1.5;margin-bottom:8px;">` +
+  return `<div style="color:${TEXT_DIM};font-size:12.5px;line-height:1.5;margin-bottom:8px;">` +
     `Event level, not per window, and not part of the judged benchmark. A 512-sample window ` +
     `carries about 56 symbols, and the separation between the two constellations is smaller ` +
     `than the estimator's own spread at that count, so the split is not something a better ` +
     `model fixes. Pooling across windows is what resolves it.</div>` +
     combined +
-    `<table style="width:100%;border-collapse:collapse;font-size:12px;">` +
+    `<table style="width:100%;border-collapse:collapse;font-size:14px;">` +
     `<thead><tr><th style="text-align:left;">Windows pooled</th>` +
     `<th style="text-align:right;">16QAM vs 64QAM accuracy</th></tr></thead>` +
     `<tbody>${rows}</tbody></table>` +
-    `<div style="color:${TEXT_DIM};font-size:11px;margin-top:8px;border-top:1px solid ${GRID};padding-top:6px;">` +
+    `<div style="color:${TEXT_DIM};font-size:12.5px;margin-top:8px;border-top:1px solid ${GRID};padding-top:6px;">` +
     `Source: src/measure.py C42_POOLED_ACCURACY. ` +
     `Measured at SNR &ge; ${dq.min_snr_db} dB, the regime the ${dq.c42_boundary} boundary was ` +
     `calibrated for. Below that the channel pulls |C42| toward zero and the resolver ` +
@@ -409,9 +409,9 @@ export function summaryHtml(perf) {
     const ok = bench.passed;
     // Verdict centred over the three class cards it summarises.
     out += `<div style="text-align:center;margin-bottom:14px;">` +
-      `<div style="font-size:17px;font-weight:700;color:${ok ? "#0F766E" : "#C1121F"};">` +
+      `<div style="font-size:18.5px;font-weight:700;color:${ok ? "#0F766E" : "#C1121F"};">` +
       `Benchmark: ${ok ? "PASS" : "FAIL"}</div>` +
-      `<div style="font-size:12px;color:${TEXT_DIM};margin-top:2px;">` +
+      `<div style="font-size:14px;color:${TEXT_DIM};margin-top:2px;">` +
       `Greater than ${(bench.benchmark_recall * 100).toFixed(0)}% recall on all three judged classes` +
       `</div></div>`;
 
@@ -434,13 +434,13 @@ export function summaryHtml(perf) {
       const line = (label, value, opts = {}) =>
         `<div style="display:flex;justify-content:space-between;align-items:baseline;` +
         `padding:3px 0;${opts.rule ? `border-top:1px solid ${GRID};margin-top:5px;padding-top:6px;` : ""}">` +
-        `<span style="font-size:11px;color:${TEXT_DIM};">${label}</span>` +
+        `<span style="font-size:12.5px;color:${TEXT_DIM};">${label}</span>` +
         `<span style="font-family:${MONO};font-size:${opts.size ?? 12}px;` +
         `font-weight:${opts.weight ?? 600};color:${opts.colour ?? TEXT};">${value}</span></div>`;
 
       return `<div style="flex:1 1 0;min-width:0;background:${PANEL};border:1px solid ${GRID};` +
         `border-radius:6px;padding:12px 14px;">` +
-        `<div style="font-family:${MONO};font-size:14px;font-weight:700;color:${TEXT};` +
+        `<div style="font-family:${MONO};font-size:16px;font-weight:700;color:${TEXT};` +
         `margin-bottom:8px;overflow-wrap:anywhere;">${cls}</div>` +
         line("Recall (primary)", pc(r.recall), { size: 20, colour: r.passed ? "#0F766E" : "#C1121F" }) +
         line("Balanced accuracy", m.balanced_accuracy === undefined ? "n/a" : pc(m.balanced_accuracy)) +
@@ -449,13 +449,13 @@ export function summaryHtml(perf) {
         line("Accuracy", m.accuracy === undefined ? "n/a" : pc(m.accuracy),
               { rule: true, weight: 400, colour: TEXT_DIM }) +
         (m.trivial_accuracy === undefined ? "" :
-          `<div style="font-size:10px;color:${TEXT_DIM};line-height:1.4;margin-top:2px;">` +
+          `<div style="font-size:11.5px;color:${TEXT_DIM};line-height:1.4;margin-top:2px;">` +
           `predicting nothing already scores ${pc(m.trivial_accuracy)}</div>`) +
         `</div>`;
     }).join("");
 
     out += `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">${cards}</div>` +
-      `<div style="font-size:11px;color:${TEXT_DIM};line-height:1.5;margin-bottom:16px;">` +
+      `<div style="font-size:12.5px;color:${TEXT_DIM};line-height:1.5;margin-bottom:16px;">` +
       `Recall is the primary figure: it is the metric the rule names and the one the per-class ` +
       `thresholds were calibrated against. Balanced accuracy supports it and is the reading of ` +
       `"accuracy" that survives the class imbalance. Precision and F1 are shown for transparency, ` +
@@ -477,7 +477,7 @@ export function summaryHtml(perf) {
     const rec = coarse?.per_tier_recall?.[tier];
     rows.push(
       `<tr><td style="font-weight:600;color:${TIER_COLOR[tier]};padding:4px 12px 4px 0;">${tier}</td>` +
-      `<td style="color:${TEXT_DIM};font-family:${MONO};font-size:11px;padding:4px 12px 4px 0;">` +
+      `<td style="color:${TEXT_DIM};font-family:${MONO};font-size:12.5px;padding:4px 12px 4px 0;">` +
       present.map(c => `${c} ${(perClass[c].recall * 100).toFixed(0)}%`).join(", ") + `</td>` +
       `<td style="text-align:right;font-family:${MONO};font-weight:600;">` +
       (rec === undefined || rec === null ? "n/a" : pc(rec)) + `</td></tr>`);
@@ -489,7 +489,7 @@ export function summaryHtml(perf) {
     // not a per-class one.
     rows.push(
       `<tr><td style="font-weight:600;padding:4px 12px 4px 0;">CEMA</td>` +
-      `<td style="color:${TEXT_DIM};font-family:${MONO};font-size:11px;padding:4px 12px 4px 0;">` +
+      `<td style="color:${TEXT_DIM};font-family:${MONO};font-size:12.5px;padding:4px 12px 4px 0;">` +
       `comms vs hostile, jamming recall ${pc(cvj.jamming_recall)}, ` +
       `false alarm ${(cvj.false_alarm_rate * 100).toFixed(2)}%</td>` +
       `<td style="text-align:right;font-family:${MONO};font-weight:700;color:#0F766E;">${pc(cvj.accuracy)}</td></tr>`);
@@ -497,25 +497,25 @@ export function summaryHtml(perf) {
 
   // Analysis first, then the table, then the source. Same order in every
   // section on this page, so a reader always knows where to look.
-  out += `<div style="font-size:14px;font-weight:700;color:${TEXT};margin-bottom:6px;">By category</div>` +
-    `<div style="font-size:11px;color:${TEXT_DIM};line-height:1.5;margin-bottom:8px;">` +
+  out += `<div style="font-size:16px;font-weight:700;color:${TEXT};margin-bottom:6px;">By category</div>` +
+    `<div style="font-size:12.5px;color:${TEXT_DIM};line-height:1.5;margin-bottom:8px;">` +
     `The two secondary scorecard metrics live here. Coarse-tier accuracy asks whether a window ` +
     `was placed in the right category, so a radar window called FHSS is still correct at this ` +
     `level. Comms versus jamming accuracy is the discrimination the competition weighs most ` +
     `heavily, and its false-alarm rate is the share of civilian traffic wrongly flagged hostile.` +
     `</div>` +
-    `<table style="width:100%;border-collapse:collapse;font-size:12px;table-layout:auto;">` +
+    `<table style="width:100%;border-collapse:collapse;font-size:14px;table-layout:auto;">` +
     `<thead><tr><th style="text-align:left;">Category</th><th style="text-align:left;">Classes</th>` +
     `<th style="text-align:right;">Tier recall</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
 
   if (coarse) {
-    out += `<div style="font-size:12px;color:${TEXT};margin-top:8px;">` +
+    out += `<div style="font-size:14px;color:${TEXT};margin-top:8px;">` +
       `Coarse-tier accuracy <strong>${pc(coarse.accuracy)}</strong>` +
       (cvj ? ` &nbsp;·&nbsp; comms versus jamming accuracy <strong>${pc(cvj.accuracy)}</strong>` +
               ` over ${cvj.n_evaluated.toLocaleString()} windows` : "") +
       `</div>`;
   }
-  out += `<div style="font-size:11px;color:${TEXT_DIM};margin-top:8px;border-top:1px solid ${GRID};padding-top:6px;">` +
+  out += `<div style="font-size:12.5px;color:${TEXT_DIM};margin-top:8px;border-top:1px solid ${GRID};padding-top:6px;">` +
     `Source: evals/scorecard.json, written by <code>python -m src.evaluate</code>. ` +
     `Tiers as declared in src/config.py TIERS.</div>`;
   return out;
@@ -539,7 +539,7 @@ export function drawPerClassRecall(canvas, perf) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.fillStyle = PANEL;
   ctx.fillRect(0, 0, cssW, cssH);
-  ctx.font = `9px ${FONT}`;
+  ctx.font = `11px ${FONT}`;
   ctx.textBaseline = "middle";
 
   const L = 40, R = 12, T = 12, B = 56;
@@ -594,7 +594,7 @@ export function breakdownTableHtml(perf) {
   // on before reading any figure in it.
   const nw = b.n_windows ?? {};
   const head =
-    `<div style="font-size:11px;color:${TEXT_DIM};margin-top:10px;">` +
+    `<div style="font-size:12.5px;color:${TEXT_DIM};margin-top:10px;">` +
     `<strong style="color:${TEXT};">${perf.breakdown_model ?? perf.model_label}</strong>` +
     (nw.single !== undefined
       ? ` &nbsp;·&nbsp; ${nw.single.toLocaleString()} single-signal / ` +
@@ -616,7 +616,7 @@ export function breakdownTableHtml(perf) {
     }
   }
   return head +
-    `<table style="width:100%;border-collapse:collapse;font-size:11px;table-layout:auto;margin-top:6px;">` +
+    `<table style="width:100%;border-collapse:collapse;font-size:12.5px;table-layout:auto;margin-top:6px;">` +
     `<thead><tr><th style="text-align:left;">Class</th><th style="text-align:left;">Group</th>` +
     bins.map(s => `<th style="text-align:right;">${s >= 0 ? "+" : ""}${s} dB</th>`).join("") +
     `<th style="text-align:right;">All</th></tr></thead><tbody>${rows}</tbody></table>`;
@@ -631,8 +631,8 @@ export function provenanceHtml(perf) {
   const smoke = ds.total_windows < 5000;
   const colour = smoke ? "#B45309" : TEXT_DIM;
   return `<div style="background:${smoke ? "#FDF6EC" : PANEL_MUTED};border:1px solid ${smoke ? "#B45309" : GRID};` +
-    `padding:12px 14px;border-radius:6px;color:${colour};font-size:12px;line-height:1.6;">` +
-    `<div style="font-size:14px;font-weight:700;color:${smoke ? "#B45309" : TEXT};margin-bottom:4px;">` +
+    `padding:12px 14px;border-radius:6px;color:${colour};font-size:14px;line-height:1.6;">` +
+    `<div style="font-size:16px;font-weight:700;color:${smoke ? "#B45309" : TEXT};margin-bottom:4px;">` +
     `How these numbers were produced</div>` +
     (smoke ? `<strong>These numbers come from a ${ds.total_windows}-window dataset: a smoke run, not the full dataset.</strong><br>` : "") +
     `Measured by the Python evaluation at build time on the held-out test split ` +
@@ -668,7 +668,7 @@ export function drawBreakdown(canvas, perf, revealMs = Infinity, revealOpts = {}
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.fillStyle = PANEL;
   ctx.fillRect(0, 0, cssW, cssH);
-  ctx.font = `9px ${FONT}`;
+  ctx.font = `11px ${FONT}`;
   ctx.textBaseline = "middle";
 
   const L = 46, R = 150, T = 14, B = 40;

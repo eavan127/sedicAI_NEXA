@@ -66,15 +66,20 @@ function sheet(doc, title, subtitle, { banner = "" } = {}) {
     if (s.y + h <= H - M) return;
     doc.addPage(); s.page++; s.y = M; foot(s);
   };
-  s.text = (str, { size = 10, color = SLATE, bold = false, x = M, gap = 14 } = {}) => {
-    s.room(gap);
+  // Paragraph text WRAPS to the page width: a long line (a reason, a filter
+  // description) used to run off the right edge.
+  s.text = (str, { size = 10.5, color = SLATE, bold = false, x = M, gap = null } = {}) => {
     doc.setFont("helvetica", bold ? "bold" : "normal");
     doc.setFontSize(size);
     doc.setTextColor(...color);
-    doc.text(String(str), x, s.y);
-    s.y += gap;
+    const lineH = gap ?? size * 1.4;
+    for (const line of doc.splitTextToSize(String(str), W - M - x)) {
+      s.room(lineH);
+      doc.text(line, x, s.y);
+      s.y += lineH;
+    }
   };
-  s.heading = str => { s.y += 6; s.text(str, { size: 12, bold: true, color: OLIVE, gap: 18 }); };
+  s.heading = str => { s.y += 8; s.text(str, { size: 13, bold: true, color: OLIVE, gap: 20 }); };
   s.rule = () => {
     s.room(10);
     doc.setDrawColor(223, 227, 217);
@@ -82,38 +87,62 @@ function sheet(doc, title, subtitle, { banner = "" } = {}) {
     s.y += 4;
   };
   // Column table. `widths` are fractions of the usable width, so the same
-  // definition works on A4 and Letter.
-  s.table = (headers, rows, widths) => {
+  // definition works on A4 and Letter. Every cell WRAPS inside its own column
+  // (long class lists used to spill into the next column); a row is as tall
+  // as its tallest cell; the shaded header row repeats on every new page.
+  s.table = (headers, rows, widths, { size = 9.5, maxLines = 6 } = {}) => {
     const usable = W - 2 * M;
     const xs = [];
     let acc = M;
     for (const w of widths) { xs.push(acc); acc += w * usable; }
-    s.room(20);
-    doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...DIM);
-    headers.forEach((h, i) => doc.text(String(h), xs[i], s.y));
-    s.y += 12;
-    doc.setFont("helvetica", "normal"); doc.setTextColor(...SLATE);
-    for (const row of rows) {
-      s.room(14);
-      row.forEach((cell, i) => {
-        const maxChars = Math.floor((widths[i] * usable) / 4.6);
-        const str = String(cell ?? "");
-        doc.text(str.length > maxChars ? str.slice(0, maxChars - 1) + "…" : str, xs[i], s.y);
-      });
-      s.y += 12;
-    }
-    s.y += 4;
+    const PAD = 5, lineH = size * 1.3;
+    const colW = widths.map(w => w * usable - 2 * PAD);
+    const wrap = (text, i) => {
+      const lines = doc.splitTextToSize(String(text ?? ""), colW[i]);
+      if (lines.length <= maxLines) return lines;
+      const kept = lines.slice(0, maxLines);
+      kept[maxLines - 1] = kept[maxLines - 1].replace(/.{0,2}$/, "") + "...";
+      return kept;
+    };
+    const drawHeader = () => {
+      doc.setFont("helvetica", "bold"); doc.setFontSize(size - 0.5);
+      const cells = headers.map((h, i) => wrap(String(h).toUpperCase(), i));
+      const h = Math.max(...cells.map(c => c.length)) * lineH + PAD * 1.6;
+      s.room(h + lineH * 2);
+      doc.setFillColor(233, 237, 221);
+      doc.rect(M, s.y - lineH + 1, usable, h, "F");
+      doc.setTextColor(...DIM);
+      cells.forEach((lines, i) => lines.forEach((l, k) => doc.text(l, xs[i] + PAD, s.y + k * lineH + 1)));
+      s.y += h;
+    };
+    drawHeader();
+    rows.forEach((row, r) => {
+      doc.setFont("helvetica", "normal"); doc.setFontSize(size);
+      const cells = row.map((cell, i) => wrap(cell, i));
+      const h = Math.max(1, ...cells.map(c => c.length)) * lineH + PAD;
+      if (s.y + h > H - M) { s.room(H); drawHeader(); doc.setFont("helvetica", "normal"); doc.setFontSize(size); }
+      if (r % 2) {
+        doc.setFillColor(246, 247, 242);
+        doc.rect(M, s.y - lineH + 2, usable, h, "F");
+      }
+      doc.setTextColor(...SLATE);
+      cells.forEach((lines, i) => lines.forEach((l, k) => doc.text(l, xs[i] + PAD, s.y + k * lineH)));
+      s.y += h;
+      doc.setDrawColor(223, 227, 217);
+      doc.line(M, s.y - lineH + 2, W - M, s.y - lineH + 2);
+    });
+    s.y += 8;
   };
 
   // Cover block, on every report: a page of detections with no record of
   // which capture, model and thresholds produced them is unreadable later --
   // the same reason main.js builds a print header.
-  doc.setFont("helvetica", "bold"); doc.setFontSize(16); doc.setTextColor(...SLATE);
-  doc.text("NEXA", M, s.y); s.y += 18;
-  doc.setFontSize(12); doc.setTextColor(...OLIVE);
-  doc.text(title, M, s.y); s.y += 16;
-  doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...DIM);
-  doc.text(subtitle, M, s.y); s.y += 10;
+  doc.setFont("helvetica", "bold"); doc.setFontSize(18); doc.setTextColor(...SLATE);
+  doc.text("NEXA", M, s.y); s.y += 20;
+  doc.setFontSize(14); doc.setTextColor(...OLIVE);
+  doc.text(title, M, s.y); s.y += 18;
+  s.text(subtitle, { size: 10, color: DIM, gap: 13 });
+  s.y -= 2;
   s.rule();
   foot(s);
   return s;
@@ -140,6 +169,12 @@ export function dtg(t = new Date()) {
   const p = n => String(n).padStart(2, "0");
   const mon = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"][t.getUTCMonth()];
   return `${p(t.getUTCDate())}${p(t.getUTCHours())}${p(t.getUTCMinutes())}Z ${mon} ${String(t.getUTCFullYear()).slice(2)}`;
+}
+
+/** "2026-09-28 15:21" in local time: fits a narrow table column on one line. */
+function stamp(t) {
+  const d = new Date(t), p = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 function fileStamp() {
@@ -239,8 +274,8 @@ export async function buildReport({ records, summary, corrections = [], audit = 
   }
   if (has("captures")) {
     s.heading(`${n++}. Captures`);
-    s.table(["When", "Capture", "Operator", "Verdict", "Classes", "SNR"],
-      records.map(r => [new Date(r.created_at).toLocaleString(), r.file_name || r.case_note || r.source,
+    s.table(["When", "Capture", "By", "Verdict", "Classes detected", "SNR"],
+      records.map(r => [stamp(r.created_at), r.file_name || r.case_note || r.source,
         r.operator || "—", r.verdict, (r.classes_detected || []).join(", "),
         r.snr_db == null ? "—" : String(r.snr_db)]), [0.19, 0.25, 0.1, 0.1, 0.28, 0.08]);
   }
@@ -258,7 +293,7 @@ export async function buildReport({ records, summary, corrections = [], audit = 
   if (has("audit")) {
     s.heading(`${n++}. Audit trail`);
     s.table(["#", "Time", "Who", "Action", "Target"],
-      audit.map(e => [e.seq, new Date(e.ts).toLocaleString(), e.actor, e.action,
+      audit.map(e => [e.seq, stamp(e.ts), e.actor, e.action,
         `${e.target_type || ""} ${(e.target_id || "").slice(0, 12)}`]), [0.07, 0.25, 0.14, 0.26, 0.28]);
   }
   if (has("model")) {
@@ -315,7 +350,7 @@ export async function buildCombined(records, summary, { title = "All analysed si
   s.heading("All captures");
   s.table(["When", "Capture", "Verdict", "Classes", "SNR", "Win"],
     records.map(r => [
-      new Date(r.created_at).toLocaleString(),
+      stamp(r.created_at),
       r.file_name || r.case_note || r.source,
       r.verdict,
       (r.classes_detected || []).join(", "),
