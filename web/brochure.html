@@ -404,7 +404,7 @@
   .person.advisor { border: 2px solid var(--orange); }
   .person.advisor .av { background: var(--orange); color: var(--ink); }
   .person .lead-tag { font: 700 11px var(--mono); color: var(--amber); letter-spacing: 0.08em; margin-top: 8px; text-transform: uppercase; }
-  .qrs { display: grid; grid-template-columns: repeat(2, minmax(0, 260px)); gap: 18px; margin-top: 48px; }
+  .qrs { display: grid; grid-template-columns: repeat(2, minmax(0, 260px)); gap: 18px; margin-top: 48px; justify-content: center; }
   @media (max-width: 560px) { .qrs { grid-template-columns: 1fr 1fr; gap: 12px; } }
   .qr { background: #fff; color: var(--ink); border: 1px solid var(--line); border-radius: 16px; padding: 16px; text-align: center; }
   .qr .code { width: 100%; aspect-ratio: 1; display: grid; place-items: center; }
@@ -498,6 +498,11 @@
     .honest ul { font-size: 9pt; }
     .features { grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 0; }
     .page-brand.print-only { display: flex !important; break-before: page; padding-top: 0; }
+    /* loop and both feature rows share one printed page */
+    .page-brand.print-only.pb-second { display: none !important; }
+    #platform .features + .features { margin-top: 8px; }
+    .feat .shot { max-height: 29mm; object-fit: cover; object-position: top; }
+    .gov .gov-shot { display: none; }
     /* platform prints as three pages: console + demo strip, loop + first features, the rest */
     #platform { height: auto; min-height: 0; padding-bottom: 0; overflow: visible; }
     .showcase { grid-template-columns: 1fr; margin-top: 12px; gap: 8px; }
@@ -513,7 +518,8 @@
     .gov-item .ic { width: 22px; height: 22px; }
     .gov-item .ic svg { width: 12px; height: 12px; }
     .gov-item h5 { font-size: 9pt; }
-    .gov-item p { font-size: 8pt; }
+    .gov-item p { font-size: 7.6pt; }
+    .gov-item .where, .gov > p { display: none; }
     .gov-item.full { padding: 6px 8px; }
     .gov .gov-shot { margin-top: 6px; }
     .feat { padding: 11px; gap: 4px; }
@@ -524,7 +530,7 @@
     .feat p { font-size: 8.5pt; }
     .feat .where { font-size: 7.5pt; padding-top: 4px; }
     .mock { padding: 8px; }
-    .loop-card { grid-template-columns: 1.1fr 1fr; gap: 8px 18px; padding: 14px 16px !important; margin-top: 0 !important; }
+    .loop-card { grid-template-columns: 1.45fr 1fr; gap: 8px 18px; padding: 12px 16px !important; margin-top: 0 !important; }
     .loop-text .where { font-size: 7.5pt; }
     .loop-text h4 { font-size: 13pt; }
     .loop-text p { font-size: 9pt; }
@@ -532,13 +538,13 @@
     .loop-rules { margin-top: 6px; gap: 3px; }
     .loop-rules li { font-size: 8.5pt; padding-left: 16px; }
     .loop-rules li::before { width: 9px; }
-    .ring { max-width: 92mm; margin: 0 auto; }
+    .ring { max-width: 60mm; margin: 0 auto; }
     .demo-card .play { display: none; }
     .ring .runner { display: none; }
-    .ring .node { font-size: 8pt; padding: 6px 7px; border-radius: 10px; }
-    .ring .node b { font-size: 9.5pt; }
+    .ring .node { font-size: 7pt; padding: 4px 6px; border-radius: 9px; }
+    .ring .node b { font-size: 8.5pt; }
     .ring .node i { width: 15px; height: 15px; font-size: 7pt; }
-    .ring-centre { font-size: 7.5pt; }
+    .ring-centre { display: none; }
     .aud { margin-top: 20px; }
     .aud article { grid-template-columns: 1fr 2.4fr; gap: 10px 22px; padding: 16px 0; }
     .aud h3 { font-size: 15pt; margin-top: 8px; }
@@ -842,7 +848,7 @@
       </div>
     </div>
 
-    <div class="page-brand print-only" aria-hidden="true"><img class="pb-nexa" src="img/nexa-logo.png" alt="" width="1100" height="264"><img class="pb-sedic" src="img/sedic-logo.png" alt="" width="831" height="238"></div>
+    <div class="page-brand print-only pb-second" aria-hidden="true"><img class="pb-nexa" src="img/nexa-logo.png" alt="" width="1100" height="264"><img class="pb-sedic" src="img/sedic-logo.png" alt="" width="831" height="238"></div>
     <div class="features">
       <div class="feat reveal">
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 5h16v11H8l-4 4z"/></svg></div>
