@@ -69,7 +69,8 @@
     color: var(--on-dark); border-bottom: 1px solid var(--slate-3);
   }
   .bar .brand { font-weight: 800; letter-spacing: 0.22em; font-size: 15px; }
-  .bar .brand span { color: var(--olive-glow); }
+  .bar .brand { display: block; line-height: 0; }
+  .bar .brand img { display: block; height: 24px; width: auto; }
   .bar nav { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; }
   .bar nav::-webkit-scrollbar { display: none; }
   .bar nav a {
@@ -130,6 +131,8 @@
     font-size: clamp(64px, 15vw, 168px); font-weight: 800; letter-spacing: 0.12em;
     line-height: 0.9; margin-left: -0.04em;
   }
+  .cover .logo-mark { line-height: 0; margin-left: 0; }
+  .cover .logo-mark img { display: block; height: clamp(54px, 11vw, 124px); width: auto; max-width: 100%; }
   .cover .tagline { font-size: clamp(20px, 3vw, 30px); font-weight: 600; margin-top: 18px; max-width: 24ch; }
   .cover .sub { color: var(--on-dark-dim); margin-top: 14px; max-width: 56ch; }
   .cover .ctas { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
@@ -306,7 +309,7 @@
     .folio { margin-bottom: 8px; font-size: 8pt; }
     .page h2 { font-size: 24pt; max-width: 22ch; }
     .lead { font-size: 10.5pt; margin-top: 8px; }
-    .cover h1 { font-size: 110px; }
+    .cover .logo-mark img { height: 96px; }
     .cover .tagline { font-size: 18pt; }
     .cover .meta { grid-template-columns: repeat(4, 1fr); margin-top: 24px; }
     .cover .meta b { font-size: 15pt; }
@@ -369,7 +372,7 @@
 <body>
 
 <header class="bar">
-  <div class="brand">NE<span>X</span>A</div>
+  <a class="brand" href="#cover"><img src="img/nexa-logo-light.png" alt="NEXA" width="523" height="127"></a>
   <nav aria-label="Brochure sections">
     <a href="#mission">Mission</a>
     <a href="#how">How it works</a>
@@ -386,7 +389,7 @@
   <canvas id="waterfall" aria-hidden="true"></canvas>
   <div class="inner">
     <div class="kicker"><span class="live-dot"></span>SEDIC 2026 · Track I · Project Overwatch: Cognitive CEMA</div>
-    <h1>NEXA</h1>
+    <h1 class="logo-mark"><img src="img/nexa-logo-light.png" alt="NEXA" width="523" height="127"></h1>
     <p class="tagline">AI-powered RF spectrum intelligence.</p>
     <p class="sub">Who is transmitting, and are they hostile? NEXA reads raw radio samples, names every signal
       in the window (civilian comms, radar, frequency hopping, jamming) and tells the operator which tier
