@@ -255,6 +255,12 @@
   .aud li span { color: var(--text-dim); font-size: 14px; }
 
   /* ---------- team ---------- */
+  .group-photo { margin: 28px 0 0; max-width: 860px; }
+  .group-photo img {
+    display: block; width: 100%; max-width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; object-position: center 88%;
+    border-radius: 16px; border: 1px solid var(--slate-3); background: var(--slate-2);
+  }
+  .group-photo figcaption { margin-top: 10px; font-size: 13px; color: var(--on-dark-dim); }
   .team { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 40px; }
   @media (max-width: 900px) { .team { grid-template-columns: repeat(2, 1fr); } }
   @media (max-width: 420px) { .team { grid-template-columns: 1fr; } }
@@ -350,6 +356,9 @@
     .aud li span { font-size: 8.5pt; }
     .team { grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 22px; }
     .person { padding: 14px; }
+    .group-photo { margin-top: 14px; }
+    .group-photo img { aspect-ratio: auto; height: 78mm; }
+    .group-photo figcaption { display: none; }
     .qrs { grid-template-columns: repeat(2, 55mm); margin-top: 26px; }
     .stage, .feat, .tier, .aud article, .kpi, .person { break-inside: avoid; }
     .stage.lit { background: var(--panel); color: var(--text); }
@@ -683,8 +692,10 @@
   <div class="inner">
     <div class="folio"><span class="num">07</span>The team</div>
     <h2 class="reveal" style="max-width:none">Group NEXA<br>Universiti Teknologi PETRONAS.</h2>
-    <p class="lead reveal">Each member owns one signal family end to end, from the physics to its results, plus one
-      part of the shared pipeline.</p>
+
+    <figure class="group-photo reveal">
+      <img src="img/team.jpg" alt="Group NEXA in matching dark suits, standing in a row in front of a gold backdrop." width="1400" height="1050" loading="lazy">
+    </figure>
 
     <div class="team">
       <div class="person reveal">
