@@ -748,13 +748,12 @@
           capture. Each detection lane and the tier bar share the waterfall's time axis; dashed boxes are the true answer.</figcaption>
       </figure>
       <aside class="demo-card">
-        <span class="demo-tag">Demo video</span>
+        <span class="demo-tag" id="demoTag">Demo video</span>
         <div class="play" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div>
-        <h3>Watch NEXA run</h3>
+        <h3 id="demoTitle">Watch NEXA run</h3>
         <p>A capture goes in, the five-model ensemble classifies it in the browser, and the operator reviews
           the events. No server, no internet.</p>
         <a class="btn demo-link" id="demoLink" href="#" target="_blank" rel="noopener">Watch the demo</a>
-        <p class="demo-soon" id="demoSoon">Video link coming soon.</p>
         <hr>
         <p class="demo-try">Or try it yourself: <a href="./" data-demo>open the live console</a>, or scan the QR on the
           last page.</p>
@@ -826,7 +825,7 @@
       <div class="loop-text">
         <span class="loop-kicker">Retraining that cannot get worse</span>
         <h4>The learning loop</h4>
-        <p>NEXA gets better in service. What operators correct becomes training data, but only after a second
+        <p>NEXA learns from the operators who use it. What they correct becomes training data, but only after a second
           person approves it. Approved corrections fine-tune the model, mixed with the original training data so
           it does not forget what it already knew.</p>
         <ul class="loop-rules">
@@ -836,7 +835,7 @@
         </ul>
         <div class="where">Page: Model</div>
       </div>
-      <div class="ring" role="img" aria-label="A cycle of four steps: 1 Detect, 2 Correct, 3 Approve, 4 Retrain, then back to Detect.">
+      <div class="ring" role="img" aria-label="A cycle of four steps: 1 Detect, 2 Correct, 3 Approve, 4 Retrain, then back to Detect. A person is in control at every step.">
         <svg viewBox="0 0 100 100" aria-hidden="true">
           <circle class="track" cx="50" cy="50" r="33.3"/>
           <path class="head" d="M -2.4 -2.8 L 3 0 L -2.4 2.8 Z" transform="translate(73.55 26.45) rotate(45)"/><path class="head" d="M -2.4 -2.8 L 3 0 L -2.4 2.8 Z" transform="translate(73.55 73.55) rotate(135)"/><path class="head" d="M -2.4 -2.8 L 3 0 L -2.4 2.8 Z" transform="translate(26.45 73.55) rotate(225)"/><path class="head" d="M -2.4 -2.8 L 3 0 L -2.4 2.8 Z" transform="translate(26.45 26.45) rotate(315)"/>
@@ -847,7 +846,7 @@
         <div class="node n2" style="--c: var(--orange)"><b><i>2</i>Correct</b>Operator fixes what it got wrong</div>
         <div class="node n3" style="--c: var(--green)"><b><i>3</i>Approve</b>A second person signs it off</div>
         <div class="node n4" style="--c: var(--navy)"><b><i>4</i>Retrain</b>Tested against the current model, then activated</div>
-        <p class="ring-centre">Every pass<br>sharpens the<br>next one</p>
+        <p class="ring-centre">Human in<br>control at<br>every step</p>
       </div>
     </div>
   </div>
@@ -859,8 +858,9 @@
     <div class="page-brand" aria-hidden="true"><img class="pb-nexa" src="img/nexa-logo.png" alt="" width="1100" height="264"><img class="pb-sedic" src="img/sedic-logo.png" alt="" width="831" height="238"></div>
     <div class="folio"><span class="num">06</span>Impact</div>
     <h2 class="reveal">What NEXA brings to contested spectrum.</h2>
-    <p class="lead reveal">Seeing who is transmitting is only useful if it leads to a faster, better decision. NEXA is
-      built to do that in the field, to keep working as signals change, and to stand up to scrutiny.</p>
+    <p class="lead reveal">Seeing who is transmitting is only useful if it leads to a faster, better decision. NEXA
+      makes that call offline on one laptop, learns from its operators' corrections, and shows the evidence behind
+      every figure.</p>
 
     <div class="aud">
       <article class="reveal" style="--c: var(--red)">
@@ -870,7 +870,7 @@
         </div>
         <ul>
           <li><b>Threats surface first</b><span>Jamming is ranked ahead of routine traffic, so attention goes where the risk is.</span></li>
-          <li><b>Overlap is not missed</b><span>A jammer sitting on a live link is reported as both, the case single-answer detectors miss.</span></li>
+          <li><b>Overlap is reported</b><span>A jammer on a live link is reported as both signals. Overlapping jamming is still found 84 to 94% of the time from −6 dB up.</span></li>
           <li><b>Works disconnected</b><span>The full five-model ensemble runs on one laptop, with no cloud or server to depend on.</span></li>
           <li><b>Decisions on record</b><span>Two-person approval and a tamper-evident log stand behind every correction.</span></li>
         </ul>
@@ -878,13 +878,13 @@
       <article class="reveal" style="--c: var(--blue)">
         <div class="aud-head">
           <div class="who">Deployment</div>
-          <h3>Light to field, built to last.</h3>
+          <h3>Light to field, simple to run.</h3>
         </div>
         <ul>
           <li><b>Runs where a browser runs</b><span>Standard ONNX models and static hosting; no GPU needed to classify.</span></li>
           <li><b>Fits existing workflows</b><span>SigMF recordings in and out, with PDF, Excel, CSV and JSON reports.</span></li>
           <li><b>Improves in service</b><span>Operator corrections feed guarded retraining, with every version kept for rollback.</span></li>
-          <li><b>Grows with the threat picture</b><span>A new signal type is added as one more independent output.</span></li>
+          <li><b>Small enough to field</b><span>About 182,000 parameters per model, so the five-model ensemble runs on an ordinary laptop.</span></li>
         </ul>
       </article>
       <article class="reveal" style="--c: var(--green)">
@@ -895,7 +895,7 @@
         <ul>
           <li><b>Evidence, labelled</b><span>Each figure is marked as a requirement, a measurement, a diagnostic or an interpretation.</span></li>
           <li><b>Honest at low SNR</b><span>Recall is reported per class and per noise level, not as one average.</span></li>
-          <li><b>Checked beyond its own data</b><span>Tested on real recorded GNSS jamming it never trained on.</span></li>
+          <li><b>Clean evaluation</b><span>Thresholds are set on validation data only; every figure comes from 19,260 held-out test windows.</span></li>
           <li><b>Reproducible</b><span>Versioned configurations, fixed seeds and an automated test suite.</span></li>
         </ul>
       </article>
@@ -1201,12 +1201,20 @@
     stages.forEach(s => s.classList.remove("lit"));
   });
 
-  /* ---------- demo video: paste the link here; until then the card says it is coming ---------- */
+  /* ---------- demo video: paste the link here; until then the card opens the live console ---------- */
   const DEMO_VIDEO_URL = "";
   {
-    const a = document.getElementById("demoLink"), soon = document.getElementById("demoSoon");
-    if (DEMO_VIDEO_URL) { a.href = DEMO_VIDEO_URL; soon.hidden = true; }
-    else { a.removeAttribute("href"); a.setAttribute("aria-disabled", "true"); }
+    const a = document.getElementById("demoLink");
+    if (DEMO_VIDEO_URL) { a.href = DEMO_VIDEO_URL; }
+    else {
+      // No video yet: the card offers the live console instead, so nothing on the page is a promise.
+      document.getElementById("demoTag").textContent = "Live demo";
+      document.getElementById("demoTitle").textContent = "See NEXA run";
+      a.textContent = "Open the live console";
+      a.href = "./"; a.removeAttribute("target"); a.setAttribute("data-demo", "");
+      a.closest(".demo-card").querySelector(".demo-try").hidden = true;
+      a.closest(".demo-card").querySelector("hr").hidden = true;
+    }
   }
 
   /* ---------- tap a console screenshot to see it full size ---------- */
