@@ -287,10 +287,31 @@
   .mock .lane { flex: 1; height: 14px; border-radius: 3px; background: var(--slate-3); position: relative; overflow: hidden; }
   .mock .lane i { position: absolute; top: 0; bottom: 0; border-radius: 3px; }
   .mock .tag { width: 76px; flex: none; }
-  .loop { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 10px; }
-  @media (max-width: 760px) { .loop { grid-template-columns: repeat(2, 1fr); } }
-  .loop div { background: var(--pill); border-radius: 10px; padding: 12px; font-size: 13.5px; }
-  .loop b { display: block; font-size: 14px; color: var(--navy); }
+  .loop-card { display: grid !important; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 24px 40px; align-items: center; }
+  @media (max-width: 760px) { .loop-card { grid-template-columns: 1fr; } }
+  .loop-text h4 { font-size: 22px; }
+  .loop-text p { font-size: 15px; color: var(--text-dim); margin-top: 10px; max-width: 46ch; }
+  .ring { position: relative; width: 100%; max-width: 440px; aspect-ratio: 1; margin: 12px auto; }
+  .ring svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+  .ring .track { fill: none; stroke: var(--line); stroke-width: 2.2; }
+  .ring .head { fill: var(--mute); }
+  .ring .runner { fill: var(--orange); }
+  .ring .node {
+    position: absolute; width: 34%; transform: translate(-50%, -50%); z-index: 1;
+    background: var(--panel); border: 2px solid var(--c); border-radius: 14px; padding: 10px 12px;
+    font-size: 12.5px; line-height: 1.35; color: var(--text-dim); text-align: center;
+  }
+  .ring .node b { display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 14px; color: var(--ink); margin-bottom: 3px; }
+  .ring .node i { font: 700 10.5px var(--mono); width: 19px; height: 19px; border-radius: 50%; display: grid; place-items: center;
+    background: var(--c); color: #fff; font-style: normal; }
+  .ring .n1 { left: 50%; top: 16.7%; }
+  .ring .n2 { left: 83.3%; top: 50%; }
+  .ring .n3 { left: 50%; top: 83.3%; }
+  .ring .n4 { left: 16.7%; top: 50%; }
+  .ring-centre { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); margin: 0;
+    text-align: center; font: 700 12px var(--font); letter-spacing: 0.04em; color: var(--mute); text-transform: uppercase; }
+  @media (max-width: 420px) { .ring .node { font-size: 11px; padding: 7px 8px; } .ring .node b { font-size: 12.5px; } .ring-centre { display: none; } }
+  @media (prefers-reduced-motion: reduce) { .ring .runner { display: none; } }
 
   /* ---------- audiences ---------- */
   /* Impact: open editorial bands, no cards. Label and heading left, four points right. */
@@ -454,8 +475,15 @@
     .feat p { font-size: 8.5pt; }
     .feat .where { font-size: 7.5pt; padding-top: 4px; }
     .mock { padding: 8px; }
-    .loop { grid-template-columns: repeat(4, 1fr); gap: 6px; }
-    .loop div { padding: 8px; font-size: 8.5pt; }
+    .loop-card { grid-template-columns: 1fr 1fr; gap: 10px 20px; }
+    .loop-text h4 { font-size: 13pt; }
+    .loop-text p { font-size: 9pt; }
+    .ring { max-width: 52mm; margin: 0 auto; }
+    .ring .runner { display: none; }
+    .ring .node { font-size: 6.5pt; padding: 4px 5px; border-radius: 8px; }
+    .ring .node b { font-size: 8pt; }
+    .ring .node i { width: 13px; height: 13px; font-size: 6pt; }
+    .ring-centre { display: none; }
     .aud { margin-top: 20px; }
     .aud article { grid-template-columns: 1fr 2.4fr; gap: 10px 22px; padding: 16px 0; }
     .aud h3 { font-size: 15pt; margin-top: 8px; }
@@ -779,12 +807,24 @@
     </div>
 
     <div class="feat loop-card reveal" style="margin-top:14px">
-      <h4>The learning loop</h4>
-      <div class="loop">
-        <div><b>1 · Detect</b>Model flags events on the timeline</div>
-        <div><b>2 · Correct</b>Operator fixes what it got wrong</div>
-        <div><b>3 · Approve</b>A second person signs it off</div>
-        <div><b>4 · Retrain</b>Tested against the current model, then activated</div>
+      <div class="loop-text">
+        <h4>The learning loop</h4>
+        <p>NEXA gets better in service. What operators correct becomes training data, but only after a second
+          person approves it, and a retrained model replaces the current one only if it does no worse on radar,
+          FHSS and jamming.</p>
+      </div>
+      <div class="ring" role="img" aria-label="A cycle of four steps: 1 Detect, 2 Correct, 3 Approve, 4 Retrain, then back to Detect.">
+        <svg viewBox="0 0 100 100" aria-hidden="true">
+          <circle class="track" cx="50" cy="50" r="33.3"/>
+          <path class="head" d="M -2.4 -2.8 L 3 0 L -2.4 2.8 Z" transform="translate(73.55 26.45) rotate(45)"/><path class="head" d="M -2.4 -2.8 L 3 0 L -2.4 2.8 Z" transform="translate(73.55 73.55) rotate(135)"/><path class="head" d="M -2.4 -2.8 L 3 0 L -2.4 2.8 Z" transform="translate(26.45 73.55) rotate(225)"/><path class="head" d="M -2.4 -2.8 L 3 0 L -2.4 2.8 Z" transform="translate(26.45 26.45) rotate(315)"/>
+          <circle class="runner" r="1.7"><animateMotion dur="9s" repeatCount="indefinite"
+            path="M 50 16.7 A 33.3 33.3 0 1 1 49.99 16.7"/></circle>
+        </svg>
+        <div class="node n1" style="--c: var(--blue)"><b><i>1</i>Detect</b>Model flags events on the timeline</div>
+        <div class="node n2" style="--c: var(--orange)"><b><i>2</i>Correct</b>Operator fixes what it got wrong</div>
+        <div class="node n3" style="--c: var(--green)"><b><i>3</i>Approve</b>A second person signs it off</div>
+        <div class="node n4" style="--c: var(--navy)"><b><i>4</i>Retrain</b>Tested against the current model, then activated</div>
+        <p class="ring-centre">Every pass<br>sharpens the<br>next one</p>
       </div>
     </div>
   </div>
