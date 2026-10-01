@@ -236,6 +236,38 @@
   .feat h4 { font-size: 17px; margin-top: 4px; }
   .feat p { font-size: 14.5px; color: var(--text-dim); }
   .feat .where { font: 12px var(--mono); color: var(--blue); margin-top: auto; padding-top: 8px; }
+  .showcase { display: grid; grid-template-columns: minmax(0, 1.75fr) minmax(0, 1fr); gap: 18px; margin-top: 40px; align-items: start; }
+  @media (max-width: 900px) { .showcase { grid-template-columns: 1fr; } }
+  .screen { margin: 0; border: 1px solid var(--line); border-radius: 16px; overflow: hidden; background: var(--panel);
+    box-shadow: 0 18px 40px -24px rgba(14, 22, 34, 0.35); }
+  .screen .chrome { display: flex; align-items: center; gap: 7px; padding: 10px 14px; background: var(--pill); border-bottom: 1px solid var(--line); }
+  .screen .chrome i { width: 11px; height: 11px; border-radius: 50%; background: var(--red); }
+  .screen .chrome i:nth-child(2) { background: var(--orange); }
+  .screen .chrome i:nth-child(3) { background: var(--green); }
+  .screen .chrome span { margin-left: 8px; font: 600 12px var(--mono); color: var(--mute); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .screen img { display: block; width: 100%; max-width: 100%; height: auto; }
+  .screen figcaption { padding: 12px 16px 14px; font-size: 13.5px; color: var(--mute); border-top: 1px solid var(--line); }
+  .demo-card { background: var(--navy); color: #fff; border-radius: 16px; padding: 24px; display: flex; flex-direction: column; gap: 12px; }
+  .demo-tag { align-self: flex-start; padding: 2px 12px; border-radius: 999px; background: var(--orange); color: var(--ink);
+    font: 800 11px var(--font); letter-spacing: 0.12em; text-transform: uppercase; }
+  .demo-card .play { width: 56px; height: 56px; border-radius: 50%; background: rgba(255,255,255,0.12); display: grid; place-items: center; }
+  .demo-card .play svg { width: 26px; height: 26px; fill: var(--orange); margin-left: 3px; }
+  .demo-card h3 { font-size: 24px; }
+  .demo-card p { font-size: 15px; color: rgba(255,255,255,0.82); }
+  .demo-card .demo-link { align-self: flex-start; background: var(--orange); color: var(--ink); }
+  .demo-card .demo-link:hover { background: #FFB733; }
+  .demo-card .demo-link[aria-disabled="true"] { opacity: 0.45; pointer-events: none; }
+  .demo-card .demo-soon { font-size: 13px; color: rgba(255,255,255,0.65); }
+  .demo-card hr { border: 0; border-top: 1px solid rgba(255,255,255,0.18); margin: 4px 0; width: 100%; }
+  .demo-card .demo-try { font-size: 14px; }
+  .demo-card .demo-try a { color: #fff; font-weight: 700; }
+  .feat .shot { display: block; width: 100%; max-width: 100%; height: auto; margin-top: 6px; border: 1px solid var(--line); border-radius: 10px; }
+  .shot, .screen img { cursor: zoom-in; }
+  dialog.zoom { padding: 0; border: 0; border-radius: 14px; max-width: min(1400px, calc(100vw - 32px)); max-height: calc(100vh - 32px);
+    background: var(--panel); box-shadow: 0 30px 80px rgba(0,0,0,0.45); overflow: auto; }
+  dialog.zoom::backdrop { background: rgba(14, 22, 34, 0.78); }
+  dialog.zoom img { display: block; width: 100%; height: auto; cursor: zoom-out; }
+  dialog.zoom p { margin: 0; padding: 10px 14px; font-size: 13px; color: var(--mute); }
   .mock {
     margin-top: 6px; border-radius: 10px; background: var(--slate); padding: 12px; overflow: hidden;
     font: 11px var(--mono); color: var(--on-dark-dim);
@@ -370,7 +402,14 @@
     #snrChart { max-height: 62mm; }
     .honest { margin-top: 14px; }
     .honest ul { font-size: 9pt; }
-    .features { grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 18px; }
+    .features { grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 0; break-before: page; padding-top: 14mm; }
+    #platform { height: auto; min-height: 0; padding-bottom: 0; overflow: visible; }
+    .showcase { grid-template-columns: 1.7fr 1fr; margin-top: 18px; }
+    .screen figcaption { font-size: 8.5pt; }
+    .demo-card { padding: 16px; }
+    .demo-card h3 { font-size: 15pt; }
+    .demo-card p { font-size: 9pt; }
+    .feat .shot { margin-top: 4px; }
     .feat { padding: 11px; gap: 4px; }
     .feat.wide { grid-column: span 2; }
     .feat .ic { width: 26px; height: 26px; border-radius: 7px; }
@@ -405,7 +444,7 @@
 <body>
 
 <header class="bar">
-  <a class="brand" href="#cover"><img src="img/nexa-logo.png" alt="NEXA" width="523" height="127"></a>
+  <a class="brand" href="#cover"><img src="img/nexa-logo.png" alt="NEXA" width="1100" height="264"></a>
   <nav aria-label="Brochure sections">
     <a href="#mission">Mission</a>
     <a href="#how">How it works</a>
@@ -422,7 +461,7 @@
   <canvas id="waterfall" aria-hidden="true"></canvas>
   <div class="inner">
     <div class="kicker"><span class="live-dot"></span>SEDIC 2026 · Track I · Project Overwatch: Cognitive CEMA</div>
-    <h1 class="logo-mark"><img src="img/nexa-logo-light.png" alt="NEXA" width="523" height="127"></h1>
+    <h1 class="logo-mark"><img src="img/nexa-logo-light.png" alt="NEXA" width="1100" height="264"></h1>
     <p class="tagline">AI-powered RF spectrum intelligence.</p>
     <p class="sub">Who is transmitting, and are they hostile? NEXA reads raw radio samples, names every signal
       in the window (civilian comms, radar, frequency hopping, jamming) and tells the operator which tier
@@ -605,21 +644,39 @@
     <div class="folio"><span class="num">05</span>The platform</div>
     <h2 class="reveal">Not just a model. A console an operator can use.</h2>
     <p class="lead reveal">NEXA ships as a complete workstation: live view, analysis, review, reporting and
-      retraining, with roles and an audit trail. Everything below is in the console at this booth.</p>
+      retraining, with roles and an audit trail. Every screen on this page is the working console, captured
+      as it ran.</p>
+
+    <div class="showcase reveal">
+      <figure class="screen">
+        <div class="chrome" aria-hidden="true"><i></i><i></i><i></i><span>NEXA console · RF Replay</span></div>
+        <img src="img/console-replay.jpg" width="1400" height="1237" loading="lazy"
+          alt="NEXA RF Replay screen: a spectrogram waterfall above per-class detection lanes for BPSK, QPSK, 16QAM, 64QAM, LFM radar, FHSS and jamming, with a colour-coded threat tier bar along a shared time axis.">
+        <figcaption>A contested band at +6 dB: civilian links, radar, frequency hopping and a jammer in one 50 ms
+          capture. Each detection lane and the tier bar share the waterfall's time axis; dashed boxes are the true answer.</figcaption>
+      </figure>
+      <aside class="demo-card">
+        <span class="demo-tag">Demo video</span>
+        <div class="play" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div>
+        <h3>Watch NEXA run</h3>
+        <p>A capture goes in, the five-model ensemble classifies it in the browser, and the operator reviews
+          the events. No server, no internet.</p>
+        <a class="btn demo-link" id="demoLink" href="#" target="_blank" rel="noopener">Watch the demo</a>
+        <p class="demo-soon" id="demoSoon">Video link coming soon.</p>
+        <hr>
+        <p class="demo-try">Or try it yourself: <a href="./" data-demo>open the live console</a>, or scan the QR on the
+          last page.</p>
+      </aside>
+    </div>
 
     <div class="features">
       <div class="feat wide reveal">
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12h3l3-8 4 16 3-8h5"/></svg></div>
         <h4>RF Replay: live spectrum, waterfall and detections</h4>
         <p>Connect a receiver or replay a file as if it were live. Spectrum, waterfall, detections and the threat
-          tier share one time axis, updated dwell by dwell. Hover to read exact times; dashed boxes show the
-          true answer on synthesised scenarios.</p>
-        <div class="mock" aria-hidden="true">
-          <div class="row"><span class="tag">JAMMING</span><span class="lane"><i style="left:52%;width:30%;background:#B0281A"></i></span></div>
-          <div class="row"><span class="tag">FHSS</span><span class="lane"><i style="left:8%;width:6%;background:#C77A00"></i><i style="left:22%;width:6%;background:#C77A00"></i><i style="left:37%;width:6%;background:#C77A00"></i><i style="left:64%;width:6%;background:#C77A00"></i></span></div>
-          <div class="row"><span class="tag">LFM_RADAR</span><span class="lane"><i style="left:30%;width:3%;background:#F0A020"></i><i style="left:45%;width:3%;background:#F0A020"></i><i style="left:60%;width:3%;background:#F0A020"></i></span></div>
-          <div class="row"><span class="tag">QPSK</span><span class="lane"><i style="left:0;width:100%;background:#2E7DB9"></i></span></div>
-        </div>
+          tier share one time axis, updated dwell by dwell. The verdict panel puts the worst tier first.</p>
+        <img class="shot" src="img/console-verdict.jpg" width="1200" height="408" loading="lazy"
+          alt="NEXA verdict panel: occupancy and detection counts beside the primary detection, a list of every detection ordered worst tier first.">
         <div class="where">Page: RF Replay</div>
       </div>
       <div class="feat reveal">
@@ -627,6 +684,8 @@
         <h4>See what the model sees</h4>
         <p>Open any 160 µs window: measured amplitude next to the model's own attention, plus a civilian
           constellation showing raw IQ against recovered symbols.</p>
+        <img class="shot" src="img/console-signal.jpg" width="1200" height="555" loading="lazy"
+          alt="NEXA Signal Analysis screen: per-class probabilities for one window beside its measured amplitude and the model's attention.">
         <div class="where">Page: Signal Analysis</div>
       </div>
       <div class="feat reveal">
@@ -641,6 +700,8 @@
         <h4>Reports in any format</h4>
         <p>Filter past captures and build a report: PDF, Excel, CSV, JSON, a SigMF bundle or the raw IQ with
           SHA-256 hashes, each with a classification banner.</p>
+        <img class="shot" src="img/console-report.jpg" width="1200" height="404" loading="lazy"
+          alt="NEXA report builder: section checkboxes, a choice of PDF, Excel, CSV, JSON, SigMF or raw IQ, and a classification banner field.">
         <div class="where">Page: History</div>
       </div>
       <div class="feat reveal">
@@ -662,6 +723,8 @@
         <h4>Assistant that cannot invent numbers</h4>
         <p>Ask in plain language. Answers come from the stored analyses; an optional local language model only
           rephrases the question, so it never sees or makes up data.</p>
+        <img class="shot" src="img/console-assistant.jpg" width="1200" height="757" loading="lazy"
+          alt="NEXA Assistant answering which uploads had jamming, listing the matching capture with its classes and confidence bars.">
         <div class="where">Page: Assistant</div>
       </div>
       <div class="feat reveal">
@@ -793,6 +856,8 @@
     </div>
   </div>
 </section>
+
+<dialog class="zoom" id="zoom" aria-label="Enlarged screenshot"><img alt="" id="zoomImg"><p>Tap the image or press Esc to close.</p></dialog>
 
 <footer>
   <div class="inner">
@@ -1021,6 +1086,26 @@
     paths.forEach(p => { p.style.transition = "none"; p.style.strokeDashoffset = 0; });
     stages.forEach(s => s.classList.remove("lit"));
   });
+
+  /* ---------- demo video: paste the link here; until then the card says it is coming ---------- */
+  const DEMO_VIDEO_URL = "";
+  {
+    const a = document.getElementById("demoLink"), soon = document.getElementById("demoSoon");
+    if (DEMO_VIDEO_URL) { a.href = DEMO_VIDEO_URL; soon.hidden = true; }
+    else { a.removeAttribute("href"); a.setAttribute("aria-disabled", "true"); }
+  }
+
+  /* ---------- tap a console screenshot to see it full size ---------- */
+  {
+    const dlg = document.getElementById("zoom"), big = document.getElementById("zoomImg");
+    document.querySelectorAll(".shot, .screen img").forEach(img => {
+      img.tabIndex = 0;
+      const open = () => { big.src = img.src; big.alt = img.alt; dlg.showModal(); };
+      img.addEventListener("click", open);
+      img.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } });
+    });
+    dlg.addEventListener("click", () => dlg.close());
+  }
 
   /* ---------- photo tags <-> team cards: hover, focus or tap one to highlight both ---------- */
   const linked = n => document.querySelectorAll(`.tag-pin[data-p="${n}"], .person[data-p="${n}"]`);
