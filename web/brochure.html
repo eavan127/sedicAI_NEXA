@@ -236,8 +236,8 @@
   .feat h4 { font-size: 17px; margin-top: 4px; }
   .feat p { font-size: 14.5px; color: var(--text-dim); }
   .feat .where { font: 12px var(--mono); color: var(--blue); margin-top: auto; padding-top: 8px; }
-  .showcase { display: grid; grid-template-columns: minmax(0, 1.75fr) minmax(0, 1fr); gap: 18px; margin-top: 40px; align-items: start; }
-  @media (max-width: 900px) { .showcase { grid-template-columns: 1fr; } }
+  /* three stacked boxes: the console large, the demo strip, then the learning loop */
+  .showcase { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; margin-top: 40px; }
   .screen { margin: 0; border: 1px solid var(--line); border-radius: 16px; overflow: hidden; background: var(--panel);
     box-shadow: 0 18px 40px -24px rgba(14, 22, 34, 0.35); }
   .screen .chrome { display: flex; align-items: center; gap: 7px; padding: 10px 14px; background: var(--pill); border-bottom: 1px solid var(--line); }
@@ -247,14 +247,19 @@
   .screen .chrome span { margin-left: 8px; font: 600 12px var(--mono); color: var(--mute); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .screen img { display: block; width: 100%; max-width: 100%; height: auto; }
   .screen figcaption { padding: 12px 16px 14px; font-size: 13.5px; color: var(--mute); border-top: 1px solid var(--line); }
-  .demo-card { background: var(--navy); color: #fff; border-radius: 16px; padding: 24px; display: flex; flex-direction: column; gap: 12px; }
+  .demo-card { background: var(--navy); color: #fff; border-radius: 16px; padding: 20px 24px;
+    display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 16px 24px; align-items: center; }
+  @media (max-width: 760px) { .demo-card { grid-template-columns: minmax(0, 1fr); } .demo-card .play { display: none; } }
+  .demo-text { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+  .demo-actions { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+  .demo-actions .demo-try { font-size: 13px; max-width: 30ch; }
   .demo-tag { align-self: flex-start; padding: 2px 12px; border-radius: 999px; background: var(--orange); color: var(--ink);
     font: 800 11px var(--font); letter-spacing: 0.12em; text-transform: uppercase; }
   .demo-card .play { width: 56px; height: 56px; border-radius: 50%; background: rgba(255,255,255,0.12); display: grid; place-items: center; }
   .demo-card .play svg { width: 26px; height: 26px; fill: var(--orange); margin-left: 3px; }
   .demo-card h3 { font-size: 24px; }
   .demo-card p { font-size: 15px; color: rgba(255,255,255,0.82); }
-  .demo-card .demo-link { align-self: flex-start; background: var(--orange); color: var(--ink); }
+  .demo-card .demo-link { background: var(--orange); color: var(--ink); }
   .demo-card .demo-link:hover { background: #FFB733; }
   .demo-card .demo-link[aria-disabled="true"] { opacity: 0.45; pointer-events: none; }
   .demo-card .demo-soon { font-size: 13px; color: rgba(255,255,255,0.65); }
@@ -271,6 +276,7 @@
   .gov-item .where { display: block; padding-top: 4px; }
   .gov-item.full { grid-column: 1 / -1; background: var(--pill); border-radius: 12px; padding: 12px 14px; }
   .gov .gov-shot { margin-top: 14px; }
+  .features + .features { margin-top: 14px; }
   .feat .shot { display: block; width: 100%; max-width: 100%; height: auto; margin-top: 6px; border: 1px solid var(--line); border-radius: 10px; }
   .shot, .screen img { cursor: zoom-in; }
   dialog.zoom { padding: 0; border: 0; border-radius: 14px; max-width: min(1400px, calc(100vw - 32px)); max-height: calc(100vh - 32px);
@@ -474,16 +480,13 @@
     .honest ul { font-size: 9pt; }
     .features { grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 0; }
     .page-brand.print-only { display: flex !important; break-before: page; padding-top: 0; }
-    /* the learning loop fits under the showcase on the platform's first printed page */
-    #platform .inner { display: flex; flex-direction: column; }
-    #platform .inner > * { order: 0; }
-    #platform .inner > .folio { align-self: flex-start; }
-    #platform .loop-card { order: 1; margin-top: 8px !important; }
-    #platform .page-brand.print-only, #platform .features { order: 2; }
+    /* platform prints as three pages: console + demo strip, loop + first features, the rest */
     #platform { height: auto; min-height: 0; padding-bottom: 0; overflow: visible; }
-    .showcase { grid-template-columns: 1.2fr 1fr; margin-top: 12px; }
+    .showcase { grid-template-columns: 1fr; margin-top: 12px; gap: 8px; }
+    .screen { width: 100%; max-width: 168mm; margin: 0 auto; }
     .screen figcaption { font-size: 8.5pt; }
-    .demo-card { padding: 16px; }
+    .demo-card { padding: 10px 16px; gap: 6px 16px; grid-template-columns: minmax(0, 1fr) auto; }
+    .demo-actions .demo-try { font-size: 8pt; }
     .demo-card h3 { font-size: 15pt; }
     .demo-card p { font-size: 9pt; }
     .feat .shot { margin-top: 4px; }
@@ -503,21 +506,21 @@
     .feat p { font-size: 8.5pt; }
     .feat .where { font-size: 7.5pt; padding-top: 4px; }
     .mock { padding: 8px; }
-    .loop-card { grid-template-columns: 1.5fr 1fr; gap: 8px 16px; padding: 12px 14px !important; }
-    .loop-text .where { display: none; }
+    .loop-card { grid-template-columns: 1.1fr 1fr; gap: 8px 18px; padding: 14px 16px !important; margin-top: 0 !important; }
+    .loop-text .where { font-size: 7.5pt; }
     .loop-text h4 { font-size: 13pt; }
     .loop-text p { font-size: 9pt; }
     .loop-kicker { font-size: 6.5pt; padding: 2px 8px; margin-bottom: 4px; }
     .loop-rules { margin-top: 6px; gap: 3px; }
     .loop-rules li { font-size: 8.5pt; padding-left: 16px; }
     .loop-rules li::before { width: 9px; }
-    .ring { max-width: 46mm; margin: 0 auto; }
+    .ring { max-width: 92mm; margin: 0 auto; }
     .demo-card .play { display: none; }
     .ring .runner { display: none; }
-    .ring .node { font-size: 6.5pt; padding: 4px 5px; border-radius: 8px; }
-    .ring .node b { font-size: 8pt; }
-    .ring .node i { width: 13px; height: 13px; font-size: 6pt; }
-    .ring-centre { display: none; }
+    .ring .node { font-size: 8pt; padding: 6px 7px; border-radius: 10px; }
+    .ring .node b { font-size: 9.5pt; }
+    .ring .node i { width: 15px; height: 15px; font-size: 7pt; }
+    .ring-centre { font-size: 7.5pt; }
     .aud { margin-top: 20px; }
     .aud article { grid-template-columns: 1fr 2.4fr; gap: 10px 22px; padding: 16px 0; }
     .aud h3 { font-size: 15pt; margin-top: 8px; }
@@ -756,19 +759,50 @@
           capture. Each detection lane and the tier bar share the waterfall's time axis; dashed boxes are the true answer.</figcaption>
       </figure>
       <aside class="demo-card">
-        <span class="demo-tag" id="demoTag">Demo video</span>
         <div class="play" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div>
-        <h3 id="demoTitle">Watch NEXA run</h3>
-        <p>A capture goes in, the five-model ensemble classifies it in the browser, and the operator reviews
-          the events. No server, no internet.</p>
-        <a class="btn demo-link" id="demoLink" href="#" target="_blank" rel="noopener">Watch the demo</a>
-        <hr>
-        <p class="demo-try">Or try it yourself: <a href="./" data-demo>open the live console</a>, or scan the QR on the
-          last page.</p>
+        <div class="demo-text">
+          <span class="demo-tag" id="demoTag">Demo video</span>
+          <h3 id="demoTitle">Watch NEXA run</h3>
+          <p>A capture goes in, the five-model ensemble classifies it in the browser, and the operator reviews
+            the events. No server, no internet.</p>
+        </div>
+        <div class="demo-actions">
+          <a class="btn demo-link" id="demoLink" href="#" target="_blank" rel="noopener">Watch the demo</a>
+          <p class="demo-try">Or <a href="./" data-demo>open the live console</a>, or scan the QR on the last page.</p>
+        </div>
       </aside>
     </div>
 
     <div class="page-brand print-only" aria-hidden="true"><img class="pb-nexa" src="img/nexa-logo.png" alt="" width="1100" height="264"><img class="pb-sedic" src="img/sedic-logo.png" alt="" width="831" height="238"></div>
+    <div class="feat loop-card reveal" style="margin-top:14px">
+      <div class="loop-text">
+        <span class="loop-kicker">Retraining that cannot get worse</span>
+        <h4>The learning loop</h4>
+        <p>NEXA learns from the operators who use it. What they correct becomes training data, but only after a second
+          person approves it. Approved corrections fine-tune the model, mixed with the original training data so
+          it does not forget what it already knew.</p>
+        <ul class="loop-rules">
+          <li>A retrained version is offered only if it does no worse on radar, FHSS and jamming.</li>
+          <li>Only a second person can activate it.</li>
+          <li>Every version is kept, so any of them can be brought back.</li>
+        </ul>
+        <div class="where">Page: Model</div>
+      </div>
+      <div class="ring" role="img" aria-label="A cycle of four steps: 1 Detect, 2 Correct, 3 Approve, 4 Retrain, then back to Detect. A person is in control at every step.">
+        <svg viewBox="0 0 100 100" aria-hidden="true">
+          <circle class="track" cx="50" cy="50" r="33.3"/>
+          <path class="head" d="M -2.4 -2.8 L 3 0 L -2.4 2.8 Z" transform="translate(73.55 26.45) rotate(45)"/><path class="head" d="M -2.4 -2.8 L 3 0 L -2.4 2.8 Z" transform="translate(73.55 73.55) rotate(135)"/><path class="head" d="M -2.4 -2.8 L 3 0 L -2.4 2.8 Z" transform="translate(26.45 73.55) rotate(225)"/><path class="head" d="M -2.4 -2.8 L 3 0 L -2.4 2.8 Z" transform="translate(26.45 26.45) rotate(315)"/>
+          <circle class="runner" r="1.7"><animateMotion dur="9s" repeatCount="indefinite"
+            path="M 50 16.7 A 33.3 33.3 0 1 1 49.99 16.7"/></circle>
+        </svg>
+        <div class="node n1" style="--c: var(--blue)"><b><i>1</i>Detect</b>Model flags events on the timeline</div>
+        <div class="node n2" style="--c: var(--orange)"><b><i>2</i>Correct</b>Operator fixes what it got wrong</div>
+        <div class="node n3" style="--c: var(--green)"><b><i>3</i>Approve</b>A second person signs it off</div>
+        <div class="node n4" style="--c: var(--navy)"><b><i>4</i>Retrain</b>Tested against the current model, then activated</div>
+        <p class="ring-centre">Human in<br>control at<br>every step</p>
+      </div>
+    </div>
+
     <div class="features">
       <div class="feat wide reveal">
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12h3l3-8 4 16 3-8h5"/></svg></div>
@@ -788,6 +822,10 @@
           alt="NEXA Signal Analysis screen: per-class probabilities for one window beside its measured amplitude and the model's attention.">
         <div class="where">Page: Signal Analysis</div>
       </div>
+    </div>
+
+    <div class="page-brand print-only" aria-hidden="true"><img class="pb-nexa" src="img/nexa-logo.png" alt="" width="1100" height="264"><img class="pb-sedic" src="img/sedic-logo.png" alt="" width="831" height="238"></div>
+    <div class="features">
       <div class="feat reveal">
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 5h16v11H8l-4 4z"/></svg></div>
         <h4>Assistant that cannot invent numbers</h4>
@@ -829,34 +867,6 @@
       </div>
     </div>
 
-    <div class="feat loop-card reveal" style="margin-top:14px">
-      <div class="loop-text">
-        <span class="loop-kicker">Retraining that cannot get worse</span>
-        <h4>The learning loop</h4>
-        <p>NEXA learns from the operators who use it. What they correct becomes training data, but only after a second
-          person approves it. Approved corrections fine-tune the model, mixed with the original training data so
-          it does not forget what it already knew.</p>
-        <ul class="loop-rules">
-          <li>A retrained version is offered only if it does no worse on radar, FHSS and jamming.</li>
-          <li>Only a second person can activate it.</li>
-          <li>Every version is kept, so any of them can be brought back.</li>
-        </ul>
-        <div class="where">Page: Model</div>
-      </div>
-      <div class="ring" role="img" aria-label="A cycle of four steps: 1 Detect, 2 Correct, 3 Approve, 4 Retrain, then back to Detect. A person is in control at every step.">
-        <svg viewBox="0 0 100 100" aria-hidden="true">
-          <circle class="track" cx="50" cy="50" r="33.3"/>
-          <path class="head" d="M -2.4 -2.8 L 3 0 L -2.4 2.8 Z" transform="translate(73.55 26.45) rotate(45)"/><path class="head" d="M -2.4 -2.8 L 3 0 L -2.4 2.8 Z" transform="translate(73.55 73.55) rotate(135)"/><path class="head" d="M -2.4 -2.8 L 3 0 L -2.4 2.8 Z" transform="translate(26.45 73.55) rotate(225)"/><path class="head" d="M -2.4 -2.8 L 3 0 L -2.4 2.8 Z" transform="translate(26.45 26.45) rotate(315)"/>
-          <circle class="runner" r="1.7"><animateMotion dur="9s" repeatCount="indefinite"
-            path="M 50 16.7 A 33.3 33.3 0 1 1 49.99 16.7"/></circle>
-        </svg>
-        <div class="node n1" style="--c: var(--blue)"><b><i>1</i>Detect</b>Model flags events on the timeline</div>
-        <div class="node n2" style="--c: var(--orange)"><b><i>2</i>Correct</b>Operator fixes what it got wrong</div>
-        <div class="node n3" style="--c: var(--green)"><b><i>3</i>Approve</b>A second person signs it off</div>
-        <div class="node n4" style="--c: var(--navy)"><b><i>4</i>Retrain</b>Tested against the current model, then activated</div>
-        <p class="ring-centre">Human in<br>control at<br>every step</p>
-      </div>
-    </div>
   </div>
 </section>
 
@@ -1221,7 +1231,6 @@
       a.textContent = "Open the live console";
       a.href = "./"; a.removeAttribute("target"); a.setAttribute("data-demo", "");
       a.closest(".demo-card").querySelector(".demo-try").hidden = true;
-      a.closest(".demo-card").querySelector("hr").hidden = true;
     }
   }
 
