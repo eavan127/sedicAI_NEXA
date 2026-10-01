@@ -524,10 +524,12 @@
     .person.advisor { grid-column: auto; }
     .person { padding: 14px; }
     .group-photo { margin-top: 14px; }
-    .group-photo img { aspect-ratio: auto; height: 78mm; }
+    .group-photo { max-width: 160mm; }
+    .group-photo img { aspect-ratio: 16 / 9; height: auto; box-shadow: 8px 8px 0 var(--navy); }
     .group-photo figcaption { font-size: 8.5pt; margin-top: 6px; }
     .tag-pin { bottom: 8px; font-size: 8pt; }
-    .qrs { grid-template-columns: repeat(2, 55mm); margin-top: 26px; }
+    .qrs { grid-template-columns: repeat(2, 44mm); margin-top: 16px; }
+    .qr { padding: 10px; }
     .stage, .feat, .tier, .aud article, .kpi, .person { break-inside: avoid; }
     .stage.lit { background: var(--panel); color: var(--text); }
     .kpi .meter i { transition: none; }
