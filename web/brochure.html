@@ -268,6 +268,20 @@
   dialog.zoom::backdrop { background: rgba(14, 22, 34, 0.78); }
   dialog.zoom img { display: block; width: 100%; height: auto; cursor: zoom-out; }
   dialog.zoom p { margin: 0; padding: 10px 14px; font-size: 13px; color: var(--mute); }
+  .page-brand { display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    margin-bottom: 28px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+  .page-brand img { display: block; width: auto; max-width: 48%; }
+  .page-brand .pb-nexa { height: 28px; }
+  .page-brand .pb-sedic { height: 60px; }
+  .cover-brand { justify-content: flex-end; border-bottom: 0; padding-bottom: 0; margin-bottom: 32px; }
+  .cover-brand .pb-sedic { height: 72px; max-width: 70%; padding: 10px 16px; box-sizing: content-box;
+    background: rgba(14, 22, 34, 0.82); border: 1px solid rgba(255,255,255,0.12); border-radius: 14px; }
+  @media (max-width: 560px) {
+    .page-brand .pb-nexa { height: 22px; }
+    .page-brand .pb-sedic { height: 44px; }
+    .cover-brand .pb-sedic { height: 50px; }
+  }
+  .print-only { display: none !important; }
   .mock {
     margin-top: 6px; border-radius: 10px; background: var(--slate); padding: 12px; overflow: hidden;
     font: 11px var(--mono); color: var(--on-dark-dim);
@@ -369,6 +383,11 @@
     .page { height: 297mm; overflow: hidden; padding: 14mm 14mm; break-after: page; border: 0; }
     .page:last-of-type { break-after: auto; }
     .folio { margin-bottom: 8px; font-size: 8pt; }
+    .page-brand { margin-bottom: 10px; padding-bottom: 8px; }
+    .page-brand .pb-nexa { height: 18px; }
+    .page-brand .pb-sedic { height: 36px; }
+    .cover-brand { margin-bottom: 18px; }
+    .cover-brand .pb-sedic { height: 52px; }
     .page h2 { font-size: 24pt; max-width: 22ch; }
     .lead { font-size: 10.5pt; margin-top: 8px; }
     .cover .logo-mark img { height: 96px; }
@@ -402,7 +421,14 @@
     #snrChart { max-height: 62mm; }
     .honest { margin-top: 14px; }
     .honest ul { font-size: 9pt; }
-    .features { grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 0; break-before: page; padding-top: 14mm; }
+    .features { grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 0; }
+    .page-brand.print-only { display: flex !important; break-before: page; padding-top: 14mm; }
+    /* the learning loop fits under the showcase on the platform's first printed page */
+    #platform .inner { display: flex; flex-direction: column; }
+    #platform .inner > * { order: 0; }
+    #platform .inner > .folio { align-self: flex-start; }
+    #platform .loop-card { order: 1; margin-top: 12px !important; }
+    #platform .page-brand.print-only, #platform .features { order: 2; }
     #platform { height: auto; min-height: 0; padding-bottom: 0; overflow: visible; }
     .showcase { grid-template-columns: 1.7fr 1fr; margin-top: 18px; }
     .screen figcaption { font-size: 8.5pt; }
@@ -460,6 +486,7 @@
 <section class="page dark cover" id="cover">
   <canvas id="waterfall" aria-hidden="true"></canvas>
   <div class="inner">
+    <div class="page-brand cover-brand"><img class="pb-sedic" src="img/sedic-logo-light.png" alt="SEDIC 2026, Strategic Electronic Defence Innovation Challenge 2026" width="831" height="238"></div>
     <div class="kicker"><span class="live-dot"></span>SEDIC 2026 · Track I · Project Overwatch: Cognitive CEMA</div>
     <h1 class="logo-mark"><img src="img/nexa-logo-light.png" alt="NEXA" width="1100" height="264"></h1>
     <p class="tagline">AI-powered RF spectrum intelligence.</p>
@@ -482,6 +509,7 @@
 <!-- ===================== 02 MISSION ===================== -->
 <section class="page" id="mission">
   <div class="inner">
+    <div class="page-brand" aria-hidden="true"><img class="pb-nexa" src="img/nexa-logo.png" alt="" width="1100" height="264"><img class="pb-sedic" src="img/sedic-logo.png" alt="" width="831" height="238"></div>
     <div class="folio"><span class="num">02</span>The mission</div>
     <h2 class="reveal">One band. Friends, the military and an adversary, all at once.</h2>
     <p class="lead reveal">In contested spectrum, civilian traffic, military emissions and deliberate interference
@@ -523,6 +551,7 @@
 <!-- ===================== 03 HOW IT WORKS ===================== -->
 <section class="page tint" id="how">
   <div class="inner">
+    <div class="page-brand" aria-hidden="true"><img class="pb-nexa" src="img/nexa-logo.png" alt="" width="1100" height="264"><img class="pb-sedic" src="img/sedic-logo.png" alt="" width="831" height="238"></div>
     <div class="folio"><span class="num">03</span>How it works</div>
     <h2 class="reveal">From raw samples to a threat verdict in five steps.</h2>
     <p class="lead reveal">Every window is 512 IQ samples at 3.2 MHz: 160 microseconds of radio. The same
@@ -579,6 +608,7 @@
 <!-- ===================== 04 RESULTS ===================== -->
 <section class="page" id="proof">
   <div class="inner">
+    <div class="page-brand" aria-hidden="true"><img class="pb-nexa" src="img/nexa-logo.png" alt="" width="1100" height="264"><img class="pb-sedic" src="img/sedic-logo.png" alt="" width="831" height="238"></div>
     <div class="folio"><span class="num">04</span>Results</div>
     <h2 class="reveal">Above the bar on every judged class.</h2>
     <p class="lead reveal">Recall on 19,260 held-out test windows, 5-model ensemble, thresholds calibrated on
@@ -641,6 +671,7 @@
 <!-- ===================== 05 PLATFORM ===================== -->
 <section class="page" id="platform">
   <div class="inner">
+    <div class="page-brand" aria-hidden="true"><img class="pb-nexa" src="img/nexa-logo.png" alt="" width="1100" height="264"><img class="pb-sedic" src="img/sedic-logo.png" alt="" width="831" height="238"></div>
     <div class="folio"><span class="num">05</span>The platform</div>
     <h2 class="reveal">Not just a model. A console an operator can use.</h2>
     <p class="lead reveal">NEXA ships as a complete workstation: live view, analysis, review, reporting and
@@ -669,6 +700,7 @@
       </aside>
     </div>
 
+    <div class="page-brand print-only" aria-hidden="true"><img class="pb-nexa" src="img/nexa-logo.png" alt="" width="1100" height="264"><img class="pb-sedic" src="img/sedic-logo.png" alt="" width="831" height="238"></div>
     <div class="features">
       <div class="feat wide reveal">
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12h3l3-8 4 16 3-8h5"/></svg></div>
@@ -736,7 +768,7 @@
       </div>
     </div>
 
-    <div class="feat reveal" style="margin-top:14px">
+    <div class="feat loop-card reveal" style="margin-top:14px">
       <h4>The learning loop</h4>
       <div class="loop">
         <div><b>1 · Detect</b>Model flags events on the timeline</div>
@@ -751,6 +783,7 @@
 <!-- ===================== 06 FOR YOU ===================== -->
 <section class="page tint" id="for-you">
   <div class="inner">
+    <div class="page-brand" aria-hidden="true"><img class="pb-nexa" src="img/nexa-logo.png" alt="" width="1100" height="264"><img class="pb-sedic" src="img/sedic-logo.png" alt="" width="831" height="238"></div>
     <div class="folio"><span class="num">06</span>What it means for you</div>
     <h2 class="reveal">Three audiences, one system.</h2>
 
@@ -792,6 +825,7 @@
 <!-- ===================== 07 TEAM ===================== -->
 <section class="page" id="team">
   <div class="inner">
+    <div class="page-brand" aria-hidden="true"><img class="pb-nexa" src="img/nexa-logo.png" alt="" width="1100" height="264"><img class="pb-sedic" src="img/sedic-logo.png" alt="" width="831" height="238"></div>
     <div class="folio"><span class="num">07</span>The team</div>
     <h2 class="reveal" style="max-width:none">Group NEXA<br>Universiti Teknologi PETRONAS.</h2>
 
