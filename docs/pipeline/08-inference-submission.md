@@ -4,8 +4,13 @@
 
 ## Goal
 
-Run the trained model on the organisers' **"Qualifier IQ Data Stream"** and
-produce the classification log, then package everything the rules require.
+> **Corrected 6 Sept 2026.** There is no organiser "Qualifier IQ Data Stream" and no
+> classification-log requirement — confirmed with the organiser, and absent from both
+> official PDFs in [`../rules/`](../rules/). This page is kept because `infer.py` is still
+> how we classify our own IQ files for the demo and verification pack.
+
+Run the trained model over an IQ file and produce a per-window classification CSV,
+then package everything the rules actually require.
 
 ## ⚠️ The highest-risk line of code in the repo
 
@@ -42,7 +47,7 @@ A wrong dtype is the single most likely way to submit a confident, worthless log
 ## Running
 
 ```bash
-python -m src.infer --input data/raw/qualifier_iq_stream.bin --output evals/classification_log.csv
+python -m src.infer --input verification_pack/mixed_sequence.f32 --output evals/classification_log.csv
 ```
 
 Slides a `window_len` window across the stream, classifies each, writes:
@@ -68,8 +73,7 @@ Per Section 4 of the rules:
 | Item | Where it comes from | Owner |
 |---|---|---|
 | **Model source code** | This repo — `src/`, `configs/`, `tests/`, README | A |
-| **Classification log & results** | `evals/classification_log.csv` | C |
-| **Performance benchmark** (>90% recall on Military/CEMA + Jamming) | `evals/scorecard.json` + confusion matrix + accuracy-vs-SNR | D |
+| **Performance benchmark** (>80% on Military/CEMA + Jamming, **shown in the video**) | `evals/scorecard.json` + confusion matrix + accuracy-vs-SNR | D |
 | **Technical brief** (PDF) | Dataset, architecture, DSP logic, limitations | B |
 | **Video demo** (≤5 min, YouTube) | Screen recording | D |
 
@@ -102,10 +106,11 @@ forms its opinion.
   ranges and the literature they came from
 - **Validation methodology**: the `tests/` suite — and honestly, that it verifies
   internal consistency rather than real-world realism
-- **Architecture**: 1D-CNN, trained from scratch (no pretrained RF backbone
-  exists), class weighting, augmentation
+- **Architecture**: two-branch fusion CNN (IQ + STFT), 148,938 parameters, trained
+  from scratch (no pretrained RF backbone exists), class weighting, low-SNR
+  oversampling
 - **Results**: per-class recall, confusion matrix, accuracy-vs-SNR, and the SNR
-  at which each judged class crosses 90%
+  at which each judged class crosses **80%**
 - **Limitations**: named plainly
 - **Phase 2 roadmap**: one line on the live GUI/waterfall we would build if we
   reach the Top 10 — shows we understand the full arc without spending days on it
@@ -113,10 +118,10 @@ forms its opinion.
 
 ### Video demo (≤5 min)
 
-Rough shape: problem and the seven classes (~30s) → architecture and data
-sources (~1 min) → spectrograms of each class (~1 min) → live run of
-`src.infer` on the qualifier stream (~1.5 min) → results and the benchmark table
-(~1 min). Record with OBS Studio; upload unlisted if you prefer.
+**Superseded** — the shot-by-shot plan is now [`../VIDEO_PLAN.md`](../VIDEO_PLAN.md)
+and the word-for-word script is [`../VIDEO_SCRIPT.md`](../VIDEO_SCRIPT.md). Runtime is
+allocated against the rubric's points table rather than evenly, because the >80%
+benchmark is itself scored as a *video* deliverable.
 
 ## Not required in Phase 1
 

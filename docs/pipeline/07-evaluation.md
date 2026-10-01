@@ -44,7 +44,7 @@ Evaluates on the **held-out test split** — never train or validation.
 Console prints a plain verdict:
 
 ```
---- Benchmark (>90% recall on judged classes) ---
+--- Benchmark (>80% recall on judged classes) ---
   LFM_RADAR    recall=0.9800  PASS
   FHSS         recall=0.9100  PASS
   JAMMING      recall=0.9400  PASS

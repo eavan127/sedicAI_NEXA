@@ -9,8 +9,14 @@ down from the original >90% announcement). Treat that as the
 Here is why the distinction matters for us specifically: **none of our judged
 classes came from the organisers.** Radar is RadChar, FHSS and jamming are our own
 synthesis. So a high score on our own test split proves very little — it only
-shows the model learned *our* data. The number that counts is measured on the
-Qualifier IQ Stream, which none of us has seen.
+shows the model learned *our* data.
+
+**Corrected 6 Sept 2026:** there is no Qualifier IQ Stream. The organiser provides
+no data at all, so no external number is ever measured for us. That makes this
+concern sharper, not weaker — nothing downstream will catch a generation flaw.
+The nearest substitute we have is the out-of-distribution check against real
+recorded GNSS jamming (brief §7.2), which is the only measurement in the project
+taken on signals nobody here produced.
 
 Everything we do is therefore aimed at one question: **does this hold up on
 signals we did not generate?**
@@ -218,7 +224,7 @@ on Day 2, not Day 4.
 |---|---|
 | 1 | Generate all three jamming types, plot, verify against reference figures. Start brief skeleton and video script |
 | 2 | Tune parameters with P2 to separate sweep from radar. Draft brief sections as P1/P3 deliver |
-| 3 | Run inference on the qualifier stream. **Confirm the file dtype first.** Record video draft |
+| 3 | ~~Run inference on the qualifier stream.~~ *(No such stream — became out-of-distribution validation.)* Record video draft |
 | 4 | Assemble brief, final video edit, package, **submit with hours to spare** |
 
 ### Your trap

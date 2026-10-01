@@ -139,7 +139,8 @@ src/
     amc_cnn.py           dual-branch fusion CNN, see Architecture above
   train.py              training loop, stratified by (label-combination, SNR)
   evaluate.py           per-class recall, tier metrics, comms-vs-jamming, scorecard
-  infer.py              runs the model on the Qualifier IQ Stream -> classification log
+  infer.py              runs the model over an IQ file -> per-window classification CSV
+                        (no organiser stream exists; used for our own demo/verification files)
 
 scripts/
   train_ensemble.py      N-seed ensemble (averages sigmoid outputs) — the main robustness result
@@ -183,8 +184,12 @@ python -m src.train
 python -m src.evaluate
 ```
 ```bash
-python -m src.infer --input data/raw/qualifier_iq_stream.bin --output evals/classification_log.csv
+python -m src.infer --input verification_pack/mixed_sequence.f32 --output evals/classification_log.csv
 ```
+
+There is no organiser-provided IQ stream — confirmed with the organiser, and absent from both
+official PDFs in [`docs/rules/`](docs/rules/). `infer.py` runs over our own files: the
+`verification_pack/` captures, or anything else in interleaved float32.
 
 For a more robust number, run the ensemble (5 seeds averaged) and check the
 variance floor before trusting any single result:
@@ -245,14 +250,19 @@ whether *both* were caught, not forced into an either/or bucket.
 - 3+-signal composites (not just pairs) are architecturally representable
   (sigmoid doesn't care how many bits are true) but have no training data
   yet — untested generalization from 2-signal training.
-- `src/infer.py::load_iq_file()` assumes interleaved float32 — confirm the
-  organizer's actual Qualifier Stream format before submitting.
+- `src/infer.py::load_iq_file()` assumes interleaved float32. This was previously
+  flagged as an untested submission risk against an organiser-provided stream;
+  **no such stream exists**, so the assumption only has to hold for our own files,
+  which it does.
 
 ## Tests: why they exist
 
 The biggest risk on this track is shipping synthetic training data whose
-physics is subtly wrong — the model then scores well on our own data and
-fails the organizer's real Qualifier IQ Stream, with no time left to fix it.
+physics is subtly wrong — the model then scores well on our own data and has
+learned the generator rather than the signal. There is no organiser stream that
+would eventually expose that, so nothing catches it for us: the tests below, and
+the out-of-distribution check in `validate_external_jamming.py`, are the only
+things standing between a subtle generation bug and a result that means nothing.
 
 `tests/` asserts the maths does what the class name claims: the LFM chirp
 sweeps *linearly* at the requested rate, FHSS hops land on declared channels,

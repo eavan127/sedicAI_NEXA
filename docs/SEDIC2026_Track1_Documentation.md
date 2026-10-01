@@ -1,13 +1,44 @@
 # SEDIC 2026 — RF/Signal Track ("Project Overwatch")
 ## Full Technical Documentation — Phase 1 Preliminary Qualifier
 
+> ## ⚠ Superseded planning document — read this box first
+>
+> **This is the original 4-day sprint playbook, written before the dataset or the model existed.** It
+> is kept for its reasoning and its parameter research, not as a statement of fact. Several of its
+> core claims are now known to be wrong.
+>
+> **For what is actually true, use these instead:**
+>
+> | For | Read |
+> |---|---|
+> | The rules, verbatim | [`rules/SEDIC2026_RF_track_announcement.md`](rules/SEDIC2026_RF_track_announcement.md) |
+> | How Phase 1 is scored | [`rules/SEDIC2026_Phase1_assessment_rubric.md`](rules/SEDIC2026_Phase1_assessment_rubric.md) |
+> | Current status and results | [`STATUS_AND_PLAN.md`](STATUS_AND_PLAN.md) |
+> | The system as built | The technical brief (`SEDIC REPORT.docx`) |
+>
+> **Corrections, applied 6 Sept 2026:**
+>
+> 1. **There is no "Qualifier IQ Data Stream."** The organiser confirmed no data is provided; it
+>    appears in neither official PDF. Every mention below — §1, §2, §4, §13, §14, §15 — is wrong.
+>    There is **no classification-log requirement** either. All data is our own.
+> 2. **The model is not a 1D-CNN.** It is a two-branch fusion network (IQ branch with dilated
+>    convolutions + STFT branch), 148,938 parameters. §4 and §9's architecture guidance describe a
+>    design we did not ship.
+> 3. **The timeline is not 4 days.** The deadline is 13 Sept 2026; the sprint framing throughout §13
+>    is an artefact of the original planning assumption.
+>
+> The self-QA methodology, the parameter ranges in §15, and the risk analysis in §13 remain useful and
+> were largely borne out.
+
 ---
 
 ## 1. Executive Summary
 
 This document is the complete technical plan for attempting the SEDIC 2026 RF/Signal Track: an AI model that detects and classifies radio signals from raw IQ data into civilian modulation types, military/tactical signals (radar, frequency-hopping), and hostile jamming — evaluated at both clean (high-SNR) and noisy (low-SNR) conditions.
 
-**Known risk (stated up front, not buried):** the mandatory benchmark (>80% recall on Military/CEMA and Jamming classes -- confirmed 2026-08-14, down from the original >90% announcement) is measured against the organizer's own "Qualifier IQ Data Stream" — a file your team has not seen. Your training data for the military/jamming classes must be synthesized yourselves (no public dataset covers it), and there is no signal-processing expert available on your team's timeline to validate that synthetic data before submission. This document includes a self-QA methodology to partially mitigate that, but it does not eliminate the risk. Treat this as the single biggest go/no-go factor for this track.
+**Known risk (stated up front, not buried):** ~~the mandatory benchmark is measured against the organizer's own "Qualifier IQ Data Stream" — a file your team has not seen.~~ **Corrected 6 Sept 2026: no such file exists.** The organiser provides no data; the benchmark (>80% on Military/CEMA and Jamming — confirmed 2026-08-14, down from the original >90% announcement) is measured on our own held-out test split.
+
+The rest of the risk stands, and is in fact sharper without an organiser stream: training data for the military/jamming classes had to be synthesized ourselves (no public dataset covers it), with no signal-processing expert available to validate it. The self-QA methodology below partially mitigates that. What closed the gap further — and was not anticipated when this was written — is out-of-distribution testing against a real recorded jamming dataset from outside the project (brief §7.2), which measures generalisation in a way self-QA cannot.
 
 ---
 
@@ -19,7 +50,7 @@ This document is the complete technical plan for attempting the SEDIC 2026 RF/Si
 | Mandatory classes | Civilian: BPSK, QPSK, 16QAM, 64QAM. Military/CEMA: Radar Pulses (LFM), FHSS bursts |
 | Bonus differentiator | Distinguishing standard comms vs. hostile jamming — but note: the Evaluation section explicitly folds Jamming into the >80% mandatory benchmark, so treat it as required, not optional |
 | Conditions | Must work across high-SNR (clean) and low-SNR (faded/noisy) |
-| Submission package | Model source code, classification log & results (run on provided Qualifier IQ Data Stream), performance benchmark (>80% recall on Military/CEMA + Jamming), technical brief PDF, video demo (≤5 min, YouTube) |
+| Submission package | **Corrected 6 Sept:** technical brief PDF (dataset, architecture, DSP logic) · a *video* performance benchmark showing >80% on Military/CEMA + Jamming · demonstration video (≤5 min, YouTube). No classification log and no organiser data stream — see [`rules/`](rules/) |
 | NOT required in Phase 1 | GUI, live demo station, poster, jury presentation — these are Phase 2 (Top 10 only) |
 
 ---
@@ -54,8 +85,9 @@ This document is the complete technical plan for attempting the SEDIC 2026 RF/Si
                             ▼
 ┌─────────────────────────────────────────────────────────┐
 │  MODEL                                                     │
-│  1D-CNN / CLDNN trained from scratch                       │
-│  (no pretrained backbone exists for this domain)           │
+│  Two-branch fusion CNN, trained from scratch               │
+│  IQ branch (dilated conv) + STFT branch (2D CNN)           │
+│  148,938 params; sigmoid multi-label output                │
 └───────────────────────────┬───────────────────────────────┘
                             ▼
 ┌─────────────────────────────────────────────────────────┐
@@ -66,8 +98,8 @@ This document is the complete technical plan for attempting the SEDIC 2026 RF/Si
                             ▼
 ┌─────────────────────────────────────────────────────────┐
 │  SUBMISSION                                                │
-│  Run on organizer's Qualifier IQ Data Stream               │
-│  → classification log + technical brief + video demo       │
+│  Evaluate on our own held-out test split                   │
+│  → technical brief PDF + video demo (benchmark shown)      │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -345,17 +377,19 @@ for snr in snr_bins:
 |---|---|---|---|---|
 | **A** | Download RadioML; build LFM radar generator + spectrogram QA plots | Fix radar generator per QA findings; help merge full dataset | Help evaluate model; iterate if recall <80% on Military class | Package submission (code, log, benchmark) |
 | **B** | Build FHSS generator + spectrogram QA plots | Fix FHSS generator; help merge dataset | Monitor training; tune class weights/hyperparameters | Finish technical brief |
-| **C** | Build jamming generator (barrage/tone/sweep) + spectrogram QA plots | Fix jamming generator; kick off real training run | Run inference on organizer's Qualifier IQ Data Stream → classification log | Generate accuracy-vs-SNR plots + confusion matrix for brief |
+| **C** | Build jamming generator (barrage/tone/sweep) + spectrogram QA plots | Fix jamming generator; kick off real training run | ~~Run inference on organizer's Qualifier IQ Data Stream~~ *(no such stream; became out-of-distribution validation instead)* | Generate accuracy-vs-SNR plots + confusion matrix for brief |
 | **D** | Set up training pipeline; dry-run on RadioML-only data to confirm pipeline works end-to-end | Continue pipeline; prep evaluation scripts | Start recording video demo | Final video edit; submit with buffer time before deadline |
 
-**Structural risk to note explicitly**: Days 1–2 have no independent check — the same 4 people generating the synthetic signals are also the ones QA-checking them. Unlike Track 2 (where a labeling gap just costs you some accuracy points), a flaw here that survives self-QA doesn't surface until the organizer's Qualifier IQ Data Stream is run against your model — which is also your Phase 1 submission, with no time left to fix it.
+**Structural risk to note explicitly**: Days 1–2 have no independent check — the same 4 people generating the synthetic signals are also the ones QA-checking them.
+
+*Outcome, 6 Sept 2026:* this risk was real, and it never resolved the way this paragraph expected. There is no organiser stream, so a flaw surviving self-QA would never have been caught by the submission at all — it would simply have gone unmeasured. What actually surfaced it was out-of-distribution testing against a real recorded jamming dataset (brief §7.2): 57.6% recall externally against 84.44% on our own test split, with SingleChirp at 20.0% where our synthetic sweep scores 95.7%. The generator's signature *had* been partly learned. Self-QA alone would never have shown that.
 
 ---
 
 ## 14. Submission Checklist
 
 - [ ] Model source code (PyTorch), clean and runnable
-- [ ] Classification log generated by running the model on the organizer's Qualifier IQ Data Stream
+- [ ] ~~Classification log generated by running the model on the organizer's Qualifier IQ Data Stream~~ — **not a requirement; no organiser data exists**
 - [ ] Performance benchmark: recall >80% on Military/CEMA and Jamming classes, documented
 - [ ] Technical brief PDF: dataset methodology (including synthetic generation + self-QA process), architecture, training details, confusion matrix, accuracy-vs-SNR curve, honest discussion of limitations
 - [ ] Video demonstration (≤5 min, uploaded to YouTube): explain architecture, show classification log results
@@ -374,4 +408,4 @@ for snr in snr_bins:
 | FHSS | Number of channels | 8–64 |
 | Jamming | JSR | 0–20 dB (vary across examples) |
 
-*(These are general literature-informed starting points, not guarantees of matching the organizer's actual Qualifier IQ Data Stream — validate against your own research before finalizing.)*
+*(These are general literature-informed starting points. They were never validated against an organiser reference — no such data exists — so they remain literature-informed assumptions, and the brief states them as such in §8.1.)*

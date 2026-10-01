@@ -1,6 +1,6 @@
 # 02 — Radar (LFM) Class
 
-**Owner:** Person A · **Day:** 1–2 · **Judged class — must clear >90% recall**
+**Owner:** Person A · **Day:** 1–2 · **Judged class — must clear >80% recall** *(bar revised down from 90%, confirmed 2026-08-14)*
 
 ## What an LFM pulse is
 

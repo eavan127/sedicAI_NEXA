@@ -1,6 +1,6 @@
 # 03 — FHSS Class
 
-**Owner:** Person B · **Day:** 1–2 · **Judged class — must clear >90% recall**
+**Owner:** Person B · **Day:** 1–2 · **Judged class — must clear >80% recall** *(bar revised down from 90%, confirmed 2026-08-14)*
 
 > **Highest-risk class in the project.** No public raw-IQ FHSS dataset exists
 > that we can use, so unlike radar (which has RadChar) this class is *entirely*
@@ -118,7 +118,7 @@ coverage while staying strictly inside the enforced ceiling.
 | Precision | 73% |
 | F1 | 0.82 |
 
-Crosses 90% recall above -2 dB SNR; degrades at low SNR (-10 dB, -6 dB) as
+Crosses the benchmark above -2 dB SNR; degrades at low SNR (-10 dB, -6 dB) as
 expected — a healthy accuracy-vs-SNR shape, not a flat/suspicious one.
 
 Dominant confusion is with JAMMING, not radar. Cross-checking the confusion

@@ -1,12 +1,13 @@
 # 04 — Jamming Class
 
-**Owner:** Person C · **Day:** 1–2 · **Judged class — must clear >90% recall**
+**Owner:** Person C · **Day:** 1–2 · **Judged class — must clear >80% recall** *(bar revised down from 90%, confirmed 2026-08-14)*
 
 ## Is jamming actually mandatory?
 
 The rules list distinguishing jamming under *"Competitive Advantage"*, which
-reads optional — but the Evaluation section requires **">90% recall specifically
-on the High Priority (Military/CEMA) and Jamming classes."**
+reads optional — but the Evaluation section folds it into the mandatory benchmark:
+**">80% specifically on the High Priority (Military/CEMA) and Jamming classes."**
+*(The bar was 90% at first announcement; revised to 80%, confirmed 2026-08-14.)*
 
 **Treat it as mandatory.** The benchmark names it explicitly.
 

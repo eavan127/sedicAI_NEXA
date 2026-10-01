@@ -19,7 +19,7 @@ Master tool/licence list: [`../TOOLS.md`](../TOOLS.md)
 
 ## The seven classes
 
-| Class | Tier | Source | Judged at >90% recall |
+| Class | Tier | Source | Judged at >80% recall |
 |---|---|---|---|
 | BPSK, QPSK, 16QAM, 64QAM | Civilian | RadioML 2018.01A | no |
 | LFM_RADAR | Military / CEMA | RadChar dataset | **yes** |
