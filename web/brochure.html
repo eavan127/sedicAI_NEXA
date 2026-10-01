@@ -423,13 +423,17 @@
   }
 
   /* ---------- print: one A4 page per section, for the PDF version ---------- */
-  @page { size: A4; margin: 0; }
+  /* A4 with an equal 12 mm margin on every side; nothing prints edge to edge. */
+  @page { size: A4; margin: 12mm; }
   @media print {
     * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     body { font-size: 9.5pt; line-height: 1.45; background: #fff; }
     .bar, .no-print, footer { display: none !important; }
     .reveal { opacity: 1 !important; transform: none !important; }
-    .page { height: 297mm; overflow: hidden; padding: 14mm 14mm; break-after: page; border: 0; }
+    .page { height: 273mm; overflow: hidden; padding: 0; break-after: page; border: 0; }
+    .page.tint { background: #fff; }
+    .page > .inner { max-width: none; }
+    .cover { height: 273mm; min-height: 0; padding: 12mm; border-radius: 6mm; }
     .page:last-of-type { break-after: auto; }
     .folio { margin-bottom: 8px; font-size: 8pt; }
     .page-brand { margin-bottom: 10px; padding-bottom: 8px; }
@@ -469,15 +473,15 @@
     .honest { margin-top: 14px; }
     .honest ul { font-size: 9pt; }
     .features { grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 0; }
-    .page-brand.print-only { display: flex !important; break-before: page; padding-top: 14mm; }
+    .page-brand.print-only { display: flex !important; break-before: page; padding-top: 0; }
     /* the learning loop fits under the showcase on the platform's first printed page */
     #platform .inner { display: flex; flex-direction: column; }
     #platform .inner > * { order: 0; }
     #platform .inner > .folio { align-self: flex-start; }
-    #platform .loop-card { order: 1; margin-top: 12px !important; }
+    #platform .loop-card { order: 1; margin-top: 8px !important; }
     #platform .page-brand.print-only, #platform .features { order: 2; }
     #platform { height: auto; min-height: 0; padding-bottom: 0; overflow: visible; }
-    .showcase { grid-template-columns: 1.7fr 1fr; margin-top: 18px; }
+    .showcase { grid-template-columns: 1.2fr 1fr; margin-top: 12px; }
     .screen figcaption { font-size: 8.5pt; }
     .demo-card { padding: 16px; }
     .demo-card h3 { font-size: 15pt; }
@@ -499,14 +503,16 @@
     .feat p { font-size: 8.5pt; }
     .feat .where { font-size: 7.5pt; padding-top: 4px; }
     .mock { padding: 8px; }
-    .loop-card { grid-template-columns: 1fr 1fr; gap: 10px 20px; }
+    .loop-card { grid-template-columns: 1.5fr 1fr; gap: 8px 16px; padding: 12px 14px !important; }
+    .loop-text .where { display: none; }
     .loop-text h4 { font-size: 13pt; }
     .loop-text p { font-size: 9pt; }
     .loop-kicker { font-size: 6.5pt; padding: 2px 8px; margin-bottom: 4px; }
     .loop-rules { margin-top: 6px; gap: 3px; }
     .loop-rules li { font-size: 8.5pt; padding-left: 16px; }
     .loop-rules li::before { width: 9px; }
-    .ring { max-width: 52mm; margin: 0 auto; }
+    .ring { max-width: 46mm; margin: 0 auto; }
+    .demo-card .play { display: none; }
     .ring .runner { display: none; }
     .ring .node { font-size: 6.5pt; padding: 4px 5px; border-radius: 8px; }
     .ring .node b { font-size: 8pt; }
