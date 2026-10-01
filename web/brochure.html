@@ -132,7 +132,7 @@
   }
   .cover .logo-mark { line-height: 0; margin-left: 0; }
   .cover .logo-mark img { display: block; height: clamp(54px, 11vw, 124px); width: auto; max-width: 100%; }
-  .cover .tagline { font-size: clamp(20px, 3vw, 30px); font-weight: 600; margin-top: 18px; max-width: 24ch; }
+  .cover .tagline { text-wrap: balance; max-width: 30ch !important; font-size: clamp(20px, 3vw, 30px); font-weight: 600; margin-top: 18px; max-width: 24ch; }
   .cover .sub { color: var(--on-dark-dim); margin-top: 14px; max-width: 56ch; }
   .cover .ctas { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
   .cover .meta {
@@ -309,7 +309,19 @@
 
   /* ---------- team ---------- */
   .group-photo { margin: 28px 0 0; max-width: 100%; }
-  .photo-frame { position: relative; }
+  .photo-frame { position: relative; margin: 18px 14px 14px 0; }
+  /* the poster's orange pill and blue dot, sitting on the photo's top edge */
+  .photo-frame::before, .photo-frame::after { content: ""; position: absolute; top: -14px; z-index: 2; }
+  .photo-frame::before { left: 28px; width: 92px; height: 28px; border-radius: 14px; background: var(--orange); }
+  .photo-frame::after { left: 130px; width: 28px; height: 28px; border-radius: 50%; background: var(--blue); }
+  .group-photo img { box-shadow: 14px 14px 0 var(--navy); }
+  @media (max-width: 560px) {
+    .photo-frame { margin: 14px 8px 8px 0; }
+    .photo-frame::before, .photo-frame::after { top: -10px; height: 20px; }
+    .photo-frame::before { left: 18px; width: 60px; border-radius: 10px; }
+    .photo-frame::after { left: 86px; width: 20px; }
+    .group-photo img { box-shadow: 8px 8px 0 var(--navy); }
+  }
   .group-photo img {
     display: block; width: 100%; max-width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; object-position: center 88%;
     border-radius: 16px; border: 1px solid var(--line); background: var(--pill);
@@ -489,7 +501,7 @@
     <div class="page-brand cover-brand"><img class="pb-sedic" src="img/sedic-logo-light.png" alt="SEDIC 2026, Strategic Electronic Defence Innovation Challenge 2026" width="831" height="238"></div>
     <div class="kicker"><span class="live-dot"></span>SEDIC 2026 · Track I · Project Overwatch: Cognitive CEMA</div>
     <h1 class="logo-mark"><img src="img/nexa-logo-light.png" alt="NEXA" width="1100" height="264"></h1>
-    <p class="tagline">AI-powered RF spectrum intelligence.</p>
+    <p class="tagline">A Dual-Branch Fusion CNN for Multi-Label RF Signal Classification</p>
     <p class="sub">Who is transmitting, and are they hostile? NEXA reads raw radio samples, names every signal
       in the window (civilian comms, radar, frequency hopping, jamming) and tells the operator which tier
       it belongs to. It runs offline, in a browser, with a human in the loop.</p>
