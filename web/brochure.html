@@ -187,7 +187,7 @@
   .stage.lit { background: var(--slate); border-color: var(--slate); color: var(--on-dark); }
   .stage.lit p { color: var(--on-dark-dim); }
   .stage.lit .spec, .stage.lit::before { color: var(--accent-hot); }
-  .why { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; margin-top: 44px; }
+  .why { display: grid; grid-template-columns: repeat(2, 1fr); gap: 28px; margin-top: 44px; }
   @media (max-width: 900px) { .why { grid-template-columns: 1fr; } }
   .why h4 { font-size: 16px; }
   .why p { font-size: 15px; color: var(--text-dim); margin-top: 6px; }
@@ -454,7 +454,7 @@
     .stage h4 { font-size: 10.5pt; }
     .stage p { font-size: 8.5pt; }
     .stage .spec { font-size: 7.5pt; }
-    .why { grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 22px; }
+    .why { grid-template-columns: repeat(2, 1fr); gap: 14px; margin-top: 22px; }
     .why h4 { font-size: 10.5pt; }
     .why p { font-size: 9pt; }
     .kpis { grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 20px; }
@@ -661,11 +661,6 @@
         <h4>Where the data comes from</h4>
         <p>Real benchmark data where it exists (RadioML 2018.01A, RadChar), our own generators where it does not
           (FHSS, jamming, empty channel), plus overlays and mixtures of up to three signals.</p>
-      </div>
-      <div class="reveal">
-        <h4>Caught along the way</h4>
-        <p>RadioML's shipped class list does not match its data. We found it from the signals themselves and
-          confirmed it against an independent analysis. Using it unchecked would have mislabelled every civilian example.</p>
       </div>
     </div>
   </div>
