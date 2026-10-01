@@ -438,6 +438,24 @@
     .reveal { opacity: 1 !important; transform: none !important; }
     .page { height: 273mm; overflow: hidden; padding: 0; break-after: page; border: 0; }
     .page.tint { background: #fff; }
+    /* mission and how-it-works share one printed page */
+    #mission { height: auto; break-after: auto; }
+    #how { height: auto; margin-top: 4mm; padding-top: 4mm !important; border-top: 1px solid var(--line); }
+    #how .page-brand { display: none; }
+    #mission h2, #how h2 { font-size: 19pt; }
+    #mission .lead, #how .lead { font-size: 9.5pt; margin-top: 5px; }
+    #mission .folio, #how .folio { margin-bottom: 6px; }
+    #mission .tiers { margin-top: 12px; }
+    #mission .callout { margin-top: 8px; padding: 8px 12px; }
+    #how .pipe { margin-top: 12px; }
+    #how .stage { padding: 9px 9px; }
+    #how .why { margin-top: 10px; gap: 10px 16px; }
+    #how .why p { font-size: 8.5pt; }
+    #how .stage p { font-size: 8pt; margin-top: 4px; }
+    #how .stage .spec { margin-top: 6px; }
+    #mission .tier { padding: 10px 12px; }
+    #mission .chips { margin-top: 8px; }
+    #mission h2, #how h2 { max-width: none; }
     .page > .inner { max-width: none; }
     .cover { height: 273mm; min-height: 0; padding: 12mm; border-radius: 6mm; }
     .page:last-of-type { break-after: auto; }
