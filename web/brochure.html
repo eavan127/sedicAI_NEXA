@@ -264,8 +264,8 @@
     border-radius: 16px; border: 1px solid var(--slate-3); background: var(--slate-2);
   }
   .group-photo figcaption { margin-top: 10px; font-size: 13px; color: var(--on-dark-dim); }
-  .team { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 40px; }
-  @media (max-width: 900px) { .team { grid-template-columns: repeat(2, 1fr); } }
+  .team { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-top: 40px; }
+  @media (max-width: 900px) { .team { grid-template-columns: repeat(2, 1fr); } .person.advisor { grid-column: 1 / -1; } }
   @media (max-width: 420px) { .team { grid-template-columns: 1fr; } }
   .person { border: 1px solid var(--slate-3); border-radius: 14px; padding: 20px; background: var(--slate-2); }
   .person .av {
@@ -274,6 +274,8 @@
   }
   .person h4 { font-size: 16px; margin-top: 14px; color: #fff; }
   .person .role { font-size: 13.5px; color: var(--on-dark-dim); margin-top: 4px; }
+  .person.advisor { border-color: var(--olive); }
+  .person.advisor .av { background: var(--olive-glow); color: var(--slate); }
   .person .lead-tag { font: 600 11px var(--mono); color: var(--olive-glow); letter-spacing: 0.08em; margin-top: 8px; text-transform: uppercase; }
   .qrs { display: grid; grid-template-columns: repeat(2, minmax(0, 260px)); gap: 18px; margin-top: 48px; }
   @media (max-width: 560px) { .qrs { grid-template-columns: 1fr 1fr; gap: 12px; } }
@@ -357,7 +359,8 @@
     .aud li { padding: 7px 0; }
     .aud li b, .aud li { font-size: 9.5pt; }
     .aud li span { font-size: 8.5pt; }
-    .team { grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 22px; }
+    .team { grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 22px; }
+    .person.advisor { grid-column: auto; }
     .person { padding: 14px; }
     .group-photo { margin-top: 14px; }
     .group-photo img { aspect-ratio: auto; height: 78mm; }
@@ -721,6 +724,12 @@
         <div class="av">CX</div>
         <h4>Chua Xin Ying</h4>
         <p class="role">Jamming · inference and packaging</p>
+      </div>
+      <div class="person advisor reveal">
+        <div class="av">NT</div>
+        <h4>Dr Noureen Talpur</h4>
+        <p class="role">Universiti Teknologi PETRONAS</p>
+        <p class="lead-tag">Advisor</p>
       </div>
     </div>
 
