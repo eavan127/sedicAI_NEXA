@@ -1,0 +1,974 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NEXA Brochure</title>
+<meta name="description" content="NEXA: AI-powered RF spectrum intelligence. SEDIC 2026 Track I, Project Overwatch.">
+<!--
+  E-brochure for the SEDIC 2026 Grand Finale booth (CyberDSA, 7 Oct 2026).
+  Visitors reach it by QR code; it links straight into the live console
+  (index.html) deployed beside it.
+
+  Numbers are copied from web/data/performance.json (generated 2026-09-26,
+  5-model ensemble, 19,260 held-out test windows) so the brochure and the
+  console's Performance page say the same thing. Re-copy them if the
+  ensemble is retrained.
+
+  One file, no build step. Animation is decoration only: everything reads
+  correctly with prefers-reduced-motion, and the print stylesheet lays the
+  same pages out as A4 for the PDF version (Ctrl+P, Save as PDF, background
+  graphics on).
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  /* Palette shared with the console (src/ui/palette.py, web/index.html). */
+  :root {
+    --olive: #627143;
+    --olive-dark: #4A552F;
+    --olive-tint: #EFF1EA;
+    --olive-glow: #B9C98F;
+    --slate: #121C27;
+    --slate-2: #1B2734;
+    --slate-3: #2A3846;
+    --bg: #F7F8F5;
+    --panel: #FFFFFF;
+    --grid: #DFE3D9;
+    --text: #121C27;
+    --text-dim: #5F6B72;
+    --on-dark: #E8ECE2;
+    --on-dark-dim: #9AA7A0;
+    --civ: #4F7CAC;
+    --mil: #627143;
+    --hos: #C1543F;
+    --emp: #B8962E;
+    --font: "Inter", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    --mono: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+    --gutter: clamp(16px, 4vw, 48px);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: var(--font); font-size: 16px; line-height: 1.55;
+    overflow-x: hidden;
+  }
+  h1, h2, h3, h4 { margin: 0; line-height: 1.15; letter-spacing: -0.01em; }
+  p { margin: 0; }
+  a { color: inherit; }
+  .mono { font-family: var(--mono); }
+
+  /* ---------- top bar ---------- */
+  .bar {
+    position: sticky; top: 0; z-index: 20;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 10px var(--gutter);
+    background: rgba(18, 28, 39, 0.92); backdrop-filter: blur(8px);
+    color: var(--on-dark); border-bottom: 1px solid var(--slate-3);
+  }
+  .bar .brand { font-weight: 800; letter-spacing: 0.22em; font-size: 15px; }
+  .bar .brand span { color: var(--olive-glow); }
+  .bar nav { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; }
+  .bar nav::-webkit-scrollbar { display: none; }
+  .bar nav a {
+    font-size: 13px; text-decoration: none; color: var(--on-dark-dim);
+    padding: 6px 10px; border-radius: 999px; white-space: nowrap;
+  }
+  .bar nav a:hover, .bar nav a.on { color: var(--on-dark); background: var(--slate-3); }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    font: 600 14px var(--font); text-decoration: none; white-space: nowrap;
+    padding: 9px 16px; border-radius: 999px; border: 1px solid transparent;
+    background: var(--olive); color: #fff; cursor: pointer;
+    transition: background .2s, transform .2s;
+  }
+  .btn:hover { background: var(--olive-dark); transform: translateY(-1px); }
+  .btn.ghost { background: transparent; border-color: currentColor; color: inherit; }
+  .btn.ghost:hover { background: rgba(255,255,255,0.08); }
+  @media (max-width: 720px) { .bar nav { display: none; } }
+
+  /* ---------- pages ---------- */
+  .page {
+    position: relative;
+    padding: clamp(56px, 9vw, 112px) var(--gutter);
+    border-bottom: 1px solid var(--grid);
+  }
+  .page > .inner { max-width: 1120px; margin: 0 auto; }
+  .page.dark { background: var(--slate); color: var(--on-dark); border-bottom-color: var(--slate-3); }
+  .page.tint { background: var(--olive-tint); }
+  .folio {
+    display: flex; align-items: baseline; gap: 14px; margin-bottom: 18px;
+    font: 600 12px var(--mono); letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--olive);
+  }
+  .dark .folio { color: var(--olive-glow); }
+  .folio .num { color: var(--text-dim); }
+  .dark .folio .num { color: var(--on-dark-dim); }
+  .page h2 { font-size: clamp(30px, 5vw, 50px); font-weight: 800; max-width: 18ch; }
+  .lead { font-size: clamp(17px, 2vw, 20px); color: var(--text-dim); max-width: 60ch; margin-top: 18px; }
+  .dark .lead { color: var(--on-dark-dim); }
+
+  /* ---------- cover ---------- */
+  .cover {
+    min-height: 100svh; display: grid; align-content: end;
+    padding-top: 40px; overflow: hidden; isolation: isolate;
+  }
+  .cover canvas { position: absolute; inset: 0; width: 100%; height: 100%; z-index: -2; display: block; }
+  .cover::after {
+    content: ""; position: absolute; inset: 0; z-index: -1;
+    background:
+      linear-gradient(90deg, rgba(18,28,39,0.88) 0%, rgba(18,28,39,0.6) 50%, rgba(18,28,39,0.1) 100%),
+      linear-gradient(180deg, rgba(18,28,39,0) 0%, rgba(18,28,39,0.35) 50%, rgba(18,28,39,0.97) 88%);
+  }
+  .cover .kicker {
+    font: 600 12px var(--mono); letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--olive-glow); margin-bottom: 18px;
+  }
+  .cover h1 {
+    font-size: clamp(64px, 15vw, 168px); font-weight: 800; letter-spacing: 0.12em;
+    line-height: 0.9; margin-left: -0.04em;
+  }
+  .cover .tagline { font-size: clamp(20px, 3vw, 30px); font-weight: 600; margin-top: 18px; max-width: 24ch; }
+  .cover .sub { color: var(--on-dark-dim); margin-top: 14px; max-width: 56ch; }
+  .cover .ctas { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
+  .cover .meta {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px;
+    margin-top: 44px; background: var(--slate-3); border: 1px solid var(--slate-3); border-radius: 12px; overflow: hidden;
+  }
+  @media (max-width: 900px) { .cover .meta { grid-template-columns: repeat(2, 1fr); } }
+  .cover .meta div { background: rgba(18,28,39,0.85); padding: 14px 16px; }
+  .cover .meta b { display: block; font: 700 22px var(--mono); color: #fff; }
+  .cover .meta span { font-size: 13px; color: var(--on-dark-dim); }
+  .live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #7FD07A; margin-right: 8px; box-shadow: 0 0 0 0 rgba(127,208,122,.6); animation: pulse 2s infinite; }
+  @keyframes pulse { 70% { box-shadow: 0 0 0 10px rgba(127,208,122,0); } 100% { box-shadow: 0 0 0 0 rgba(127,208,122,0); } }
+
+  /* ---------- tiers ---------- */
+  .tiers { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 44px; }
+  @media (max-width: 900px) { .tiers { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 480px) { .tiers { grid-template-columns: 1fr; } }
+  .tier { background: var(--panel); border: 1px solid var(--grid); border-radius: 14px; padding: 20px; border-top: 4px solid var(--c); }
+  .tier h4 { font-size: 18px; }
+  .tier .q { font-size: 14px; color: var(--text-dim); margin-top: 4px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+  .chip { font: 600 12px var(--mono); padding: 4px 8px; border-radius: 6px; background: var(--olive-tint); color: var(--slate); }
+  .callout {
+    margin-top: 28px; padding: 18px 20px; border-radius: 14px;
+    background: var(--slate); color: var(--on-dark); display: flex; gap: 16px; align-items: center; flex-wrap: wrap;
+  }
+  .callout .eg { font: 600 15px var(--mono); color: var(--olive-glow); }
+
+  /* ---------- pipeline ---------- */
+  .pipe { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0; margin-top: 48px; counter-reset: step; }
+  @media (max-width: 900px) { .pipe { grid-template-columns: 1fr; } }
+  .stage {
+    position: relative; padding: 22px 20px 24px; border: 1px solid var(--grid); background: var(--panel);
+    transition: background .5s, border-color .5s, transform .5s;
+  }
+  .stage + .stage { border-left: 0; }
+  @media (max-width: 900px) { .stage + .stage { border-left: 1px solid var(--grid); border-top: 0; } }
+  .stage:first-child { border-radius: 14px 0 0 14px; }
+  .stage:last-child { border-radius: 0 14px 14px 0; }
+  @media (max-width: 900px) {
+    .stage:first-child { border-radius: 14px 14px 0 0; }
+    .stage:last-child { border-radius: 0 0 14px 14px; }
+  }
+  .stage::before {
+    counter-increment: step; content: "0" counter(step);
+    font: 600 12px var(--mono); color: var(--olive); letter-spacing: 0.1em;
+  }
+  .stage h4 { font-size: 17px; margin-top: 8px; }
+  .stage p { font-size: 14px; color: var(--text-dim); margin-top: 8px; }
+  .stage .spec { font: 12px var(--mono); color: var(--olive-dark); margin-top: 12px; }
+  .stage.lit { background: var(--slate); border-color: var(--slate); color: var(--on-dark); }
+  .stage.lit p { color: var(--on-dark-dim); }
+  .stage.lit .spec, .stage.lit::before { color: var(--olive-glow); }
+  .why { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; margin-top: 44px; }
+  @media (max-width: 900px) { .why { grid-template-columns: 1fr; } }
+  .why h4 { font-size: 16px; }
+  .why p { font-size: 15px; color: var(--text-dim); margin-top: 6px; }
+
+  /* ---------- proof ---------- */
+  .kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 44px; }
+  @media (max-width: 760px) { .kpis { grid-template-columns: 1fr; } }
+  .kpi { background: var(--slate-2); border: 1px solid var(--slate-3); border-radius: 14px; padding: 22px; }
+  .kpi .label { font-size: 14px; color: var(--on-dark-dim); }
+  .kpi .val { font: 700 clamp(44px, 6vw, 60px) var(--mono); color: #fff; line-height: 1.1; margin-top: 6px; }
+  .kpi .val small { font-size: 0.45em; color: var(--on-dark-dim); }
+  .kpi .meter { height: 6px; background: var(--slate-3); border-radius: 3px; margin-top: 14px; position: relative; overflow: visible; }
+  .kpi .meter i { display: block; height: 100%; width: 0; background: var(--olive-glow); border-radius: 3px; transition: width 1.4s cubic-bezier(.2,.8,.2,1); }
+  .kpi .meter::after { content: ""; position: absolute; left: 80%; top: -5px; bottom: -5px; width: 2px; background: var(--hos); }
+  .kpi .pass { font: 600 12px var(--mono); color: #7FD07A; margin-top: 10px; letter-spacing: 0.06em; }
+  .secondary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 14px; }
+  @media (max-width: 760px) { .secondary { grid-template-columns: 1fr; } }
+  .secondary div { border: 1px solid var(--slate-3); border-radius: 14px; padding: 18px 22px; }
+  .secondary b { font: 700 28px var(--mono); color: #fff; display: block; }
+  .secondary .cap { display: block; font-size: 14px; color: var(--on-dark-dim); }
+  .chart-wrap { margin-top: 36px; background: var(--slate-2); border: 1px solid var(--slate-3); border-radius: 14px; padding: 22px; }
+  .chart-wrap h4 { font-size: 16px; }
+  .chart-wrap .note { font-size: 13px; color: var(--on-dark-dim); margin-top: 4px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 12px; font-size: 13px; color: var(--on-dark); }
+  .legend i { display: inline-block; width: 14px; height: 3px; vertical-align: middle; margin-right: 6px; border-radius: 2px; }
+  #snrChart { width: 100%; height: auto; display: block; margin-top: 10px; }
+  #snrChart .line { fill: none; stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+  .honest { margin-top: 36px; border-left: 3px solid var(--emp); padding: 4px 0 4px 20px; }
+  .honest h4 { font-size: 16px; color: #fff; }
+  .honest ul { margin: 10px 0 0; padding-left: 18px; color: var(--on-dark-dim); font-size: 15px; }
+  .honest li + li { margin-top: 6px; }
+
+  /* ---------- platform ---------- */
+  .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 44px; }
+  @media (max-width: 900px) { .features { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 560px) { .features { grid-template-columns: 1fr; } }
+  .feat { background: var(--panel); border: 1px solid var(--grid); border-radius: 14px; padding: 22px; display: flex; flex-direction: column; gap: 8px; }
+  .feat.wide { grid-column: span 2; }
+  @media (max-width: 560px) { .feat.wide { grid-column: auto; } }
+  .feat .ic { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; background: var(--olive-tint); color: var(--olive-dark); }
+  .feat .ic svg { width: 20px; height: 20px; }
+  .feat h4 { font-size: 17px; margin-top: 4px; }
+  .feat p { font-size: 14.5px; color: var(--text-dim); }
+  .feat .where { font: 12px var(--mono); color: var(--olive); margin-top: auto; padding-top: 8px; }
+  .mock {
+    margin-top: 6px; border-radius: 10px; background: var(--slate); padding: 12px; overflow: hidden;
+    font: 11px var(--mono); color: var(--on-dark-dim);
+  }
+  .mock .row { display: flex; align-items: center; gap: 8px; }
+  .mock .row + .row { margin-top: 6px; }
+  .mock .lane { flex: 1; height: 14px; border-radius: 3px; background: var(--slate-3); position: relative; overflow: hidden; }
+  .mock .lane i { position: absolute; top: 0; bottom: 0; border-radius: 3px; }
+  .mock .tag { width: 76px; flex: none; }
+  .loop { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 10px; }
+  @media (max-width: 760px) { .loop { grid-template-columns: repeat(2, 1fr); } }
+  .loop div { background: var(--olive-tint); border-radius: 10px; padding: 12px; font-size: 13.5px; }
+  .loop b { display: block; font-size: 14px; color: var(--slate); }
+
+  /* ---------- audiences ---------- */
+  .aud { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 44px; }
+  @media (max-width: 900px) { .aud { grid-template-columns: 1fr; } }
+  .aud article { border-radius: 16px; padding: 26px; background: var(--panel); border: 1px solid var(--grid); }
+  .aud .who { font: 600 12px var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--olive); }
+  .aud h3 { font-size: 22px; margin-top: 8px; }
+  .aud ul { list-style: none; margin: 16px 0 0; padding: 0; }
+  .aud li { padding: 10px 0; border-top: 1px solid var(--grid); font-size: 15px; }
+  .aud li b { display: block; font-size: 15px; }
+  .aud li span { color: var(--text-dim); font-size: 14px; }
+
+  /* ---------- team ---------- */
+  .team { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 40px; }
+  @media (max-width: 900px) { .team { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 420px) { .team { grid-template-columns: 1fr; } }
+  .person { border: 1px solid var(--slate-3); border-radius: 14px; padding: 20px; background: var(--slate-2); }
+  .person .av {
+    width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center;
+    background: var(--olive); color: #fff; font-weight: 700; font-size: 15px;
+  }
+  .person h4 { font-size: 16px; margin-top: 14px; color: #fff; }
+  .person .role { font-size: 13.5px; color: var(--on-dark-dim); margin-top: 4px; }
+  .person .lead-tag { font: 600 11px var(--mono); color: var(--olive-glow); letter-spacing: 0.08em; margin-top: 8px; text-transform: uppercase; }
+  .qrs { display: grid; grid-template-columns: repeat(2, minmax(0, 260px)); gap: 18px; margin-top: 48px; }
+  @media (max-width: 560px) { .qrs { grid-template-columns: 1fr 1fr; gap: 12px; } }
+  .qr { background: #fff; color: var(--slate); border-radius: 14px; padding: 16px; text-align: center; }
+  .qr .code { width: 100%; aspect-ratio: 1; display: grid; place-items: center; }
+  .qr .code img, .qr .code canvas { width: 100% !important; height: auto !important; image-rendering: pixelated; }
+  .qr .code .fallback { font: 12px var(--mono); color: var(--text-dim); word-break: break-all; }
+  .qr b { display: block; margin-top: 10px; font-size: 14px; }
+  .qr span { font-size: 12.5px; color: var(--text-dim); }
+  footer { padding: 28px var(--gutter); background: var(--slate); color: var(--on-dark-dim); font-size: 13px; }
+  footer .inner { max-width: 1120px; margin: 0 auto; display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: space-between; }
+
+  /* ---------- reveal on scroll ---------- */
+  .reveal { opacity: 0; transform: translateY(18px); transition: opacity .7s ease, transform .7s ease; }
+  .reveal.in { opacity: 1; transform: none; }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .reveal { opacity: 1; transform: none; transition: none; }
+    .live-dot { animation: none; }
+    .kpi .meter i, .stage, .btn { transition: none; }
+  }
+
+  /* ---------- print: one A4 page per section, for the PDF version ---------- */
+  @page { size: A4; margin: 0; }
+  @media print {
+    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    body { font-size: 9.5pt; line-height: 1.45; background: #fff; }
+    .bar, .no-print, footer { display: none !important; }
+    .reveal { opacity: 1 !important; transform: none !important; }
+    .page { height: 297mm; overflow: hidden; padding: 14mm 14mm; break-after: page; border: 0; }
+    .page:last-of-type { break-after: auto; }
+    .folio { margin-bottom: 8px; font-size: 8pt; }
+    .page h2 { font-size: 24pt; max-width: 22ch; }
+    .lead { font-size: 10.5pt; margin-top: 8px; }
+    .cover h1 { font-size: 110px; }
+    .cover .tagline { font-size: 18pt; }
+    .cover .meta { grid-template-columns: repeat(4, 1fr); margin-top: 24px; }
+    .cover .meta b { font-size: 15pt; }
+    .tiers { grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 22px; }
+    .tier { padding: 12px; }
+    .tier h4 { font-size: 11pt; }
+    .tier .q { font-size: 8.5pt; }
+    .callout { margin-top: 14px; padding: 12px 14px; }
+    .pipe { grid-template-columns: repeat(5, 1fr); margin-top: 22px; }
+    .stage { padding: 12px 10px; }
+    .stage + .stage { border-left: 0; border-top: 1px solid var(--grid); }
+    .stage:first-child { border-radius: 10px 0 0 10px; }
+    .stage:last-child { border-radius: 0 10px 10px 0; }
+    .stage h4 { font-size: 10.5pt; }
+    .stage p { font-size: 8.5pt; }
+    .stage .spec { font-size: 7.5pt; }
+    .why { grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 22px; }
+    .why h4 { font-size: 10.5pt; }
+    .why p { font-size: 9pt; }
+    .kpis { grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 20px; }
+    .kpi { padding: 14px; }
+    .kpi .val { font-size: 30pt; }
+    .secondary { grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 8px; }
+    .secondary div { padding: 10px 14px; }
+    .secondary b { font-size: 16pt; }
+    .secondary .cap { font-size: 8.5pt; }
+    .chart-wrap { margin-top: 14px; padding: 14px; }
+    #snrChart { max-height: 62mm; }
+    .honest { margin-top: 14px; }
+    .honest ul { font-size: 9pt; }
+    .features { grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 18px; }
+    .feat { padding: 11px; gap: 4px; }
+    .feat.wide { grid-column: span 2; }
+    .feat .ic { width: 26px; height: 26px; border-radius: 7px; }
+    .feat .ic svg { width: 15px; height: 15px; }
+    .feat h4 { font-size: 10pt; margin-top: 2px; }
+    .feat p { font-size: 8.5pt; }
+    .feat .where { font-size: 7.5pt; padding-top: 4px; }
+    .mock { padding: 8px; }
+    .loop { grid-template-columns: repeat(4, 1fr); gap: 6px; }
+    .loop div { padding: 8px; font-size: 8.5pt; }
+    .aud { grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 22px; }
+    .aud article { padding: 14px; }
+    .aud h3 { font-size: 13pt; }
+    .aud li { padding: 7px 0; }
+    .aud li b, .aud li { font-size: 9.5pt; }
+    .aud li span { font-size: 8.5pt; }
+    .team { grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 22px; }
+    .person { padding: 14px; }
+    .qrs { grid-template-columns: repeat(2, 55mm); margin-top: 26px; }
+    .stage, .feat, .tier, .aud article, .kpi, .person { break-inside: avoid; }
+    .stage.lit { background: var(--panel); color: var(--text); }
+    .kpi .meter i { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <div class="brand">NE<span>X</span>A</div>
+  <nav aria-label="Brochure sections">
+    <a href="#mission">Mission</a>
+    <a href="#how">How it works</a>
+    <a href="#proof">Results</a>
+    <a href="#platform">Platform</a>
+    <a href="#for-you">For you</a>
+    <a href="#team">Team</a>
+  </nav>
+  <a class="btn" href="./" data-demo>Try the live console</a>
+</header>
+
+<!-- ===================== 01 COVER ===================== -->
+<section class="page dark cover" id="cover">
+  <canvas id="waterfall" aria-hidden="true"></canvas>
+  <div class="inner">
+    <div class="kicker"><span class="live-dot"></span>SEDIC 2026 · Track I · Project Overwatch: Cognitive CEMA</div>
+    <h1>NEXA</h1>
+    <p class="tagline">AI-powered RF spectrum intelligence.</p>
+    <p class="sub">Who is transmitting, and are they hostile? NEXA reads raw radio samples, names every signal
+      in the window (civilian comms, radar, frequency hopping, jamming) and tells the operator which tier
+      it belongs to. It runs offline, in a browser, with a human in the loop.</p>
+    <div class="ctas">
+      <a class="btn" href="./" data-demo>Open the live console</a>
+      <a class="btn ghost" href="#mission">Read the brochure</a>
+    </div>
+    <div class="meta">
+      <div><b>8</b><span>signal classes, judged independently</span></div>
+      <div><b>128,400</b><span>training and test windows</span></div>
+      <div><b>3 / 3</b><span>judged classes above the 80% bar</span></div>
+      <div><b>0 servers</b><span>inference runs in the browser</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 02 MISSION ===================== -->
+<section class="page" id="mission">
+  <div class="inner">
+    <div class="folio"><span class="num">02</span>The mission</div>
+    <h2 class="reveal">One band. Friends, the military and an adversary, all at once.</h2>
+    <p class="lead reveal">In contested spectrum, civilian traffic, military emissions and deliberate interference
+      overlap in time and frequency. A detector that can only name one signal per window misses the most
+      important case: a jammer sitting on top of a real transmission. NEXA answers yes or no for each class
+      separately, so it can report both.</p>
+
+    <div class="tiers">
+      <div class="tier reveal" style="--c: var(--civ)">
+        <h4>Civilian</h4>
+        <p class="q">Ordinary digital communications</p>
+        <div class="chips"><span class="chip">BPSK</span><span class="chip">QPSK</span><span class="chip">16QAM</span><span class="chip">64QAM</span></div>
+      </div>
+      <div class="tier reveal" style="--c: var(--mil)">
+        <h4>Military / CEMA</h4>
+        <p class="q">High priority emitters</p>
+        <div class="chips"><span class="chip">LFM radar</span><span class="chip">FHSS</span></div>
+      </div>
+      <div class="tier reveal" style="--c: var(--hos)">
+        <h4>Hostile</h4>
+        <p class="q">Deliberate interference</p>
+        <div class="chips"><span class="chip">Barrage</span><span class="chip">Tone</span><span class="chip">Sweep</span></div>
+      </div>
+      <div class="tier reveal" style="--c: var(--emp)">
+        <h4>Empty channel</h4>
+        <p class="q">Nobody transmitting</p>
+        <div class="chips"><span class="chip">Noise floor</span></div>
+      </div>
+    </div>
+
+    <div class="callout reveal">
+      <span>One window, more than one answer:</span>
+      <span class="eg">{ QPSK, JAMMING }</span>
+      <span style="color:var(--on-dark-dim);font-size:14px">a civilian link being jammed, reported as both.</span>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 03 HOW IT WORKS ===================== -->
+<section class="page tint" id="how">
+  <div class="inner">
+    <div class="folio"><span class="num">03</span>How it works</div>
+    <h2 class="reveal">From raw samples to a threat verdict in five steps.</h2>
+    <p class="lead reveal">Every window is 512 IQ samples at 3.2 MHz: 160 microseconds of radio. The same
+      format is enforced for every source, so the model learns the signal and not where it came from.</p>
+
+    <div class="pipe" id="pipe">
+      <div class="stage">
+        <h4>Capture</h4>
+        <p>Raw IQ from a receiver, a recording or a SigMF file, cut into windows.</p>
+        <div class="spec">2 × 512 · 3.2 MHz</div>
+      </div>
+      <div class="stage">
+        <h4>Signal processing</h4>
+        <p>Normalise power, then build a spectrogram (STFT) alongside the raw samples.</p>
+        <div class="spec">IQ + time-frequency</div>
+      </div>
+      <div class="stage">
+        <h4>Two-branch AI</h4>
+        <p>One branch reads phase in the raw IQ; the other reads chirps and hops in the spectrogram. They are fused.</p>
+        <div class="spec">dilated 1D-CNN ‖ 2D-CNN</div>
+      </div>
+      <div class="stage">
+        <h4>Eight decisions</h4>
+        <p>A separate calibrated yes/no per class, so overlapping signals are all reported.</p>
+        <div class="spec">8 × sigmoid · 5-model ensemble</div>
+      </div>
+      <div class="stage">
+        <h4>Verdict</h4>
+        <p>Detections are grouped into events on a timeline and ranked Hostile, Military, Civilian.</p>
+        <div class="spec">tier + event log</div>
+      </div>
+    </div>
+
+    <div class="why">
+      <div class="reveal">
+        <h4>Why two branches?</h4>
+        <p>Civilian modulations are defined by phase, which only raw IQ keeps. Radar chirps and frequency hops are
+          clearest in a spectrogram. Neither view does both jobs, so the model uses both on the same window.</p>
+      </div>
+      <div class="reveal">
+        <h4>Where the data comes from</h4>
+        <p>Real benchmark data where it exists (RadioML 2018.01A, RadChar), our own generators where it does not
+          (FHSS, jamming, empty channel), plus overlays and mixtures of up to three signals.</p>
+      </div>
+      <div class="reveal">
+        <h4>Caught along the way</h4>
+        <p>RadioML's shipped class list does not match its data. We found it from the signals themselves and
+          confirmed it against an independent analysis. Using it unchecked would have mislabelled every civilian example.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 04 RESULTS ===================== -->
+<section class="page dark" id="proof">
+  <div class="inner">
+    <div class="folio"><span class="num">04</span>Results</div>
+    <h2 class="reveal">Above the bar on every judged class.</h2>
+    <p class="lead reveal">Recall on 19,260 held-out test windows, 5-model ensemble, thresholds calibrated on
+      validation data only. The red tick on each meter is the organiser's 80% pass mark.</p>
+
+    <div class="kpis">
+      <div class="kpi reveal">
+        <div class="label">LFM radar</div>
+        <div class="val"><span data-count="84.2">84.2</span><small>%</small></div>
+        <div class="meter"><i data-w="84.2"></i></div>
+        <div class="pass">PASS · +4.2 PTS</div>
+      </div>
+      <div class="kpi reveal">
+        <div class="label">Frequency hopping (FHSS)</div>
+        <div class="val"><span data-count="82.9">82.9</span><small>%</small></div>
+        <div class="meter"><i data-w="82.9"></i></div>
+        <div class="pass">PASS · +2.9 PTS</div>
+      </div>
+      <div class="kpi reveal">
+        <div class="label">Jamming</div>
+        <div class="val"><span data-count="84.0">84.0</span><small>%</small></div>
+        <div class="meter"><i data-w="84.0"></i></div>
+        <div class="pass">PASS · +4.0 PTS</div>
+      </div>
+    </div>
+    <div class="secondary">
+      <div class="reveal"><b><span data-count="97.0">97.0</span>%</b><span class="cap">comms vs jamming discrimination, 16,290 windows</span></div>
+      <div class="reveal"><b>99.7%</b><span class="cap">jamming precision: when it says jammed, it almost always is</span></div>
+      <div class="reveal"><b><span data-count="92.0">92.0</span>%</b><span class="cap">correct tier (Civilian, Military, Hostile, Empty)</span></div>
+    </div>
+
+    <div class="chart-wrap reveal">
+      <h4>Recall against noise level, judged classes</h4>
+      <p class="note">Single-signal test windows. Left is noisier: at −10 dB the signal sits below the noise.</p>
+      <div class="legend">
+        <span><i style="background:#B9C98F"></i>LFM radar</span>
+        <span><i style="background:#7FB3E0"></i>FHSS</span>
+        <span><i style="background:#E8836C"></i>Jamming</span>
+        <span><i style="background:#C1543F;height:2px"></i>80% pass mark</span>
+      </div>
+      <svg id="snrChart" viewBox="0 0 640 260" role="img" aria-label="Recall versus SNR for radar, FHSS and jamming. All three are at or above 85 percent from minus 6 dB upward, except radar at 76 percent at minus 6 dB, and all fall below 80 percent at minus 10 dB."></svg>
+    </div>
+
+    <div class="honest reveal">
+      <h4>What we say before you ask</h4>
+      <ul>
+        <li>The pass is an average over the test set. At −10 dB all three judged classes fall below 80%.</li>
+        <li>Radar and FHSS are tuned for recall: about 6 in 10 of their alarms are correct. A missed emitter
+          costs more than a second look.</li>
+        <li>On real recorded GNSS jamming that the model never trained on, recall is 57.6% with zero false alarms.
+          That gap is our next piece of work, and we report it rather than hide it.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 05 PLATFORM ===================== -->
+<section class="page" id="platform">
+  <div class="inner">
+    <div class="folio"><span class="num">05</span>The platform</div>
+    <h2 class="reveal">Not just a model. A console an operator can use.</h2>
+    <p class="lead reveal">NEXA ships as a complete workstation: live view, analysis, review, reporting and
+      retraining, with roles and an audit trail. Everything below is in the console at this booth.</p>
+
+    <div class="features">
+      <div class="feat wide reveal">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12h3l3-8 4 16 3-8h5"/></svg></div>
+        <h4>RF Replay: live spectrum, waterfall and detections</h4>
+        <p>Connect a receiver or replay a file as if it were live. Spectrum, waterfall, detections and the threat
+          tier share one time axis, updated dwell by dwell. Hover to read exact times; dashed boxes show the
+          true answer on synthesised scenarios.</p>
+        <div class="mock" aria-hidden="true">
+          <div class="row"><span class="tag">JAMMING</span><span class="lane"><i style="left:52%;width:30%;background:#C1543F"></i></span></div>
+          <div class="row"><span class="tag">FHSS</span><span class="lane"><i style="left:8%;width:6%;background:#627143"></i><i style="left:22%;width:6%;background:#627143"></i><i style="left:37%;width:6%;background:#627143"></i><i style="left:64%;width:6%;background:#627143"></i></span></div>
+          <div class="row"><span class="tag">LFM_RADAR</span><span class="lane"><i style="left:30%;width:3%;background:#8FA35F"></i><i style="left:45%;width:3%;background:#8FA35F"></i><i style="left:60%;width:3%;background:#8FA35F"></i></span></div>
+          <div class="row"><span class="tag">QPSK</span><span class="lane"><i style="left:0;width:100%;background:#4F7CAC"></i></span></div>
+        </div>
+        <div class="where">Page: RF Replay</div>
+      </div>
+      <div class="feat reveal">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><circle cx="8" cy="8" r="1"/><circle cx="16" cy="8" r="1"/><circle cx="8" cy="16" r="1"/><circle cx="16" cy="16" r="1"/></svg></div>
+        <h4>See what the model sees</h4>
+        <p>Open any 160 µs window: measured amplitude next to the model's own attention, plus a civilian
+          constellation showing raw IQ against recovered symbols.</p>
+        <div class="where">Page: Signal Analysis</div>
+      </div>
+      <div class="feat reveal">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 12l2 2 4-4"/><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/></svg></div>
+        <h4>Human review, four-eyes rule</h4>
+        <p>Operators correct a detection or report a missed signal. A different named person must approve it
+          before it can become training data.</p>
+        <div class="where">Pages: RF Replay, History</div>
+      </div>
+      <div class="feat reveal">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></div>
+        <h4>Reports in any format</h4>
+        <p>Filter past captures and build a report: PDF, Excel, CSV, JSON, a SigMF bundle or the raw IQ with
+          SHA-256 hashes, each with a classification banner.</p>
+        <div class="where">Page: History</div>
+      </div>
+      <div class="feat reveal">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 007 0l3-3a5 5 0 00-7-7l-1 1"/><path d="M14 11a5 5 0 00-7 0l-3 3a5 5 0 007 7l1-1"/></svg></div>
+        <h4>Tamper-evident audit trail</h4>
+        <p>Every analysis, export and deletion is logged. Each entry carries a hash of the one before it, so
+          one click proves nothing was edited.</p>
+        <div class="where">Page: History</div>
+      </div>
+      <div class="feat reveal">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 12a8 8 0 0114-5l2 2M20 12a8 8 0 01-14 5l-2-2"/><path d="M20 4v5h-5M4 20v-5h5"/></svg></div>
+        <h4>Retraining that cannot get worse</h4>
+        <p>Approved corrections fine-tune the model. A new version is offered only if it does not lose ground on
+          radar, FHSS or jamming, and only a second person can activate it. Every version is kept for rollback.</p>
+        <div class="where">Page: Model</div>
+      </div>
+      <div class="feat reveal">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 5h16v11H8l-4 4z"/></svg></div>
+        <h4>Assistant that cannot invent numbers</h4>
+        <p>Ask in plain language. Answers come from the stored analyses; an optional local language model only
+          rephrases the question, so it never sees or makes up data.</p>
+        <div class="where">Page: Assistant</div>
+      </div>
+      <div class="feat reveal">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg></div>
+        <h4>Roles and offline operation</h4>
+        <p>Operator, Analyst and Admin accounts. The AI runs inside the browser through ONNX, so the console
+          works with no internet and no inference server.</p>
+        <div class="where">Pages: Users, all</div>
+      </div>
+    </div>
+
+    <div class="feat reveal" style="margin-top:14px">
+      <h4>The learning loop</h4>
+      <div class="loop">
+        <div><b>1 · Detect</b>Model flags events on the timeline</div>
+        <div><b>2 · Correct</b>Operator fixes what it got wrong</div>
+        <div><b>3 · Approve</b>A second person signs it off</div>
+        <div><b>4 · Retrain</b>Tested against the current model, then activated</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 06 FOR YOU ===================== -->
+<section class="page tint" id="for-you">
+  <div class="inner">
+    <div class="folio"><span class="num">06</span>What it means for you</div>
+    <h2 class="reveal">Three audiences, one system.</h2>
+
+    <div class="aud">
+      <article class="reveal">
+        <div class="who">Defence &amp; operations</div>
+        <h3>A verdict, not a spreadsheet.</h3>
+        <ul>
+          <li><b>Hostile first</b><span>Events ranked by tier so jamming surfaces before routine traffic.</span></li>
+          <li><b>Jammer on top of comms</b><span>Multi-label output reports the victim and the attacker together.</span></li>
+          <li><b>Air-gap ready</b><span>No cloud, no server: the full ensemble runs on the laptop.</span></li>
+          <li><b>Accountable</b><span>Four-eyes approval, hash-chained audit log, classification banners on exports.</span></li>
+        </ul>
+      </article>
+      <article class="reveal">
+        <div class="who">Industry</div>
+        <h3>Built to deploy and maintain.</h3>
+        <ul>
+          <li><b>Runs anywhere a browser does</b><span>ONNX models, static hosting, no GPU needed for inference.</span></li>
+          <li><b>Standard formats</b><span>SigMF in and out, plus PDF, Excel, CSV and JSON reports.</span></li>
+          <li><b>MLOps included</b><span>Retraining trigger, regression exam, versioning and rollback.</span></li>
+          <li><b>Extensible</b><span>New classes slot in as another independent yes/no output.</span></li>
+        </ul>
+      </article>
+      <article class="reveal">
+        <div class="who">Academia</div>
+        <h3>Claims you can check.</h3>
+        <ul>
+          <li><b>Every number labelled</b><span>Requirement, measured, diagnostic or interpretation.</span></li>
+          <li><b>Reported per noise level</b><span>Recall against SNR per class, not one flattering average.</span></li>
+          <li><b>Tested outside our data</b><span>Real recorded GNSS jamming the model never saw.</span></li>
+          <li><b>Reproducible</b><span>Versioned configs, fixed seeds and an automated test suite.</span></li>
+        </ul>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 07 TEAM ===================== -->
+<section class="page dark" id="team">
+  <div class="inner">
+    <div class="folio"><span class="num">07</span>The team</div>
+    <h2 class="reveal">Group NEXA, Universiti Teknologi PETRONAS.</h2>
+    <p class="lead reveal">Each member owns one signal family end to end, from the physics to its results, plus one
+      part of the shared pipeline.</p>
+
+    <div class="team">
+      <div class="person reveal">
+        <div class="av">ET</div>
+        <h4>Eavan Tan</h4>
+        <p class="role">Radar · model and training</p>
+        <p class="lead-tag">Group leader</p>
+      </div>
+      <div class="person reveal">
+        <div class="av">EY</div>
+        <h4>Eileen Yeoh Jing Han</h4>
+        <p class="role">Civilian comms · data pipeline</p>
+      </div>
+      <div class="person reveal">
+        <div class="av">JP</div>
+        <h4>Jessy Pang Xin Yuan</h4>
+        <p class="role">Frequency hopping · evaluation</p>
+      </div>
+      <div class="person reveal">
+        <div class="av">CX</div>
+        <h4>Chua Xin Ying</h4>
+        <p class="role">Jamming · inference and packaging</p>
+      </div>
+    </div>
+
+    <div class="qrs">
+      <div class="qr">
+        <div class="code" id="qrDemo"></div>
+        <b>Try the live console</b>
+        <span>Same AI, on your phone</span>
+      </div>
+      <div class="qr">
+        <div class="code" id="qrSelf"></div>
+        <b>Keep this brochure</b>
+        <span>Scan to save or share</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="inner">
+    <span>NEXA · SEDIC 2026 Grand Finale · CyberDSA, 7 October 2026</span>
+    <span>Figures: 5-model ensemble, held-out test split, 26 Sept 2026</span>
+  </div>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" defer></script>
+<script>
+(() => {
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* ---------- cover: scrolling spectrum waterfall with labelled detections ---------- */
+  const cv = document.getElementById("waterfall");
+  const ctx = cv.getContext("2d");
+  const BINS = 360;               // frequency bins across
+  const ROWS = 150;               // time rows visible
+  const buf = document.createElement("canvas");
+  buf.width = BINS; buf.height = ROWS;
+  const bctx = buf.getContext("2d");
+  const row = bctx.createImageData(BINS, 1);
+
+  // dark slate -> olive -> pale green-yellow
+  const stops = [[18,28,39],[30,46,52],[74,85,47],[146,166,96],[226,236,186]];
+  function cmap(v) {
+    v = Math.max(0, Math.min(0.9999, v)) * (stops.length - 1);
+    const i = Math.floor(v), t = v - i, a = stops[i], b = stops[i + 1];
+    return [a[0] + (b[0]-a[0])*t, a[1] + (b[1]-a[1])*t, a[2] + (b[2]-a[2])*t];
+  }
+
+  const COLORS = { QPSK: "#7FB3E0", LFM_RADAR: "#D8E8A8", FHSS: "#B9C98F", JAMMING: "#E8836C" };
+  let events = [];  // {type, f0, f1, born, len}
+  let t = 0;
+  const rnd = (a, b) => a + Math.random() * (b - a);
+
+  function spawn() {
+    const r = Math.random();
+    if (r < 0.3) {
+      const f = rnd(0.08, 0.3);
+      events.push({ type: "FHSS", f0: f, f1: f + 0.05, born: t, len: 140, hop: 0, fhss: true });
+    } else if (r < 0.55) {
+      const f = rnd(0.35, 0.6);
+      events.push({ type: "LFM_RADAR", f0: f, f1: f + 0.2, born: t, len: 90, chirp: true });
+    } else if (r < 0.75) {
+      events.push({ type: "JAMMING", f0: rnd(0.2, 0.45), f1: 0, born: t, len: 70, jam: true });
+      const e = events[events.length - 1]; e.f1 = e.f0 + rnd(0.3, 0.45);
+    }
+  }
+  // a steady civilian carrier, always present
+  const civ = { type: "QPSK", f0: 0.78, f1: 0.86 };
+
+  function step() {
+    t++;
+    if (t % 55 === 0) spawn();
+    events = events.filter(e => t - e.born < e.len + ROWS + 10);
+    const d = row.data;
+    for (let k = 0; k < BINS; k++) {
+      const f = k / BINS;
+      let v = 0.12 + Math.random() * 0.14;  // noise floor
+      if (f > civ.f0 && f < civ.f1) v += 0.35 + Math.random() * 0.1;
+      for (const e of events) {
+        const age = t - e.born;
+        if (age < 0 || age >= e.len) continue;
+        if (e.jam) {
+          if (f > e.f0 && f < e.f1) v += 0.55 + Math.random() * 0.25;
+        } else if (e.chirp) {
+          const pulse = age % 30 < 12;
+          const fc = e.f0 + (e.f1 - e.f0) * ((age % 30) / 12);
+          if (pulse && Math.abs(f - fc) < 0.006) v += 0.7;
+        } else if (e.fhss) {
+          const slot = Math.floor(age / 14);
+          const fc = e.f0 + ((slot * 7919) % 5) * 0.11;
+          if (age % 14 < 11 && Math.abs(f - fc) < 0.009) v += 0.65;
+        }
+      }
+      const [r, g, b] = cmap(v);
+      d[k*4] = r; d[k*4+1] = g; d[k*4+2] = b; d[k*4+3] = 255;
+    }
+    bctx.drawImage(buf, 0, 0, BINS, ROWS - 1, 0, 1, BINS, ROWS - 1);  // scroll down
+    bctx.putImageData(row, 0, 0);
+  }
+
+  function boxFor(e) {
+    if (e.fhss) return [e.f0 - 0.03, e.f0 + 0.47];
+    if (e.chirp) return [e.f0 - 0.02, e.f1 + 0.02];
+    return [e.f0, e.f1];
+  }
+
+  function draw() {
+    const dpr = Math.min(devicePixelRatio || 1, 2);
+    const W = cv.clientWidth, H = cv.clientHeight;
+    if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) {
+      cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(buf, 0, 0, W, H);
+    const sy = H / ROWS;
+    ctx.font = "600 11px 'JetBrains Mono', monospace";
+    ctx.lineWidth = 1.5;
+    for (const e of events) {
+      const age = t - e.born;
+      const yTop = Math.max(0, age - e.len) * sy, yBot = Math.min(age, ROWS) * sy;
+      if (yBot - yTop < 14 || age - e.len > ROWS) continue;
+      const [a, b] = boxFor(e);
+      const x0 = a * W, x1 = b * W;
+      ctx.strokeStyle = COLORS[e.type];
+      ctx.setLineDash(e.jam ? [] : [5, 4]);
+      ctx.strokeRect(x0, yTop, x1 - x0, yBot - yTop);
+      ctx.setLineDash([]);
+      const label = e.type === "LFM_RADAR" ? "LFM_RADAR" : e.type;
+      const tw = ctx.measureText(label).width + 10;
+      ctx.fillStyle = COLORS[e.type];
+      ctx.fillRect(x0, yTop, tw, 17);
+      ctx.fillStyle = "#121C27";
+      ctx.fillText(label, x0 + 5, yTop + 12);
+    }
+    // the civilian carrier's label, pinned near the top
+    const cx = civ.f0 * W;
+    ctx.fillStyle = COLORS.QPSK;
+    const tw = ctx.measureText("QPSK").width + 10;
+    ctx.fillRect(cx, 70, tw, 17);
+    ctx.fillStyle = "#121C27"; ctx.fillText("QPSK", cx + 5, 82);
+  }
+
+  // Pre-fill so the first frame is already a full waterfall.
+  for (let i = 0; i < ROWS + 40; i++) { if (i === 5 || i === 40 || i === 80) spawn(); step(); }
+  draw();
+  if (!reduce) {
+    let last = 0, visible = true;
+    new IntersectionObserver(([en]) => { visible = en.isIntersecting; }).observe(cv);
+    (function loop(ts) {
+      if (visible && ts - last > 45) { step(); draw(); last = ts; }
+      requestAnimationFrame(loop);
+    })(0);
+  }
+  addEventListener("resize", draw);
+
+  /* ---------- recall vs SNR chart (web/data/performance.json, breakdown.recall.single) ---------- */
+  const SNR = [-10, -6, -2, 2, 6, 10];
+  const SERIES = [
+    { name: "LFM radar", c: "#B9C98F", v: [40.0, 76.0, 99.3, 100, 100, 100] },
+    { name: "FHSS",      c: "#7FB3E0", v: [63.3, 100, 100, 100, 100, 100] },
+    { name: "Jamming",   c: "#E8836C", v: [22.0, 85.3, 97.3, 95.3, 97.3, 100] },
+  ];
+  const svg = document.getElementById("snrChart");
+  const NS = "http://www.w3.org/2000/svg";
+  const L = 44, R = 596, T = 14, B = 226;
+  const xs = i => L + (R - L) * i / (SNR.length - 1);
+  const ys = v => B - (B - T) * v / 100;
+  const el = (n, a) => { const e = document.createElementNS(NS, n); for (const k in a) e.setAttribute(k, a[k]); svg.appendChild(e); return e; };
+  [0, 20, 40, 60, 80, 100].forEach(v => {
+    el("line", { x1: L, x2: R, y1: ys(v), y2: ys(v), stroke: "#2A3846", "stroke-width": 1 });
+    el("text", { x: L - 8, y: ys(v) + 4, "text-anchor": "end", fill: "#9AA7A0", "font-size": 11, "font-family": "JetBrains Mono, monospace" }).textContent = v + "%";
+  });
+  SNR.forEach((s, i) => {
+    el("text", { x: xs(i), y: B + 22, "text-anchor": "middle", fill: "#9AA7A0", "font-size": 11, "font-family": "JetBrains Mono, monospace" }).textContent = (s > 0 ? "+" : s < 0 ? "−" : "") + Math.abs(s) + " dB";
+  });
+  el("line", { x1: L, x2: R, y1: ys(80), y2: ys(80), stroke: "#C1543F", "stroke-width": 2, "stroke-dasharray": "6 5" });
+  const paths = SERIES.map(s => {
+    const d = s.v.map((v, i) => (i ? "L" : "M") + xs(i).toFixed(1) + " " + ys(v).toFixed(1)).join(" ");
+    const p = el("path", { d, class: "line", stroke: s.c });
+    s.v.forEach((v, i) => el("circle", { cx: xs(i), cy: ys(v), r: 3.5, fill: s.c }));
+    return p;
+  });
+  if (!reduce) {
+    paths.forEach(p => { const n = p.getTotalLength(); p.style.strokeDasharray = n; p.style.strokeDashoffset = n; });
+  }
+
+  /* ---------- scroll-driven reveals, count-ups, meters, pipeline ---------- */
+  function countUp(node) {
+    const target = parseFloat(node.dataset.count), dec = (node.dataset.count.split(".")[1] || "").length;
+    if (reduce) { node.textContent = target.toFixed(dec); return; }
+    const t0 = performance.now(), dur = 1300;
+    (function tick(now) {
+      const k = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - k, 3);
+      node.textContent = (target * e).toFixed(dec);
+      if (k < 1) requestAnimationFrame(tick);
+    })(t0);
+  }
+  const io = new IntersectionObserver(entries => {
+    for (const en of entries) {
+      if (!en.isIntersecting) continue;
+      const n = en.target;
+      n.classList.add("in");
+      n.querySelectorAll("[data-count]").forEach(countUp);
+      n.querySelectorAll("[data-w]").forEach(m => m.style.width = m.dataset.w + "%");
+      if (n.classList.contains("chart-wrap")) paths.forEach(p => {
+        p.style.transition = "stroke-dashoffset 1.6s cubic-bezier(.2,.8,.2,1)"; p.style.strokeDashoffset = 0;
+      });
+      io.unobserve(n);
+    }
+  }, { threshold: 0.2 });
+  document.querySelectorAll(".reveal").forEach(n => io.observe(n));
+  if (reduce) document.querySelectorAll("[data-w]").forEach(m => m.style.width = m.dataset.w + "%");
+
+  // Pipeline: stages light up one after another once it is on screen.
+  const stages = [...document.querySelectorAll("#pipe .stage")];
+  new IntersectionObserver(([en], obs) => {
+    if (!en.isIntersecting) return;
+    obs.disconnect();
+    if (reduce) { stages.forEach(s => s.classList.add("lit")); return; }
+    let i = 0;
+    (function next() {
+      stages.forEach((s, j) => s.classList.toggle("lit", j === i));
+      i = (i + 1) % (stages.length + 1);
+      setTimeout(next, i === 0 ? 1400 : 1100);
+    })();
+  }, { threshold: 0.35 }).observe(document.getElementById("pipe"));
+
+  // Highlight the current section in the top bar.
+  const links = [...document.querySelectorAll(".bar nav a")];
+  const secIO = new IntersectionObserver(entries => {
+    for (const en of entries) if (en.isIntersecting) {
+      links.forEach(a => a.classList.toggle("on", a.getAttribute("href") === "#" + en.target.id));
+    }
+  }, { rootMargin: "-45% 0px -50% 0px" });
+  document.querySelectorAll("section.page[id]").forEach(s => secIO.observe(s));
+
+  // Printing: show the finished state of every animated element.
+  addEventListener("beforeprint", () => {
+    document.querySelectorAll(".reveal").forEach(n => n.classList.add("in"));
+    document.querySelectorAll("[data-count]").forEach(n => n.textContent = n.dataset.count);
+    document.querySelectorAll("[data-w]").forEach(m => m.style.width = m.dataset.w + "%");
+    paths.forEach(p => { p.style.transition = "none"; p.style.strokeDashoffset = 0; });
+    stages.forEach(s => s.classList.remove("lit"));
+  });
+
+  /* ---------- QR codes: the console (this folder) and this page ---------- */
+  addEventListener("load", () => {
+    const here = location.href.split("#")[0];
+    const demo = new URL("./", here).href;
+    const targets = [["qrDemo", demo], ["qrSelf", here]];
+    for (const [id, url] of targets) {
+      const box = document.getElementById(id);
+      if (location.protocol === "file:" || typeof QRCode === "undefined") {
+        box.innerHTML = '<span class="fallback"></span>';
+        box.firstChild.textContent = location.protocol === "file:" ? "QR appears once deployed" : url;
+        continue;
+      }
+      new QRCode(box, { text: url, width: 512, height: 512, colorDark: "#121C27", colorLight: "#ffffff", correctLevel: QRCode.CorrectLevel.M });
+    }
+  });
+})();
+</script>
+</body>
+</html>
