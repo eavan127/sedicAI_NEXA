@@ -293,15 +293,19 @@
   .loop b { display: block; font-size: 14px; color: var(--navy); }
 
   /* ---------- audiences ---------- */
-  .aud { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 44px; }
-  @media (max-width: 900px) { .aud { grid-template-columns: 1fr; } }
-  .aud article { border-radius: 16px; padding: 26px; background: var(--panel); border: 1px solid var(--grid); }
+  /* Impact: open editorial bands, no cards. Label and heading left, four points right. */
+  .aud { display: flex; flex-direction: column; margin-top: 40px; border-top: 2px solid var(--ink); }
+  .aud article { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2.2fr); gap: 20px 40px;
+    padding: 30px 0; border-bottom: 1px solid var(--line); }
+  @media (max-width: 760px) { .aud article { grid-template-columns: 1fr; padding: 24px 0; } }
   .aud .who { display: inline-block; font: 800 11px var(--font); letter-spacing: 0.14em; text-transform: uppercase; color: #fff; background: var(--c, var(--navy)); padding: 3px 12px; border-radius: 999px; }
-  .aud h3 { font-size: 22px; margin-top: 8px; }
-  .aud ul { list-style: none; margin: 16px 0 0; padding: 0; }
-  .aud li { padding: 10px 0; border-top: 1px solid var(--grid); font-size: 15px; }
-  .aud li b { display: block; font-size: 15px; }
-  .aud li span { color: var(--text-dim); font-size: 14px; }
+  .aud h3 { font-size: clamp(22px, 2.6vw, 30px); font-weight: 800; margin-top: 12px; color: var(--c); text-wrap: balance; }
+  .aud ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 32px; }
+  @media (max-width: 520px) { .aud ul { grid-template-columns: 1fr; gap: 16px; } }
+  .aud li { font-size: 15px; }
+  .aud li::before { content: ""; display: block; width: 28px; height: 3px; border-radius: 2px; background: var(--c); margin-bottom: 10px; }
+  .aud li b { display: block; font-size: 16px; }
+  .aud li span { display: block; color: var(--text-dim); font-size: 14.5px; margin-top: 3px; }
 
   /* ---------- team ---------- */
   .group-photo { margin: 28px 0 0; max-width: 100%; }
@@ -452,11 +456,12 @@
     .mock { padding: 8px; }
     .loop { grid-template-columns: repeat(4, 1fr); gap: 6px; }
     .loop div { padding: 8px; font-size: 8.5pt; }
-    .aud { grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 22px; }
-    .aud article { padding: 14px; }
-    .aud h3 { font-size: 13pt; }
+    .aud { margin-top: 20px; }
+    .aud article { grid-template-columns: 1fr 2.4fr; gap: 10px 22px; padding: 16px 0; }
+    .aud h3 { font-size: 15pt; margin-top: 8px; }
     .aud .who { white-space: nowrap; font-size: 7pt; letter-spacing: 0.1em; padding: 2px 9px; }
-    .aud li { padding: 7px 0; }
+    .aud ul { gap: 12px 20px; }
+    .aud li::before { margin-bottom: 6px; width: 22px; }
     .aud li b, .aud li { font-size: 9.5pt; }
     .aud li span { font-size: 8.5pt; }
     .team { grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 22px; }
@@ -796,8 +801,10 @@
 
     <div class="aud">
       <article class="reveal" style="--c: var(--red)">
-        <div class="who">Operations</div>
-        <h3>Clearer calls, sooner.</h3>
+        <div class="aud-head">
+          <div class="who">Operations</div>
+          <h3>Clearer calls, sooner.</h3>
+        </div>
         <ul>
           <li><b>Threats surface first</b><span>Jamming is ranked ahead of routine traffic, so attention goes where the risk is.</span></li>
           <li><b>Overlap is not missed</b><span>A jammer sitting on a live link is reported as both, the case single-answer detectors miss.</span></li>
@@ -806,8 +813,10 @@
         </ul>
       </article>
       <article class="reveal" style="--c: var(--blue)">
-        <div class="who">Deployment</div>
-        <h3>Light to field, built to last.</h3>
+        <div class="aud-head">
+          <div class="who">Deployment</div>
+          <h3>Light to field, built to last.</h3>
+        </div>
         <ul>
           <li><b>Runs where a browser runs</b><span>Standard ONNX models and static hosting; no GPU needed to classify.</span></li>
           <li><b>Fits existing workflows</b><span>SigMF recordings in and out, with PDF, Excel, CSV and JSON reports.</span></li>
@@ -816,8 +825,10 @@
         </ul>
       </article>
       <article class="reveal" style="--c: var(--green)">
-        <div class="who">Research</div>
-        <h3>A method that can be tested.</h3>
+        <div class="aud-head">
+          <div class="who">Research</div>
+          <h3>A method that can be tested.</h3>
+        </div>
         <ul>
           <li><b>Evidence, labelled</b><span>Each figure is marked as a requirement, a measurement, a diagnostic or an interpretation.</span></li>
           <li><b>Honest at low SNR</b><span>Recall is reported per class and per noise level, not as one average.</span></li>
