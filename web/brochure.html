@@ -261,6 +261,16 @@
   .demo-card hr { border: 0; border-top: 1px solid rgba(255,255,255,0.18); margin: 4px 0; width: 100%; }
   .demo-card .demo-try { font-size: 14px; }
   .demo-card .demo-try a { color: #fff; font-weight: 700; }
+  .gov-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 26px; margin-top: 10px; }
+  @media (max-width: 640px) { .gov-grid { grid-template-columns: 1fr; } }
+  .gov-item { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 12px; align-items: start; }
+  .gov-item .ic { width: 34px; height: 34px; }
+  .gov-item .ic svg { width: 17px; height: 17px; }
+  .gov-item h5 { margin: 0; font-size: 15px; color: var(--ink); }
+  .gov-item p { margin-top: 3px; font-size: 14px; color: var(--text-dim); }
+  .gov-item .where { display: block; padding-top: 4px; }
+  .gov-item.full { grid-column: 1 / -1; background: var(--pill); border-radius: 12px; padding: 12px 14px; }
+  .gov .gov-shot { margin-top: 14px; }
   .feat .shot { display: block; width: 100%; max-width: 100%; height: auto; margin-top: 6px; border: 1px solid var(--line); border-radius: 10px; }
   .shot, .screen img { cursor: zoom-in; }
   dialog.zoom { padding: 0; border: 0; border-radius: 14px; max-width: min(1400px, calc(100vw - 32px)); max-height: calc(100vh - 32px);
@@ -290,7 +300,7 @@
   .loop-card { display: grid !important; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 24px 40px; align-items: center; }
   @media (max-width: 760px) { .loop-card { grid-template-columns: 1fr; } }
   .loop-kicker { display: inline-block; font: 800 11px var(--font); letter-spacing: 0.12em; text-transform: uppercase;
-    color: #fff; background: var(--navy); padding: 3px 12px; border-radius: 999px; margin-bottom: 10px; }
+    color: #fff; background: var(--navy); padding: 3px 12px; border-radius: 999px; margin-bottom: 10px; align-self: flex-start; }
   .loop-text h4 { font-size: 22px; }
   .loop-rules { margin: 12px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; max-width: 46ch; }
   .loop-rules li { position: relative; padding-left: 22px; font-size: 14.5px; color: var(--ink); }
@@ -473,6 +483,14 @@
     .demo-card h3 { font-size: 15pt; }
     .demo-card p { font-size: 9pt; }
     .feat .shot { margin-top: 4px; }
+    .gov-grid { gap: 8px 14px; margin-top: 6px; }
+    .gov-item { grid-template-columns: 22px 1fr; gap: 7px; }
+    .gov-item .ic { width: 22px; height: 22px; }
+    .gov-item .ic svg { width: 12px; height: 12px; }
+    .gov-item h5 { font-size: 9pt; }
+    .gov-item p { font-size: 8pt; }
+    .gov-item.full { padding: 6px 8px; }
+    .gov .gov-shot { margin-top: 6px; }
     .feat { padding: 11px; gap: 4px; }
     .feat.wide { grid-column: span 2; }
     .feat .ic { width: 26px; height: 26px; border-radius: 7px; }
@@ -769,29 +787,6 @@
         <div class="where">Page: Signal Analysis</div>
       </div>
       <div class="feat reveal">
-        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 12l2 2 4-4"/><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/></svg></div>
-        <h4>Human review, four-eyes rule</h4>
-        <p>Operators correct a detection or report a missed signal. A different named person must approve it
-          before it can become training data.</p>
-        <div class="where">Pages: RF Replay, History</div>
-      </div>
-      <div class="feat reveal">
-        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></div>
-        <h4>Reports in any format</h4>
-        <p>Filter past captures and build a report: PDF, Excel, CSV, JSON, a SigMF bundle or the raw IQ with
-          SHA-256 hashes, each with a classification banner.</p>
-        <img class="shot" src="img/console-report.jpg" width="1200" height="404" loading="lazy"
-          alt="NEXA report builder: section checkboxes, a choice of PDF, Excel, CSV, JSON, SigMF or raw IQ, and a classification banner field.">
-        <div class="where">Page: History</div>
-      </div>
-      <div class="feat reveal">
-        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 007 0l3-3a5 5 0 00-7-7l-1 1"/><path d="M14 11a5 5 0 00-7 0l-3 3a5 5 0 007 7l1-1"/></svg></div>
-        <h4>Tamper-evident audit trail</h4>
-        <p>Every analysis, export and deletion is logged. Each entry carries a hash of the one before it, so
-          one click proves nothing was edited.</p>
-        <div class="where">Page: History</div>
-      </div>
-      <div class="feat reveal">
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 5h16v11H8l-4 4z"/></svg></div>
         <h4>Assistant that cannot invent numbers</h4>
         <p>Ask in plain language. Answers come from the stored analyses; an optional local language model only
@@ -800,12 +795,35 @@
           alt="NEXA Assistant answering which uploads had jamming, listing the matching capture with its classes and confidence bars.">
         <div class="where">Page: Assistant</div>
       </div>
-      <div class="feat wide reveal">
-        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg></div>
-        <h4>Roles and offline operation</h4>
-        <p>Operator, Analyst and Admin accounts. The AI runs inside the browser through ONNX, so the console
-          works with no internet and no inference server.</p>
-        <div class="where">Pages: Users, all</div>
+      <div class="feat wide gov reveal">
+        <span class="loop-kicker">Governance &amp; administration</span>
+        <h4>Accountable by design</h4>
+        <p>Who can act, who approved what and what left the system are all on record, and the console keeps
+          working when the network does not.</p>
+        <div class="gov-grid">
+          <div class="gov-item">
+            <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg></div>
+            <div><h5>Role-based access</h5><p>Operator, Analyst and Admin accounts, each with its own permissions. Every account change is logged.</p><span class="where">Page: Users</span></div>
+          </div>
+          <div class="gov-item">
+            <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 12l2 2 4-4"/><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/></svg></div>
+            <div><h5>Four-eyes review</h5><p>A correction or a missed signal becomes training data only after a different named person approves it.</p><span class="where">Pages: RF Replay, History</span></div>
+          </div>
+          <div class="gov-item">
+            <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 007 0l3-3a5 5 0 00-7-7l-1 1"/><path d="M14 11a5 5 0 00-7 0l-3 3a5 5 0 007 7l1-1"/></svg></div>
+            <div><h5>Tamper-evident audit trail</h5><p>Every analysis, export and deletion is logged, each entry chained to the one before, so one click proves nothing was edited.</p><span class="where">Page: History</span></div>
+          </div>
+          <div class="gov-item">
+            <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></div>
+            <div><h5>Controlled reporting</h5><p>PDF, Excel, CSV, JSON, a SigMF bundle or raw IQ with SHA-256 hashes, each carrying a classification banner.</p><span class="where">Page: History</span></div>
+          </div>
+          <div class="gov-item full">
+            <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></div>
+            <div><h5>Offline operation</h5><p>The models run inside the browser through ONNX, with no internet connection and no inference server.</p><span class="where">All pages</span></div>
+          </div>
+        </div>
+        <img class="shot gov-shot" src="img/console-report.jpg" width="1200" height="404" loading="lazy"
+          alt="NEXA report builder: section checkboxes, a choice of PDF, Excel, CSV, JSON, SigMF or raw IQ, and a classification banner field.">
       </div>
     </div>
 
