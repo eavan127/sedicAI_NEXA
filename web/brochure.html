@@ -258,12 +258,34 @@
   .aud li span { color: var(--text-dim); font-size: 14px; }
 
   /* ---------- team ---------- */
-  .group-photo { margin: 28px 0 0; max-width: 860px; }
+  .group-photo { margin: 28px 0 0; max-width: 100%; }
+  .photo-frame { position: relative; }
   .group-photo img {
     display: block; width: 100%; max-width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; object-position: center 88%;
     border-radius: 16px; border: 1px solid var(--slate-3); background: var(--slate-2);
   }
   .group-photo figcaption { margin-top: 10px; font-size: 13px; color: var(--on-dark-dim); }
+  .tag-pin {
+    position: absolute; bottom: 14px; transform: translateX(-50%);
+    display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px 4px 4px;
+    border: 1px solid rgba(255,255,255,0.25); border-radius: 999px; cursor: pointer;
+    background: rgba(18,28,39,0.78); color: var(--on-dark); font: 600 12.5px var(--font); white-space: nowrap;
+    backdrop-filter: blur(4px); transition: background .2s, transform .2s, border-color .2s;
+  }
+  .tag-pin b {
+    display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%;
+    background: var(--olive); color: #fff; font: 700 11px var(--mono);
+  }
+  .tag-pin.hl, .tag-pin:focus-visible { background: var(--olive); border-color: var(--olive-glow); transform: translateX(-50%) translateY(-3px); outline: none; }
+  .tag-pin.hl b { background: var(--slate); }
+  @media (max-width: 640px) { .tag-pin { padding: 3px; bottom: 8px; } .tag-pin span { display: none; } }
+  .person { position: relative; transition: border-color .2s, background .2s, transform .2s; cursor: default; }
+  .person .pin-no {
+    position: absolute; top: 14px; right: 14px; width: 22px; height: 22px; border-radius: 50%;
+    display: grid; place-items: center; font: 700 11px var(--mono); color: var(--on-dark-dim); border: 1px solid var(--slate-3);
+  }
+  .person.hl, .person:focus-visible { border-color: var(--olive-glow); background: var(--slate-3); transform: translateY(-3px); outline: none; }
+  .person.hl .pin-no { background: var(--olive); border-color: var(--olive); color: #fff; }
   .team { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-top: 40px; }
   @media (max-width: 900px) { .team { grid-template-columns: repeat(2, 1fr); } .person.advisor { grid-column: 1 / -1; } }
   @media (max-width: 420px) { .team { grid-template-columns: 1fr; } }
@@ -364,7 +386,8 @@
     .person { padding: 14px; }
     .group-photo { margin-top: 14px; }
     .group-photo img { aspect-ratio: auto; height: 78mm; }
-    .group-photo figcaption { display: none; }
+    .group-photo figcaption { font-size: 8.5pt; margin-top: 6px; }
+    .tag-pin { bottom: 8px; font-size: 8pt; }
     .qrs { grid-template-columns: repeat(2, 55mm); margin-top: 26px; }
     .stage, .feat, .tier, .aud article, .kpi, .person { break-inside: avoid; }
     .stage.lit { background: var(--panel); color: var(--text); }
@@ -700,36 +723,49 @@
     <h2 class="reveal" style="max-width:none">Group NEXA<br>Universiti Teknologi PETRONAS.</h2>
 
     <figure class="group-photo reveal">
-      <img src="img/team.jpg" alt="Group NEXA in matching dark suits, standing in a row in front of a gold backdrop." width="1400" height="1050" loading="lazy">
+      <div class="photo-frame">
+        <img src="img/team.jpg" alt="Group NEXA at SEDIC 2026. Left to right: Eavan Tan, Eileen Yeoh Jing Han, Dr Noureen Talpur, Jessy Pang Xin Yuan, Chua Xin Ying." width="1400" height="1050" loading="lazy">
+        <button type="button" class="tag-pin" data-p="1" style="left:19%" aria-label="Eavan Tan"><b>1</b><span>Eavan</span></button>
+        <button type="button" class="tag-pin" data-p="2" style="left:32%" aria-label="Eileen Yeoh Jing Han"><b>2</b><span>Eileen</span></button>
+        <button type="button" class="tag-pin" data-p="3" style="left:50%" aria-label="Dr Noureen Talpur"><b>3</b><span>Dr Noureen</span></button>
+        <button type="button" class="tag-pin" data-p="4" style="left:68.5%" aria-label="Jessy Pang Xin Yuan"><b>4</b><span>Jessy</span></button>
+        <button type="button" class="tag-pin" data-p="5" style="left:86.5%" aria-label="Chua Xin Ying"><b>5</b><span>Chua</span></button>
+      </div>
+      <figcaption>Left to right: Eavan Tan, Eileen Yeoh Jing Han, Dr Noureen Talpur, Jessy Pang Xin Yuan, Chua Xin Ying.</figcaption>
     </figure>
 
     <div class="team">
-      <div class="person reveal">
+      <div class="person reveal" data-p="1" tabindex="0">
         <div class="av">ET</div>
+        <span class="pin-no">1</span>
         <h4>Eavan Tan</h4>
         <p class="role">Radar · model and training</p>
         <p class="lead-tag">Group leader</p>
       </div>
-      <div class="person reveal">
+      <div class="person reveal" data-p="2" tabindex="0">
         <div class="av">EY</div>
+        <span class="pin-no">2</span>
         <h4>Eileen Yeoh Jing Han</h4>
         <p class="role">Civilian comms · data pipeline</p>
       </div>
-      <div class="person reveal">
-        <div class="av">JP</div>
-        <h4>Jessy Pang Xin Yuan</h4>
-        <p class="role">Frequency hopping · evaluation</p>
-      </div>
-      <div class="person reveal">
-        <div class="av">CX</div>
-        <h4>Chua Xin Ying</h4>
-        <p class="role">Jamming · inference and packaging</p>
-      </div>
-      <div class="person advisor reveal">
+      <div class="person advisor reveal" data-p="3" tabindex="0">
         <div class="av">NT</div>
+        <span class="pin-no">3</span>
         <h4>Dr Noureen Talpur</h4>
         <p class="role">Universiti Teknologi PETRONAS</p>
         <p class="lead-tag">Advisor</p>
+      </div>
+      <div class="person reveal" data-p="4" tabindex="0">
+        <div class="av">JP</div>
+        <span class="pin-no">4</span>
+        <h4>Jessy Pang Xin Yuan</h4>
+        <p class="role">Frequency hopping · evaluation</p>
+      </div>
+      <div class="person reveal" data-p="5" tabindex="0">
+        <div class="av">CX</div>
+        <span class="pin-no">5</span>
+        <h4>Chua Xin Ying</h4>
+        <p class="role">Jamming · inference and packaging</p>
       </div>
     </div>
 
@@ -975,6 +1011,19 @@
     paths.forEach(p => { p.style.transition = "none"; p.style.strokeDashoffset = 0; });
     stages.forEach(s => s.classList.remove("lit"));
   });
+
+  /* ---------- photo tags <-> team cards: hover, focus or tap one to highlight both ---------- */
+  const linked = n => document.querySelectorAll(`.tag-pin[data-p="${n}"], .person[data-p="${n}"]`);
+  const clearHl = () => document.querySelectorAll(".tag-pin.hl, .person.hl").forEach(x => x.classList.remove("hl"));
+  document.querySelectorAll(".tag-pin[data-p], .person[data-p]").forEach(el => {
+    const on = () => { clearHl(); linked(el.dataset.p).forEach(x => x.classList.add("hl")); };
+    el.addEventListener("mouseenter", on);
+    el.addEventListener("focus", on);
+    el.addEventListener("mouseleave", clearHl);
+    el.addEventListener("blur", clearHl);
+    el.addEventListener("click", e => { e.stopPropagation(); on(); });
+  });
+  document.addEventListener("click", clearHl);
 
   /* ---------- QR codes: the console (this folder) and this page ---------- */
   addEventListener("load", () => {
