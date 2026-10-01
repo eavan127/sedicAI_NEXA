@@ -289,7 +289,13 @@
   .mock .tag { width: 76px; flex: none; }
   .loop-card { display: grid !important; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 24px 40px; align-items: center; }
   @media (max-width: 760px) { .loop-card { grid-template-columns: 1fr; } }
+  .loop-kicker { display: inline-block; font: 800 11px var(--font); letter-spacing: 0.12em; text-transform: uppercase;
+    color: #fff; background: var(--navy); padding: 3px 12px; border-radius: 999px; margin-bottom: 10px; }
   .loop-text h4 { font-size: 22px; }
+  .loop-rules { margin: 12px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; max-width: 46ch; }
+  .loop-rules li { position: relative; padding-left: 22px; font-size: 14.5px; color: var(--ink); }
+  .loop-rules li::before { content: ""; position: absolute; left: 0; top: 0.5em; width: 12px; height: 3px; border-radius: 2px; background: var(--orange); }
+  .loop-text .where { margin-top: 12px; }
   .loop-text p { font-size: 15px; color: var(--text-dim); margin-top: 10px; max-width: 46ch; }
   .ring { position: relative; width: 100%; max-width: 440px; aspect-ratio: 1; margin: 12px auto; }
   .ring svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
@@ -478,6 +484,10 @@
     .loop-card { grid-template-columns: 1fr 1fr; gap: 10px 20px; }
     .loop-text h4 { font-size: 13pt; }
     .loop-text p { font-size: 9pt; }
+    .loop-kicker { font-size: 6.5pt; padding: 2px 8px; margin-bottom: 4px; }
+    .loop-rules { margin-top: 6px; gap: 3px; }
+    .loop-rules li { font-size: 8.5pt; padding-left: 16px; }
+    .loop-rules li::before { width: 9px; }
     .ring { max-width: 52mm; margin: 0 auto; }
     .ring .runner { display: none; }
     .ring .node { font-size: 6.5pt; padding: 4px 5px; border-radius: 8px; }
@@ -782,13 +792,6 @@
         <div class="where">Page: History</div>
       </div>
       <div class="feat reveal">
-        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 12a8 8 0 0114-5l2 2M20 12a8 8 0 01-14 5l-2-2"/><path d="M20 4v5h-5M4 20v-5h5"/></svg></div>
-        <h4>Retraining that cannot get worse</h4>
-        <p>Approved corrections fine-tune the model. A new version is offered only if it does not lose ground on
-          radar, FHSS or jamming, and only a second person can activate it. Every version is kept for rollback.</p>
-        <div class="where">Page: Model</div>
-      </div>
-      <div class="feat reveal">
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 5h16v11H8l-4 4z"/></svg></div>
         <h4>Assistant that cannot invent numbers</h4>
         <p>Ask in plain language. Answers come from the stored analyses; an optional local language model only
@@ -797,7 +800,7 @@
           alt="NEXA Assistant answering which uploads had jamming, listing the matching capture with its classes and confidence bars.">
         <div class="where">Page: Assistant</div>
       </div>
-      <div class="feat reveal">
+      <div class="feat wide reveal">
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg></div>
         <h4>Roles and offline operation</h4>
         <p>Operator, Analyst and Admin accounts. The AI runs inside the browser through ONNX, so the console
@@ -808,10 +811,17 @@
 
     <div class="feat loop-card reveal" style="margin-top:14px">
       <div class="loop-text">
+        <span class="loop-kicker">Retraining that cannot get worse</span>
         <h4>The learning loop</h4>
         <p>NEXA gets better in service. What operators correct becomes training data, but only after a second
-          person approves it, and a retrained model replaces the current one only if it does no worse on radar,
-          FHSS and jamming.</p>
+          person approves it. Approved corrections fine-tune the model, mixed with the original training data so
+          it does not forget what it already knew.</p>
+        <ul class="loop-rules">
+          <li>A retrained version is offered only if it does no worse on radar, FHSS and jamming.</li>
+          <li>Only a second person can activate it.</li>
+          <li>Every version is kept, so any of them can be brought back.</li>
+        </ul>
+        <div class="where">Page: Model</div>
       </div>
       <div class="ring" role="img" aria-label="A cycle of four steps: 1 Detect, 2 Correct, 3 Approve, 4 Retrain, then back to Detect.">
         <svg viewBox="0 0 100 100" aria-hidden="true">
