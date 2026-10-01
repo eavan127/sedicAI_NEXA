@@ -4,7 +4,7 @@ import {
   noiseFloorPower, occupancy, powerSpectrumDb, resolveSession, scipyStft,
 } from "./analysis.js";
 import { drawConsole } from "./console.js";
-import { describe, isSigmfName, readSigmf } from "./sigmf.js";
+import { decodeSamples, describe, isSigmfName, parseDatatype, readSigmf } from "./sigmf.js";
 import { FileReplay, SimulatedReceiver, dwellLevel, shouldStore, toInterleavedF32 } from "./receiver.js";
 import { detectedIn, spanAt, suggestCorrections } from "./review.js";
 import { eventRows, headerLine, latestBlock, printHeaderHtml, statusBlock } from "./panels.js";
@@ -20,9 +20,9 @@ import { isAvailable as ollamaAvailable, rewrite as ollamaRewrite, warmUp as oll
 import {
   attachCapture, buildRecord, canDelete, correctionStats, deleteAnalysis, detectServer, exportReport, retrainStatus,
   activateModel, getJob, listJobs, listModels, retrainHistory, reviewModel, rollbackModel, startRetrain,
-  listAnalyses, listAudit, listCorrections, logEvent, operatorName, readConfig, reviewCorrection,
+  correctionIq, listAnalyses, listAudit, listCorrections, logEvent, operatorName, readConfig, reviewCorrection,
   saveAnalysis, setOperatorName, submitCorrection, supportsCorrections, usingSupabase, verifyAudit,
-  ROLE_LABEL, createUser, currentAuth, listUsers, loadAuth, signOut, updateUser,
+  ROLE_LABEL, createUser, currentAuth, listUsers, loadAuth, signOut, switchDemoPerson, updateUser,
 } from "./storage.js";
 import { applyFilters, barsHtml, summarise, summaryHtml as histSummaryHtml, tableHtml } from "./history.js";
 import { buildReport, buildSingle } from "./report.js";
@@ -218,7 +218,7 @@ function measureCapture(re, im) {
  */
 async function analyze(re, im, { source, caseNote = "", truth = null, snrDb = null,
                                   snrCapped = false, requestedSnrDb = null, live = false,
-                                  signal = null }) {
+                                  signal = null, review = null }) {
   synthBtn.disabled = uploadBtn.disabled = true;
   try {
     const which = modelSel.value;
@@ -237,10 +237,13 @@ async function analyze(re, im, { source, caseNote = "", truth = null, snrDb = nu
     const elapsed = ((performance.now() - t0) / 1000).toFixed(2);
 
     session = { capture, result, source, caseNote, truth, snrDb, which,
-                 snrCapped, requestedSnrDb, mode: live ? "LIVE" : "REPLAY" };
+                 snrCapped, requestedSnrDb, mode: live ? "LIVE" : "REPLAY", review };
     render();
+    showReviewBanner();
     statusEl.textContent = `${result.nWindows} windows classified in ${elapsed}s.`;
-    if (live) return Number(elapsed);
+    // A capture opened to review a correction is already in the database:
+    // storing it again would add a duplicate and inflate the correction rate.
+    if (live || review) return Number(elapsed);
     // Stored AFTER render: a storage backend that is slow, full or
     // misconfigured must not delay the picture the operator is waiting for,
     // and must not lose it either -- store() reports its own failures and
@@ -385,7 +388,41 @@ function openCorrection({ predicted, startS, endS, missed, suggested = null, rea
   corrError.textContent = "";
   corrSubmit.disabled = false;
   corrDialog.showModal();
-  corrReason.focus();
+  corrReason.focus({ preventScroll: true });
+  pinCorrectionSpan();
+}
+
+/** While the form is open, keep the stretch under review in sight: scroll the
+ *  detection lanes to mid-screen, shade the stretch, and dock the form on the
+ *  side away from it (a centred modal would hide exactly what is being judged). */
+function pinCorrectionSpan() {
+  if (!consoleGeom || window.innerWidth < 1000) return;
+  const span = () => showSpan(Number(corrStart.value), Number(corrEnd.value));
+  span();
+  scrollToLanes();
+  const r = consoleCanvas.getBoundingClientRect();
+  const spanMid = r.left + (msToCss(Number(corrStart.value)) + msToCss(Number(corrEnd.value))) / 2;
+  corrDialog.classList.add("docked");
+  corrDialog.classList.toggle("dock-left", spanMid > window.innerWidth / 2);
+  corrStart.oninput = corrEnd.oninput = span;
+}
+
+/** Closes the form and clears the pinned stretch. Called directly as well as
+ *  from the "close" event (Esc), which some hosts deliver late or not at all. */
+function closeCorrection() {
+  if (corrDialog.open) corrDialog.close();
+  corrDialog.classList.remove("docked", "dock-left");
+  corrStart.oninput = corrEnd.oninput = null;
+  restoreSpan();
+}
+corrDialog.addEventListener("close", closeCorrection);
+
+/** Bring the detection lanes (where truth and model disagree) to mid-screen. */
+function scrollToLanes() {
+  if (!consoleGeom) return;
+  const r = consoleCanvas.getBoundingClientRect(), k = r.width / consoleGeom.cssW;
+  const mid = (consoleGeom.yLaneTop + consoleGeom.yBot) / 2 * k;
+  window.scrollTo({ top: window.scrollY + r.top + mid - window.innerHeight / 2, behavior: "smooth" });
 }
 
 tbody.addEventListener("click", async (ev) => {
@@ -410,7 +447,7 @@ el("corrMissed").addEventListener("click", async () => {
   openCorrection({ predicted: [], startS: 0, endS: session.capture.re.length / FS, missed: true });
 });
 
-el("corrCancel").addEventListener("click", () => corrDialog.close());
+el("corrCancel").addEventListener("click", closeCorrection);
 
 /** Make sure the capture being corrected is stored WITH its raw IQ: a live
  *  dwell that was not stored is stored now, and a synthesized scenario (saved
@@ -442,7 +479,7 @@ corrForm.addEventListener("submit", async (ev) => {
       predicted_labels: corrCtx.predicted, corrected_labels: corrected,
       reason: corrReason.value, model: corrCtx.sess.which,
     });
-    corrDialog.close();
+    closeCorrection();
     const done = `Correction submitted by ${operatorName()}: `
       + `${corrCtx.predicted.join(" + ") || "nothing"} → ${corrected.join(" + ")}. `
       + "It waits in History ▸ Human corrections until another person approves it.";
@@ -496,7 +533,16 @@ function showSpan(aMs, bMs) {
   tlSel.hidden = false;
 }
 
-function hideCursor() { tlCursor.hidden = true; if (!tlDrag) tlSel.hidden = true; }
+function hideCursor() { tlCursor.hidden = true; if (!tlDrag) restoreSpan(); }
+
+/** What the shading falls back to when nothing is being dragged or hovered:
+ *  the open form's stretch, else the correction under review, else nothing. */
+function restoreSpan() {
+  if (corrDialog.open) return;
+  const r = session?.review;
+  if (r) showSpan(r.start_s * 1000, r.end_s * 1000);
+  else tlSel.hidden = true;
+}
 
 consoleCanvas.addEventListener("pointermove", (ev) => {
   if (!session || !consoleGeom) return;
@@ -620,7 +666,7 @@ suggestList.addEventListener("mouseover", (ev) => {
   const s = session.suggestions.items[Number(row.dataset.sugg)];
   showSpan(s.startS * 1000, s.endS * 1000);
 });
-suggestList.addEventListener("mouseleave", () => { if (!tlDrag) tlSel.hidden = true; });
+suggestList.addEventListener("mouseleave", () => { if (!tlDrag) restoreSpan(); });
 
 suggestList.addEventListener("click", (ev) => {
   const btn = ev.target.closest("button[data-review-sugg]");
@@ -1521,6 +1567,7 @@ const AUDIT_LABEL = {
   "user.login": "Signed in",
   "user.login_failed": "Failed sign-in",
   "user.logout": "Signed out",
+  "user.demo_switch": "Switched demo person",
   "report.export": "Report exported",
   "client.receiver_connect": "Receiver connected",
   "client.receiver_disconnect": "Receiver disconnected",
@@ -1652,9 +1699,14 @@ async function renderCorrections() {
         const span = `${(c.start_s * 1000).toFixed(1)}–${(c.end_s * 1000).toFixed(1)} ms`;
         const status = c.status === "pending" ? `<span class="pill pending">pending</span>`
           : `<span class="pill ${c.status}">${c.status}</span><div class="note">by ${esc(c.reviewed_by)}${c.review_note ? `: “${esc(c.review_note)}”` : ""}</div>`;
-        const actions = c.status === "pending"
-          ? `<button class="mini" data-review="approve" data-id="${esc(c.id)}">✔ Approve</button> `
-            + `<button class="mini" data-review="reject" data-id="${esc(c.id)}">✖ Reject</button>` : "";
+        // Four-eyes: the server refuses a review by the submitter, so offer no
+        // buttons that can only fail -- say who has to do it instead.
+        const own = c.operator.toLowerCase() === operatorName().toLowerCase();
+        const view = `<button class="mini" data-view="${esc(c.id)}" title="Open this capture and see the corrected stretch">👁 View</button> `;
+        const actions = view + (c.status !== "pending" ? ""
+          : own ? `<span class="note">Your own correction:<br>another person must review it</span>`
+          : `<button class="mini" data-review="approve" data-id="${esc(c.id)}">✔ Approve</button> `
+            + `<button class="mini" data-review="reject" data-id="${esc(c.id)}">✖ Reject</button>`);
         return `<tr><td>${esc(new Date(c.created_at).toLocaleString())}</td>`
           + `<td>${esc(cap?.file_name || cap?.case_note?.slice(0, 40) || c.analysis_id.slice(0, 8))}<div class="note">${span}</div></td>`
           + `<td><s>${esc(c.predicted_labels.join(" + ") || "nothing")}</s> → <strong>${esc(c.corrected_labels.join(" + "))}</strong></td>`
@@ -1669,6 +1721,8 @@ async function renderCorrections() {
 corrStatusSel.addEventListener("change", renderCorrections);
 
 corrTable.addEventListener("click", async (ev) => {
+  const viewBtn = ev.target.closest("button[data-view]");
+  if (viewBtn) return viewCorrection(corrRows.find(c => c.id === viewBtn.dataset.view));
   const btn = ev.target.closest("button[data-review]");
   if (!btn) return;
   const decision = btn.dataset.review;
@@ -1677,6 +1731,7 @@ corrTable.addEventListener("click", async (ev) => {
     : `Reject as ${operatorName()}. Why? (required)`, "");
   if (note === null) return;
   corrMsg.textContent = "";
+  corrMsg.className = "note";
   try {
     await reviewCorrection(btn.dataset.id, decision, note);
     corrMsg.textContent = `Correction ${decision === "approve" ? "approved" : "rejected"} by ${operatorName()}.`;
@@ -1684,8 +1739,56 @@ corrTable.addEventListener("click", async (ev) => {
     await renderAudit();
     await renderTrigger(el("histTrigger"));
   } catch (e) {
+    corrMsg.className = "corr-error";       // a refusal must not look like a footnote
     corrMsg.textContent = e.message.replace(/^Local database review failed \(\d+\)\. /, "");
   }
+});
+
+// Reviewing a correction: open its capture on RF Replay so the reviewer judges
+// the signal, not just the operator's words.
+const reviewBanner = el("reviewBanner");
+
+async function viewCorrection(c) {
+  if (!c) return;
+  corrMsg.className = "note";
+  corrMsg.textContent = "Opening the capture…";
+  try {
+    const iq = await correctionIq(c.id);
+    if (Math.abs(iq.sampleRate - FS) > 1) {
+      throw new Error(`it was recorded at ${(iq.sampleRate / 1e6).toFixed(3)} MS/s, `
+        + `and the console analyses ${(FS / 1e6).toFixed(1)} MS/s only`);
+    }
+    const { re, im } = decodeSamples(iq.buffer, parseDatatype(iq.datatype));
+    const cap = histRecords.find(r => r.id === c.analysis_id);
+    corrMsg.textContent = "";
+    showPage("replay");
+    await analyze(re, im, { source: "upload", caseNote: cap?.case_note || "",
+                            review: { ...c, capture: cap?.file_name || cap?.case_note || "this capture" } });
+    if (session?.review?.id === c.id) { restoreSpan(); scrollToLanes(); }
+  } catch (e) {
+    corrMsg.className = "corr-error";
+    corrMsg.textContent = `Could not open the capture: ${e.message}`;
+  }
+}
+
+function showReviewBanner() {
+  const r = session?.review;
+  reviewBanner.hidden = !r;
+  if (!r) return;
+  const esc = t => String(t ?? "").replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
+  reviewBanner.innerHTML = `<div><strong>Reviewing a correction</strong> by ${esc(r.operator)} on ${esc(r.capture)}: `
+    + `the shaded stretch, ${(r.start_s * 1000).toFixed(2)}–${(r.end_s * 1000).toFixed(2)} ms. `
+    + `Model said <s>${esc(r.predicted_labels.join(" + ") || "nothing")}</s> → human says `
+    + `<strong>${esc(r.corrected_labels.join(" + "))}</strong>.`
+    + `<div class="note">Reason: ${esc(r.reason)}</div>`
+    + `<div class="note">The model shown is the one in use now, so its detections may differ from what the operator saw.</div></div>`
+    + `<button class="mini" id="reviewBack">← Back to corrections</button>`;
+}
+
+reviewBanner.addEventListener("click", (ev) => {
+  if (!ev.target.closest("#reviewBack")) return;
+  showPage("history");
+  corrBlock.scrollIntoView({ block: "start" });
 });
 
 el("auditVerify").addEventListener("click", async () => {
@@ -1757,11 +1860,30 @@ function applyAuth(a) {
   const role = document.createElement("span");
   role.className = "auth-role";
   role.textContent = ROLE_LABEL[a.user.role] || a.user.role;
-  const out = document.createElement("button");
-  out.type = "button";
-  out.textContent = "Log out";
-  out.addEventListener("click", logOut);
-  authChip.replaceChildren("Signed in as ", who, role, out);
+  if (a.demo) {
+    // --demo: no sign-in; one button per demo person. Reloading after a switch
+    // redraws every role-gated button and name box for the new person.
+    const people = a.people.map(p => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = `${p.username} · ${ROLE_LABEL[p.role] || p.role}`;
+      b.className = p.username === a.user.username ? "active" : "";
+      b.title = p.username === a.user.username ? "You are acting as this person" : `Act as ${p.username}`;
+      b.addEventListener("click", async () => {
+        if (p.username === a.user.username) return;
+        try { await switchDemoPerson(p.username); location.reload(); }
+        catch (e) { statusEl.textContent = `Could not switch person: ${e.message}`; }
+      });
+      return b;
+    });
+    authChip.replaceChildren("Demo · acting as:", ...people);
+  } else {
+    const out = document.createElement("button");
+    out.type = "button";
+    out.textContent = "Log out";
+    out.addEventListener("click", logOut);
+    authChip.replaceChildren("Signed in as ", who, role, out);
+  }
   authChip.hidden = false;
   document.querySelector('nav button[data-page="users"]').hidden = a.user.role !== "admin";
   // Every prompt and message that names "you" reads operatorName(): make it
@@ -1770,7 +1892,8 @@ function applyAuth(a) {
   for (const input of [operatorInput, corrOperator, rtOperator]) {
     input.value = a.user.username;
     input.readOnly = true;
-    input.title = `Signed in as ${a.user.username}. Log out to change.`;
+    input.title = a.demo ? `Acting as ${a.user.username}. Use the buttons at the top to change.`
+                         : `Signed in as ${a.user.username}. Log out to change.`;
   }
 }
 

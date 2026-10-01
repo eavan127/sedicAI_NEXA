@@ -110,7 +110,7 @@
 
     .print-only { display: block; }
     /* Controls, navigation and live status are interaction, not content. */
-    nav, .grow, #status, h3.page-title, .note, .receiver, #corrMissed, #eventsTable button, #consoleEnlarge, #suggestBlock, .tl-cursor, .tl-sel, #authChip { display: none !important; }
+    nav, .grow, #status, h3.page-title, .note, .receiver, #corrMissed, #eventsTable button, #consoleEnlarge, #suggestBlock, .tl-cursor, .tl-sel, #authChip, .review-banner { display: none !important; }
     header { margin-bottom: 10px; }
     .layout { display: block; }
     main { width: 100%; }
@@ -168,7 +168,8 @@
   .filters select, .filters input { padding: 6px 8px; border: 1px solid var(--grid); border-radius: 4px; background: var(--panel); color: var(--text); font-family: var(--font); font-size: 14px; }
   button.mini { padding: 3px 8px; font-size: 12.5px; border: 1px solid var(--grid); border-radius: 4px; background: var(--panel); color: var(--text); cursor: pointer; }
   button.mini:hover { background: var(--brand-olive-tint); }
-  td.row-actions { display: flex; gap: 6px; }
+  td.row-actions { white-space: nowrap; }
+  td.row-actions button + button { margin-left: 4px; }
   td.num, th.num { text-align: right; font-family: var(--mono); }
   .receiver { border: 1px solid var(--grid); border-radius: 8px; background: var(--panel); padding: 12px 14px; margin: 4px 0 12px; }
   .rx-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
@@ -189,6 +190,11 @@
   .note.audit-bad { color: #B3261E; font-weight: 600; }
   dialog#corrDialog { border: 1px solid var(--grid); border-radius: 10px; padding: 18px 20px; width: min(560px, calc(100vw - 32px)); background: var(--panel); color: var(--text); font-family: var(--font); }
   dialog#corrDialog::backdrop { background: rgba(18, 28, 39, 0.45); }
+  .review-banner { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; border: 2px solid #627143; background: var(--brand-olive-tint, #eef0e6); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; }
+  /* main.js:pinCorrectionSpan -- docked beside the timeline so the stretch under review stays visible */
+  dialog#corrDialog.docked { position: fixed; margin: 0; inset: auto 16px 16px auto; width: min(460px, 40vw); max-height: calc(100vh - 32px); overflow: auto; box-shadow: 0 8px 28px rgba(18, 28, 39, 0.28); }
+  dialog#corrDialog.docked.dock-left { inset: auto auto 16px 16px; }
+  dialog#corrDialog.docked::backdrop { background: rgba(18, 28, 39, 0.06); }
   .corr-span { display: flex; gap: 12px; margin-bottom: 10px; }
   .corr-span label, .corr-block { display: flex; flex-direction: column; gap: 4px; font-size: 14px; color: var(--text-dim); }
   .corr-block { margin-top: 10px; }
@@ -206,6 +212,7 @@
   .auth-role { font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; padding: 2px 8px; border-radius: 10px; background: var(--brand-olive-tint); color: var(--brand-olive-dark); }
   .auth-chip button, .user-row-actions button { font-family: var(--font); font-size: 12px; border-radius: 6px; border: 1px solid var(--grid); padding: 4px 10px; cursor: pointer; background: var(--panel); color: var(--text); }
   .auth-chip button:hover, .user-row-actions button:hover { border-color: var(--brand-olive); background: var(--brand-olive-tint); }
+  .auth-chip button.active { background: var(--brand-olive); border-color: var(--brand-olive); color: #fff; font-weight: 700; cursor: default; }
   .user-add { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
   .user-add label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-dim); }
   .user-add input, .user-add select, .user-row-actions input, #usersTable select { font-family: var(--font); font-size: 13px; padding: 6px 8px; border: 1px solid var(--grid); border-radius: 6px; background: var(--panel); color: var(--text); }
@@ -473,6 +480,8 @@
         <div id="statusBox"></div>
         <div id="latestBox"></div>
       </div>
+
+      <div class="review-banner" id="reviewBanner" hidden></div>
 
       <div class="block">
         <div class="block-label" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">

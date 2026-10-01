@@ -234,3 +234,42 @@ def test_logout_ends_the_session(server):
     status, headers, _ = call(base + "/api/auth/logout", "POST", {}, cookie=ava)
     assert status == 200 and "Max-Age=0" in headers["Set-Cookie"]
     assert call(base + "/api/analyses", cookie=ava)[0] == 401
+
+
+# --- --demo: no sign-in, buttons switch person ----------------------------------
+
+@pytest.fixture
+def demo_server(tmp_path):
+    srv = serve_local.make_server(tmp_path / "nexa.db", "127.0.0.1", 0, demo=True)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{srv.server_address[1]}", srv.nexa_db
+    srv.shutdown()
+    srv.server_close()
+
+
+def test_demo_serves_the_system_without_sign_in(demo_server):
+    base, db = demo_server
+    assert not db.auth_enabled()                         # no accounts were ever created
+    assert fetch(base, "/index.html")[0] == 200
+    status, headers = fetch(base, "/login.html")
+    assert status == 302 and headers["Location"] == "/index.html"
+    me = call(base + "/api/auth/me")[2]
+    assert me["demo"] and me["user"] == {"username": "eavan", "role": "admin"}
+    assert {p["role"] for p in me["people"]} == {"operator", "analyst", "admin"}
+    assert call(base + "/api/auth/login", "POST", {"username": "x", "password": "y"})[0] == 404
+
+
+def test_demo_switch_changes_who_did_it_and_keeps_roles_and_four_eyes(demo_server):
+    base, db = demo_server
+    status, headers, _ = call(base + "/api/auth/demo", "POST", {"username": "olivia"})
+    assert status == 200
+    olivia = headers["Set-Cookie"].split(";")[0]
+    assert call(base + "/api/analyses", "POST", record("d1"), cookie=olivia, operator="eavan")[0] == 201
+    assert db.get_analysis("d1")["operator"] == "olivia"
+    # still an operator: may not approve or retrain
+    assert call(base + "/api/corrections/x/review", "POST", {"decision": "approve"}, cookie=olivia)[0] == 403
+    assert call(base + "/api/retrain/start", "POST", {"reason": "because"}, cookie=olivia)[0] == 403
+    aaron = call(base + "/api/auth/demo", "POST", {"username": "aaron"})[1]["Set-Cookie"].split(";")[0]
+    assert call(base + "/api/auth/me", cookie=aaron)[2]["user"]["role"] == "analyst"
+    assert call(base + "/api/auth/demo", "POST", {"username": "mallory"})[0] == 400
+    assert db.audit(limit=5, action_prefix="user.demo_switch")[0]["actor"] == "aaron"

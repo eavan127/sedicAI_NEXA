@@ -239,6 +239,8 @@ async function authCall(path, body, method = "POST") {
 }
 
 export const signOut = () => authCall("/api/auth/logout", {});
+/** --demo only: act as another of the server's demo people. */
+export const switchDemoPerson = (username) => authCall("/api/auth/demo", { username });
 export const listUsers = () => authCall("/api/users", undefined, "GET");
 export const createUser = (username, password, role) => authCall("/api/users", { username, password, role });
 /** changes: {role?, disabled?, password?} */
@@ -513,6 +515,15 @@ export function listCorrections({ status = "", analysisId = "" } = {}) {
   if (status) q.set("status", status);
   if (analysisId) q.set("analysis_id", analysisId);
   return serverJson(`/api/corrections?${q}`, "corrections read");
+}
+
+/** The raw IQ behind a correction, for the reviewer to look at:
+ *  {buffer, datatype, sampleRate}. */
+export async function correctionIq(id) {
+  const res = await fetch(`/api/corrections/${encodeURIComponent(id)}/iq`, { cache: "no-store" });
+  await serverCheck(res, "capture read");
+  return { buffer: await res.arrayBuffer(), datatype: res.headers.get("X-NEXA-Datatype") || "cf32_le",
+           sampleRate: Number(res.headers.get("X-NEXA-Sample-Rate")) };
 }
 
 /** Report builder, server-built formats. Returns {blob, filename, reportId}. */

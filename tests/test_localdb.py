@@ -211,6 +211,21 @@ def test_capture_upload_is_fingerprinted(server):
     assert audit[0]["details"]["sha256"] == out["file_sha256"]
 
 
+def test_reviewer_can_fetch_the_iq_behind_a_correction(server):
+    base, _ = server
+    assert call(base + "/api/analyses", "POST", record("v1", duration_s=0.05))[0] == 201
+    payload = b"\x00\x00\x80\x3f" * 512                  # float32 1.0, little-endian
+    assert call(base + "/api/captures/v1?name=x.f32", "PUT", raw=payload,
+                headers={"Content-Type": "application/octet-stream"})[0] == 201
+    status, _, body = call(base + "/api/corrections", "POST", correction("v1"))
+    assert status == 201
+    cid = json.loads(body)["id"]
+    status, headers, iq = call(base + f"/api/corrections/{cid}/iq")
+    assert status == 200 and iq == payload
+    assert headers["X-NEXA-Datatype"] == "cf32_le" and float(headers["X-NEXA-Sample-Rate"]) == 3_200_000
+    assert call(base + "/api/corrections/nope/iq")[0] == 404
+
+
 def test_client_events_cannot_impersonate_server_actions(server):
     base, _ = server
     assert call(base + "/api/audit", "POST", {"action": "analysis.delete"})[0] == 400

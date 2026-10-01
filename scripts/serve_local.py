@@ -8,6 +8,7 @@ scripts can read -- nothing is sent anywhere else.
     python scripts/serve_local.py                 # http://localhost:8099
     python scripts/serve_local.py --port 8200 --no-browser
     python scripts/serve_local.py --lan           # other machines on this network
+    python scripts/serve_local.py --demo          # no sign-in: buttons switch operator / analyst / admin
 
 Standard library only, so it runs on any machine with Python and no install.
 
@@ -21,6 +22,7 @@ API (JSON)
     POST   /api/corrections            a human's correction to a capture
     GET    /api/corrections?status=pending&analysis_id=<id>
     GET    /api/corrections/stats      counts, approved labels per class
+    GET    /api/corrections/<id>/iq    the raw IQ behind a correction (X-NEXA-Datatype, -Sample-Rate)
     POST   /api/corrections/<id>/review   {decision: approve|reject, note}
     GET    /api/retrain/status         the retraining trigger: numbers + each rule
     POST   /api/retrain/start          {reason, override, scope: single|both}
@@ -87,7 +89,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from src.localdb import SESSION_HOURS, Actor, LocalDB, role_at_least  # noqa: E402
-from src.report_export import build_export  # noqa: E402
+from src.report_export import _iq_payload, build_export  # noqa: E402
 
 WEB = ROOT / "web"
 DEFAULT_DB = ROOT / "data" / "local" / "nexa.db"
@@ -103,6 +105,13 @@ LOGIN_PAGE = "/login.html"
 LOGO = ROOT / "assets" / "sedic_logo.png"
 # All a signed-out browser may fetch: the login page and its logo.
 PUBLIC_STATIC = {LOGIN_PAGE, "/brand/logo.png", "/favicon.ico"}
+
+# --demo: no sign-in; the page shows one button per person and whoever was
+# clicked last is "who did it" (a cookie). Three PEOPLE, not three roles, so the
+# four-eyes rule still holds on stage: olivia submits, aaron approves.
+DEMO_PEOPLE = {"olivia": "operator", "aaron": "analyst", "eavan": "admin"}
+DEMO_DEFAULT = "eavan"
+DEMO_COOKIE = "nexa_demo_as"
 
 
 def required_role(method: str, parts: list[str]) -> str:
@@ -143,6 +152,7 @@ class Handler(SimpleHTTPRequestHandler):
     db: LocalDB = None
     iq_dir: Path = None
     lan: bool = False
+    demo: bool = False
     retrain_args: list = []
 
     # -- request gate ----------------------------------------------------------
@@ -161,13 +171,24 @@ class Handler(SimpleHTTPRequestHandler):
         can name someone else."""
         return self.me or Actor("anonymous", "none", self.client_address[0])
 
-    def _session_token(self) -> str | None:
+    def _cookie_value(self, name: str) -> str | None:
         jar = http.cookies.SimpleCookie()
         try:
             jar.load(self.headers.get("Cookie") or "")
         except http.cookies.CookieError:
             return None
-        return jar[SESSION_COOKIE].value if SESSION_COOKIE in jar else None
+        return jar[name].value if name in jar else None
+
+    def _session_token(self) -> str | None:
+        return self._cookie_value(SESSION_COOKIE)
+
+    def _current_actor(self) -> Actor | None:
+        """The signed-in account, or in --demo the person last picked."""
+        if self.demo:
+            name = self._cookie_value(DEMO_COOKIE)
+            name = name if name in DEMO_PEOPLE else DEMO_DEFAULT
+            return Actor(name, DEMO_PEOPLE[name], self.client_address[0])
+        return self.db.session_actor(self._session_token(), self.client_address[0])
 
     @staticmethod
     def _cookie(token: str | None) -> dict:
@@ -176,7 +197,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def _authorize(self, method: str, parts: list[str]) -> bool:
         """True when the API call may go ahead; otherwise the refusal is sent."""
-        self.me = self.db.session_actor(self._session_token(), self.client_address[0])
+        self.me = self._current_actor()
         if parts[:1] == ["health"] or (parts[:1] == ["auth"] and parts[1:2] in (["me"], ["login"], ["setup"])):
             return True
         if not self.me:
@@ -228,7 +249,13 @@ class Handler(SimpleHTTPRequestHandler):
             # The system itself is only for signed-in people: a page request
             # goes to the login page, anything else (scripts, models, data)
             # is refused.
-            if url.path not in PUBLIC_STATIC and not self.db.session_actor(self._session_token()):
+            if self.demo and url.path == LOGIN_PAGE:       # nothing to sign in to
+                self.send_response(HTTPStatus.FOUND)
+                self.send_header("Location", "/index.html")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return None
+            if url.path not in PUBLIC_STATIC and not self._current_actor():
                 if url.path in ("/", "/index.html") or url.path.endswith(".html"):
                     self.send_response(HTTPStatus.FOUND)
                     self.send_header("Location", LOGIN_PAGE)
@@ -318,6 +345,8 @@ class Handler(SimpleHTTPRequestHandler):
                     (query.get("status") or [None])[0], (query.get("analysis_id") or [None])[0], limit))
             if method == "GET" and parts[1:] == ["stats"]:
                 return self._send_json(self.db.correction_stats())
+            if method == "GET" and len(parts) == 3 and parts[2] == "iq":
+                return self._correction_iq(parts[1])
             if method == "POST" and len(parts) == 3 and parts[2] == "review":
                 body = self._read_json()
                 return self._send_json(self.db.review_correction(
@@ -395,6 +424,20 @@ class Handler(SimpleHTTPRequestHandler):
 
     def _auth(self, method, rest):
         client = self.client_address[0]
+        if self.demo:
+            if method == "GET" and rest == ["me"]:
+                return self._send_json({"auth_enabled": True, "demo": True, "can_setup": False,
+                                        "user": {"username": self.me.name, "role": self.me.role},
+                                        "people": [{"username": n, "role": r} for n, r in DEMO_PEOPLE.items()]})
+            if method == "POST" and rest == ["demo"]:
+                name = str(self._read_json().get("username") or "").lower()
+                if name not in DEMO_PEOPLE:
+                    raise ValueError(f"demo person must be one of {', '.join(DEMO_PEOPLE)}")
+                self.db.log(Actor(name, DEMO_PEOPLE[name], client), "user.demo_switch", "user", name,
+                            {"from": self.me.name})
+                return self._send_json({"user": {"username": name, "role": DEMO_PEOPLE[name]}}, headers={
+                    "Set-Cookie": f"{DEMO_COOKIE}={name}; HttpOnly; SameSite=Strict; Path=/"})
+            return self._error(HTTPStatus.NOT_FOUND, "sign-in is off in --demo; switch person instead")
         if method == "GET" and rest == ["me"]:
             enabled = self.db.auth_enabled()
             return self._send_json({"auth_enabled": enabled,
@@ -554,6 +597,19 @@ class Handler(SimpleHTTPRequestHandler):
         })
         return self._send_file(data, ctype, fname, {"X-Report-Id": meta["report_id"]})
 
+    def _correction_iq(self, correction_id):
+        """The raw IQ a correction points at, so a reviewer can look at the
+        signal before approving it instead of trusting the text alone."""
+        c = self.db.get_correction(correction_id)
+        if not c:
+            return self._error(HTTPStatus.NOT_FOUND, "no such correction")
+        payload = _iq_payload(self.db.path.parent, c["iq_path"]) if c.get("iq_path") else None
+        if not payload:
+            return self._error(HTTPStatus.NOT_FOUND, "the raw IQ behind this correction is missing")
+        datatype, rate, data, _ = payload
+        return self._send_file(data, "application/octet-stream", "capture.iq",
+                               {"X-NEXA-Datatype": str(datatype), "X-NEXA-Sample-Rate": str(rate)})
+
     def _put_capture(self, analysis_id, name):
         if not re.fullmatch(r"[\w\-]{1,64}", analysis_id):
             raise ValueError("bad analysis id")
@@ -632,11 +688,11 @@ def pick_port(host: str, preferred: int, tries: int = 20) -> int:
 
 
 def make_server(db_path: Path, host: str, port: int, lan: bool = False,
-                retrain_args: list | None = None) -> ThreadingHTTPServer:
+                retrain_args: list | None = None, demo: bool = False) -> ThreadingHTTPServer:
     db = LocalDB(db_path)
     iq_dir = Path(db_path).parent / "iq"
     iq_dir.mkdir(parents=True, exist_ok=True)
-    handler = type("NexaHandler", (Handler,), {"db": db, "iq_dir": iq_dir, "lan": lan,
+    handler = type("NexaHandler", (Handler,), {"db": db, "iq_dir": iq_dir, "lan": lan, "demo": demo,
                                                 "retrain_args": list(retrain_args or [])})
     server = ThreadingHTTPServer((host, port), partial(handler, directory=str(WEB)))
     server.nexa_db = db
@@ -650,6 +706,9 @@ def main():
     p.add_argument("--lan", action="store_true",
                    help="listen on all interfaces so other machines on this network can connect")
     p.add_argument("--no-browser", action="store_true")
+    p.add_argument("--demo", action="store_true",
+                   help="no sign-in: buttons at the top switch between an operator, an analyst "
+                        "and an admin (for presenting; refused together with --lan)")
     p.add_argument("--quick-retrain", action="store_true",
                    help="demo/test: retrain on a small sample (1 epoch, 2,000 replay windows, "
                         "3,000-window exam) so a retrain takes about a minute")
@@ -663,14 +722,18 @@ def main():
     retrain_args = ["--epochs", "1", "--replay", "2000", "--gate-limit", "3000"] if a.quick_retrain else []
     if a.synthetic_exam:
         retrain_args += ["--gate", "synthetic"]
-    server = make_server(a.db, host, port, a.lan, retrain_args)
+    if a.demo and a.lan:
+        raise SystemExit("--demo turns sign-in off, so anyone who can reach the server could act as "
+                         "the admin. It is refused together with --lan.")
+    server = make_server(a.db, host, port, a.lan, retrain_args, demo=a.demo)
     url = f"http://localhost:{port}/index.html"          # redirects to sign-in first
     counts = server.nexa_db.counts()
     print(f"NEXA local server\n  open      {url}\n  database  {a.db}\n"
           f"  stored    {counts.get('analyses', 0)} analyses, {counts.get('audit_log', 0)} audit entries\n"
           f"  network   {'LAN (other machines can connect)' if a.lan else 'this machine only'}\n"
-          "Press Ctrl+C to stop.")
-    if not server.nexa_db.auth_enabled():
+          + ("  sign-in   OFF (demo): switch person with the buttons at the top of the page\n" if a.demo else "")
+          + "Press Ctrl+C to stop.")
+    if not a.demo and not server.nexa_db.auth_enabled():
         print("  FIRST RUN: no accounts yet. Open the page on THIS machine to create the admin account.")
     if not a.no_browser:
         threading.Timer(0.8, webbrowser.open, (url,)).start()
