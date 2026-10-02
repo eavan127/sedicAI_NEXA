@@ -73,6 +73,14 @@
   .track i { position: absolute; top: -5px; left: 0; width: 14px; height: 14px; border-radius: 50%; background: var(--ink);
     transition: left 1s cubic-bezier(.6,0,.3,1); }
   .timeline-wrap { position: absolute; left: 20px; top: 262px; width: 860px; }
+  .tiergrid { display: flex; align-items: stretch; gap: 6px; margin-top: 16px; }
+  .tg { position: relative; display: flex; gap: 6px; border: 2px solid var(--c); border-radius: 12px; padding: 16px 8px 8px; }
+  .tg b { position: absolute; top: -11px; left: 10px; font-size: 11px; font-weight: 800; letter-spacing: 1px; color: #fff; background: var(--c); border-radius: 9px; padding: 2px 9px; }
+  .tg span { flex: 1; display: grid; place-items: center; height: 34px; border-radius: 8px; background: var(--t); color: var(--k); font-size: 14px; font-weight: 800; white-space: nowrap; }
+  .tsep { align-self: center; font-size: 22px; font-weight: 800; color: var(--mute); }
+  .tg, .tg span { transition: background .35s, color .35s, opacity .35s, box-shadow .35s, transform .35s; }
+  .tiergrid.live .tg span.hit { background: var(--c); color: #fff; box-shadow: 0 0 16px 2px var(--c); transform: scale(1.06); }
+  #tierCap i { font-style: normal; color: #fff; background: var(--c); border-radius: 10px; padding: 2px 10px; margin-left: 6px; transition: background .35s; }
 
   /* ---------- P2 architecture ---------- */
   #p2 { left: 970px; top: 150px; width: 910px; height: 424px; }
@@ -81,8 +89,8 @@
   .wire { fill: none; stroke: #C9CED3; stroke-width: 2.5; stroke-dasharray: 7 7; animation: flow 2s linear infinite; transition: stroke .5s; }
   .wire.on { stroke: var(--ink); stroke-width: 3.5; }
   .arch .node { transition: opacity .6s, box-shadow .6s, transform .6s; }
-  .arch.touring .node { opacity: .25; }
-  .arch.touring .node.on { opacity: 1; transform: translateY(-2px); box-shadow: 0 0 0 5px rgba(46,125,185,.16), 0 12px 26px rgba(0,0,0,.10); }
+  .arch.touring .node { opacity: 1; }
+  .arch.touring .node.on { opacity: 1; transform: translateY(-3px); box-shadow: 0 0 0 5px #CFE1F1, 0 0 22px 4px rgba(46,125,185,.35); }
   .n-stat { position: absolute; left: 0; top: 2px; width: 136px; line-height: 1.25; }
   .n-stat b { display: block; font-size: 21px; font-weight: 800; color: var(--blue); }
   .n-stat span { display: block; font-size: 11px; font-weight: 700; color: var(--mute); }
@@ -227,8 +235,17 @@
       </div>
       <div class="track"><i id="dot"></i></div>
       <div class="timeline-wrap">
-        <div class="wave-meta"><span class="cap">Output · detected events</span><span class="tiers"><span class="cap">Tier priority</span><i style="--c:var(--red)">HOSTILE</i>›<i style="--c:var(--orange)">MILITARY</i>›<i style="--c:var(--blue)">CIVILIAN</i>›<i style="--c:var(--green)">EMPTY</i></span></div>
-        <canvas id="tl" width="1720" height="176" style="width:860px;height:88px"></canvas>
+        <div class="wave-meta"><span class="cap">8 classes</span></div>
+        <div class="tiergrid">
+          <div class="tg" data-tier="HOSTILE" style="--c:var(--red);--t:#F6E4E2;--k:#8E1F14;flex:1.25"><b>HOSTILE</b><span data-k="JAM">JAMMING</span></div>
+          <div class="tsep">›</div>
+          <div class="tg" data-tier="MILITARY" style="--c:var(--orange);--t:#FDF1DD;--k:#8A5600;flex:2.2"><b>MILITARY</b><span data-k="LFM">LFM RADAR</span><span data-k="FHSS">FHSS</span></div>
+          <div class="tsep">›</div>
+          <div class="tg" data-tier="CIVILIAN" style="--c:var(--blue);--t:#E6EFF7;--k:#1F5F91;flex:4"><b>CIVILIAN</b><span data-k="BPSK">BPSK</span><span data-k="QPSK">QPSK</span><span data-k="16QAM">16QAM</span><span data-k="64QAM">64QAM</span></div>
+          <div class="tsep">›</div>
+          <div class="tg" data-tier="EMPTY" style="--c:var(--green);--t:#E9F0DF;--k:#365F00;flex:1.25"><b>EMPTY</b><span data-k="NOISE">NOISE</span></div>
+        </div>
+        <canvas id="tl" width="1720" height="176" style="display:none"></canvas>
       </div>
     </div>
   </section>
@@ -457,7 +474,7 @@
     const e = []; for (let k = 0; k < n; k++) { let s = 0; for (let j = 0; j < 21; j++) { const idx = (off * 2 + k * 21 + j) % N; s += I[idx] ** 2 + Q[idx] ** 2; } e.push(s / 21); }
     const mx = Math.max(...e.map(v => Math.exp(v * 2))); const w = e.map(v => Math.exp(v * 2) / mx);
     ma.clearRect(0, 0, W, H);
-    w.forEach((v, k) => { ma.fillStyle = v > .8 ? C.orange : C.green; ma.fillRect(k * bw + 1, H - v * H, bw - 2, v * H); });
+    w.forEach((v, k) => { const h = (.18 + .82 * v) * H; ma.fillStyle = v > .8 ? C.orange : C.green; ma.fillRect(k * bw + 1, H - h, bw - 2, h); });
   }
 
   /* ---- P2 wire packets ---- */
@@ -485,7 +502,6 @@
     document.querySelectorAll(".wire").forEach(w => w.classList.toggle("on", st.w.includes(w.id)));
     cap.classList.add("fade");
     setTimeout(() => { snum.textContent = tourI + 1; stext.textContent = st.t; cap.classList.remove("fade"); }, 300);
-    if (tourI === 0) resetOutputs();
     if (st.out) fillOutputs();
     setTimeout(tourStep, st.out ? 5600 : 3400);
   }
@@ -592,7 +608,7 @@
   for (let k = 0; k < 140; k++) stftColumn();
   requestAnimationFrame(() => requestAnimationFrame(settle));
   stepChips(); setInterval(stepChips, 1200);
-  archEl.classList.add("touring"); tourStep();
+  finalOutputs(); archEl.classList.add("touring"); tourStep();
   let last = performance.now();
   function frame(now) {
     const dt = Math.min(64, now - last); last = now;
@@ -605,4 +621,28 @@
   requestAnimationFrame(frame);
 })();
 </script>
-</body></html>
+<script>
+/* Tier panel: cycle example detections. Static (no change) with reduced motion. */
+(() => {
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const grid = document.querySelector(".tiergrid"), cap = document.getElementById("tierCap");
+  if (!grid) return;
+  const TIER_OF = { JAM: "HOSTILE", LFM: "MILITARY", FHSS: "MILITARY", BPSK: "CIVILIAN", QPSK: "CIVILIAN", "16QAM": "CIVILIAN", "64QAM": "CIVILIAN", NOISE: "EMPTY" };
+  const ORDER = ["HOSTILE", "MILITARY", "CIVILIAN", "EMPTY"];
+  const COLOR = { HOSTILE: "var(--red)", MILITARY: "var(--orange)", CIVILIAN: "var(--blue)", EMPTY: "var(--green)" };
+  const SCENES = [["JAM"], ["LFM"], ["FHSS"], ["BPSK"], ["QPSK"], ["16QAM"], ["64QAM"], ["NOISE"]];
+  const chips = [...grid.querySelectorAll("span[data-k]")], groups = [...grid.querySelectorAll(".tg")];
+  grid.classList.add("live");
+  let k = 0;
+  function show() {
+    const hit = SCENES[k];
+    const win = ORDER.find(t => hit.some(c => TIER_OF[c] === t));
+    chips.forEach(el => el.classList.toggle("hit", hit.includes(el.dataset.k)));
+    groups.forEach(g => g.classList.toggle("win", g.dataset.tier === win));
+    if (cap) cap.innerHTML = 'Reported first <i style="background:' + COLOR[win] + '">' + win + "</i>";
+    k = (k + 1) % SCENES.length;
+  }
+  show();
+  setInterval(show, 1200);
+})();
+</script></body></html>
