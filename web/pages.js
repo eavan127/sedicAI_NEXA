@@ -227,87 +227,57 @@ export function drawAttention(canvas, session, windowIndex) {
  * and rebuilds. The page states what is running; it does not claim this
  * architecture is the best-performing one. */
 export function modelCardHtml(card, which) {
+  // Built from the page's own pieces (.kpi tiles, .barlist bars, .tier-chip
+  // chips, as on the History page) so it reads as part of the same console.
   const ens = which === "ensemble";
   const arch = ens ? card.architecture : card.member_architecture;
   const total = ens ? card.parameters * 5 : card.parameters;
   const judged = new Set(card.judged_classes || []);
   const fmt = n => n.toLocaleString();
-  // One member's parameters: the two named branches, and whatever the
-  // checkpoint holds besides them (fusion, attention pooling, classifier head).
   const branchSum = Object.values(card.branches).reduce((a, b) => a + b, 0);
   const parts = [
     ...Object.entries(card.branches).map(([name, n]) => [name.replace("_branch", "").toUpperCase() + " branch", n]),
     ["Fusion, pooling and head", Math.max(0, card.parameters - branchSum)],
   ];
-  const PART_COLOR = ["#1F6FB2", "#7A5BC0", "#627143"];
-  const windowUs = (card.window_len / card.fs * 1e6).toFixed(0);
-  const tile = (label, value, sub) => `<div class="mc-tile"><div class="mc-k">${label}</div><div class="mc-v">${value}</div>`
-    + (sub ? `<div class="mc-s">${sub}</div>` : "") + `</div>`;
+  const kpi = (label, value, sub) => `<div class="kpi"><div class="kpi-label">${label}</div>`
+    + `<div class="kpi-value mc-v">${value}</div>${sub ? `<div class="mc-sub">${sub}</div>` : ""}</div>`;
+  const bar = (label, frac, value, strong = false) => `<div class="barrow mc-barrow"><div class="barlabel"${strong ? ' style="font-weight:700"' : ""}>${label}</div>`
+    + `<div class="bartrack"><div class="barfill" style="width:${(frac * 100).toFixed(1)}%"></div></div><div class="barvalue">${value}</div></div>`;
+  const head = t => `<div class="kpi-label mc-head">${t}</div>`;
 
-  return `<style>
-    .mc { font-family: ${FONT}; color: ${TEXT}; background: ${PANEL}; border: 1px solid ${GRID}; border-radius: 10px; padding: 20px 22px; }
-    .mc-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 14px; padding-bottom: 16px; border-bottom: 1px solid ${GRID}; }
-    .mc-k { font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: ${TEXT_DIM}; }
-    .mc-name { font-size: 28px; font-weight: 800; letter-spacing: .01em; margin-top: 2px; }
-    .mc-sub { font-size: 14px; color: ${TEXT_DIM}; margin-top: 2px; }
-    .mc-big { font-family: ${MONO}; font-size: 30px; font-weight: 700; text-align: right; }
-    .mc-sec { margin-top: 18px; }
-    .mc-bar { display: flex; height: 16px; border-radius: 8px; overflow: hidden; margin: 8px 0 6px; background: ${BG}; }
-    .mc-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13.5px; color: ${INSTRUMENT}; }
-    .mc-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
-    .mc-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 8px; }
-    @media (max-width: 760px) { .mc-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-    @media (max-width: 420px) { .mc-grid { grid-template-columns: 1fr; } }
-    .mc-tile { background: ${BG}; border: 1px solid ${GRID}; border-radius: 8px; padding: 10px 12px; }
-    .mc-v { font-size: 17px; font-weight: 700; margin-top: 3px; }
-    .mc-s { font-size: 13px; color: ${TEXT_DIM}; margin-top: 2px; }
-    .mc-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-    .mc-chip { font-size: 13px; font-weight: 700; color: #fff; border-radius: 999px; padding: 3px 11px; }
-    .mc-chip small { font-weight: 600; opacity: .85; margin-left: 4px; }
-    .mc-thr { display: grid; grid-template-columns: 110px 1fr 46px; gap: 7px 10px; align-items: center; margin-top: 10px; font-size: 14px; }
-    .mc-track { position: relative; height: 12px; border-radius: 6px; background: ${BG}; border: 1px solid ${GRID}; }
-    .mc-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 6px; }
-    .mc-num { font-family: ${MONO}; text-align: right; }
-    .mc-foot { margin-top: 16px; font-size: 13px; color: ${TEXT_DIM}; }
-  </style>
-  <div class="mc">
-    <div class="mc-head">
-      <div><div class="mc-k">Architecture</div><div class="mc-name">${arch}</div>
-        <div class="mc-sub">${ens ? `5 × ${card.member_architecture}, scores averaged` : "dual-branch CNN, raw IQ + spectrogram"}</div></div>
-      <div><div class="mc-k" style="text-align:right">Parameters</div><div class="mc-big">${fmt(total)}</div>
-        ${ens ? `<div class="mc-sub" style="text-align:right">5 × ${fmt(card.parameters)}</div>` : ""}</div>
-    </div>
+  return `<div class="kpi-row">`
+    + kpi("Architecture", arch, ens ? `5 × ${card.member_architecture}, scores averaged` : "dual-branch CNN")
+    + kpi("Parameters", fmt(total), ens ? `5 × ${fmt(card.parameters)}` : "")
+    + kpi("Classes", card.classes.length, `${judged.size} judged`)
+    + kpi("Window", `${(card.window_len / card.fs * 1e6).toFixed(0)} µs`, `${card.window_len} samples at ${(card.fs / 1e6).toFixed(1)} MHz`)
+    + `</div>`
 
-    <div class="mc-sec"><div class="mc-k">One member, ${fmt(card.parameters)} parameters</div>
-      <div class="mc-bar">${parts.map(([, n], i) => `<div style="width:${(n / card.parameters * 100).toFixed(2)}%;background:${PART_COLOR[i]}"></div>`).join("")}</div>
-      <div class="mc-legend">${parts.map(([name, n], i) => `<span><i style="background:${PART_COLOR[i]}"></i>${name} · ${fmt(n)} (${Math.round(n / card.parameters * 100)}%)</span>`).join("")}</div>
-    </div>
+    + head(`One member: ${fmt(card.parameters)} parameters`)
+    + `<div class="barlist">${parts.map(([name, n]) => bar(name, n / card.parameters, `${Math.round(n / card.parameters * 100)}%`)).join("")}</div>`
 
-    <div class="mc-sec"><div class="mc-k">Specification</div>
-      <div class="mc-grid">
-        ${tile("Input", `(2, ${card.window_len})`, "I and Q channels")}
-        ${tile("Window", `${windowUs} µs`, `at ${(card.fs / 1e6).toFixed(1)} MHz`)}
-        ${tile("Output", "Sigmoid, multi-label", "each class decided independently")}
-        ${tile("Pooling", "Energy-gated attention", "weights the windows that carry signal")}
-        ${tile("Sampling", "SNR-weighted", "10^(−SNR/20)")}
-        ${tile("Runtime", "onnxruntime-web", "WASM, exported from the .pt checkpoint")}
-      </div>
-    </div>
+    + head("Specification")
+    + `<div class="kpi-row">`
+    + kpi("Input", `(2, ${card.window_len})`, "I and Q channels")
+    + kpi("Output", "Sigmoid, multi-label", "each class decided on its own")
+    + kpi("Pooling", "Energy-gated attention", "weights windows that carry signal")
+    + kpi("Sampling", "SNR-weighted", "10^(−SNR/20)")
+    + kpi("Runtime", "onnxruntime-web", "WASM, exported from .pt")
+    + `</div>`
 
-    <div class="mc-sec"><div class="mc-k">${card.classes.length} classes</div>
-      <div class="mc-chips">${card.classes.map(c => `<span class="mc-chip" style="background:${CLASS_COLOR[c] || INSTRUMENT}">${c}${judged.has(c) ? "<small>judged</small>" : ""}</span>`).join("")}</div>
-    </div>
+    + head("Classes")
+    + `<div class="tier-row">${card.classes.map(c => {
+      const tier = TIER_OF[c] || "Empty";
+      return `<span class="tier-chip" style="border-left-color:${TIER_COLOR[tier] || GRID}"><b>${c}</b>`
+        + ` <span class="dim">${tier}${judged.has(c) ? " · judged" : ""}</span></span>`;
+    }).join("")}</div>`
 
-    <div class="mc-sec"><div class="mc-k">Decision thresholds</div>
-      <div class="mc-sub">A class is reported once its score crosses its own line. Judged classes are tuned for at least ${Math.round((card.benchmark_recall || 0.8) * 100)}% recall.</div>
-      <div class="mc-thr">${Object.entries(card.thresholds).map(([c, v]) =>
-        `<span style="font-weight:${judged.has(c) ? 800 : 600}">${c}</span>`
-        + `<div class="mc-track"><div class="mc-fill" style="width:${(v * 100).toFixed(1)}%;background:${CLASS_COLOR[c] || INSTRUMENT}"></div></div>`
-        + `<span class="mc-num">${v.toFixed(2)}</span>`).join("")}</div>
-    </div>
+    + head("Decision thresholds")
+    + `<div class="note" style="margin-bottom:6px;">A class is reported once its score crosses its own line. `
+    + `Judged classes (bold) are tuned for at least ${Math.round((card.benchmark_recall || 0.8) * 100)}% recall.</div>`
+    + `<div class="barlist">${Object.entries(card.thresholds).map(([c, v]) => bar(c, v, v.toFixed(2), judged.has(c))).join("")}</div>`
 
-    <div class="mc-foot">Read from the checkpoint at build time, not hardcoded. Describes what is running; not a claim that this architecture is the best performing.</div>
-  </div>`;
+    + `<div class="note" style="margin-top:12px;">Read from the checkpoint at build time, not hardcoded. `
+    + `Describes what is running; not a claim that this architecture is the best performing.</div>`;
 }
 
 // ---------------------------------------------------------------------------

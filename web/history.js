@@ -81,7 +81,8 @@ export function applyFilters(records, { tier = "", cls = "", source = "", query 
     if (t < lo || t > hi) return false;
     if (tier && r.verdict !== tier) return false;
     if (cls && !(r.classes_detected || []).includes(cls)) return false;
-    if (source && r.source !== source) return false;
+    // The stored source ("scenario"/"upload"), or one of the four input labels
+    if (source && (source === "scenario" || source === "upload" ? r.source !== source : inputLabel(r) !== source)) return false;
     if (q) {
       const hay = [r.file_name, r.case_note, r.model, r.verdict,
                     ...(r.classes_detected || [])].filter(Boolean).join(" ").toLowerCase();
@@ -141,12 +142,23 @@ export function barsHtml(pairs, { empty = "Nothing recorded yet.", sort = true }
     </div>`).join("")}</div>`;
 }
 
+/** Where a capture came in: the four inputs of the console. Read from what
+ *  the page wrote at the time (source + case note), so older rows label too. */
+export function inputLabel(r) {
+  const note = r.case_note || "";
+  if (note.startsWith("LIVE · simulated receiver")) return "Live · simulated receiver";
+  if (note.startsWith("LIVE · replay")) return "Live · file replay";
+  if (r.source === "upload") return "File upload";
+  if (r.source === "scenario") return "Synthesized";
+  return r.source || "unknown";
+}
+
 /** Alert and review chips beside the verdict (local database records only). */
 export function flagsHtml(r) {
   const chips = [];
   if (r.alert_level === "confirmed") chips.push(`<span class="chip alert" title="Military or hostile emitter, model clearly past its threshold">alert</span>`);
   if (r.alert_level === "possible") chips.push(`<span class="chip possible" title="Possible threat: the model only just reported it (or jamming under its reporting threshold)">possible</span>`);
-  if (r.needs_review && !r.reviewed_by) chips.push(`<span class="chip review" title="Close call: waiting for an operator to check it">needs a look</span>`);
+  if (r.needs_review && !r.reviewed_by) chips.push(`<span class="chip review" title="Low-confidence detection awaiting review">review required</span>`);
   if (r.needs_review && r.reviewed_by) chips.push(`<span class="chip done" title="Checked by ${esc(r.reviewed_by)}">checked</span>`);
   return chips.length ? `<div>${chips.join(" ")}</div>` : "";
 }
@@ -172,7 +184,7 @@ export function tableHtml(records, { canDelete = true } = {}) {
   const rows = records.map(r => `
     <tr>
       <td>${esc(fmtTime(r.created_at))}</td>
-      <td>${esc(r.file_name || r.case_note || r.source)}</td>
+      <td>${esc(r.file_name || r.case_note || r.source)}<div><span class="src-tag">${esc(inputLabel(r))}</span></div></td>
       <td><span style="color:${TIER_COLOR[r.verdict] || "inherit"}"><b>${esc(r.verdict)}</b></span>${flagsHtml(r)}</td>
       <td>${esc((r.classes_detected || []).join(", ") || "—")}</td>
       <td class="num">${r.snr_db == null ? "—" : esc(r.snr_db)}</td>

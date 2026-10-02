@@ -533,7 +533,7 @@ class LocalDB:
         if a.get("verdict") in THREAT_VERDICTS or a.get("alert_level"):
             return "kept", "threat detected"
         if a.get("needs_review"):
-            return "kept", "close call, flagged for review"
+            return "kept", "low confidence, flagged for review"
         return "rolling", "routine signal, kept briefly"
 
     def prune_rolling_iq(self, cap_bytes: int = ROLLING_IQ_BYTES, actor: Actor = SYSTEM) -> list[str]:
@@ -572,8 +572,11 @@ class LocalDB:
         return [a["id"] for a, _, _ in gone]
 
     def mark_reviewed(self, analysis_id: str, actor: Actor, note: str = "") -> dict:
-        """An operator looked at a flagged capture and agrees with the model.
-        (A correction marks it reviewed too.) Kept either way: it was flagged."""
+        """An analyst looked at a flagged capture and agrees with the model.
+        (A correction marks it reviewed too.) Kept either way: it was flagged.
+        Operators correct; only an analyst may close a close call as right."""
+        if not role_at_least(actor.role, TOP_ROLE):
+            raise PermissionError("Only an analyst can mark the model right; an operator views and corrects.")
         with self._write() as con:
             a = con.execute("SELECT * FROM analyses WHERE id = ?", (analysis_id,)).fetchone()
             if not a:
@@ -655,6 +658,13 @@ class LocalDB:
                 "reason": reason, "model": body.get("model") or a["model"],
                 "iq_path": iq_path, "iq_sha256": iq_sha,
             }
+            # An operator's correction waits for an analyst. An analyst IS the
+            # approving authority, so theirs takes effect at once -- recorded as
+            # such, never silently (audit: correction.create, direct=True).
+            direct = role_at_least(actor.role, TOP_ROLE)
+            if direct:
+                row.update(status="approved", reviewed_by=actor.name, reviewed_at=row["created_at"],
+                           review_note="approved directly by an analyst")
             con.execute(f"INSERT INTO corrections ({', '.join(row)}) VALUES "
                         f"({', '.join(':' + k for k in row)})", row)
             con.execute("UPDATE analyses SET reviewed_by = ?, reviewed_at = ? WHERE id = ?"
@@ -662,7 +672,7 @@ class LocalDB:
             self._append_audit(con, actor, "correction.create", "correction", row["id"], {
                 "analysis_id": analysis_id, "span_s": [start_s, end_s],
                 "predicted": predicted, "corrected": corrected, "reason": reason,
-                "iq_sha256": iq_sha,
+                "iq_sha256": iq_sha, "direct": direct,
             })
         return self.get_correction(row["id"])
 
@@ -707,15 +717,22 @@ class LocalDB:
                 raise ValueError("no such correction")
             if row["status"] != "pending":
                 raise PermissionError(f"already {row['status']} by {row['reviewed_by']}")
-            if row["operator"].lower() == actor.name.lower():
+            own = row["operator"].lower() == actor.name.lower()
+            if own and not role_at_least(actor.role, TOP_ROLE):
                 raise PermissionError("Four-eyes rule: a correction must be reviewed by someone "
                                       "other than the person who submitted it.")
+            # With two roles an analyst's own correction has nobody else to
+            # review it, so an analyst may -- never silently: it takes a real
+            # reason and is recorded as a self-review in the audit trail.
+            if own and len(note) < 10:
+                raise ValueError("Reviewing your own correction needs a reason (at least 10 characters); "
+                                 "it is recorded as a self-review.")
             con.execute("UPDATE corrections SET status = ?, reviewed_by = ?, reviewed_at = ?,"
                         " review_note = ? WHERE id = ?",
                         (status, actor.name, now_iso(), note, correction_id))
             self._append_audit(con, actor, f"correction.{decision}", "correction", correction_id, {
                 "analysis_id": row["analysis_id"], "submitted_by": row["operator"],
-                "corrected": json.loads(row["corrected_labels"]), "note": note,
+                "corrected": json.loads(row["corrected_labels"]), "note": note, "self_review": own,
             })
         return self.get_correction(correction_id)
 

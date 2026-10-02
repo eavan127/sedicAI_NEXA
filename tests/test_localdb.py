@@ -375,19 +375,31 @@ def test_v1_database_migrates_in_place(tmp_path):
     assert {"iq_path", "iq_sha256"} <= cols and db.verify_audit()["ok"]
 
 
+def test_an_analysts_correction_is_direct_an_operators_waits_for_an_analyst(db, tmp_path):
+    analyst, operator = Actor("ana", "analyst", "127.0.0.1"), Actor("olly", "operator", "127.0.0.1")
+    _stored(db, tmp_path, "sr1")
+    direct = db.create_correction(correction("sr1"), analyst)
+    assert direct["status"] == "approved" and direct["reviewed_by"] == "ana"
+    assert db.audit(limit=1, action_prefix="correction.create")[0]["details"]["direct"] is True
+    _stored(db, tmp_path, "sr2")
+    waits = db.create_correction(correction("sr2"), operator)
+    assert waits["status"] == "pending"
+    with pytest.raises(PermissionError, match="Four-eyes"):
+        db.review_correction(waits["id"], "approve", "I am sure it is right", operator)
+    assert db.review_correction(waits["id"], "approve", "", analyst)["status"] == "approved"
+
+
 def test_corrections_over_http(server):
     base, _ = server
     call(base + "/api/analyses", "POST", record("h9", duration_s=0.05, file_path="iq/h9/a.f32"))
+    # eavan is an analyst: her correction is approved on the spot
     status, _, body = call(base + "/api/corrections", "POST", correction("h9"),
                            headers={"X-NEXA-Operator": "eavan"})
-    assert status == 201
-    cid = json.loads(body)["id"]
-    status, _, body = call(base + f"/api/corrections/{cid}/review", "POST", {"decision": "approve"},
-                           headers={"X-NEXA-Operator": "eavan"})
-    assert status == 409 and "Four-eyes" in json.loads(body)["error"]
-    status, _, _ = call(base + f"/api/corrections/{cid}/review", "POST", {"decision": "approve"},
-                        headers={"X-NEXA-Operator": "jessy"})
-    assert status == 200
+    c = json.loads(body)
+    assert status == 201 and c["status"] == "approved" and c["reviewed_by"] == "eavan"
+    status, _, body = call(base + f"/api/corrections/{c['id']}/review", "POST", {"decision": "approve"},
+                           headers={"X-NEXA-Operator": "jessy"})
+    assert status == 409 and "already approved" in json.loads(body)["error"]
     assert json.loads(call(base + "/api/corrections/stats")[2])["approved"] == 1
 
 
@@ -500,11 +512,14 @@ def test_a_retrain_logs_and_keeps_the_signals_it_learned_from(db, tmp_path):
     assert db.prune_rolling_iq(cap_bytes=0) == [] and f.exists()
 
 
-def test_operator_marks_a_flagged_capture_reviewed_once(db, tmp_path):
+def test_only_an_analyst_marks_a_flagged_capture_right_and_only_once(db, tmp_path):
+    analyst = Actor("ana", "analyst", "127.0.0.1")
     _stored(db, tmp_path, "q1", needs_review=True)
-    assert db.mark_reviewed("q1", ME, "model is right")["reviewed_by"] == "eavan"
+    with pytest.raises(PermissionError, match="Only an analyst"):
+        db.mark_reviewed("q1", ME, "model is right")                # ME is an operator
+    assert db.mark_reviewed("q1", analyst, "model is right")["reviewed_by"] == "ana"
     with pytest.raises(PermissionError, match="already reviewed"):
-        db.mark_reviewed("q1", EXPERT)
+        db.mark_reviewed("q1", analyst)
     _stored(db, tmp_path, "q2", needs_review=True)
     db.create_correction(correction("q2"), EXPERT)              # a correction counts as a review
     assert db.get_analysis("q2")["reviewed_by"] == "jessy"

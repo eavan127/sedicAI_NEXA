@@ -145,9 +145,9 @@ function paintTriage(t) {
   }
   if (t.needsReview) {
     const calls = t.closeCalls.slice(0, 3).map(c => `${c.cls} ${pct(c.peak)} (clear above ${pct(c.line)})`).join(", ");
-    parts.push(`<div class="tri review"><strong>NEEDS A LOOK</strong> `
-      + (calls ? `close call: ${calls}${t.closeCalls.length > 3 ? ` and ${t.closeCalls.length - 3} more` : ""}. ` : "")
-      + `Sent to the operator's review queue (History).</div>`);
+    parts.push(`<div class="tri review"><strong>REVIEW REQUIRED</strong> `
+      + (calls ? `low confidence: ${calls}${t.closeCalls.length > 3 ? ` and ${t.closeCalls.length - 3} more` : ""}. ` : "")
+      + `Added to the review queue (History).</div>`);
   }
   triageBanner.innerHTML = parts.join("");
   triageBanner.hidden = !parts.length;
@@ -424,6 +424,9 @@ function openCorrection({ predicted, startS, endS, missed, suggested = null, rea
   corrError.textContent = "";
   corrSubmit.disabled = false;
   corrDialog.showModal();
+  el("corrRule").textContent = isAnalyst()
+    ? "As an analyst, your correction is approved directly and can be used for retraining (recorded in the audit trail)."
+    : "Your correction waits for an analyst to approve it before it can be used to retrain the model.";
   corrReason.focus({ preventScroll: true });
   corrReason.setSelectionRange(corrReason.value.length, corrReason.value.length);   // type straight after a pre-filled start
   pinCorrectionSpan();
@@ -517,9 +520,10 @@ corrForm.addEventListener("submit", async (ev) => {
       reason: corrReason.value, model: corrCtx.sess.which,
     });
     closeCorrection();
-    const done = `Correction submitted by ${operatorName()}: `
+    const done = `Correction ${isAnalyst() ? "made" : "submitted"} by ${operatorName()}: `
       + `${corrCtx.predicted.join(" + ") || "nothing"} → ${corrected.join(" + ")}. `
-      + "It waits in History ▸ Human corrections until another person approves it.";
+      + (isAnalyst() ? "As an analyst it is approved directly and can be used for retraining."
+                     : "It waits in History ▸ Human corrections until an analyst approves it.");
     eventsNote.textContent = done;
     // Mark the recommended rows this correction answers, so none is reviewed
     // (and submitted) a second time: the one it was opened from, and any the
@@ -785,8 +789,8 @@ suggBulk.addEventListener("click", async (ev) => {
   if (sess !== session) return;
   renderSuggestions();
   suggestStatus.className = failed.length ? "corr-error" : "note";
-  suggestStatus.textContent = `${ok} correction${ok === 1 ? "" : "s"} submitted by ${operatorName()}; `
-    + "they wait in History, Human corrections, for another person to approve."
+  suggestStatus.textContent = `${ok} correction${ok === 1 ? "" : "s"} ${isAnalyst() ? "made" : "submitted"} by ${operatorName()}; `
+    + (isAnalyst() ? "as an analyst's, they are approved directly." : "they wait in History, Human corrections, for an analyst to approve.")
     + (failed.length ? ` Not submitted: ${failed.join("; ")}` : "");
 });
 
@@ -932,7 +936,7 @@ async function rxLoop() {
     if (t?.alertLevel || t?.needsReview) {
       rxLogLine(`Dwell ${block.index + 1}: ${classes.join(" + ") || "nothing"}`
         + (t.alertLevel ? ` · ${t.alertLevel === "confirmed" ? "THREAT" : "possible threat"}` : "")
-        + (t.needsReview ? " · needs a look" : ""));
+        + (t.needsReview ? " · review required" : ""));
     }
     const bytes = toInterleavedF32(block.re, block.im);
     session.storing = store(new File([bytes.buffer], `dwell-${String(block.index + 1).padStart(5, "0")}.f32`));
@@ -1132,6 +1136,7 @@ function showPage(page) {
   // Canvases cannot be sized while hidden, so each page draws on entry.
   if (page === "signal") renderSignal();
   if (page === "history") return renderHistory();
+  if (page === "audit") renderAudit();
   if (page === "performance") renderPerformance();
   if (page === "model") renderModel();
   if (page === "users") renderUsers();
@@ -1264,9 +1269,13 @@ const STATUS_TEXT = { active: "in use", candidate: "waiting for approval", retir
 
 /** What can be done with a saved version, and how it is labelled. Every
  *  version stays on disk forever, so every one of them has a way back. */
+/** Only an analyst decides which model runs (serve_local.py refuses the rest). */
+const isOperator = () => currentAuth().user?.role === "operator";
+const isAnalyst = () => currentAuth().user?.role === "analyst";
+
 function versionActions(m) {
   const v = escH(m.version), passed = !!m.metrics?.gate?.passed;
-  if (m.status === "active") return "";
+  if (m.status === "active" || isOperator()) return "";
   if (m.status === "candidate") {
     return (passed ? `<button class="mini" data-act="approve" data-v="${v}">Approve &amp; activate</button> `
       : `<button class="mini warn" data-act="override" data-v="${v}">Activate anyway…</button> `)
@@ -1283,6 +1292,8 @@ async function renderRetrain() {
   block.hidden = false;
   el("historyBlock").hidden = false;
   rtOperator.value = operatorName();
+  el("rtControls").hidden = isOperator();
+  el("rtOperatorNote").hidden = !isOperator();
   const st = await renderTrigger(el("modelTrigger"));
   el("rtOverrideRow").hidden = !!st?.recommended;
   try {
@@ -1302,7 +1313,7 @@ async function renderRetrain() {
       `<tr class="shipped"><td><strong>${name}</strong><div class="note">shipped with the app, never modified</div></td>`
       + `<td>${MODEL_KIND_LABEL[kind]}</td><td colspan="6"><span class="note">the version every retrain is measured against first</span></td>`
       + `<td><span class="pill ${active ? "approved" : "neutral"}">${active ? "in use" : "saved"}</span></td>`
-      + `<td class="row-actions">${active ? "" : `<button class="mini" data-act="shipped" data-kind="${kind}">Use shipped</button>`}</td></tr>`;
+      + `<td class="row-actions">${active || isOperator() ? "" : `<button class="mini" data-act="shipped" data-kind="${kind}">Use shipped</button>`}</td></tr>`;
 
     rtModels.innerHTML = `<table><thead><tr><th>Version</th><th>Type</th><th>Fine-tuned from · data</th><th>Exam</th>`
       + `<th>LFM_RADAR</th><th>FHSS</th><th>JAMMING</th><th>Gate</th><th>Status</th><th></th></tr></thead><tbody>`
@@ -1577,29 +1588,32 @@ function paintHistory() {
     : `${filtered.length} of ${histRecords.length} stored`;
 }
 
-// "Needs a look": close calls nobody has checked yet, newest first. The
+// "Review required": low-confidence detections nobody has reviewed yet, newest first. The
 // operator views each one, then corrects it or marks the model right.
 const queueBlock = el("queueBlock"), queueList = el("queueList"), queueMsg = el("queueMsg");
 const QUEUE_SHOWN = 15;
 
 function paintQueue() {
   const waiting = histRecords.filter(r => r.needs_review && !r.reviewed_by);
+  const analyst = isAnalyst();               // only an analyst closes a close call as right
   queueBlock.hidden = readConfig().backend !== "server";
   if (queueBlock.hidden) return;
   const esc = t => String(t ?? "").replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
   queueList.innerHTML = !waiting.length
-    ? `<div class="note">Nothing waiting: every close call has been checked.</div>`
-    : `<div class="note">${waiting.length} waiting${waiting.length > QUEUE_SHOWN ? `, newest ${QUEUE_SHOWN} shown` : ""}.</div>`
-      + `<div class="bulkbar"><label><input type="checkbox" id="queueAll"> Select all shown</label>`
-      + `<button class="mini" id="queueRightSel" disabled>Mark selected: model is right</button><span class="bulk-n" id="queueN">0 selected</span></div>`
-      + `<table><tbody>` + waiting.slice(0, QUEUE_SHOWN).map(r => `<tr><td style="width:34px"><input type="checkbox" class="row-pick" data-pick="${esc(r.id)}" aria-label="Select"></td>`
+    ? `<div class="note">Nothing waiting: every low-confidence detection has been reviewed.</div>`
+    : `<div class="note">${waiting.length} waiting${waiting.length > QUEUE_SHOWN ? `, newest ${QUEUE_SHOWN} shown` : ""}.`
+      + (analyst ? "" : " View one and correct it; an analyst decides whether the model was right.") + `</div>`
+      + (analyst ? `<div class="bulkbar"><label><input type="checkbox" id="queueAll"> Select all shown</label>`
+        + `<button class="mini" id="queueRightSel" disabled>Mark selected: model is right</button><span class="bulk-n" id="queueN">0 selected</span></div>` : "")
+      + `<table><tbody>` + waiting.slice(0, QUEUE_SHOWN).map(r => `<tr>`
+        + (analyst ? `<td style="width:34px"><input type="checkbox" class="row-pick" data-pick="${esc(r.id)}" aria-label="Select"></td>` : "")
         + `<td>${esc(new Date(r.created_at).toLocaleString())}</td>`
         + `<td>${esc(r.file_name || r.case_note || r.source)}</td>`
         + `<td><b style="color:${TIER_COLOR[r.verdict] || "inherit"}">${esc(r.verdict)}</b>${flagsHtml(r)}</td>`
         + `<td>${esc((r.classes_detected || []).join(", ") || "—")}</td>`
         + `<td class="row-actions">`
         + (canView(r) ? `<button class="mini" data-q="view" data-id="${esc(r.id)}">View</button> ` : "")
-        + `<button class="mini" data-q="right" data-id="${esc(r.id)}">Model is right</button></td></tr>`).join("")
+        + (analyst ? `<button class="mini" data-q="right" data-id="${esc(r.id)}">Model is right</button>` : "") + `</td></tr>`).join("")
       + `</tbody></table>`;
 }
 
@@ -1957,9 +1971,9 @@ async function renderCorrections() {
     const byId = new Map(histRecords.map(r => [r.id, r]));
     // Bulk review: analysts only, and never your own (four-eyes)
     const mayReview = currentAuth().user?.role === "analyst" || !currentAuth().user;
-    const canPick = c => mayReview && c.status === "pending" && c.operator.toLowerCase() !== operatorName().toLowerCase();
+    const canPick = c => mayReview && c.status === "pending";
     const nPick = rows.filter(canPick).length;
-    const bar = nPick ? `<div class="bulkbar"><label><input type="checkbox" id="corrAll"> Select all I may review (${nPick})</label>`
+    const bar = nPick ? `<div class="bulkbar"><label><input type="checkbox" id="corrAll"> Select all pending (${nPick})</label>`
       + `<button class="mini" data-bulk="approve" disabled>Approve selected</button>`
       + `<button class="mini" data-bulk="reject" disabled>Reject selected</button><span class="bulk-n" id="corrN">0 selected</span></div>` : "";
     corrTable.innerHTML = rows.length ? bar + `<table><thead><tr><th style="width:34px"></th><th>Submitted</th><th>Capture · span</th>`
@@ -1974,9 +1988,10 @@ async function renderCorrections() {
         const own = c.operator.toLowerCase() === operatorName().toLowerCase();
         const view = `<button class="mini" data-view="${esc(c.id)}" title="Open this capture and see the corrected stretch">View</button> `;
         const actions = view + (c.status !== "pending" ? ""
-          : own ? `<span class="note">Your own correction:<br>another person must review it</span>`
-          : `<button class="mini" data-review="approve" data-id="${esc(c.id)}">Approve</button> `
-            + `<button class="mini" data-review="reject" data-id="${esc(c.id)}">Reject</button>`);
+          : !mayReview ? `<div class="note">Waiting for an analyst</div>`
+          : `<button class="mini" data-review="approve" data-id="${esc(c.id)}"${own ? ' data-own="1"' : ""}>Approve</button> `
+            + `<button class="mini" data-review="reject" data-id="${esc(c.id)}"${own ? ' data-own="1"' : ""}>Reject</button>`
+            + (own ? `<div class="note">your own: self-review, reason required</div>` : ""));
         return `<tr><td>${canPick(c) ? `<input type="checkbox" class="row-pick" data-pick="${esc(c.id)}" aria-label="Select">` : ""}</td>`
           + `<td>${esc(new Date(c.created_at).toLocaleString())}</td>`
           + `<td>${esc(cap?.file_name || cap?.case_note?.slice(0, 40) || c.analysis_id.slice(0, 8))}<div class="note">${span}</div></td>`
@@ -2011,10 +2026,21 @@ corrTable.addEventListener("click", async (ev) => {
   const bulk = ev.target.closest("button[data-bulk]");
   if (!bulk) return;
   const ids = corrPicked(), decision = bulk.dataset.bulk;
-  const note = window.prompt(decision === "approve"
+  const me = operatorName().toLowerCase();
+  const nOwn = ids.filter(id => corrRows.find(c => c.id === id)?.operator.toLowerCase() === me).length;
+  const verb = decision === "approve" ? "Approve" : "Reject";
+  const note = window.prompt(nOwn
+    ? `${verb} ${ids.length} corrections as ${operatorName()}. ${nOwn} of them are your own, so they are recorded as `
+      + "SELF-REVIEWS. Give a reason (at least 10 characters, applies to all):"
+    : decision === "approve"
     ? `Approve ${ids.length} corrections as ${operatorName()}? Optional note (applies to all):`
     : `Reject ${ids.length} corrections as ${operatorName()}. Why? (required, applies to all)`, "");
   if (note === null) return;
+  if (nOwn && note.trim().length < 10) {
+    corrMsg.className = "corr-error";
+    corrMsg.textContent = "Your own corrections need a reason of at least 10 characters (recorded as a self-review). Nothing was changed.";
+    return;
+  }
   corrMsg.className = "note";
   corrMsg.textContent = `${decision === "approve" ? "Approving" : "Rejecting"} ${ids.length}…`;
   let ok = 0; const failed = [];
@@ -2036,7 +2062,10 @@ corrTable.addEventListener("click", async (ev) => {
   const btn = ev.target.closest("button[data-review]");
   if (!btn) return;
   const decision = btn.dataset.review;
-  const note = window.prompt(decision === "approve"
+  const note = window.prompt(btn.dataset.own
+    ? `This is your own correction. ${decision === "approve" ? "Approve" : "Reject"} it as a SELF-REVIEW? `
+      + "Give a reason (at least 10 characters); it is recorded in the audit trail."
+    : decision === "approve"
     ? `Approve as ${operatorName()}? Optional note:`
     : `Reject as ${operatorName()}. Why? (required)`, "");
   if (note === null) return;
@@ -2115,12 +2144,12 @@ function showReviewBanner() {
     const a = r.rec;
     reviewBanner.innerHTML = `<div><strong>Stored capture</strong> ${esc(r.capture)}, analysed `
       + `${esc(new Date(a.created_at).toLocaleString())} as <strong>${esc(a.verdict)}</strong>. `
-      + (a.needs_review && !a.reviewed_by ? "It was flagged as a close call: check it, then correct it "
-         + "(click or drag on the timeline) or mark the model right." : "")
+      + (a.needs_review && !a.reviewed_by ? "It was flagged as a low-confidence detection: inspect it, then correct it "
+         + "(click or drag on the timeline)" + (isAnalyst() ? " or mark the model right." : "; an analyst decides whether the model was right.") : "")
       + `<div class="note">Raw signal: ${esc(a.retention?.why || "")}. The model shown is the one in use now.`
       + (session.truth?.length ? " Dashed boxes are the known true answer." : "") + `</div></div>`
       + `<div class="row-actions">`
-      + (a.needs_review && !a.reviewed_by ? `<button class="mini" id="reviewRight">Model is right</button> ` : "")
+      + (a.needs_review && !a.reviewed_by && isAnalyst() ? `<button class="mini" id="reviewRight">Model is right</button> ` : "")
       + `<button class="mini" id="reviewBack">← Back to History</button></div>`;
     return;
   }

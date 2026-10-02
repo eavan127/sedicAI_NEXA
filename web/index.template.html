@@ -155,6 +155,12 @@
   .tier-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
   .tier-chip { border: 1px solid var(--grid); border-left-width: 4px; border-radius: 4px; padding: 4px 10px; font-size: 14px; }
   .tier-chip .dim { color: var(--text-dim); }
+  /* Model card (pages.js:modelCardHtml): the page's kpi/barlist/chip pieces, text-sized */
+  .kpi-value.mc-v { font-size: 18px; }
+  .kpi .mc-sub { font-size: 13px; color: var(--text-dim); margin-top: 2px; }
+  .kpi-label.mc-head { margin: 16px 0 6px; font-weight: 600; }
+  .mc-barrow { grid-template-columns: minmax(0, 13rem) minmax(40px, 1fr) 3rem; }
+  .mc-barrow .barlabel { white-space: normal; overflow: visible; }
   .barlist { display: grid; gap: 6px; }
   /* The label column shrinks before the bar does: at 120px fixed, the two
      side-by-side panels left the track 2px wide and the chart read as a list
@@ -201,6 +207,7 @@
   .chip.review { background: rgba(214, 170, 0, 0.20); color: #6B5400; }
   .chip.done { background: rgba(98, 113, 67, 0.16); color: #4A5A2E; }
   .ret { font-weight: 700; font-size: 13px; }
+  .src-tag { display: inline-block; margin-top: 3px; font-size: 11.5px; font-weight: 700; letter-spacing: .03em; color: var(--text-dim); background: var(--bg); border: 1px solid var(--grid); border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
   .ret.kept { color: #4A5A2E; } .ret.rolling { color: var(--text-dim); } .ret.deleted { color: #9A4F12; }
   .rt-progress { margin: 4px 0 10px; }
   .rt-bar { height: 14px; border-radius: 7px; background: var(--grid); overflow: hidden; }
@@ -323,6 +330,19 @@
   #rtModels td.row-actions button { display: block; width: 100%; white-space: nowrap; text-align: center; }
   #rtModels td.row-actions button + button { margin: 6px 0 0; }
   .pill { white-space: nowrap; }
+  /* Audit trail page: a narrow # and time, room for the details */
+  #auditTable.table-wrap { max-height: 75vh; }
+  #auditTable table { table-layout: auto; }
+  #auditTable td:nth-child(1), #auditTable th:nth-child(1) { width: 1%; white-space: nowrap; }
+  #auditTable td:nth-child(2), #auditTable td:nth-child(3), #auditTable td:nth-child(4) { white-space: nowrap; }
+  #auditTable td:nth-child(5) { min-width: 320px; }
+  #auditTable td:nth-child(6) { white-space: nowrap; }
+  /* Corrections queue: sized to its content so the last column stays inside the box */
+  #corrTable table { table-layout: auto; }
+  #corrTable td { vertical-align: middle; }
+  #corrTable td:nth-child(5) { min-width: 180px; }
+  #corrTable td.row-actions { width: 1%; white-space: nowrap; padding-right: 14px; }
+  #corrTable td.row-actions .note { white-space: nowrap; margin-top: 4px; }
   .rt-scope { border: 1px solid var(--grid); border-radius: 6px; padding: 8px 12px; margin: 10px 0 0; }
   .rt-scope legend { font-size: 12.5px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; }
   .rt-scope label { display: flex; gap: 8px; align-items: baseline; font-size: 15px; padding: 3px 0; }
@@ -436,6 +456,7 @@
       <button class="active" data-page="replay">RF Replay</button>
       <button data-page="signal">Signal Analysis</button>
       <button data-page="history">History</button>
+      <button data-page="audit">Audit trail</button>
       <button data-page="performance">Performance</button>
       <button data-page="model">Model</button>
       <button data-page="assistant">Assistant</button>
@@ -634,9 +655,11 @@
         <button class="secondary" id="histRefresh">Refresh</button>
         <select id="histTier"><option value="">Every verdict</option></select>
         <select id="histClass"><option value="">Every class</option></select>
-        <select id="histSource"><option value="">Scenario and upload</option>
-          <option value="scenario">Scenario only</option>
-          <option value="upload">Upload only</option></select>
+        <select id="histSource"><option value="">Every input</option>
+          <option value="File upload">File upload</option>
+          <option value="Synthesized">Synthesized</option>
+          <option value="Live · simulated receiver">Live · simulated receiver</option>
+          <option value="Live · file replay">Live · file replay</option></select>
         <input id="histQuery" type="search" placeholder="Search file, case, class">
         <label class="note" style="margin:0;">From <input id="histFrom" type="date"></label>
         <label class="note" style="margin:0;">To <input id="histTo" type="date"></label>
@@ -704,10 +727,10 @@
       </div>
 
       <div class="block" id="queueBlock" hidden>
-        <div class="block-label">Needs a look: close calls waiting for an operator</div>
+        <div class="block-label">Review required: low-confidence detections</div>
         <div class="note">The model only just made up its mind on these (a score under 1.5x that class's
-          threshold), or saw possible jamming it did not report. View one, then correct it on the
-          timeline or mark the model right. Their raw signal is kept until then and afterwards.</div>
+          threshold), or saw possible jamming it did not report. An operator views one and corrects it on the
+          timeline; an analyst may instead mark the model right. Their raw signal is kept either way.</div>
         <div class="note" id="queueMsg" role="status"></div>
         <div class="table-wrap" id="queueList"></div>
       </div>
@@ -717,16 +740,13 @@
         <div class="table-wrap" id="histTable"></div>
       </div>
 
-      <div class="block">
-        <div class="block-label">Storage</div>
-        <div class="note" id="histBackendNote"></div>
-      </div>
+      <div id="histBackendNote" hidden></div>
 
       <div class="block" id="corrBlock" hidden>
         <div class="block-label">Human corrections: review queue</div>
-        <div class="note">Operators correct detections on the RF Replay page. Each correction must be
-          approved by a <strong>different</strong> named person (four-eyes rule) before it can become
-          training data, and is read-only once reviewed. Set your name in the Operator box below.</div>
+        <div class="note">Operators correct detections on the RF Replay page, and an <strong>analyst</strong> approves or
+          rejects each one before it can become training data; it is read-only once reviewed. An analyst's own
+          corrections are approved directly, and recorded as such in the audit trail.</div>
         <div class="filters" style="margin-top:8px;">
           <select id="corrStatusSel">
             <option value="pending" selected>Waiting for review</option>
@@ -739,7 +759,10 @@
         <div class="note" id="corrMsg" role="status"></div>
         <div class="table-wrap" id="corrTable"></div>
       </div>
+    </section>
 
+    <section id="page-audit" hidden>
+      <h3 class="page-title">Audit trail</h3>
       <div class="block" id="auditBlock" hidden>
         <div class="block-label">Audit trail</div>
         <div class="note">Every analysis, stored raw IQ file, deletion and report export, newest first.
@@ -809,11 +832,14 @@
         <div class="note">Approved corrections become training data. A retrain fine-tunes the single model, and
           optionally all 5 ensemble members, on them (mixed with original training data so they do not forget), then
           sits a fixed exam against the version in use: a new version is only offered for activation if it does not get
-          worse on LFM_RADAR, FHSS or JAMMING, and only a second person can activate it. <strong>Every version is
+          worse on LFM_RADAR, FHSS or JAMMING, and only an analyst can activate it. <strong>Every version is
           kept</strong>, including ones that failed or were rejected, so any of them, or the shipped files, can be
           brought back at any time.</div>
         <div id="modelTrigger"></div>
         <div class="note" id="rtActive" style="margin-top:10px;"></div>
+        <div class="note" id="rtOperatorNote" hidden style="margin-top:8px;">Only an analyst starts a retrain or changes the
+          model in use. As an operator you see which model is running and every saved version.</div>
+        <div id="rtControls">
         <label class="corr-block">Why retrain now? (required, recorded in the audit trail)
           <textarea id="rtReason" rows="2" placeholder="e.g. operators keep correcting FHSS as LFM_RADAR on the new captures"></textarea></label>
         <label class="note" id="rtOverrideRow" style="display:flex;gap:6px;align-items:center;margin-top:6px;">
@@ -830,6 +856,7 @@
           <label class="note" for="rtOperator" style="margin:0;">Your name</label>
           <input id="rtOperator" maxlength="64" style="width:160px;">
           <button class="primary" id="rtStart">Start retraining</button>
+        </div>
         </div>
         <div class="note" id="rtMsg" role="status" style="margin-top:6px;"></div>
         <div id="rtJob" hidden style="margin-top:10px;">
@@ -852,7 +879,10 @@
           on the History page, where Verify integrity proves none were edited.</div>
         <div id="rtHistory"></div>
       </div>
-      <div id="modelCardBox"></div>
+      <div class="block">
+        <div class="block-label">Model card</div>
+        <div id="modelCardBox"></div>
+      </div>
     </section>
     <section id="page-assistant" hidden>
       <h3 class="page-title">Assistant</h3>
@@ -907,8 +937,7 @@
     <form id="corrForm" method="dialog">
       <h3 id="corrTitle" style="margin:0 0 6px;">Correct this detection</h3>
       <div class="note" style="margin-bottom:10px;">The model said <strong id="corrModelSaid"></strong>.
-        Tick what is <em>really</em> there. Your correction waits for a second person to approve it
-        before it can be used to retrain the model.</div>
+        Tick what is <em>really</em> there. <span id="corrRule"></span></div>
       <div class="corr-span">
         <label>From (ms) <input id="corrStart" type="number" step="0.01" min="0" required></label>
         <label>To (ms) <input id="corrEnd" type="number" step="0.01" min="0" required></label>

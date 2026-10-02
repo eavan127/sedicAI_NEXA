@@ -130,6 +130,10 @@ def required_role(method: str, parts: list[str]) -> str:
         return "analyst"
     if method == "POST" and head in ("corrections", "models") and len(parts) == 3 and parts[2] == "review":
         return "analyst"
+    # Declaring a flagged capture correct is a judgement like approving one:
+    # an operator views it and corrects it; only an analyst closes it as right.
+    if method == "POST" and head == "analyses" and len(parts) == 3 and parts[2] == "reviewed":
+        return "analyst"
     # Putting a model version into use (approve / restore) is an analyst's
     # decision, like approving one; overriding a FAILED exam is checked
     # separately in the route and needs the analyst role too.
@@ -752,7 +756,7 @@ def main():
     p.add_argument("--demo", action="store_true", help=argparse.SUPPRESS)   # the default now; kept so old commands work
     p.add_argument("--keep-gb", type=float, default=ROLLING_IQ_BYTES / 1024 ** 3,
                    help="rolling window for ROUTINE raw signals (civilian/empty, confident, uncorrected); "
-                        "threats, close calls, corrected and training captures are always kept")
+                        "threats, low-confidence, corrected and training captures are always kept")
     p.add_argument("--quick-retrain", action="store_true",
                    help="demo/test: retrain on a small sample (1 epoch, 2,000 replay windows, "
                         "3,000-window exam) so a retrain takes about a minute")

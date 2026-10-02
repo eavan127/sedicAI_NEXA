@@ -125,7 +125,7 @@ function retention(a, corrected) {
   if (a.used_for_training) return ["kept", `used to train ${a.used_for_training}`];
   if (corrected) return ["kept", "a human corrected it"];
   if (THREAT_VERDICTS.includes(a.verdict) || a.alert_level) return ["kept", "threat detected"];
-  if (a.needs_review) return ["kept", "close call, flagged for review"];
+  if (a.needs_review) return ["kept", "low confidence, flagged for review"];
   return ["rolling", "routine signal, kept briefly"];
 }
 function analysisOut(a, corr = correctedIds()) {
@@ -316,6 +316,7 @@ function requiredRole(method, parts) {
   if (head === "users" || (method === "POST" && parts.join("/") === "retrain/start")
       || (method === "POST" && parts.join("/") === "models/rollback") || (method === "DELETE" && head === "analyses")) return "analyst";
   if (method === "POST" && (head === "corrections" || head === "models") && parts.length === 3 && ["review", "activate"].includes(parts[2])) return "analyst";
+  if (method === "POST" && head === "analyses" && parts.length === 3 && parts[2] === "reviewed") return "analyst";
   return "operator";
 }
 
@@ -447,9 +448,12 @@ async function route(method, parts, query, init) {
                   predicted_labels: predicted, corrected_labels: corrected, reason, model: b.model || a.model,
                   iq_path: a.file_path, iq_sha256: a.file_sha256 || null, status: "pending",
                   reviewed_by: null, reviewed_at: null, review_note: null };
+      const direct = actor.role === "analyst";           // an analyst's correction takes effect at once
+      if (direct) Object.assign(c, { status: "approved", reviewed_by: actor.name, reviewed_at: c.created_at,
+                                     review_note: "approved directly by an analyst" });
       S.corrections.push(c);
       if (!a.reviewed_by) { a.reviewed_by = actor.name; a.reviewed_at = c.created_at; }
-      await audit(actor, "correction.create", "correction", c.id, { analysis_id: a.id, span_s: [start, end], predicted, corrected, reason, iq_sha256: c.iq_sha256 });
+      await audit(actor, "correction.create", "correction", c.id, { analysis_id: a.id, span_s: [start, end], predicted, corrected, reason, iq_sha256: c.iq_sha256, direct });
       await save();
       return json(c, 201);
     }
@@ -473,11 +477,13 @@ async function route(method, parts, query, init) {
       const note = String(b.note || "").trim();
       if (status === "rejected" && note.length < 3) throw bad("say why it is rejected");
       if (c.status !== "pending") throw conflict(`already ${c.status} by ${c.reviewed_by}`);
-      if (c.operator.toLowerCase() === actor.name.toLowerCase()) {
+      const own = c.operator.toLowerCase() === actor.name.toLowerCase();
+      if (own && actor.role !== "analyst") {
         throw conflict("Four-eyes rule: a correction must be reviewed by someone other than the person who submitted it.");
       }
+      if (own && note.length < 10) throw bad("Reviewing your own correction needs a reason (at least 10 characters); it is recorded as a self-review.");
       Object.assign(c, { status, reviewed_by: actor.name, reviewed_at: nowIso(), review_note: note });
-      await audit(actor, `correction.${b.decision}`, "correction", c.id, { analysis_id: c.analysis_id, submitted_by: c.operator, corrected: c.corrected_labels, note });
+      await audit(actor, `correction.${b.decision}`, "correction", c.id, { analysis_id: c.analysis_id, submitted_by: c.operator, corrected: c.corrected_labels, note, self_review: own });
       await save();
       return json(c);
     }
