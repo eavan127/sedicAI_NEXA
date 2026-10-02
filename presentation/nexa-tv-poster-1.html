@@ -20,7 +20,7 @@
   /* template decorations */
 
   /* header */
-  .logo { left: 44px; top: 74px; }
+  .logo { left: 44px; top: 38px; }
   .logo img { display: block; height: 52px; width: auto; }
   .logo small { display: block; font-size: 14px; font-weight: 700; color: var(--mute); letter-spacing: 2px; margin: 6px 0 0 4px; }
   .title-pill {
@@ -179,15 +179,16 @@
 
   /* ---------- P5 resilience ---------- */
   #p5 { left: 1220px; top: 594px; width: 660px; height: 430px; }
-  .res-head { position: absolute; left: 14px; right: 14px; top: 0; display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .res-head { position: absolute; left: 14px; right: 14px; top: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
   .res-head strong { font-size: 17px; font-weight: 800; white-space: nowrap; }
-  .legend { display: flex; gap: 10px; font-size: 11px; font-weight: 800; white-space: nowrap; }
+  .legend { display: flex; gap: 12px; font-size: 13px; font-weight: 800; white-space: nowrap; }
   .legend span { display: inline-flex; align-items: center; gap: 5px; }
-  .legend i { width: 14px; height: 4px; border-radius: 2px; background: var(--c); }
-  .chart { position: absolute; left: 4px; top: 34px; }
+  .legend i { width: 18px; height: 5px; border-radius: 2px; background: var(--c); }
+  .chart { position: absolute; left: 4px; top: 56px; }
   .chart text { font-family: var(--font); }
   .series { fill: none; stroke-width: 4; stroke-linejoin: round; stroke-linecap: round; stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw 2.2s cubic-bezier(.3,.6,.2,1) forwards; }
-  .series.thin { stroke-width: 2; }
+  .series { stroke-width: 5; }
+  .series.thin { stroke-width: 2; opacity: .8; }
   @keyframes draw { to { stroke-dashoffset: 0; } }
   .res-foot { position: absolute; left: 14px; right: 14px; top: 336px; }
 
@@ -331,9 +332,8 @@
     <h2>RESILIENCE ACROSS NOISE</h2>
     <div class="body">
       <div class="res-head"><strong>All threats ≥ 80% from −6 dB up</strong>
-        <div class="legend"><span style="--c:var(--orange)"><i></i>LFM RADAR</span><span style="--c:var(--amber)"><i></i>FHSS</span><span style="--c:var(--red)"><i></i>JAMMING</span><span style="--c:#8DB6D8"><i style="height:2px"></i>OTHER 5 CLASSES</span></div></div>
-      <svg class="chart" id="chart" width="650" height="296" viewBox="0 0 650 296" role="img" aria-label="Recall by SNR for LFM radar, FHSS and jamming"></svg>
-      <div class="res-foot note">Recall per SNR bin on all held-out test windows, single and overlapping signals, 5-model ensemble. At −10 dB the noise is 10× stronger than the signal. Known limit: FHSS under a jammer 10 dB stronger falls to 26%.</div>
+        <div class="legend"><span style="--c:#6F42C1"><i></i>LFM RADAR</span><span style="--c:var(--amber)"><i></i>FHSS</span><span style="--c:var(--red)"><i></i>JAMMING</span><span style="--c:#8DB6D8"><i style="height:2px"></i>OTHER 5 CLASSES</span></div></div>
+      <svg class="chart" id="chart" width="650" height="316" viewBox="0 0 650 316" role="img" aria-label="Recall by SNR for LFM radar, FHSS and jamming"></svg>
     </div>
   </section>
 
@@ -583,9 +583,9 @@
   const others = [["BPSK", "#8DB6D8", [40.3, 81.9, 92.4, 93.7, 94.0, 95.2]], ["QPSK", "#8DB6D8", [71.7, 79.5, 84.8, 91.3, 91.0, 90.0]],
     ["16QAM", "#8DB6D8", [45.4, 81.1, 90.6, 97.1, 97.9, 97.8]], ["64QAM", "#8DB6D8", [55.6, 80.9, 89.7, 95.2, 97.6, 96.1]],
     ["NOISE", "#8DB6D8", [80.7, 86.7, 83.3, 87.3, 86.7, 81.3]]];
-  const series = [["LFM RADAR", C.orange, [64.1, 90.6, 85.3, 89.6, 89.2, 86.1]], ["FHSS", C.amber, [57.8, 90.6, 87.5, 91.0, 86.9, 83.7]], ["JAMMING", C.red, [44.5, 83.7, 91.0, 95.1, 93.5, 96.1]]];
+  const series = [["LFM RADAR", "#6F42C1", [64.1, 90.6, 85.3, 89.6, 89.2, 86.1]], ["FHSS", C.amber, [57.8, 90.6, 87.5, 91.0, 86.9, 83.7]], ["JAMMING", C.red, [44.5, 83.7, 91.0, 95.1, 93.5, 96.1]]];
   const svg = document.getElementById("chart");
-  const LO = 30, L = 56, Rr = 630, T = 14, B = 246, X = i => L + (Rr - L) * i / 5, Y = v => B - (B - T) * (v - LO) / (100 - LO);
+  const LO = 30, L = 56, Rr = 630, T = 14, B = 266, X = i => L + (Rr - L) * i / 5, Y = v => B - (B - T) * (v - LO) / (100 - LO);
   let s = "";
   [40, 60, 80, 100].forEach(v => {
     s += `<line x1="${L}" x2="${Rr}" y1="${Y(v)}" y2="${Y(v)}" stroke="${v === 80 ? C.ink : C.line}" stroke-width="${v === 80 ? 2 : 1}" ${v === 80 ? 'stroke-dasharray="8 6"' : ""}/>`;
@@ -603,8 +603,9 @@
     const d = vals.map((v, i) => (i ? "L" : "M") + X(i) + "," + Y(v)).join(" ");
     s += `<path class="series" pathLength="1" d="${d}" stroke="${c}" style="animation-delay:${k * .35}s"/>`;
     vals.forEach((v, i) => { s += `<circle cx="${X(i)}" cy="${Y(v)}" r="5.5" fill="#fff" stroke="${c}" stroke-width="3"/>`; });
-    const v0 = vals[0]; s += `<text x="${X(0) + 12}" y="${Y(v0) + 5}" font-size="14" font-weight="800" fill="${c}" stroke="#fff" stroke-width="4" paint-order="stroke">${v0}%</text>`;
+
   });
+  series.forEach(([n, c, vals]) => { const v0 = vals[0]; s += `<text x="${X(0) + 12}" y="${Y(v0) + 5}" font-size="15" font-weight="800" fill="${c}" stroke="#fff" stroke-width="5" paint-order="stroke">${v0}%</text>`; });
   svg.innerHTML = s;
 
   /* ---- start ---- */
