@@ -205,6 +205,9 @@
   .next-btn { position: fixed; right: 12px; bottom: 10px; z-index: 6; font: 800 15px var(--font); letter-spacing: .5px; color: #fff;
     background: var(--navy, #22306B); border-radius: 18px; padding: 8px 18px; text-decoration: none; opacity: .85; box-shadow: 0 4px 12px rgba(0,0,0,.18); }
   .next-btn:hover, .next-btn:focus-visible { opacity: 1; outline: 2px solid var(--orange, #F0A020); outline-offset: 2px; }
+  .back-btn { position: fixed; left: 12px; bottom: 10px; z-index: 6; font: 800 15px var(--font); letter-spacing: .5px; color: #fff;
+    background: var(--navy, #22306B); border-radius: 18px; padding: 8px 18px; text-decoration: none; opacity: .85; box-shadow: 0 4px 12px rgba(0,0,0,.18); }
+  .back-btn:hover, .back-btn:focus-visible { opacity: 1; outline: 2px solid var(--orange, #F0A020); outline-offset: 2px; }
   @media (prefers-reduced-motion: reduce) {
     .wire, .panel > h2 .live::before { animation: none; }
     .series { animation: none; stroke-dashoffset: 0; }
@@ -340,6 +343,7 @@
 </div>
 </div>
 <button class="fs-btn" id="fs" type="button">Fullscreen (F)</button>
+<a class="back-btn" id="back" href="nexa-opening-spectrogram.html" title="Previous slide (← or Page Up)">← Back</a>
 <a class="next-btn" id="next" href="nexa-tv-poster-2-system.html" title="Next slide (→ or Page Down)">Next →</a>
 
 <script>
@@ -366,6 +370,7 @@
   addEventListener("keydown", e => { if (e.key === "f" || e.key === "F") toggleFs(); });
   /* → / Page Down: next slide, so a presentation clicker works too */
   addEventListener("keydown", e => { if (e.key === "ArrowRight" || e.key === "PageDown") location.href = document.getElementById("next").href; });
+  addEventListener("keydown", e => { if (e.key === "ArrowLeft" || e.key === "PageUp") location.href = document.getElementById("back").href; });
   document.addEventListener("fullscreenchange", () => { fsBtn.hidden = !!document.fullscreenElement; });
 
   /* ---- a synthetic IQ scene: QPSK traffic + radar chirp bursts + noise ---- */

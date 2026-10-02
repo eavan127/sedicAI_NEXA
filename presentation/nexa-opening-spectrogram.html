@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NEXA opening</title>
+<!--
+  NEXA opening: an illustrative receiver screen (generic design, not any real product).
+  Main view: live spectrum on top, waterfall below; frequency runs left to right and
+  time scrolls downward, the same layout as the NEXA console. The side panel shows the
+  tuned frequency, a signal-level bar, a band overview and a zoom on the team's link.
+  Works offline; no external files. Illustrative only: not a recording.
+
+  Controls (also work with a presentation clicker):
+    Space / Right arrow / Page Down / click  -> next stage (after the last stage: poster 1)
+    Left arrow / Page Up                     -> previous stage
+    F                                        -> toggle full screen
+    R                                        -> reset to the start
+
+  Stages:
+    0  an ordinary busy band (cellular-style block, the team's data link, packet bursts,
+       push-to-talk voice, a time-slotted digital radio, weak carriers, centre spur)
+    1  a frequency-hopping radio appears, scattering short bursts across the band
+    2  a barrage jammer raises the noise over the team's link and buries it
+
+  Open with #1 or #2 at the end of the address to start on a later stage.
+  The frequency readout is decorative; change CENTRE_HZ below to show another value.
+-->
+<style>
+  :root { --chrome: #D7DBE0; --chrome-2: #C5CAD1; --edge: #9AA1AA; --ink: #1C2128; --ink-2: #4A525C; --screen: #0A0B0D; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--chrome); font-family: "Segoe UI", system-ui, sans-serif; color: var(--ink); }
+  body.idle, body.idle * { cursor: none; }
+  .app { display: grid; grid-template-rows: auto 1fr auto; height: 100vh; }
+
+  /* toolbar */
+  .ribbon { display: flex; align-items: stretch; gap: 0; background: linear-gradient(#E6E9ED, var(--chrome)); border-bottom: 1px solid var(--edge); padding: 0.5vh 0.6vw; }
+  .grp { display: flex; flex-direction: column; justify-content: space-between; padding: 0 0.9vw; border-right: 1px solid var(--chrome-2); }
+  .grp .row { display: flex; gap: 0.5vw; align-items: center; }
+  .grp .cap { text-align: center; font-size: 1.05vh; color: var(--ink-2); margin-top: 0.4vh; }
+  .btn { display: flex; flex-direction: column; align-items: center; gap: 0.3vh; font-size: 1.15vh; color: var(--ink); min-width: 3vw; }
+  .ico { width: 2.6vh; height: 2.6vh; display: grid; place-items: center; }
+  .ico svg { width: 100%; height: 100%; }
+  .chk { font-size: 1.15vh; display: flex; align-items: center; gap: 0.3vw; }
+  .chk i { width: 1.2vh; height: 1.2vh; border: 1px solid var(--edge); background: #fff; display: inline-block; }
+  .sel { font-size: 1.15vh; padding: 0.2vh 0.5vw; background: #fff; border: 1px solid var(--edge); border-radius: 2px; }
+
+  /* body */
+  .main { display: grid; grid-template-columns: 17vw 1fr; min-height: 0; }
+  .side { background: var(--chrome); border-right: 1px solid var(--edge); padding: 0.8vh 0.6vw; display: flex; flex-direction: column; gap: 0.9vh; min-height: 0; }
+  .freq { background: #050607; color: #F2F4F6; font-family: Consolas, "Courier New", monospace; font-weight: 700; font-size: 3.3vh; letter-spacing: 0.06em; text-align: right; padding: 0.6vh 0.6vw; border: 1px solid #000; border-radius: 2px; font-variant-numeric: tabular-nums; }
+  .freq small { display: block; font-size: 1.1vh; font-weight: 400; color: #8D96A0; letter-spacing: 0.08em; text-align: left; }
+  .meter { height: 1.1vh; background: #050607; border: 1px solid #000; position: relative; }
+  .meter i { position: absolute; left: 0; top: 0; bottom: 0; background: linear-gradient(90deg, #1FAF4A, #E8D21F 70%, #E0381E); width: 30%; transition: width 0.15s linear; }
+  .meter u { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; left: 30%; }
+  .panel { background: var(--screen); border: 1px solid #000; border-radius: 2px; position: relative; }
+  .panel canvas { display: block; width: 100%; height: 100%; }
+  .ptitle { height: 1.6vh; background: linear-gradient(#5E6670, #454C55); border-bottom: 1px solid #000; }
+  #ovw { height: 10vh; }
+  #zspec { height: 10vh; }
+  #zfall { height: 36vh; }
+  .modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.4vh 0.3vw; margin-top: auto; }
+  .modes span { font-size: 1.2vh; text-align: center; padding: 0.5vh 0; background: linear-gradient(#F4F5F7, #DCE0E5); border: 1px solid var(--edge); border-radius: 2px; }
+  .modes span.on { background: linear-gradient(#3B4450, #262D36); color: #fff; border-color: #11151A; }
+
+  .view { display: grid; grid-template-rows: 27% 1fr; min-height: 0; background: var(--screen); position: relative; }
+  #spec, #fall { display: block; width: 100%; height: 100%; }
+  #spec { border-bottom: 2px solid #000; }
+  .selbox { position: absolute; top: 27%; bottom: 0; border-left: 1px solid rgba(90,230,120,0.55); border-right: 1px solid rgba(90,230,120,0.55); pointer-events: none; }
+
+  .status { display: flex; justify-content: space-between; gap: 2vw; font-size: 1.1vh; color: var(--ink-2); background: var(--chrome); border-top: 1px solid var(--edge); padding: 0.3vh 0.8vw; }
+  .status b { font-weight: 600; color: var(--ink); }
+  /* Next slide: stays visible in fullscreen */
+  .next-btn { position: fixed; right: 12px; bottom: 34px; z-index: 6; font: 800 15px "Segoe UI", system-ui, sans-serif; letter-spacing: .5px; color: #fff;
+    background: #22306B; border: 1px solid rgba(255,255,255,.55); border-radius: 18px; padding: 8px 18px; text-decoration: none; opacity: .85; box-shadow: 0 4px 12px rgba(0,0,0,.3); }
+  .next-btn:hover, .next-btn:focus-visible { opacity: 1; outline: 2px solid #F0A020; outline-offset: 2px; }
+  body.idle .next-btn { cursor: pointer; }
+  .fs-btn { position: fixed; right: 118px; bottom: 36px; z-index: 6; font: 600 12px "Segoe UI", system-ui, sans-serif; color: #fff;
+    background: rgba(20,24,32,.75); border: 1px solid rgba(255,255,255,.45); border-radius: 14px; padding: 6px 12px; cursor: pointer; opacity: .75; }
+  .fs-btn:hover, .fs-btn:focus-visible { opacity: 1; outline: 2px solid #F0A020; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="ribbon" aria-hidden="true">
+    <div class="grp"><div class="row">
+      <div class="btn"><span class="ico"><svg viewBox="0 0 24 24"><polygon points="7,4 20,12 7,20" fill="#2E8B3E"/></svg></span>Start</div>
+      <div class="btn"><span class="ico"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" fill="#B33A2E"/></svg></span>Stop</div>
+      <div class="btn"><span class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="6" fill="#C9302C"/></svg></span>Record</div>
+    </div><div class="cap">Receiver</div></div>
+    <div class="grp"><div class="row">
+      <span class="sel">Bandwidth ▾</span><span class="sel">Gain: Auto ▾</span>
+    </div><div class="row"><span class="chk"><i></i>Calibration</span><span class="chk"><i></i>Frequency lock</span></div><div class="cap">Radio</div></div>
+    <div class="grp"><div class="row">
+      <div class="btn"><span class="ico"><svg viewBox="0 0 24 24"><path d="M4 18 L9 10 L13 14 L20 5" stroke="#2A68AD" stroke-width="2.4" fill="none"/></svg></span>Spectrum</div>
+      <div class="btn"><span class="ico"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" fill="#1E3F8F"/><rect x="9" y="4" width="4" height="16" fill="#E8C21F"/></svg></span>Waterfall</div>
+      <div class="btn"><span class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7" stroke="#4A525C" stroke-width="2.2" fill="none"/><path d="M12 8v4l3 2" stroke="#4A525C" stroke-width="2.2" fill="none"/></svg></span>History</div>
+    </div><div class="cap">Display</div></div>
+    <div class="grp"><div class="row"><span class="chk"><i></i>Noise blanker</span><span class="chk"><i></i>Auto-notch</span></div><div class="row"><span class="chk"><i></i>Squelch</span><span class="chk"><i></i>AGC</span></div><div class="cap">Filters</div></div>
+  </div>
+
+  <div class="main">
+    <div class="side">
+      <div class="freq"><small>FREQUENCY · Hz</small><span id="freq"></span></div>
+      <div class="meter"><i id="lvl"></i><u></u></div>
+      <div class="panel"><div class="ptitle"></div><canvas id="ovw"></canvas></div>
+      <div class="panel"><div class="ptitle"></div><canvas id="zspec"></canvas><canvas id="zfall"></canvas></div>
+      <div class="modes"><span>AM</span><span class="on">NFM</span><span>WFM</span><span>USB</span><span>LSB</span><span>CW</span><span>DSB</span><span>RAW</span><span>DIG</span></div>
+    </div>
+    <div class="view">
+      <canvas id="spec"></canvas>
+      <canvas id="fall"></canvas>
+      <div class="selbox" id="selbox"></div>
+    </div>
+  </div>
+
+  <div class="status" aria-hidden="true">
+    <span>Sample rate <b>3.2 MS/s</b></span><span>Span <b>3.2 MHz</b></span><span>FFT <b>8192</b></span><span>Averaging <b>4</b></span><span id="clock"></span>
+  </div>
+</div>
+<button class="fs-btn" id="fs" type="button" title="Full screen (F)">Fullscreen (F)</button>
+<a class="next-btn" id="next" href="nexa-tv-poster-1.html" title="Next slide (→ or Page Down after the last stage)">Next →</a>
+
+<script>
+(() => {
+  const CENTRE_HZ = 2400000000;   // decorative readout, matches the console's simulated tuning
+
+  const $ = id => document.getElementById(id);
+  const spec = $("spec"), sctx = spec.getContext("2d");
+  const fall = $("fall"), fctx = fall.getContext("2d");
+  const ovw = $("ovw"), octx = ovw.getContext("2d");
+  const zspec = $("zspec"), zsctx = zspec.getContext("2d");
+  const zfall = $("zfall"), zfctx = zfall.getContext("2d");
+
+  const BINS = 900, ROWS = 340, ROWS_PER_SEC = 30;
+  const DB_MIN = -7, DB_MAX = 31;
+  const ZW = 200, ZR = 220;
+
+  let seed = 7102026;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const e1 = () => -Math.log(1 - rnd() * 0.999999);
+  const expo = () => (e1() + e1() + e1() + e1()) / 4;     // display averaging smooths the speckle
+
+  // Receiver "rainbow" colour map: deep blue floor -> cyan -> green -> yellow -> red.
+  const STOPS = [[0, [0, 0, 70]], [0.16, [0, 10, 150]], [0.30, [0, 70, 235]], [0.45, [0, 190, 255]],
+                 [0.58, [20, 235, 170]], [0.68, [120, 245, 40]], [0.78, [250, 235, 0]],
+                 [0.89, [255, 120, 0]], [1, [215, 0, 0]]];
+  const LUT = new Uint8ClampedArray(256 * 3);
+  for (let i = 0; i < 256; i++) {
+    const v = i / 255; let k = 0; while (k < STOPS.length - 2 && v > STOPS[k + 1][0]) k++;
+    const [a, ca] = STOPS[k], [b, cb] = STOPS[k + 1], u = (v - a) / (b - a);
+    for (let c = 0; c < 3; c++) LUT[i * 3 + c] = ca[c] + (cb[c] - ca[c]) * u;
+  }
+  const dB = x => 10 * Math.log10(x);
+  const lin = d => Math.pow(10, d / 10);
+  const bin = f => Math.round(f * (BINS - 1));
+  const lvl = v => Math.max(0, Math.min(255, ((v - DB_MIN) / (DB_MAX - DB_MIN)) * 255)) | 0;
+
+  const passband = new Float32Array(BINS);
+  for (let i = 0; i < BINS; i++) {
+    const x = i / (BINS - 1), roll = Math.min(1, x / 0.05, (1 - x) / 0.05);
+    passband[i] = 0.35 + 0.65 * Math.sin(roll * Math.PI / 2) ** 2;
+  }
+  function block(P, f0, f1, pwr, shoulder) {
+    const a = bin(f0), b = bin(f1), s = Math.max(1, Math.round(shoulder * BINS));
+    for (let i = Math.max(0, a - s); i <= Math.min(BINS - 1, b + s); i++) {
+      let g = 1;
+      if (i < a) g = Math.cos((a - i) / s * Math.PI / 2) ** 2;
+      else if (i > b) g = Math.cos((i - b) / s * Math.PI / 2) ** 2;
+      P[i] += pwr * g * expo();
+    }
+  }
+  function bell(P, fc, width, pwr) {
+    const c = fc * (BINS - 1), w = Math.max(0.6, width * BINS);
+    for (let i = Math.max(0, Math.floor(c - 3 * w)); i <= Math.min(BINS - 1, Math.ceil(c + 3 * w)); i++) {
+      const z = (i - c) / w; P[i] += pwr * Math.exp(-0.5 * z * z) * expo();
+    }
+  }
+
+  let stage = Math.min(2, Math.max(0, parseInt(location.hash.slice(1), 10) || 0));
+  const level = { hop: stage >= 1 ? 1 : 0, jam: stage >= 2 ? 1 : 0 };
+  let t = 0;
+
+  const LINK = { f0: 0.535, f1: 0.585 };
+  const ZOOM = { f0: 0.505, f1: 0.615 };      // side-panel zoom around the team's link
+  const voice = [0.705, 0.732, 0.759, 0.786].map((f, i) => ({ f, on: i % 2 === 0, left: 40 + i * 37, dev: 0 }));
+  const packets = [];
+  let dmrOn = true, dmrLeft = 160;
+  let hop = { f: 0.3, left: 0 };
+
+  function row() {
+    level.hop += ((stage >= 1 ? 1 : 0) - level.hop) * 0.05;
+    level.jam += ((stage >= 2 ? 1 : 0) - level.jam) * 0.05;
+    const P = new Float32Array(BINS);
+    for (let i = 0; i < BINS; i++) P[i] = passband[i] * expo();
+    bell(P, 0.5, 0.0009, lin(13));                                    // receiver centre spur
+    bell(P, 0.118, 0.0012, lin(9)); bell(P, 0.642, 0.0012, lin(11)); bell(P, 0.931, 0.0012, lin(8));
+    block(P, 0.07, 0.22, lin(13 + 1.5 * Math.sin(t * 0.013)), 0.012);   // wideband cellular-style block
+    const fadeLink = 1 + 0.35 * Math.sin(t * 0.045) + 0.15 * Math.sin(t * 0.17);
+    block(P, LINK.f0, LINK.f1, lin(22) * fadeLink, 0.014);            // the team's data link
+    if (rnd() < 0.06) packets.push({ f: 0.27 + rnd() * 0.17, w: 0.012 + rnd() * 0.022, p: 10 + rnd() * 9, left: 2 + Math.floor(rnd() * 6) });
+    for (let k = packets.length - 1; k >= 0; k--) { const q = packets[k]; block(P, q.f, q.f + q.w, lin(q.p), 0.005); if (--q.left <= 0) packets.splice(k, 1); }
+    for (const v of voice) {                                          // push-to-talk voice
+      if (--v.left <= 0) { v.on = !v.on; v.left = v.on ? 60 + Math.floor(rnd() * 140) : 90 + Math.floor(rnd() * 240); }
+      if (v.on) { v.dev += (rnd() - 0.5) * 0.0012; v.dev *= 0.9; bell(P, v.f + v.dev, 0.0065, lin(25)); }
+    }
+    if (--dmrLeft <= 0) { dmrOn = !dmrOn; dmrLeft = dmrOn ? 150 + Math.floor(rnd() * 150) : 60 + Math.floor(rnd() * 120); }
+    if (dmrOn && (t % 4 < 2)) block(P, 0.840, 0.850, lin(19), 0.004);  // time-slotted digital radio
+    if (level.hop > 0.02) {                                           // stage 1: frequency hopper
+      if (--hop.left <= 0) { hop.f = 0.24 + rnd() * 0.72; hop.left = 5; }
+      if (hop.left > 0) bell(P, hop.f, 0.0032, lin(25) * level.hop);
+    }
+    if (level.jam > 0.02) block(P, 0.47, 0.65, lin(28) * level.jam, 0.012);   // stage 2: barrage jammer
+    t++;
+    return P;
+  }
+
+  // ---- drawing ----
+  const avg = new Float32Array(BINS);
+  let rowImg, zRowImg, first = true, linkLevel = 0;
+
+  function fitCanvas(c, ctx) {
+    const r = c.getBoundingClientRect();
+    c.width = Math.max(1, Math.round(r.width * devicePixelRatio));
+    c.height = Math.max(1, Math.round(r.height * devicePixelRatio));
+  }
+
+  function resize() {
+    fall.width = BINS; fall.height = ROWS;
+    zfall.width = ZW; zfall.height = ZR;
+    [spec, ovw, zspec].forEach(c => fitCanvas(c));
+    rowImg = fctx.createImageData(BINS, 1);
+    zRowImg = zfctx.createImageData(ZW, 1);
+    const sb = $("selbox");
+    sb.style.left = (LINK.f0 - 0.012) * 100 + "%";
+    sb.style.width = (LINK.f1 - LINK.f0 + 0.024) * 100 + "%";
+    first = true;
+    for (let r = 0; r < ROWS; r++) pushRow(row());
+  }
+
+  function pushRow(P) {
+    fctx.drawImage(fall, 0, 0, BINS, ROWS - 1, 0, 1, BINS, ROWS - 1);
+    const d = rowImg.data;
+    for (let i = 0; i < BINS; i++) {
+      const v = dB(P[i]), k = lvl(v) * 3;
+      d[i * 4] = LUT[k]; d[i * 4 + 1] = LUT[k + 1]; d[i * 4 + 2] = LUT[k + 2]; d[i * 4 + 3] = 255;
+      avg[i] = first ? v : avg[i] * 0.72 + v * 0.28;
+    }
+    fctx.putImageData(rowImg, 0, 0);
+
+    // Zoomed waterfall of the team's link.
+    zfctx.drawImage(zfall, 0, 0, ZW, ZR - 1, 0, 1, ZW, ZR - 1);
+    const zd = zRowImg.data, a = ZOOM.f0 * (BINS - 1), span = (ZOOM.f1 - ZOOM.f0) * (BINS - 1);
+    for (let x = 0; x < ZW; x++) {
+      const k = lvl(dB(P[Math.round(a + span * x / (ZW - 1))])) * 3;
+      zd[x * 4] = LUT[k]; zd[x * 4 + 1] = LUT[k + 1]; zd[x * 4 + 2] = LUT[k + 2]; zd[x * 4 + 3] = 255;
+    }
+    zfctx.putImageData(zRowImg, 0, 0);
+
+    let s = 0, n = 0; for (let i = bin(LINK.f0); i <= bin(LINK.f1); i++) { s += P[i]; n++; }
+    linkLevel = linkLevel * 0.8 + dB(s / n) * 0.2;
+    first = false;
+  }
+
+  function trace(ctx, w, h, f0, f1, opts) {
+    const pad = h * 0.08;
+    ctx.fillStyle = "#0E0F11"; ctx.fillRect(0, 0, w, h);
+    ctx.strokeStyle = "rgba(170,175,180,0.16)"; ctx.lineWidth = 1;
+    for (let g = 1; g < opts.hg; g++) { const y = pad + (h - 2 * pad) * g / opts.hg; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
+    for (let g = 1; g < opts.vg; g++) { const x = w * g / opts.vg; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
+    const Y = v => h - pad - Math.max(0, Math.min(1, (v - DB_MIN) / (DB_MAX - DB_MIN))) * (h - 2 * pad);
+    const a = f0 * (BINS - 1), span = (f1 - f0) * (BINS - 1), N = Math.min(BINS, Math.round(span) + 1);
+    if (opts.sel) {                                       // highlighted channel, like a tuned selection
+      const x0 = (opts.sel[0] - f0) / (f1 - f0) * w, x1 = (opts.sel[1] - f0) / (f1 - f0) * w;
+      ctx.fillStyle = "rgba(60,200,90,0.20)"; ctx.fillRect(x0, 0, x1 - x0, h);
+      ctx.strokeStyle = "rgba(90,230,120,0.75)"; ctx.strokeRect(x0 + 0.5, 0.5, x1 - x0 - 1, h - 1);
+    }
+    ctx.beginPath(); ctx.moveTo(0, h);
+    for (let j = 0; j < N; j++) ctx.lineTo(j / (N - 1) * w, Y(avg[Math.round(a + span * j / (N - 1))]));
+    ctx.lineTo(w, h); ctx.closePath(); ctx.fillStyle = "rgba(200,205,210,0.07)"; ctx.fill();
+    ctx.beginPath();
+    for (let j = 0; j < N; j++) { const x = j / (N - 1) * w, y = Y(avg[Math.round(a + span * j / (N - 1))]); j ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+    ctx.strokeStyle = "#E6E8EA"; ctx.lineWidth = Math.max(1, devicePixelRatio * opts.lw); ctx.stroke();
+  }
+
+  function drawAll() {
+    trace(sctx, spec.width, spec.height, 0, 1, { hg: 7, vg: 12, lw: 1.1, sel: [LINK.f0 - 0.012, LINK.f1 + 0.012] });
+    trace(octx, ovw.width, ovw.height, 0, 1, { hg: 4, vg: 6, lw: 0.9 });
+    trace(zsctx, zspec.width, zspec.height, ZOOM.f0, ZOOM.f1, { hg: 4, vg: 4, lw: 1.1 });
+    const pct = Math.max(4, Math.min(100, (linkLevel + 5) / 40 * 100));
+    $("lvl").style.width = pct + "%";
+  }
+
+  function fmtHz(hz) { return String(hz).replace(/\B(?=(\d{3})+(?!\d))/g, "."); }
+  $("freq").textContent = fmtHz(CENTRE_HZ);
+
+  let last = performance.now(), carry = 0;
+  function frame(now) {
+    carry += Math.min(0.1, (now - last) / 1000) * ROWS_PER_SEC;
+    last = now;
+    while (carry >= 1) { pushRow(row()); carry -= 1; }
+    drawAll();
+    const d = new Date();
+    $("clock").innerHTML = "UTC <b>" + d.toISOString().slice(11, 19) + "</b>";
+    requestAnimationFrame(frame);
+  }
+
+  // Past the last stage, the next press moves on to poster 1.
+  function go(delta) {
+    if (delta > 0 && stage === 2) { location.href = document.getElementById("next").href; return; }
+    stage = Math.min(2, Math.max(0, stage + delta));
+  }
+  function reset() { stage = 0; level.hop = 0; level.jam = 0; resize(); }
+
+  addEventListener("keydown", e => {
+    if ([" ", "ArrowRight", "PageDown", "Enter"].includes(e.key)) { e.preventDefault(); go(1); }
+    else if (["ArrowLeft", "PageUp", "Backspace"].includes(e.key)) { e.preventDefault(); go(-1); }
+    else if (e.key === "r" || e.key === "R") reset();
+    else if (e.key === "f" || e.key === "F") {
+      if (document.fullscreenElement) document.exitFullscreen?.();
+      else document.documentElement.requestFullscreen?.().catch(() => {});
+    }
+  });
+  addEventListener("click", e => { if (!e.target.closest(".next-btn, .fs-btn")) go(1); });
+  const fsBtn = document.getElementById("fs");
+  fsBtn.addEventListener("click", () => {
+    if (document.fullscreenElement) document.exitFullscreen?.();
+    else document.documentElement.requestFullscreen?.().catch(() => {});
+  });
+  document.addEventListener("fullscreenchange", () => { fsBtn.hidden = !!document.fullscreenElement; });
+  addEventListener("resize", () => { [spec, ovw, zspec].forEach(c => fitCanvas(c)); });
+
+  let idleTimer;
+  addEventListener("mousemove", () => {
+    document.body.classList.remove("idle");
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => document.body.classList.add("idle"), 2000);
+  });
+
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
