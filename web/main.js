@@ -85,7 +85,12 @@ async function init() {
     // model -- only possible when the server sends the cross-origin
     // isolation headers (scripts/serve_local.py, web/vercel.json); without
     // them the browser forces one thread and this is a no-op.
-    ort.env.wasm.proxy = true;
+    // Proxy only over https (the deployed site). Served from this machine
+    // (http://localhost, scripts/serve_local.py) Chrome blocks the threads
+    // the proxy worker starts, so the model never finishes loading ("Failed
+    // to fetch dynamically imported module ...jsep.mjs"). Without the proxy
+    // the page starts those threads itself, which it may, and keeps every core.
+    ort.env.wasm.proxy = location.protocol === "https:";
     if (globalThis.crossOriginIsolated) {
       ort.env.wasm.numThreads = Math.min(8, Math.max(1, (navigator.hardwareConcurrency || 2) - 2));
     }
@@ -536,11 +541,14 @@ function showSpan(aMs, bMs) {
 function hideCursor() { tlCursor.hidden = true; if (!tlDrag) restoreSpan(); }
 
 /** What the shading falls back to when nothing is being dragged or hovered:
- *  the open form's stretch, else the correction under review, else nothing. */
+ *  the open form's stretch, else the correction under review, else the
+ *  recommended correction last clicked, else nothing. */
 function restoreSpan() {
   if (corrDialog.open) return;
   const r = session?.review;
+  const f = session?.suggestions?.items[session.suggFocus];
   if (r) showSpan(r.start_s * 1000, r.end_s * 1000);
+  else if (f) showSpan(f.startS * 1000, f.endS * 1000);
   else tlSel.hidden = true;
 }
 
@@ -652,7 +660,8 @@ function renderSuggestions() {
       : "No ground truth for this capture, and every detection is confident (40% or more).";
   }
   suggestList.innerHTML = items.slice(0, SUGGEST_SHOWN).map((s, i) =>
-    `<div class="sugg" data-sugg="${i}"><span class="sugg-kind ${s.kind}">${KIND_LABEL[s.kind]}</span>`
+    `<div class="sugg${i === session.suggFocus ? " sel" : ""}" data-sugg="${i}" tabindex="0" `
+    + `title="Show this stretch on the timeline"><span class="sugg-kind ${s.kind}">${KIND_LABEL[s.kind]}</span>`
     + `<span class="sugg-time">${(s.startS * 1000).toFixed(2)}–${(s.endS * 1000).toFixed(2)} ms</span>`
     + `<span class="sugg-text">${esc(s.text)}</span>`
     + (s.submitted ? `<span class="sugg-done">✓ Submitted</span>`
@@ -668,9 +677,36 @@ suggestList.addEventListener("mouseover", (ev) => {
 });
 suggestList.addEventListener("mouseleave", () => { if (!tlDrag) restoreSpan(); });
 
+/** Scroll the timeline to a recommended correction and keep its stretch
+ *  shaded (and the row marked) until another row is chosen. */
+function jumpToSuggestion(i) {
+  const s = session.suggestions.items[i];
+  session.suggFocus = i;
+  for (const row of suggestList.querySelectorAll("[data-sugg]")) {
+    row.classList.toggle("sel", Number(row.dataset.sugg) === i);
+  }
+  consoleCanvas.closest(".tl-wrap").scrollIntoView({ block: "center",
+    behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  showSpan(s.startS * 1000, s.endS * 1000);
+  tlSel.classList.remove("flash");
+  void tlSel.offsetWidth;                         // restart the animation on a repeat click
+  tlSel.classList.add("flash");
+}
+
+suggestList.addEventListener("keydown", (ev) => {
+  const row = ev.target.closest?.("[data-sugg]");
+  if (!row || ev.target !== row || !session?.suggestions) return;
+  if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); jumpToSuggestion(Number(row.dataset.sugg)); }
+});
+
 suggestList.addEventListener("click", (ev) => {
+  if (!session?.suggestions) return;
   const btn = ev.target.closest("button[data-review-sugg]");
-  if (!btn || !session?.suggestions) return;
+  if (!btn) {
+    const row = ev.target.closest("[data-sugg]");
+    if (row) jumpToSuggestion(Number(row.dataset.sugg));
+    return;
+  }
   const s = session.suggestions.items[Number(btn.dataset.reviewSugg)];
   startCorrection({ predicted: s.predicted, startS: s.startS, endS: s.endS, suggested: s.suggested,
                     reason: s.reason, missed: !s.predicted.length, title: `Review: ${s.text}`,
