@@ -1861,14 +1861,14 @@ function applyAuth(a) {
   role.className = "auth-role";
   role.textContent = ROLE_LABEL[a.user.role] || a.user.role;
   if (a.demo) {
-    // --demo: no sign-in; one button per demo person. Reloading after a switch
-    // redraws every role-gated button and name box for the new person.
+    // No sign-in: one button per role. Reloading after a switch redraws every
+    // role-gated button and name box for the new role.
     const people = a.people.map(p => {
       const b = document.createElement("button");
       b.type = "button";
-      b.textContent = `${p.username} · ${ROLE_LABEL[p.role] || p.role}`;
+      b.textContent = ROLE_LABEL[p.role] || p.role;
       b.className = p.username === a.user.username ? "active" : "";
-      b.title = p.username === a.user.username ? "You are acting as this person" : `Act as ${p.username}`;
+      b.title = p.username === a.user.username ? "You are acting as this role" : `Act as ${b.textContent}`;
       b.addEventListener("click", async () => {
         if (p.username === a.user.username) return;
         try { await switchDemoPerson(p.username); location.reload(); }
@@ -1876,7 +1876,7 @@ function applyAuth(a) {
       });
       return b;
     });
-    authChip.replaceChildren("Demo · acting as:", ...people);
+    authChip.replaceChildren("Acting as:", ...people);
   } else {
     const out = document.createElement("button");
     out.type = "button";
@@ -1885,7 +1885,8 @@ function applyAuth(a) {
     authChip.replaceChildren("Signed in as ", who, role, out);
   }
   authChip.hidden = false;
-  document.querySelector('nav button[data-page="users"]').hidden = a.user.role !== "admin";
+  // Accounts only exist with sign-in on; the demo people are not accounts.
+  document.querySelector('nav button[data-page="users"]').hidden = a.demo || a.user.role !== "admin";
   // Every prompt and message that names "you" reads operatorName(): make it
   // the signed-in account, not whatever name this browser last typed.
   setOperatorName(a.user.username);

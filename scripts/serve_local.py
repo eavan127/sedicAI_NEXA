@@ -5,10 +5,11 @@ exactly as before, and adds a small JSON API over src/localdb.py so every
 analysis, raw IQ file and audit entry lands in one SQLite file the training
 scripts can read -- nothing is sent anywhere else.
 
-    python scripts/serve_local.py                 # http://localhost:8099
+    python scripts/serve_local.py                 # http://localhost:8099, no sign-in:
+                                                  #   buttons switch operator / analyst / admin
     python scripts/serve_local.py --port 8200 --no-browser
-    python scripts/serve_local.py --lan           # other machines on this network
-    python scripts/serve_local.py --demo          # no sign-in: buttons switch operator / analyst / admin
+    python scripts/serve_local.py --sign-in       # real accounts: login page, passwords, Users page
+    python scripts/serve_local.py --lan           # other machines on this network (sign-in forced on)
 
 Standard library only, so it runs on any machine with Python and no install.
 
@@ -47,8 +48,11 @@ API (JSON)
     POST   /api/users                  {username, password, role} (admin)
     POST   /api/users/<name>           {role?, disabled?, password?} (admin)
 
-Sign-in (always on)
-  Nothing of the system is served without a session: the page, its scripts,
+Sign-in (--sign-in, or --lan)
+  Off by default: the page opens straight into the console, and buttons at
+  the top switch between operator / analyst / admin, so roles
+  can be shown without logging out and in. With --sign-in (and always with
+  --lan), nothing of the system is served without a session: the page, its scripts,
   the models and every API call except health/auth. A browser that is not
   signed in is sent to /login.html, which on a fresh database offers to
   create the first admin (on this machine only). The server -- not the page
@@ -106,11 +110,11 @@ LOGO = ROOT / "assets" / "sedic_logo.png"
 # All a signed-out browser may fetch: the login page and its logo.
 PUBLIC_STATIC = {LOGIN_PAGE, "/brand/logo.png", "/favicon.ico"}
 
-# --demo: no sign-in; the page shows one button per person and whoever was
-# clicked last is "who did it" (a cookie). Three PEOPLE, not three roles, so the
-# four-eyes rule still holds on stage: olivia submits, aaron approves.
-DEMO_PEOPLE = {"olivia": "operator", "aaron": "analyst", "eavan": "admin"}
-DEMO_DEFAULT = "eavan"
+# Default (no --sign-in): no sign-in; the page shows one button per role and whoever was
+# clicked last is "who did it" (a cookie). Each role is its own identity, so the
+# four-eyes rule still holds on stage: the operator submits, the analyst approves.
+DEMO_PEOPLE = {"operator": "operator", "analyst": "analyst", "admin": "admin"}
+DEMO_DEFAULT = "admin"
 DEMO_COOKIE = "nexa_demo_as"
 
 
@@ -706,9 +710,10 @@ def main():
     p.add_argument("--lan", action="store_true",
                    help="listen on all interfaces so other machines on this network can connect")
     p.add_argument("--no-browser", action="store_true")
-    p.add_argument("--demo", action="store_true",
-                   help="no sign-in: buttons at the top switch between an operator, an analyst "
-                        "and an admin (for presenting; refused together with --lan)")
+    p.add_argument("--sign-in", action="store_true",
+                   help="require real accounts (login page, passwords, Users page). Without it, "
+                        "buttons at the top switch between an operator, an analyst and an admin")
+    p.add_argument("--demo", action="store_true", help=argparse.SUPPRESS)   # the default now; kept so old commands work
     p.add_argument("--quick-retrain", action="store_true",
                    help="demo/test: retrain on a small sample (1 epoch, 2,000 replay windows, "
                         "3,000-window exam) so a retrain takes about a minute")
@@ -722,18 +727,24 @@ def main():
     retrain_args = ["--epochs", "1", "--replay", "2000", "--gate-limit", "3000"] if a.quick_retrain else []
     if a.synthetic_exam:
         retrain_args += ["--gate", "synthetic"]
+    if a.demo and a.sign_in:
+        raise SystemExit("--demo and --sign-in contradict each other: pick one.")
     if a.demo and a.lan:
         raise SystemExit("--demo turns sign-in off, so anyone who can reach the server could act as "
                          "the admin. It is refused together with --lan.")
-    server = make_server(a.db, host, port, a.lan, retrain_args, demo=a.demo)
-    url = f"http://localhost:{port}/index.html"          # redirects to sign-in first
+    # Without sign-in anyone who can reach the server could act as the admin,
+    # so on the network (--lan) sign-in is always on.
+    demo = not (a.sign_in or a.lan)
+    server = make_server(a.db, host, port, a.lan, retrain_args, demo=demo)
+    url = f"http://localhost:{port}/index.html"          # with sign-in on, redirects to the login page first
     counts = server.nexa_db.counts()
     print(f"NEXA local server\n  open      {url}\n  database  {a.db}\n"
           f"  stored    {counts.get('analyses', 0)} analyses, {counts.get('audit_log', 0)} audit entries\n"
           f"  network   {'LAN (other machines can connect)' if a.lan else 'this machine only'}\n"
-          + ("  sign-in   OFF (demo): switch person with the buttons at the top of the page\n" if a.demo else "")
+          + ("  sign-in   OFF: switch person with the buttons at the top of the page (--sign-in for accounts)\n"
+             if demo else "  sign-in   ON (login page; accounts in the database)\n")
           + "Press Ctrl+C to stop.")
-    if not a.demo and not server.nexa_db.auth_enabled():
+    if not demo and not server.nexa_db.auth_enabled():
         print("  FIRST RUN: no accounts yet. Open the page on THIS machine to create the admin account.")
     if not a.no_browser:
         threading.Timer(0.8, webbrowser.open, (url,)).start()
