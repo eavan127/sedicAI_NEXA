@@ -198,10 +198,14 @@
   .footer b { color: var(--ink); }
 
   .fs-btn {
-    position: fixed; right: 12px; bottom: 12px; z-index: 5; font: 600 12px var(--font); color: var(--mute);
+    position: fixed; right: 118px; bottom: 12px; z-index: 5; font: 600 12px var(--font); color: var(--mute);
     background: rgba(255,255,255,.9); border: 1px solid var(--line); border-radius: 14px; padding: 6px 12px; cursor: pointer; opacity: .55;
   }
   .fs-btn:hover, .fs-btn:focus-visible { opacity: 1; outline: 2px solid var(--blue); }
+  /* Next slide: stays visible in fullscreen, where the poster is presented */
+  .next-btn { position: fixed; right: 12px; bottom: 10px; z-index: 6; font: 800 15px var(--font); letter-spacing: .5px; color: #fff;
+    background: var(--navy, #22306B); border-radius: 18px; padding: 8px 18px; text-decoration: none; opacity: .85; box-shadow: 0 4px 12px rgba(0,0,0,.18); }
+  .next-btn:hover, .next-btn:focus-visible { opacity: 1; outline: 2px solid var(--orange, #F0A020); outline-offset: 2px; }
   @media (prefers-reduced-motion: reduce) {
     .wire, .panel > h2 .live::before { animation: none; }
     .series { animation: none; stroke-dashoffset: 0; }
@@ -339,6 +343,7 @@
 </div>
 </div>
 <button class="fs-btn" id="fs" type="button">Fullscreen (F)</button>
+<a class="next-btn" id="next" href="nexa-tv-poster-2-system.html" title="Next slide (→ or Page Down)">Next →</a>
 
 <script>
 (() => {
@@ -362,6 +367,8 @@
   }
   fsBtn.addEventListener("click", toggleFs);
   addEventListener("keydown", e => { if (e.key === "f" || e.key === "F") toggleFs(); });
+  /* → / Page Down: next slide, so a presentation clicker works too */
+  addEventListener("keydown", e => { if (e.key === "ArrowRight" || e.key === "PageDown") location.href = document.getElementById("next").href; });
   document.addEventListener("fullscreenchange", () => { fsBtn.hidden = !!document.fullscreenElement; });
 
   /* ---- a synthetic IQ scene: QPSK traffic + radar chirp bursts + noise ---- */
