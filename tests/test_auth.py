@@ -1,7 +1,7 @@
 """Sign-in and roles (src/localdb.py accounts, scripts/serve_local.py gate).
 
 Sign-in is always on. With no accounts yet, only the login page is served
-(it offers to create the first admin, on the server machine only); after
+(it offers to create the first analyst, on the server machine only); after
 that every page, script, model and API call needs a session, and the server
 decides who did what.
 """
@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from src.localdb import MAX_FAILED_LOGINS, Actor, LocalDB  # noqa: E402
 import serve_local  # noqa: E402
 
-ADMIN = Actor("ava", "admin", "127.0.0.1")
+ADMIN = Actor("ava", "analyst", "127.0.0.1")   # the top role
 
 
 @pytest.fixture
@@ -38,10 +38,10 @@ def accounts(db):
 
 # --- database ----------------------------------------------------------------
 
-def test_sign_in_is_off_until_the_first_admin(db):
+def test_sign_in_is_off_until_the_first_analyst(db):
     assert not db.auth_enabled()
     user = db.setup_admin("Ava", "admin-pass-1")
-    assert user == {**user, "username": "ava", "role": "admin", "disabled": False}
+    assert user == {**user, "username": "ava", "role": "analyst", "disabled": False}
     assert db.auth_enabled()
     with pytest.raises(PermissionError, match="already set up"):
         db.setup_admin("eve", "another-pass")
@@ -73,28 +73,40 @@ def test_failed_logins_are_audited_and_lock_the_account(accounts):
     fails = accounts.audit(limit=50, action_prefix="user.login_failed")
     assert len(fails) == MAX_FAILED_LOGINS + 1
     assert accounts.get_user("olly")["locked"]
-    # an admin password reset unlocks it
+    # an analyst's password reset unlocks it
     accounts.update_user("olly", ADMIN, password="fresh-pass-1")
     assert accounts.login("olly", "fresh-pass-1")[0]
     assert accounts.verify_audit()["ok"]
 
 
-def test_only_admins_manage_accounts(accounts):
+def test_only_analysts_manage_accounts(accounts):
     with pytest.raises(PermissionError):
-        accounts.create_user("zed", "zed-pass-123", "admin", Actor("nina", "analyst"))
+        accounts.create_user("zed", "zed-pass-123", "operator", Actor("olly", "operator"))
+    with pytest.raises(ValueError, match="role must be"):
+        accounts.create_user("zed", "zed-pass-123", "admin", ADMIN)          # no admin role any more
     with pytest.raises(ValueError, match="reserved"):
         accounts.create_user("operator", "some-pass-1", "operator", ADMIN)
     with pytest.raises(ValueError, match="at least"):
         accounts.create_user("zed", "short", "operator", ADMIN)
 
 
-def test_the_last_admin_cannot_be_removed_and_nobody_disables_themselves(accounts):
-    with pytest.raises(PermissionError, match="last active admin"):
-        accounts.update_user("ava", ADMIN, role="analyst")
+def test_the_last_analyst_cannot_be_removed_and_nobody_disables_themselves(accounts):
+    accounts.update_user("nina", ADMIN, role="operator")                     # ava is now the only analyst
+    with pytest.raises(PermissionError, match="last active analyst"):
+        accounts.update_user("ava", ADMIN, role="operator")
     with pytest.raises(PermissionError, match="your own account"):
         accounts.update_user("ava", ADMIN, disabled=True)
-    accounts.update_user("nina", ADMIN, role="admin")
-    assert accounts.update_user("ava", Actor("nina", "admin"), role="analyst")["role"] == "analyst"
+    accounts.update_user("nina", ADMIN, role="analyst")
+    assert accounts.update_user("ava", Actor("nina", "analyst"), role="operator")["role"] == "operator"
+
+
+def test_old_admin_accounts_become_analysts(tmp_path):
+    import sqlite3 as sq
+    db = LocalDB(tmp_path / "nexa.db")
+    db.setup_admin("ava", "admin-pass-1")
+    with sq.connect(db.path) as con:                    # as written before the admin role was dropped
+        con.execute("UPDATE users SET role = 'admin' WHERE username = 'ava'")
+    assert LocalDB(tmp_path / "nexa.db").get_user("ava")["role"] == "analyst"
 
 
 def test_disabling_an_account_ends_its_sessions(accounts):
@@ -159,7 +171,7 @@ def fetch(base, path, cookie=None):
 
 def test_nothing_of_the_system_is_served_before_sign_in(server):
     """No demo mode: even with no accounts yet, the system is closed. Only
-    the login page (which offers to create the first admin) is served."""
+    the login page (which offers to create the first analyst) is served."""
     base, _ = server
     assert call(base + "/api/auth/me")[2] == {"auth_enabled": False, "user": None, "can_setup": True}
     assert call(base + "/api/analyses", "POST", record("r1"), operator="jessy")[0] == 401
@@ -186,7 +198,7 @@ def test_after_sign_in_the_system_is_served(server):
 def test_after_setup_every_call_needs_a_session(server):
     base, _ = server
     status, headers, body = call(base + "/api/auth/setup", "POST", {"username": "ava", "password": "admin-pass-1"})
-    assert status == 200 and body["user"] == {"username": "ava", "role": "admin"}
+    assert status == 200 and body["user"] == {"username": "ava", "role": "analyst"}
     assert "nexa_session=" in headers["Set-Cookie"]
     assert call(base + "/api/analyses")[0] == 401
     assert call(base + "/api/health")[0] == 200                 # the page must still find the server
@@ -216,11 +228,12 @@ def test_roles_gate_what_each_person_can_do(server):
     # an operator may not approve, delete, retrain or manage users
     assert call(base + "/api/corrections/x/review", "POST", {"decision": "approve"}, cookie=olly)[0] == 403
     assert call(base + "/api/analyses/r3", "DELETE", cookie=olly)[0] == 403
-    status, _, body = call(base + "/api/retrain/start", "POST", {"reason": "because"}, cookie=nina)
-    assert status == 403 and "admin role" in body["error"]
-    assert call(base + "/api/users", cookie=nina)[0] == 403
-    # an analyst may delete; an admin manages users
+    status, _, body = call(base + "/api/retrain/start", "POST", {"reason": "because"}, cookie=olly)
+    assert status == 403 and "analyst role" in body["error"]
+    assert call(base + "/api/users", cookie=olly)[0] == 403
+    # an analyst may delete, retrain (it gets past the role check) and manage users
     assert call(base + "/api/analyses/r3", "DELETE", cookie=nina)[0] == 200
+    assert call(base + "/api/users", cookie=nina)[0] == 200
     assert [u["username"] for u in call(base + "/api/users", cookie=ava)[2]] == ["ava", "nina", "olly"]
     assert call(base + "/api/users", "POST", {"username": "sam", "password": "sam-pass-12", "role": "analyst"},
                 cookie=ava)[0] == 201
@@ -254,8 +267,8 @@ def test_demo_serves_the_system_without_sign_in(demo_server):
     status, headers = fetch(base, "/login.html")
     assert status == 302 and headers["Location"] == "/index.html"
     me = call(base + "/api/auth/me")[2]
-    assert me["demo"] and me["user"] == {"username": "admin", "role": "admin"}
-    assert {p["role"] for p in me["people"]} == {"operator", "analyst", "admin"}
+    assert me["demo"] and me["user"] == {"username": "operator", "role": "operator"}
+    assert {p["role"] for p in me["people"]} == {"operator", "analyst"}
     assert call(base + "/api/auth/login", "POST", {"username": "x", "password": "y"})[0] == 404
 
 
@@ -264,7 +277,7 @@ def test_demo_switch_changes_who_did_it_and_keeps_roles_and_four_eyes(demo_serve
     status, headers, _ = call(base + "/api/auth/demo", "POST", {"username": "operator"})
     assert status == 200
     op_cookie = headers["Set-Cookie"].split(";")[0]
-    assert call(base + "/api/analyses", "POST", record("d1"), cookie=op_cookie, operator="admin")[0] == 201
+    assert call(base + "/api/analyses", "POST", record("d1"), cookie=op_cookie, operator="analyst")[0] == 201
     assert db.get_analysis("d1")["operator"] == "operator"
     # still an operator: may not approve or retrain
     assert call(base + "/api/corrections/x/review", "POST", {"decision": "approve"}, cookie=op_cookie)[0] == 403

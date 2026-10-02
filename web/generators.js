@@ -211,7 +211,49 @@ export const CASES = {
   "Civilian + Radar": [["BPSK", 0.15, 0.70], ["LFM_RADAR", 0.35, 0.85]],
   "Contested band": [["QPSK", 0.05, 0.60], ["LFM_RADAR", 0.20, 0.55],
                       ["FHSS", 0.35, 0.80], ["JAMMING", 0.55, 0.95]],
+  // One civilian modulation filling the whole capture: routine traffic, so
+  // (when the model is sure) its raw signal only lives in the rolling window.
+  // Filling the capture matters -- stretches of bare noise are where most
+  // weak false detections come from.
+  "BPSK only": [["BPSK", 0, 1]],
+  "QPSK only": [["QPSK", 0, 1]],
+  "16QAM only": [["16QAM", 0, 1]],
+  "64QAM only": [["64QAM", 0, 1]],
 };
+
+// Triage demo: one example for each box of web/triage.js, with the noise
+// level AND the random seed fixed so the outcome is the same every time.
+// Measured 2026-10-02 on the shipped 5-model ensemble, 50 ms, hop 256,
+// smoothed view -- another model or setting can land elsewhere.
+export const TRIAGE_PRESETS = {
+  "Demo 1: routine civilian (no alert, no review)": {
+    script: [["BPSK", 0, 1]], snrDb: 10, seed: 1, durationS: 0.05 },
+  "Demo 2: sure threat (alert, no review)": {
+    script: [["JAMMING", 0, 1]], snrDb: 2, seed: 1, durationS: 0.05 },
+  "Demo 3: unsure civilian (review, no alert)": {
+    script: [["QPSK", 0, 1]], snrDb: 2, seed: 4, durationS: 0.05 },
+  "Demo 4: threat + unsure (alert and review)": {
+    script: [["FHSS", 0, 1]], snrDb: 2, seed: 1, durationS: 0.05 },
+};
+export const TRIAGE_ROTATION = "Demo: all four kinds, rotating";
+
+/** What to synthesize for a case name: an ordinary case uses the chosen SNR
+ *  and a fresh seed; a demo preset brings its own; the rotation steps through
+ *  the four presets, one per dwell. */
+export function resolveCase(caseName, { snrDb, seed, durationS, index = 0 }) {
+  if (caseName === TRIAGE_ROTATION) {
+    const names = Object.keys(TRIAGE_PRESETS);
+    return resolveCase(names[index % names.length], { snrDb, seed, durationS });
+  }
+  const preset = TRIAGE_PRESETS[caseName];
+  if (preset) return { label: caseName, ...preset };
+  const script = CASES[caseName];
+  if (!script) throw new Error(`Unknown scenario case "${caseName}".`);
+  return { label: caseName, script, snrDb, seed, durationS };
+}
+
+/** Every name the case dropdown offers, presets last. */
+export const CASE_NAMES = [...Object.keys(CASES), ...Object.keys(TRIAGE_PRESETS), TRIAGE_ROTATION];
 
 export function caseNeedsLibrary(script) {
   return script.some(([cls]) => CIVILIAN.includes(cls));

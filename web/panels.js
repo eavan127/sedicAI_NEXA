@@ -48,7 +48,7 @@ export function headerLine({ mode = "REPLAY", source, snrKnown, trueSnrDb, snrCa
   const snrNote = (snrKnown && trueSnrDb !== null && trueSnrDb !== undefined)
     ? `SNR ${trueSnrDb.toFixed(1)} dB KNOWN${capNote} &nbsp;·&nbsp; ` : "";
   return (
-    `<strong>● ${mode === "LIVE" ? "LIVE" : "REPLAY"}</strong> &nbsp; source <code>${source}</code> &nbsp;·&nbsp; ` +
+    `<strong>${mode === "LIVE" ? "LIVE" : "REPLAY"}</strong> &nbsp; source <code>${source}</code> &nbsp;·&nbsp; ` +
     `BASEBAND · fs 3.2 MHz &nbsp;·&nbsp; ${snrNote}` +
     `${modelLabel} &nbsp;·&nbsp; ` +
     (caseNote ? `${caseNote} &nbsp;·&nbsp; ` : "") +

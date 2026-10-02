@@ -59,11 +59,14 @@ RETRAIN_RULES = {
 }
 JUDGED = ("LFM_RADAR", "FHSS", "JAMMING")
 
-# Sign-in. Each role can do everything the one before it can:
-#   operator  analyse, store captures, submit corrections, export reports
-#   analyst   + approve/reject corrections and candidate models, delete a capture
-#   admin     + start retraining, roll back the model, clear history, manage users
-ROLES = ("operator", "analyst", "admin")
+# Sign-in. Two roles; the analyst can do everything the operator can:
+#   operator  analyse, store captures, flag and submit corrections, export reports
+#   analyst   + approve/reject corrections, start retraining, activate/roll back
+#               models, delete captures, manage accounts
+# (A separate admin role was dropped 2026-10-02: one decision-maker above the
+# operator, as in a real watch floor. Old 'admin' accounts become analysts.)
+ROLES = ("operator", "analyst")
+TOP_ROLE = ROLES[-1]
 USERNAME_RE = re.compile(r"[a-z0-9][a-z0-9._-]{1,31}")
 MIN_PASSWORD = 8
 PBKDF2_ITERATIONS = 200_000
@@ -81,6 +84,7 @@ ANALYSIS_COLUMNS = {
     "requested_snr_db": "real", "snr_capped": "bool",
     "classes_detected": "json", "peak_probability": "json", "n_events": "int",
     "tier_counts": "json", "verdict": "text", "app_version": "text", "truth": "json",
+    "alert_level": "text", "needs_review": "bool",
     "operator": "text",
 }
 REQUIRED = ("id", "created_at", "source")
@@ -212,7 +216,7 @@ BEGIN SELECT RAISE(ABORT, 'what a human said in a correction cannot be edited');
 -- PBKDF2-SHA256 hashes, never as text.
 CREATE TABLE IF NOT EXISTS users (
     username        TEXT PRIMARY KEY,
-    role            TEXT NOT NULL CHECK (role IN ('operator', 'analyst', 'admin')),
+    role            TEXT NOT NULL CHECK (role IN ('operator', 'analyst', 'admin')),  -- 'admin' only in old rows, migrated
     pw_salt         TEXT NOT NULL,
     pw_hash         TEXT NOT NULL,
     created_at      TEXT NOT NULL,
@@ -246,7 +250,28 @@ MIGRATIONS = [
     # ([{className, startS, endS}]), so a reviewer opening the capture later
     # sees the same dashed truth boxes the operator saw. NULL when unknown.
     ("analyses", "truth", "TEXT"),
+    # Triage, set by the page from the model's scores: alert_level is
+    # "confirmed" / "possible" for a military or hostile detection (NULL for
+    # none); needs_review marks a close call a human should check.
+    ("analyses", "alert_level", "TEXT"),
+    ("analyses", "needs_review", "INTEGER DEFAULT 0"),
+    ("analyses", "reviewed_by", "TEXT"),
+    ("analyses", "reviewed_at", "TEXT"),
+    # Retention (see LocalDB.retention): when routine raw IQ was deleted by
+    # the rolling window, and which model versions trained on this capture.
+    ("analyses", "iq_pruned_at", "TEXT"),
+    ("analyses", "used_for_training", "TEXT"),
 ]
+
+# Retention of raw IQ. The RESULT of every capture is kept forever; the raw
+# signal of a ROUTINE capture (civilian or empty, model confident, nobody
+# corrected it) is kept only in a rolling window of the newest
+# ROLLING_IQ_BYTES and then deleted -- civilian traffic is not the target,
+# and keeping it indefinitely is a privacy liability, not an asset. Anything
+# that is evidence is kept permanently: threats, close calls, corrected
+# captures, and every capture a model was trained on.
+ROLLING_IQ_BYTES = 2 * 1024 ** 3
+THREAT_VERDICTS = ("Hostile", "Military")
 
 MODEL_KINDS = ("single", "ensemble")
 RETRAIN_SCOPES = ("single", "both")
@@ -310,6 +335,7 @@ class LocalDB:
                 have = {r["name"] for r in con.execute(f"PRAGMA table_info({table})")}
                 if col not in have:
                     con.execute(f"ALTER TABLE {table} ADD COLUMN {col} {kind}")
+            con.execute("UPDATE users SET role = ? WHERE role = 'admin'", (TOP_ROLE,))
             con.execute("INSERT OR REPLACE INTO meta VALUES ('schema_version', ?)",
                         (str(SCHEMA_VERSION),))
             # Databases written before record_file() pointed the row at IQ
@@ -422,16 +448,29 @@ class LocalDB:
             })
         return self.get_analysis(row["id"])
 
+    def _with_retention(self, con, rows) -> list[dict]:
+        """Records as the page sees them, each with why its raw IQ is (or is
+        no longer) kept: {"kind": kept|rolling|deleted|none, "why": ...}."""
+        corrected = {r[0] for r in con.execute("SELECT DISTINCT analysis_id FROM corrections")}
+        out = []
+        for r in rows:
+            d = self._from_row(r)
+            kind, why = self.retention(d, d["id"] in corrected)
+            d["retention"] = {"kind": kind, "why": why}
+            d["corrected"] = d["id"] in corrected
+            out.append(d)
+        return out
+
     def get_analysis(self, analysis_id: str) -> dict | None:
         with closing(self._connect()) as con:
             row = con.execute("SELECT * FROM analyses WHERE id = ?", (analysis_id,)).fetchone()
-        return self._from_row(row) if row else None
+            return self._with_retention(con, [row])[0] if row else None
 
     def list_analyses(self, limit: int = 500) -> list[dict]:
         with closing(self._connect()) as con:
             rows = con.execute("SELECT * FROM analyses ORDER BY created_at DESC LIMIT ?",
                                (int(limit),)).fetchall()
-        return [self._from_row(r) for r in rows]
+            return self._with_retention(con, rows)
 
     def delete_analysis(self, analysis_id: str, actor: Actor) -> bool:
         with self._write() as con:
@@ -475,6 +514,78 @@ class LocalDB:
                         (rel_path, sha256, n_bytes, analysis_id))
             self._append_audit(con, actor, "iq.store", "analysis", analysis_id,
                                {"name": name, "path": rel_path, "bytes": n_bytes, "sha256": sha256})
+
+    # -- retention ------------------------------------------------------------
+
+    @staticmethod
+    def retention(a: dict, corrected: bool = False) -> tuple[str, str]:
+        """(kind, why) for one capture's raw IQ: kind is "kept" (permanent),
+        "rolling" (routine, deleted when the window moves on), "deleted" or
+        "none" (never stored)."""
+        if a.get("iq_pruned_at"):
+            return "deleted", "routine signal, removed by the rolling window"
+        if not a.get("file_path"):
+            return "none", "no raw signal stored"
+        if a.get("used_for_training"):
+            return "kept", f"used to train {a['used_for_training']}"
+        if corrected:
+            return "kept", "a human corrected it"
+        if a.get("verdict") in THREAT_VERDICTS or a.get("alert_level"):
+            return "kept", "threat detected"
+        if a.get("needs_review"):
+            return "kept", "close call, flagged for review"
+        return "rolling", "routine signal, kept briefly"
+
+    def prune_rolling_iq(self, cap_bytes: int = ROLLING_IQ_BYTES, actor: Actor = SYSTEM) -> list[str]:
+        """Delete the raw IQ of the oldest ROUTINE captures until the routine
+        ones fit in `cap_bytes`. The records stay; only the signal goes, and
+        the deletion is audited (which captures, their fingerprints, bytes)."""
+        root = self.path.parent.resolve()
+        with self._write() as con:
+            corrected = {r[0] for r in con.execute("SELECT DISTINCT analysis_id FROM corrections")}
+            rows = [dict(r) for r in con.execute(
+                "SELECT * FROM analyses WHERE file_path IS NOT NULL AND iq_pruned_at IS NULL"
+                " ORDER BY created_at DESC")]
+            routine = [a for a in rows if self.retention(a, a["id"] in corrected)[0] == "rolling"]
+            total, gone = 0, []
+            for a in routine:                                  # newest first
+                f = (root / a["file_path"]).resolve()
+                size = f.stat().st_size if str(f).startswith(str(root)) and f.is_file() else 0
+                total += size
+                if total > cap_bytes:
+                    gone.append((a, f, size))
+            if not gone:
+                return []
+            # Never delete a file that a record being kept still points at.
+            still_used = {a["file_path"] for a in rows} - {a["file_path"] for a, _, _ in gone}
+            stamp = now_iso()
+            for a, f, _ in gone:
+                if a["file_path"] not in still_used and f.is_file():
+                    f.unlink()
+                con.execute("UPDATE analyses SET iq_pruned_at = ? WHERE id = ?", (stamp, a["id"]))
+            self._append_audit(con, actor, "iq.prune", "analysis", None, {
+                "reason": "rolling window for routine signals",
+                "cap_bytes": cap_bytes, "bytes_freed": sum(sz for _, _, sz in gone),
+                "deleted": [{"id": a["id"], "sha256": a.get("file_sha256"), "verdict": a.get("verdict")}
+                            for a, _, _ in gone],
+            })
+        return [a["id"] for a, _, _ in gone]
+
+    def mark_reviewed(self, analysis_id: str, actor: Actor, note: str = "") -> dict:
+        """An operator looked at a flagged capture and agrees with the model.
+        (A correction marks it reviewed too.) Kept either way: it was flagged."""
+        with self._write() as con:
+            a = con.execute("SELECT * FROM analyses WHERE id = ?", (analysis_id,)).fetchone()
+            if not a:
+                raise ValueError("no such capture")
+            if a["reviewed_by"]:
+                raise PermissionError(f"already reviewed by {a['reviewed_by']}")
+            con.execute("UPDATE analyses SET reviewed_by = ?, reviewed_at = ? WHERE id = ?",
+                        (actor.name, now_iso(), analysis_id))
+            self._append_audit(con, actor, "analysis.reviewed", "analysis", analysis_id,
+                               {"verdict": a["verdict"], "agrees_with_model": True,
+                                "note": str(note or "").strip()[:300]})
+        return self.get_analysis(analysis_id)
 
     # -- corrections (human in the loop) -------------------------------------
 
@@ -546,6 +657,8 @@ class LocalDB:
             }
             con.execute(f"INSERT INTO corrections ({', '.join(row)}) VALUES "
                         f"({', '.join(':' + k for k in row)})", row)
+            con.execute("UPDATE analyses SET reviewed_by = ?, reviewed_at = ? WHERE id = ?"
+                        " AND reviewed_by IS NULL", (actor.name, row["created_at"], analysis_id))
             self._append_audit(con, actor, "correction.create", "correction", row["id"], {
                 "analysis_id": analysis_id, "span_s": [start_s, end_s],
                 "predicted": predicted, "corrected": corrected, "reason": reason,
@@ -752,10 +865,33 @@ class LocalDB:
             con.execute("UPDATE jobs SET status = ?, finished_at = ?, result = ?, model_version = ?"
                         " WHERE id = ?", ("succeeded" if ok else "failed", now_iso(), json.dumps(result),
                                           ",".join(c["version"] for c in cands) or None, job_id))
+            # Which signals each new model learned from, with their
+            # fingerprints, in the audit trail itself -- and those captures
+            # are kept for good (LocalDB.retention): a model is only as
+            # accountable as the evidence it was trained on.
+            trained_on = {}
+            for c in cands:
+                ids = list((c.get("source") or {}).get("corrections") or [])
+                if not ids:
+                    continue
+                marks = ",".join("?" * len(ids))
+                used = con.execute(f"SELECT id, analysis_id, iq_sha256, corrected_labels FROM corrections"
+                                   f" WHERE id IN ({marks})", ids).fetchall()
+                trained_on[c["version"]] = [{"correction": u["id"], "capture": u["analysis_id"],
+                                             "iq_sha256": u["iq_sha256"],
+                                             "labels": json.loads(u["corrected_labels"])} for u in used]
+                for u in used:
+                    prev = con.execute("SELECT used_for_training FROM analyses WHERE id = ?",
+                                       (u["analysis_id"],)).fetchone()
+                    versions = [v for v in ((prev[0] if prev else "") or "").split(",") if v]
+                    if c["version"] not in versions:
+                        con.execute("UPDATE analyses SET used_for_training = ? WHERE id = ?",
+                                    (",".join(versions + [c["version"]]), u["analysis_id"]))
             self._append_audit(con, SYSTEM, "retrain.finish" if ok else "retrain.fail", "job", job_id, {
                 "candidates": {c["version"]: {"kind": c.get("kind", "single"),
                                               "gate_passed": c.get("metrics", {}).get("gate", {}).get("passed")}
                                for c in cands},
+                "trained_on": trained_on,
                 "error": result.get("error"),
             })
 
@@ -777,25 +913,17 @@ class LocalDB:
             row = con.execute("SELECT * FROM models WHERE status = 'active' AND kind = ?", (kind,)).fetchone()
         return self._model_row(row) if row else None
 
-    def _started_by(self, con, m: dict) -> str | None:
-        job_id = m["source"].get("job_id") if isinstance(m["source"], dict) else None
-        row = con.execute("SELECT started_by FROM jobs WHERE id = ?", (job_id,)).fetchone() if job_id else None
-        return row["started_by"] if row else None
-
     def review_model(self, version: str, decision: str, note: str, actor: Actor) -> dict:
-        """Approve (= activate) or reject a candidate. Four-eyes: not the person
-        who started the retrain. A candidate that FAILED its gate is refused
-        here; activating one anyway is activate_model(..., override=True)."""
+        """Approve (= activate) or reject a candidate. The analyst who started
+        the retrain may approve it: the safeguard on a model is its exam (the
+        gate), not a second person -- that check sits on the corrections it
+        learned from, each approved by someone other than its submitter. A
+        candidate that FAILED its gate is refused here; activating one anyway
+        is activate_model(..., override=True)."""
         if decision not in ("approve", "reject"):
             raise ValueError("decision must be 'approve' or 'reject'")
         if decision == "approve":
             m = self.get_model(version)
-            if m:                                   # who is asking comes before what they ask
-                with closing(self._connect()) as con:
-                    starter = self._started_by(con, m)
-                if starter and starter.lower() == actor.name.lower():
-                    raise PermissionError("Four-eyes rule: the model must be approved by someone other "
-                                          "than the person who started the retrain.")
             if m and m["status"] != "candidate":
                 raise PermissionError(f"{version} is {m['status']}, not a candidate")
             if m and not m["metrics"].get("gate", {}).get("passed"):
@@ -814,10 +942,6 @@ class LocalDB:
             m = self._model_row(row)
             if m["status"] != "candidate":
                 raise PermissionError(f"{version} is {m['status']}, not a candidate")
-            starter = self._started_by(con, m)
-            if starter and starter.lower() == actor.name.lower():
-                raise PermissionError("Four-eyes rule: the model must be reviewed by someone other "
-                                      "than the person who started the retrain.")
             # Rejected is a verdict, not a deletion: the files and this row stay,
             # and the version can still be activated later with an override.
             con.execute("UPDATE models SET status = 'rejected', approved_by = ?, approved_at = ?, notes = ?"
@@ -835,9 +959,9 @@ class LocalDB:
           retired (was in use before)      -> model.restore    (reason required)
           failed its gate, or rejected     -> model.override   (override + a real reason)
 
-        Always four-eyes (not the person who started that retrain) and always
-        one active version per kind: activating a single model never touches
-        the ensemble, and vice versa."""
+        The analyst who started the retrain may activate it (the gate is the
+        check on a model). Always one active version per kind: activating a
+        single model never touches the ensemble, and vice versa."""
         if actor.name.lower() == "operator":
             raise PermissionError("Set your name before activating a model.")
         note = str(note or "").strip()
@@ -848,10 +972,6 @@ class LocalDB:
             m = self._model_row(row)
             if m["status"] == "active":
                 raise PermissionError(f"{version} is already in use")
-            starter = self._started_by(con, m)
-            if starter and starter.lower() == actor.name.lower():
-                raise PermissionError("Four-eyes rule: the model must be activated by someone other "
-                                      "than the person who started the retrain.")
             gate_passed = bool(m["metrics"].get("gate", {}).get("passed"))
             if not gate_passed or m["status"] == "rejected":
                 why = "failed its gate" if not gate_passed else "was rejected"
@@ -1006,19 +1126,19 @@ class LocalDB:
 
     def setup_admin(self, username: str, password: str, client: str | None = None) -> dict:
         """The first account, which turns sign-in on. Only possible while there
-        are no accounts at all; it is always an admin."""
-        username = self._check_new_account(username, password, "admin")
+        are no accounts at all; it is always an analyst (the top role)."""
+        username = self._check_new_account(username, password, TOP_ROLE)
         with self._write() as con:
             if con.execute("SELECT 1 FROM users LIMIT 1").fetchone():
-                raise PermissionError("Sign-in is already set up; ask an admin for an account.")
-            self._insert_user(con, username, password, "admin", None)
-            self._append_audit(con, Actor(username, "admin", client), "user.setup", "user", username,
-                               {"role": "admin", "note": "first account: sign-in is now required"})
+                raise PermissionError("Sign-in is already set up; ask an analyst for an account.")
+            self._insert_user(con, username, password, TOP_ROLE, None)
+            self._append_audit(con, Actor(username, TOP_ROLE, client), "user.setup", "user", username,
+                               {"role": TOP_ROLE, "note": "first account: sign-in is now required"})
         return self.get_user(username)
 
     def create_user(self, username: str, password: str, role: str, actor: Actor) -> dict:
-        if not role_at_least(actor.role, "admin"):
-            raise PermissionError("Only an admin can create accounts.")
+        if not role_at_least(actor.role, TOP_ROLE):
+            raise PermissionError("Only an analyst can create accounts.")
         username = self._check_new_account(username, password, role)
         with self._write() as con:
             if con.execute("SELECT 1 FROM users WHERE username = ?", (username,)).fetchone():
@@ -1040,11 +1160,11 @@ class LocalDB:
     def update_user(self, username: str, actor: Actor, *, role: str | None = None,
                     disabled: bool | None = None, password: str | None = None) -> dict:
         """Change an account's role, disable/enable it, or reset its password.
-        Admin only. The last active admin cannot be demoted or disabled (that
-        would lock everyone out of user management), and nobody disables
+        Analyst only. The last active analyst cannot be demoted or disabled
+        (that would lock everyone out of user management), and nobody disables
         themselves."""
-        if not role_at_least(actor.role, "admin"):
-            raise PermissionError("Only an admin can change accounts.")
+        if not role_at_least(actor.role, TOP_ROLE):
+            raise PermissionError("Only an analyst can change accounts.")
         username = str(username or "").lower()
         with self._write() as con:
             row = con.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
@@ -1059,11 +1179,11 @@ class LocalDB:
                 if disabled and username == actor.name.lower():
                     raise PermissionError("You cannot disable your own account.")
                 changes["disabled"] = 1 if disabled else 0
-            losing_admin = row["role"] == "admin" and not row["disabled"] and (
-                changes.get("role", "admin") != "admin" or changes.get("disabled"))
-            if losing_admin and con.execute(
-                    "SELECT COUNT(*) FROM users WHERE role = 'admin' AND disabled = 0").fetchone()[0] <= 1:
-                raise PermissionError("This is the last active admin; make another admin first.")
+            losing_top = row["role"] == TOP_ROLE and not row["disabled"] and (
+                changes.get("role", TOP_ROLE) != TOP_ROLE or changes.get("disabled"))
+            if losing_top and con.execute(
+                    "SELECT COUNT(*) FROM users WHERE role = ? AND disabled = 0", (TOP_ROLE,)).fetchone()[0] <= 1:
+                raise PermissionError("This is the last active analyst; make another analyst first.")
             if password is not None:
                 if len(password) < MIN_PASSWORD:
                     raise ValueError(f"password must be at least {MIN_PASSWORD} characters")
@@ -1097,7 +1217,7 @@ class LocalDB:
             if not row:
                 error, why = PermissionError("Wrong username or password."), {"why": "no such account"}
             elif row["disabled"]:
-                error, why = PermissionError("This account is disabled; ask an admin."), {"why": "disabled"}
+                error, why = PermissionError("This account is disabled; ask an analyst."), {"why": "disabled"}
             elif row["locked_until"] and row["locked_until"] > now_iso():
                 error, why = (PermissionError(f"Too many wrong passwords; try again in {LOCKOUT_MINUTES} minutes."),
                               {"why": "locked"})

@@ -210,7 +210,7 @@ export function setOperatorName(name) {
 // {auth_enabled, user: {username, role} | null, can_setup}, from the server.
 let authInfo = { auth_enabled: false, user: null, can_setup: false };
 
-export const ROLE_LABEL = { operator: "Operator", analyst: "Analyst", admin: "Admin" };
+export const ROLE_LABEL = { operator: "Operator", analyst: "Analyst" };
 
 /** Ask the server whether sign-in is on and who is signed in. */
 export async function loadAuth() {
@@ -517,13 +517,28 @@ export function listCorrections({ status = "", analysisId = "" } = {}) {
   return serverJson(`/api/corrections?${q}`, "corrections read");
 }
 
+async function rawIq(path) {
+  const res = await fetch(path, { cache: "no-store" });
+  await serverCheck(res, "capture read");
+  let annotations = [];
+  try { annotations = JSON.parse(res.headers.get("X-NEXA-Annotations") || "[]"); } catch { /* none */ }
+  return { buffer: await res.arrayBuffer(), datatype: res.headers.get("X-NEXA-Datatype") || "cf32_le",
+           sampleRate: Number(res.headers.get("X-NEXA-Sample-Rate")), annotations };
+}
+
 /** The raw IQ behind a correction, for the reviewer to look at:
  *  {buffer, datatype, sampleRate}. */
-export async function correctionIq(id) {
-  const res = await fetch(`/api/corrections/${encodeURIComponent(id)}/iq`, { cache: "no-store" });
-  await serverCheck(res, "capture read");
-  return { buffer: await res.arrayBuffer(), datatype: res.headers.get("X-NEXA-Datatype") || "cf32_le",
-           sampleRate: Number(res.headers.get("X-NEXA-Sample-Rate")) };
+export const correctionIq = id => rawIq(`/api/corrections/${encodeURIComponent(id)}/iq`);
+
+/** A stored capture's raw IQ (fails once the rolling window deleted it). */
+export const analysisIq = id => rawIq(`/api/analyses/${encodeURIComponent(id)}/iq`);
+
+/** An operator checked a flagged capture and the model was right. */
+export function markReviewed(id, note = "") {
+  return serverJson(`/api/analyses/${encodeURIComponent(id)}/reviewed`, "review", {
+    method: "POST", headers: serverHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ note }),
+  });
 }
 
 /** Report builder, server-built formats. Returns {blob, filename, reportId}. */

@@ -99,19 +99,19 @@ async function start() {
   if (!me.auth_enabled) {
     if (!me.can_setup) {
       $("title").textContent = "Not set up yet";
-      $("note").textContent = "No accounts exist yet. Create the first admin account on the computer "
+      $("note").textContent = "No accounts exist yet. Create the first analyst account on the computer "
         + "running the NEXA server, then sign in here.";
       return;
     }
     setup = true;
-    $("title").textContent = "Create the admin account";
+    $("title").textContent = "Create the first analyst account";
     $("note").className = "note first-run";
-    $("note").textContent = "First run: no accounts exist yet. Create the admin account. The admin then "
+    $("note").textContent = "First run: no accounts exist yet. Create the first analyst account. The analyst then "
       + "adds everyone else (Users page). Accounts are stored on this computer only.";
     $("pass2Row").hidden = false;
     pass2.required = true;
     pass.autocomplete = "new-password";
-    submit.textContent = "Create admin and sign in";
+    submit.textContent = "Create analyst and sign in";
   }
   form.hidden = false;
   user.focus();

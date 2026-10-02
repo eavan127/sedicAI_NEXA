@@ -1,11 +1,13 @@
-import { CASES, buildScenario, caseNeedsLibrary, loadCivilianLibrary } from "./generators.js";
+import { CASE_NAMES, buildScenario, caseNeedsLibrary, loadCivilianLibrary, resolveCase } from "./generators.js";
 import { classifyCapture, loadModel, CLASSES, FS, WINDOW_LEN } from "./model.js";
 import {
   noiseFloorPower, occupancy, powerSpectrumDb, resolveSession, scipyStft,
 } from "./analysis.js";
 import { drawConsole } from "./console.js";
-import { decodeSamples, describe, isSigmfName, parseDatatype, readSigmf } from "./sigmf.js";
-import { FileReplay, SimulatedReceiver, dwellLevel, shouldStore, toInterleavedF32 } from "./receiver.js";
+import { annotationsToTruth, decodeSamples, describe, isSigmfName, parseDatatype, readSigmf } from "./sigmf.js";
+import { FileReplay, SimulatedReceiver, dwellLevel, toInterleavedF32 } from "./receiver.js";
+import { peakScore, triage } from "./triage.js";
+import { formatEta, retrainProgress } from "./retrain_progress.js";
 import { detectedIn, spanAt, suggestCorrections } from "./review.js";
 import { eventRows, headerLine, latestBlock, printHeaderHtml, statusBlock } from "./panels.js";
 import {
@@ -20,11 +22,12 @@ import { isAvailable as ollamaAvailable, rewrite as ollamaRewrite, warmUp as oll
 import {
   attachCapture, buildRecord, canDelete, correctionStats, deleteAnalysis, detectServer, exportReport, retrainStatus,
   activateModel, getJob, listJobs, listModels, retrainHistory, reviewModel, rollbackModel, startRetrain,
-  correctionIq, listAnalyses, listAudit, listCorrections, logEvent, operatorName, readConfig, reviewCorrection,
+  analysisIq, correctionIq, listAnalyses, listAudit, listCorrections, logEvent, markReviewed, operatorName,
+  readConfig, reviewCorrection,
   saveAnalysis, setOperatorName, submitCorrection, supportsCorrections, usingSupabase, verifyAudit,
   ROLE_LABEL, createUser, currentAuth, listUsers, loadAuth, signOut, switchDemoPerson, updateUser,
 } from "./storage.js";
-import { applyFilters, barsHtml, summarise, summaryHtml as histSummaryHtml, tableHtml } from "./history.js";
+import { applyFilters, barsHtml, canView, flagsHtml, summarise, summaryHtml as histSummaryHtml, tableHtml } from "./history.js";
 import { buildReport, buildSingle } from "./report.js";
 import { installZoom, registerZoom } from "./zoom.js";
 
@@ -40,7 +43,7 @@ const synthBtn = el("synthBtn"), uploadBtn = el("uploadBtn"), fileInput = el("fi
 const caseSel = el("caseSel"), snrSel = el("snrSel"), hopSel = el("hopSel"), modelSel = el("modelSel");
 const smoothingRadio = el("smoothingRadio");
 
-for (const name of Object.keys(CASES)) {
+for (const name of CASE_NAMES) {
   caseSel.add(new Option(name, name));
 }
 caseSel.value = "All three";
@@ -124,6 +127,32 @@ function modelLabel(which) {
 /** Re-derives every panel from the cached raw result. Smoothing is a display
  * rule, so switching it must NOT re-run inference -- same as the Gradio page,
  * where smoothing.change only re-renders. */
+// ---------------------------------------------------------------------------
+// Triage banner: ALERT (act on it) and REVIEW FLAG (a human checks it) are
+// separate, so one capture can raise both -- see web/triage.js.
+// ---------------------------------------------------------------------------
+
+const triageBanner = el("triageBanner");
+
+function paintTriage(t) {
+  const pct = x => `${Math.round(x * 100)}%`;
+  const parts = [];
+  if (t.alertLevel) {
+    const what = t.threats.map(x => `${x.cls} ${pct(x.peak)}${x.unreported ? " (under its 89% reporting threshold)" : ""}`).join(", ");
+    parts.push(t.alertLevel === "confirmed"
+      ? `<div class="tri alert"><strong>THREAT DETECTED</strong> ${what}</div>`
+      : `<div class="tri possible"><strong>POSSIBLE THREAT</strong> ${what}. The model only just reported it: check the waterfall.</div>`);
+  }
+  if (t.needsReview) {
+    const calls = t.closeCalls.slice(0, 3).map(c => `${c.cls} ${pct(c.peak)} (clear above ${pct(c.line)})`).join(", ");
+    parts.push(`<div class="tri review"><strong>NEEDS A LOOK</strong> `
+      + (calls ? `close call: ${calls}${t.closeCalls.length > 3 ? ` and ${t.closeCalls.length - 3} more` : ""}. ` : "")
+      + `Sent to the operator's review queue (History).</div>`);
+  }
+  triageBanner.innerHTML = parts.join("");
+  triageBanner.hidden = !parts.length;
+}
+
 function render() {
   const { capture, result, source, caseNote, truth, snrDb, which,
            snrCapped, requestedSnrDb, mode } = session;
@@ -131,6 +160,8 @@ function render() {
   const resolved = resolveSession(result, smoothed);
   const events = resolved.emitterEvents;
   const tiers = resolved.tiers;
+  session.triage = triage(events, peakScore(result, CLASSES.indexOf("JAMMING")));
+  paintTriage(session.triage);
   const emptyPct = tiers.length ? tiers.filter(t => t === "Empty").length / tiers.length * 100 : 0;
   const durationMs = capture.re.length / FS * 1000;
 
@@ -196,7 +227,7 @@ function render() {
       tr.appendChild(td);
     }
     const td = document.createElement("td");
-    td.innerHTML = `<button class="mini" data-correct="${i}" title="Tell the system what is really there">✎ Correct</button>`;
+    td.innerHTML = `<button class="mini" data-correct="${i}" title="Tell the system what is really there">Correct</button>`;
     tr.appendChild(td);
     tbody.appendChild(tr);
   });
@@ -267,9 +298,9 @@ async function analyze(re, im, { source, caseNote = "", truth = null, snrDb = nu
 }
 
 synthBtn.addEventListener("click", async () => {
-  const caseName = caseSel.value;
-  const snrDb = Number(snrSel.value);
-  const script = CASES[caseName];
+  const c = resolveCase(caseSel.value, { snrDb: Number(snrSel.value), seed: Math.floor(Math.random() * 1e9),
+                                         durationS: 0.05, index: Math.floor(Math.random() * 4) });
+  const script = c.script, caseName = c.label;
   try {
     // Civilian cases need the exported RadioML window library; fetched once
     // and cached, so only the first civilian case pays for it.
@@ -283,7 +314,7 @@ synthBtn.addEventListener("click", async () => {
     statusEl.textContent = "Synthesizing IQ…";
     await new Promise(r => setTimeout(r, 0));
     const scenario = buildScenario({
-      totalDuration: 0.05, snrDb, seed: Math.floor(Math.random() * 1e9),
+      totalDuration: c.durationS, snrDb: c.snrDb, seed: c.seed,
       script, library, librarySnrDb,
     });
     await analyze(scenario.re, scenario.im, {
@@ -341,7 +372,7 @@ fileInput.addEventListener("change", async () => {
       source: "upload", truth: rec.truth,
       caseNote: rec.warnings.length ? `${rec.note} · WARNING: ${rec.warnings.join(" ")}` : rec.note,
     });
-    if (rec.warnings.length) statusEl.textContent += `  ⚠ ${rec.warnings.join(" ")}`;
+    if (rec.warnings.length) statusEl.textContent += `  ${rec.warnings.join(" ")}`;
   } catch (e) {
     statusEl.textContent = `Error: ${e.message}`;
     console.error(e);
@@ -394,6 +425,7 @@ function openCorrection({ predicted, startS, endS, missed, suggested = null, rea
   corrSubmit.disabled = false;
   corrDialog.showModal();
   corrReason.focus({ preventScroll: true });
+  corrReason.setSelectionRange(corrReason.value.length, corrReason.value.length);   // type straight after a pre-filled start
   pinCorrectionSpan();
 }
 
@@ -547,7 +579,7 @@ function restoreSpan() {
   if (corrDialog.open) return;
   const r = session?.review;
   const f = session?.suggestions?.items[session.suggFocus];
-  if (r) showSpan(r.start_s * 1000, r.end_s * 1000);
+  if (r && r.kind !== "capture") showSpan(r.start_s * 1000, r.end_s * 1000);
   else if (f) showSpan(f.startS * 1000, f.endS * 1000);
   else tlSel.hidden = true;
 }
@@ -664,7 +696,7 @@ function renderSuggestions() {
     + `title="Show this stretch on the timeline"><span class="sugg-kind ${s.kind}">${KIND_LABEL[s.kind]}</span>`
     + `<span class="sugg-time">${(s.startS * 1000).toFixed(2)}–${(s.endS * 1000).toFixed(2)} ms</span>`
     + `<span class="sugg-text">${esc(s.text)}</span>`
-    + (s.submitted ? `<span class="sugg-done">✓ Submitted</span>`
+    + (s.submitted ? `<span class="sugg-done">Submitted</span>`
                    : `<button class="mini" data-review-sugg="${i}">Review</button>`) + `</div>`).join("")
     + (items.length > SUGGEST_SHOWN ? `<div class="note">+${items.length - SUGGEST_SHOWN} more, shorter or later in the capture</div>` : "");
 }
@@ -830,16 +862,21 @@ async function rxLoop() {
     me.level = dwellLevel(block.re, block.im);
     me.lastProcS = elapsed;
 
+    // Every dwell is logged with its raw signal. The server decides how long
+    // the signal is kept: routine ones only in the rolling window, threats,
+    // close calls and corrected ones for good (src/localdb.py:retention).
     const resolved = resolveSession(session.result, smoothingChoice === "Smoothed");
     const classes = [...new Set(resolved.emitterEvents.flatMap(e => e.classes))];
-    if (shouldStore(me.prevClasses, classes)) {
-      me.stored++;
-      rxLogLine(`Dwell ${block.index + 1}: ${classes.join(" + ")} detected, stored`);
-      const bytes = toInterleavedF32(block.re, block.im);
-      session.storing = store(new File([bytes.buffer], `dwell-${String(block.index + 1).padStart(5, "0")}.f32`));
-      await session.storing;
+    const t = session.triage;
+    me.stored++;
+    if (t?.alertLevel || t?.needsReview) {
+      rxLogLine(`Dwell ${block.index + 1}: ${classes.join(" + ") || "nothing"}`
+        + (t.alertLevel ? ` · ${t.alertLevel === "confirmed" ? "THREAT" : "possible threat"}` : "")
+        + (t.needsReview ? " · needs a look" : ""));
     }
-    me.prevClasses = classes;
+    const bytes = toInterleavedF32(block.re, block.im);
+    session.storing = store(new File([bytes.buffer], `dwell-${String(block.index + 1).padStart(5, "0")}.f32`));
+    await session.storing;
     rxPaint();
     // Let the page breathe between dwells (clicks, Stop, redraws).
     await new Promise(r => setTimeout(r, 30));
@@ -977,8 +1014,21 @@ async function store(file, sess = session) {
     if (sess.which === "ensemble" && activeEnsembleVersion) record.model = `ensemble:${activeEnsembleVersion}`;
     // The known answer, so "View" on a correction redraws the dashed truth
     // boxes. Local database only: the shared Supabase table has no such column.
-    if (sess.truth?.length && readConfig().backend === "server") record.truth = sess.truth;
-    const { record: saved, backend, warning } = await saveAnalysis(record, file);
+    if (readConfig().backend === "server") {
+      if (sess.truth?.length) record.truth = sess.truth;
+      // Local database only, like truth: decides the review queue and how
+      // long the raw signal is kept (src/localdb.py:retention).
+      record.alert_level = sess.triage?.alertLevel || null;
+      record.needs_review = !!sess.triage?.needsReview;
+    }
+    // A synthesized scenario has no file of its own: on the local database
+    // its samples are stored anyway, so every capture can be viewed again
+    // (how long the signal is kept is the server's call: localdb.retention).
+    let upload = file;
+    if (!upload && sess.capture && readConfig().backend === "server") {
+      upload = new File([toInterleavedF32(sess.capture.re, sess.capture.im).buffer], "capture.f32");
+    }
+    const { record: saved, backend, warning } = await saveAnalysis(record, upload);
     sess.record = saved;
     sess.recordBackend = backend;
     lastRecord = saved;
@@ -1156,12 +1206,12 @@ function versionActions(m) {
   const v = escH(m.version), passed = !!m.metrics?.gate?.passed;
   if (m.status === "active") return "";
   if (m.status === "candidate") {
-    return (passed ? `<button class="mini" data-act="approve" data-v="${v}">✔ Approve &amp; activate</button> `
-      : `<button class="mini warn" data-act="override" data-v="${v}">⚠ Activate anyway…</button> `)
-      + `<button class="mini" data-act="reject" data-v="${v}">✖ Reject</button>`;
+    return (passed ? `<button class="mini" data-act="approve" data-v="${v}">Approve &amp; activate</button> `
+      : `<button class="mini warn" data-act="override" data-v="${v}">Activate anyway…</button> `)
+      + `<button class="mini" data-act="reject" data-v="${v}">Reject</button>`;
   }
-  if (m.status === "retired" && passed) return `<button class="mini" data-act="restore" data-v="${v}">↺ Restore</button>`;
-  return `<button class="mini warn" data-act="override" data-v="${v}">⚠ Activate anyway…</button>`;
+  if (m.status === "retired" && passed) return `<button class="mini" data-act="restore" data-v="${v}">Restore</button>`;
+  return `<button class="mini warn" data-act="override" data-v="${v}">Activate anyway…</button>`;
 }
 
 async function renderRetrain() {
@@ -1190,14 +1240,14 @@ async function renderRetrain() {
       `<tr class="shipped"><td><strong>${name}</strong><div class="note">shipped with the app, never modified</div></td>`
       + `<td>${MODEL_KIND_LABEL[kind]}</td><td colspan="6"><span class="note">the version every retrain is measured against first</span></td>`
       + `<td><span class="pill ${active ? "approved" : "neutral"}">${active ? "in use" : "saved"}</span></td>`
-      + `<td class="row-actions">${active ? "" : `<button class="mini" data-act="shipped" data-kind="${kind}">↺ Use shipped</button>`}</td></tr>`;
+      + `<td class="row-actions">${active ? "" : `<button class="mini" data-act="shipped" data-kind="${kind}">Use shipped</button>`}</td></tr>`;
 
     rtModels.innerHTML = `<table><thead><tr><th>Version</th><th>Type</th><th>Fine-tuned from · data</th><th>Exam</th>`
       + `<th>LFM_RADAR</th><th>FHSS</th><th>JAMMING</th><th>Gate</th><th>Status</th><th></th></tr></thead><tbody>`
       + shippedRow("ensemble", "Submission ensemble", !ensemble) + shippedRow("single", "best_model.pt", !single)
       + models.map(m => {
         const g = m.metrics?.gate || {}, tr = m.metrics?.train || {};
-        const rules = (g.rules || []).map(r => `<li class="${r.met ? "met" : "unmet"}"><span>${r.met ? "✔" : "✖"}</span> ${escH(r.text)}</li>`).join("");
+        const rules = (g.rules || []).map(r => `<li class="${r.met ? "met" : "unmet"}"><span>${r.met ? "" : ""}</span> ${escH(r.text)}</li>`).join("");
         const fa = g.before?.noise_false_alarm != null
           ? `<li>False alarms on pure noise: ${(g.before.noise_false_alarm * 100).toFixed(1)} → ${(g.after.noise_false_alarm * 100).toFixed(1)}%</li>` : "";
         return `<tr><td><strong>${escH(m.version)}</strong><div class="note">${escH(new Date(m.created_at).toLocaleString())}</div></td>`
@@ -1278,6 +1328,15 @@ function showJob(job) {
     + `Retrain (${job.scope === "both" ? "single + ensemble" : "single model"}) started by <strong>${escH(job.started_by)}</strong>`
     + `${job.override ? " (override)" : ""}: “${escH(job.reason)}”`
     + (job.model_version ? ` → candidates <strong>${escH(job.model_version.split(",").join(", "))}</strong>` : "");
+  // Progress bar and time left, read from the run's own log (retrain_progress.js).
+  const p = retrainProgress(job);
+  el("rtProg").hidden = false;
+  el("rtFill").style.width = `${(p.fraction * 100).toFixed(1)}%`;
+  el("rtPct").textContent = `${Math.round(p.fraction * 100)}%`;
+  el("rtStage").textContent = p.stage;
+  el("rtEta").textContent = job.status === "running" || job.status === "queued"
+    ? `${formatEta(p.etaS)} left · running ${formatEta(p.elapsedS).replace("about ", "")}`
+    : `took ${formatEta(p.elapsedS).replace("about ", "")}`;
   // Library chatter (export progress, warnings) hidden; the run's own lines stay.
   rtLog.textContent = (job.log || "").replace(
     /^.*(torchvision|UserWarning|Warning:|torch\.onnx|\[torch\.onnx\]|return cls|rename_mapping|warnings\.warn|== .*\.pt -> .*\.onnx ==|exported \(|batch=\d+ seed=).*$\n?/gm, "");
@@ -1443,12 +1502,58 @@ function paintHistory() {
   histSnrBars.innerHTML = barsHtml(s.snr.map(b => [b.label, b.count]),
     { empty: "No capture carries a known SNR.", sort: false });
   histDayBars.innerHTML = barsHtml(s.byDay, { empty: "Nothing stored yet.", sort: false });
-  histTable.innerHTML = tableHtml(filtered, { canDelete: canDelete() });
+  // Deleting needs the analyst role on the local server (serve_local.py:required_role).
+  const role = currentAuth().user?.role;
+  const mayDelete = canDelete() && (readConfig().backend !== "server" || role === "analyst");
+  histTable.innerHTML = tableHtml(filtered, { canDelete: mayDelete });
+  paintQueue();
   paintReportBuilder(filtered.length);
   histStatus.textContent = filtered.length === histRecords.length
     ? `${histRecords.length} stored`
     : `${filtered.length} of ${histRecords.length} stored`;
 }
+
+// "Needs a look": close calls nobody has checked yet, newest first. The
+// operator views each one, then corrects it or marks the model right.
+const queueBlock = el("queueBlock"), queueList = el("queueList"), queueMsg = el("queueMsg");
+const QUEUE_SHOWN = 15;
+
+function paintQueue() {
+  const waiting = histRecords.filter(r => r.needs_review && !r.reviewed_by);
+  queueBlock.hidden = readConfig().backend !== "server";
+  if (queueBlock.hidden) return;
+  const esc = t => String(t ?? "").replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
+  queueList.innerHTML = !waiting.length
+    ? `<div class="note">Nothing waiting: every close call has been checked.</div>`
+    : `<div class="note">${waiting.length} waiting${waiting.length > QUEUE_SHOWN ? `, newest ${QUEUE_SHOWN} shown` : ""}.</div>`
+      + `<table><tbody>` + waiting.slice(0, QUEUE_SHOWN).map(r => `<tr>`
+        + `<td>${esc(new Date(r.created_at).toLocaleString())}</td>`
+        + `<td>${esc(r.file_name || r.case_note || r.source)}</td>`
+        + `<td><b style="color:${TIER_COLOR[r.verdict] || "inherit"}">${esc(r.verdict)}</b>${flagsHtml(r)}</td>`
+        + `<td>${esc((r.classes_detected || []).join(", ") || "—")}</td>`
+        + `<td class="row-actions">`
+        + (canView(r) ? `<button class="mini" data-q="view" data-id="${esc(r.id)}">View</button> ` : "")
+        + `<button class="mini" data-q="right" data-id="${esc(r.id)}">Model is right</button></td></tr>`).join("")
+      + `</tbody></table>`;
+}
+
+queueList.addEventListener("click", async (ev) => {
+  const btn = ev.target.closest("button[data-q]");
+  if (!btn) return;
+  const rec = histRecords.find(r => r.id === btn.dataset.id);
+  if (btn.dataset.q === "view") return viewCapture(rec);
+  queueMsg.className = "note";
+  try {
+    await markReviewed(btn.dataset.id, "checked from the review queue");
+    rec.reviewed_by = operatorName();
+    queueMsg.textContent = `Marked checked by ${operatorName()}: the model was right.`;
+    paintHistory();
+    renderAudit();
+  } catch (e) {
+    queueMsg.className = "corr-error";
+    queueMsg.textContent = e.message;
+  }
+});
 
 async function renderHistory() {
   await detectServer();
@@ -1600,7 +1705,7 @@ const AUDIT_LABEL = {
   "model.rollback": "Model rolled back",
   "model.restore": "Model version restored",
   "model.override": "Model activated by OVERRIDE",
-  "user.setup": "Sign-in set up (first admin)",
+  "user.setup": "Sign-in set up (first analyst)",
   "user.create": "Account created",
   "user.update": "Account changed",
   "user.login": "Signed in",
@@ -1707,7 +1812,7 @@ async function renderTrigger(box) {
       + `<div class="note">Correction rate, last ${st.rules.window_days} days: <strong>${(st.rate * 100).toFixed(1)}%</strong> `
       + `(${st.corrected} of ${st.analysed} analysed captures had a correction that was not rejected).</div>`
       + `<ul class="checklist">${st.conditions.map(c =>
-        `<li class="${c.met ? "met" : "unmet"}"><span aria-hidden="true">${c.met ? "✔" : "✖"}</span> ${c.text}</li>`).join("")}</ul>`;
+        `<li class="${c.met ? "met" : "unmet"}"><span aria-hidden="true">${c.met ? "" : ""}</span> ${c.text}</li>`).join("")}</ul>`;
     return st;
   } catch (e) {
     box.textContent = `Could not read the retraining trigger: ${e.message}`;
@@ -1741,11 +1846,11 @@ async function renderCorrections() {
         // Four-eyes: the server refuses a review by the submitter, so offer no
         // buttons that can only fail -- say who has to do it instead.
         const own = c.operator.toLowerCase() === operatorName().toLowerCase();
-        const view = `<button class="mini" data-view="${esc(c.id)}" title="Open this capture and see the corrected stretch">👁 View</button> `;
+        const view = `<button class="mini" data-view="${esc(c.id)}" title="Open this capture and see the corrected stretch">View</button> `;
         const actions = view + (c.status !== "pending" ? ""
           : own ? `<span class="note">Your own correction:<br>another person must review it</span>`
-          : `<button class="mini" data-review="approve" data-id="${esc(c.id)}">✔ Approve</button> `
-            + `<button class="mini" data-review="reject" data-id="${esc(c.id)}">✖ Reject</button>`);
+          : `<button class="mini" data-review="approve" data-id="${esc(c.id)}">Approve</button> `
+            + `<button class="mini" data-review="reject" data-id="${esc(c.id)}">Reject</button>`);
         return `<tr><td>${esc(new Date(c.created_at).toLocaleString())}</td>`
           + `<td>${esc(cap?.file_name || cap?.case_note?.slice(0, 40) || c.analysis_id.slice(0, 8))}<div class="note">${span}</div></td>`
           + `<td><s>${esc(c.predicted_labels.join(" + ") || "nothing")}</s> → <strong>${esc(c.corrected_labels.join(" + "))}</strong></td>`
@@ -1787,23 +1892,28 @@ corrTable.addEventListener("click", async (ev) => {
 // the signal, not just the operator's words.
 const reviewBanner = el("reviewBanner");
 
-async function viewCorrection(c) {
-  if (!c) return;
-  corrMsg.className = "note";
-  corrMsg.textContent = "Opening the capture…";
+/** Open a stored capture on RF Replay again: `fetchIq` gets its raw signal,
+ *  `review` is what the banner describes. Not stored again (analyze skips it). */
+async function openStored(cap, fetchIq, review, msgEl) {
+  msgEl.className = "note";
+  msgEl.textContent = "Opening the capture…";
+  document.body.style.cursor = "progress";
   try {
-    const iq = await correctionIq(c.id);
+    const iq = await fetchIq();
     if (Math.abs(iq.sampleRate - FS) > 1) {
       throw new Error(`it was recorded at ${(iq.sampleRate / 1e6).toFixed(3)} MS/s, `
         + `and the console analyses ${(FS / 1e6).toFixed(1)} MS/s only`);
     }
     const { re, im } = decodeSamples(iq.buffer, parseDatatype(iq.datatype));
-    const cap = histRecords.find(r => r.id === c.analysis_id);
-    corrMsg.textContent = "";
+    // Saved truth first; else a SigMF file's own annotations (captures stored
+    // before truth was saved). A synthesized scenario saved then has neither.
+    const fromNotes = annotationsToTruth(iq.annotations || [], iq.sampleRate) || [];   // null when none match
+    const truth = cap?.truth?.length ? cap.truth : fromNotes.length ? fromNotes : null;
+    msgEl.textContent = "";
     showPage("replay");
-    await analyze(re, im, { source: "upload", caseNote: cap?.case_note || "", truth: cap?.truth || null,
-                            review: { ...c, capture: cap?.file_name || cap?.case_note || "this capture" } });
-    if (session?.review?.id === c.id) {
+    await analyze(re, im, { source: "upload", caseNote: cap?.case_note || "", truth,
+                            review: { ...review, capture: cap?.file_name || cap?.case_note || "this capture" } });
+    if (session?.review?.id === review.id) {
       // A correction made while reviewing belongs to the stored capture, not
       // to a new copy of it (ensureEvidence stores the session otherwise).
       if (cap) { session.record = cap; session.recordBackend = "server"; }
@@ -1811,9 +1921,23 @@ async function viewCorrection(c) {
       scrollToLanes();
     }
   } catch (e) {
-    corrMsg.className = "corr-error";
-    corrMsg.textContent = `Could not open the capture: ${e.message}`;
+    msgEl.className = "corr-error";
+    msgEl.textContent = `Could not open the capture: ${e.message}`;
+    alert(`Could not open the capture: ${e.message}`);   // the status line may be far from the button
+  } finally {
+    document.body.style.cursor = "";
   }
+}
+
+function viewCorrection(c) {
+  if (!c) return;
+  return openStored(histRecords.find(r => r.id === c.analysis_id), () => correctionIq(c.id),
+                    { kind: "correction", ...c }, corrMsg);
+}
+
+function viewCapture(rec) {
+  if (!rec) return;
+  return openStored(rec, () => analysisIq(rec.id), { kind: "capture", id: rec.id, rec }, histStatus);
 }
 
 function showReviewBanner() {
@@ -1821,6 +1945,19 @@ function showReviewBanner() {
   reviewBanner.hidden = !r;
   if (!r) return;
   const esc = t => String(t ?? "").replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
+  if (r.kind === "capture") {
+    const a = r.rec;
+    reviewBanner.innerHTML = `<div><strong>Stored capture</strong> ${esc(r.capture)}, analysed `
+      + `${esc(new Date(a.created_at).toLocaleString())} as <strong>${esc(a.verdict)}</strong>. `
+      + (a.needs_review && !a.reviewed_by ? "It was flagged as a close call: check it, then correct it "
+         + "(click or drag on the timeline) or mark the model right." : "")
+      + `<div class="note">Raw signal: ${esc(a.retention?.why || "")}. The model shown is the one in use now.`
+      + (session.truth?.length ? " Dashed boxes are the known true answer." : "") + `</div></div>`
+      + `<div class="row-actions">`
+      + (a.needs_review && !a.reviewed_by ? `<button class="mini" id="reviewRight">Model is right</button> ` : "")
+      + `<button class="mini" id="reviewBack">← Back to History</button></div>`;
+    return;
+  }
   reviewBanner.innerHTML = `<div><strong>Reviewing a correction</strong> by ${esc(r.operator)} on ${esc(r.capture)}: `
     + `the shaded stretch, ${(r.start_s * 1000).toFixed(2)}–${(r.end_s * 1000).toFixed(2)} ms. `
     + `Model said <s>${esc(r.predicted_labels.join(" + ") || "nothing")}</s> → human says `
@@ -1833,8 +1970,22 @@ function showReviewBanner() {
     + `<button class="mini" id="reviewBack">← Back to corrections</button>`;
 }
 
-reviewBanner.addEventListener("click", (ev) => {
+reviewBanner.addEventListener("click", async (ev) => {
+  if (ev.target.closest("#reviewRight")) {
+    const r = session?.review;
+    try {
+      await markReviewed(r.id, "checked on RF Replay");
+      r.rec.reviewed_by = operatorName();
+      showReviewBanner();
+    } catch (e) { statusEl.textContent = `Could not mark it checked: ${e.message}`; }
+    return;
+  }
   if (!ev.target.closest("#reviewBack")) return;
+  if (session?.review?.kind === "capture") {
+    showPage("history");
+    renderHistory();
+    return;
+  }
   showPage("history");
   corrBlock.scrollIntoView({ block: "start" });
 });
@@ -1845,8 +1996,8 @@ el("auditVerify").addEventListener("click", async () => {
   try {
     const v = await verifyAudit();
     auditStatus.textContent = v.ok
-      ? `✔ Intact: all ${v.entries} entries match their hashes; nothing has been edited or removed.`
-      : `✖ TAMPERED: entry #${v.broken_at} ${v.reason}. Treat everything from #${v.broken_at} on as untrusted.`;
+      ? `Intact: all ${v.entries} entries match their hashes; nothing has been edited or removed.`
+      : `TAMPERED: entry #${v.broken_at} ${v.reason}. Treat everything from #${v.broken_at} on as untrusted.`;
     auditStatus.className = v.ok ? "note audit-ok" : "note audit-bad";
   } catch (e) {
     auditStatus.textContent = `Verify failed: ${e.message}`;
@@ -1860,6 +2011,7 @@ histTable.addEventListener("click", async (ev) => {
   if (!btn) return;
   const record = histRecords.find(r => r.id === btn.dataset.id);
   if (!record) return;
+  if (btn.dataset.act === "view") return viewCapture(record);
   if (btn.dataset.act === "pdf") {
     histStatus.textContent = "Building PDF…";
     try {
@@ -1879,6 +2031,7 @@ histTable.addEventListener("click", async (ev) => {
       await renderHistory();   // also redraws the audit trail
     } catch (e) {
       histStatus.textContent = `Delete failed: ${e.message}`;
+      alert(`Could not delete it: ${e.message}`);   // the status line is far above this button
     }
   }
 });
@@ -1934,7 +2087,7 @@ function applyAuth(a) {
   }
   authChip.hidden = false;
   // Accounts only exist with sign-in on; the demo people are not accounts.
-  document.querySelector('nav button[data-page="users"]').hidden = a.demo || a.user.role !== "admin";
+  document.querySelector('nav button[data-page="users"]').hidden = a.demo || a.user.role !== "analyst";
   // Every prompt and message that names "you" reads operatorName(): make it
   // the signed-in account, not whatever name this browser last typed.
   setOperatorName(a.user.username);
@@ -1952,7 +2105,7 @@ window.addEventListener("nexa-auth-required", toLogin);
 
 loadAuth().then(applyAuth).catch(e => console.error("Sign-in check failed:", e));
 
-// --- Users page (admins) -------------------------------------------------------
+// --- Users page (analysts) -------------------------------------------------------
 
 const usersTable = el("usersTable"), usersMsg = el("usersMsg");
 const uaName = el("uaName"), uaPass = el("uaPass"), uaRole = el("uaRole");
@@ -1983,7 +2136,7 @@ async function renderUsers() {
     cell(u.username + (u.username === me ? " (you)" : ""));
     const role = document.createElement("select");
     role.setAttribute("aria-label", `Role of ${u.username}`);
-    for (const r of ["operator", "analyst", "admin"]) role.add(new Option(ROLE_LABEL[r], r, false, r === u.role));
+    for (const r of ["operator", "analyst"]) role.add(new Option(ROLE_LABEL[r], r, false, r === u.role));
     role.addEventListener("change", () => changeUser(u.username, { role: role.value },
       `${u.username} is now ${ROLE_LABEL[role.value]}.`));
     cell(role);

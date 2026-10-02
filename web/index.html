@@ -110,7 +110,7 @@
 
     .print-only { display: block; }
     /* Controls, navigation and live status are interaction, not content. */
-    nav, .grow, #status, h3.page-title, .note, .receiver, #corrMissed, #eventsTable button, #consoleEnlarge, #suggestBlock, .tl-cursor, .tl-sel, #authChip, .review-banner { display: none !important; }
+    nav, .grow, #status, h3.page-title, .note, .receiver, #corrMissed, #eventsTable button, #consoleEnlarge, #suggestBlock, .tl-cursor, .tl-sel, #authChip, .review-banner, #queueBlock { display: none !important; }
     header { margin-bottom: 10px; }
     .layout { display: block; }
     main { width: 100%; }
@@ -190,6 +190,23 @@
   .note.audit-bad { color: #B3261E; font-weight: 600; }
   dialog#corrDialog { border: 1px solid var(--grid); border-radius: 10px; padding: 18px 20px; width: min(560px, calc(100vw - 32px)); background: var(--panel); color: var(--text); font-family: var(--font); }
   dialog#corrDialog::backdrop { background: rgba(18, 28, 39, 0.45); }
+  .triage { display: grid; gap: 6px; margin: 0 0 12px; }
+  .triage .tri { border-radius: 8px; padding: 8px 12px; font-size: 15px; border: 2px solid; }
+  .triage .tri.alert { border-color: #B3261E; background: rgba(179, 38, 30, 0.10); }
+  .triage .tri.possible { border-color: #C66A1E; background: rgba(198, 106, 30, 0.10); }
+  .triage .tri.review { border-color: #8A6D00; background: rgba(214, 170, 0, 0.12); }
+  .chip { display: inline-block; font-size: 12px; font-weight: 700; border-radius: 10px; padding: 1px 8px; margin-top: 3px; white-space: nowrap; }
+  .chip.alert { background: rgba(179, 38, 30, 0.14); color: #B3261E; }
+  .chip.possible { background: rgba(198, 106, 30, 0.16); color: #9A4F12; }
+  .chip.review { background: rgba(214, 170, 0, 0.20); color: #6B5400; }
+  .chip.done { background: rgba(98, 113, 67, 0.16); color: #4A5A2E; }
+  .ret { font-weight: 700; font-size: 13px; }
+  .ret.kept { color: #4A5A2E; } .ret.rolling { color: var(--text-dim); } .ret.deleted { color: #9A4F12; }
+  .rt-progress { margin: 4px 0 10px; }
+  .rt-bar { height: 14px; border-radius: 7px; background: var(--grid); overflow: hidden; }
+  .rt-fill { height: 100%; width: 0; background: var(--brand-olive, #627143); border-radius: 7px; transition: width .8s ease; }
+  .rt-ptext { font-size: 14px; margin-top: 5px; display: flex; gap: 10px; flex-wrap: wrap; align-items: baseline; }
+  .rt-eta { color: var(--text-dim); }
   .review-banner { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; border: 2px solid #627143; background: var(--brand-olive-tint, #eef0e6); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; }
   /* main.js:pinCorrectionSpan -- docked beside the timeline so the stretch under review stays visible */
   dialog#corrDialog.docked { position: fixed; margin: 0; inset: auto 16px 16px auto; width: min(460px, 40vw); max-height: calc(100vh - 32px); overflow: auto; box-shadow: 0 8px 28px rgba(18, 28, 39, 0.28); }
@@ -436,8 +453,8 @@
               <option value="0.05" selected>50 ms</option>
             </select>
           </div>
-          <button class="primary" id="rxConnect" style="flex:2;min-width:170px;">▶ Connect &amp; stream</button>
-          <button class="secondary" id="rxStop" style="flex:1;min-width:110px;" disabled>■ Stop</button>
+          <button class="primary" id="rxConnect" style="flex:2;min-width:170px;">Connect &amp; stream</button>
+          <button class="secondary" id="rxStop" style="flex:1;min-width:110px;" disabled>Stop</button>
           <input type="file" id="rxFileInput" multiple accept=".bin,.f32,.cf32,.cfile,.iq,.dat,.raw,.sigmf,.sigmf-meta,.sigmf-data" style="display:none">
         </div>
         <div class="rx-readouts" id="rxReadouts">
@@ -452,7 +469,7 @@
 
       <!-- Source input -->
       <div class="grow">
-        <button class="primary full" id="uploadBtn" disabled>📁 Select &amp; Analyze Source File</button>
+        <button class="primary full" id="uploadBtn" disabled>Select &amp; Analyze Source File</button>
         <input type="file" id="fileInput" multiple accept=".bin,.f32,.cf32,.cfile,.iq,.dat,.raw,.sigmf,.sigmf-meta,.sigmf-data" style="display:none">
       </div>
 
@@ -467,7 +484,7 @@
           <select id="snrSel"></select>
         </div>
         <button class="secondary" id="synthBtn" style="flex:2;min-width:170px;" disabled>Synthesize Scenario</button>
-        <button class="secondary" id="printBtn" style="flex:2;min-width:170px;" disabled>⭳ Download report (PDF)</button>
+        <button class="secondary" id="printBtn" style="flex:2;min-width:170px;" disabled>Download report (PDF)</button>
       </div>
 
       <div class="note">
@@ -481,6 +498,7 @@
 
       <div id="status">Loading onnxruntime-web and the 5-model ensemble…</div>
       <div id="headline"></div>
+      <div class="triage" id="triageBanner" role="alert" hidden></div>
 
       <div class="panels">
         <div id="statusBox"></div>
@@ -601,7 +619,7 @@
         <label class="corr-block">Classification banner (printed on every page / file)
           <input id="rbBanner" maxlength="120" value="UNCLASSIFIED // DEMO - SYNTHETIC DATA"></label>
         <div class="filters" style="margin-top:10px;">
-          <button class="primary" id="rbBuild">⭳ Build report</button>
+          <button class="primary" id="rbBuild">Build report</button>
           <span class="note" id="rbMsg" role="status"></span>
         </div>
       </div>
@@ -633,6 +651,15 @@
       <div class="block">
         <div class="block-label">Captures per day</div>
         <div id="histDayBars"></div>
+      </div>
+
+      <div class="block" id="queueBlock" hidden>
+        <div class="block-label">Needs a look: close calls waiting for an operator</div>
+        <div class="note">The model only just made up its mind on these (a score under 1.5x that class's
+          threshold), or saw possible jamming it did not report. View one, then correct it on the
+          timeline or mark the model right. Their raw signal is kept until then and afterwards.</div>
+        <div class="note" id="queueMsg" role="status"></div>
+        <div class="table-wrap" id="queueList"></div>
       </div>
 
       <div class="block">
@@ -752,11 +779,15 @@
         <div class="filters" style="margin-top:8px;">
           <label class="note" for="rtOperator" style="margin:0;">Your name</label>
           <input id="rtOperator" maxlength="64" style="width:160px;">
-          <button class="primary" id="rtStart">▶ Start retraining</button>
+          <button class="primary" id="rtStart">Start retraining</button>
           <span class="note" id="rtMsg" role="status"></span>
         </div>
         <div id="rtJob" hidden style="margin-top:10px;">
           <div id="rtJobHead" style="font-size:15px;margin-bottom:6px;"></div>
+          <div class="rt-progress" id="rtProg" hidden>
+            <div class="rt-bar"><div class="rt-fill" id="rtFill"></div></div>
+            <div class="rt-ptext"><strong id="rtPct">0%</strong> <span id="rtStage"></span> <span class="rt-eta" id="rtEta"></span></div>
+          </div>
           <pre class="rt-log" id="rtLog"></pre>
         </div>
         <div class="block-label" style="margin-top:14px;">Model versions (all kept)</div>
@@ -785,7 +816,7 @@
       <div style="margin-top:8px;"><button id="chatClear" type="button">Clear saved history</button></div>
     </section>
 
-    <!-- Accounts (admins only; main.js: renderUsers). -->
+    <!-- Accounts (analysts only; main.js: renderUsers). -->
     <section id="page-users" hidden>
       <h3 class="page-title">Users</h3>
       <div class="block">
@@ -803,7 +834,7 @@
             title="2-32 characters: lowercase letters, digits, . _ or -"></label>
           <label>Password <input id="uaPass" type="password" required minlength="8" autocomplete="new-password"></label>
           <label>Role <select id="uaRole">
-            <option value="operator">Operator</option><option value="analyst">Analyst</option><option value="admin">Admin</option>
+            <option value="operator">Operator</option><option value="analyst">Analyst</option>
           </select></label>
           <button type="submit" class="primary">Add account</button>
         </form>

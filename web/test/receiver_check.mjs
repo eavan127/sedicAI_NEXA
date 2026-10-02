@@ -1,7 +1,8 @@
 // Receiver sources (web/receiver.js): the simulated SDR and file replay.
 // Pure logic, no DOM or model, so this runs in node:
 //     node web/test/receiver_check.mjs
-import { FileReplay, SimulatedReceiver, dwellLevel, shouldStore, sliceTruth, toInterleavedF32 } from "../receiver.js";
+import { FileReplay, SimulatedReceiver, dwellLevel, sliceTruth, toInterleavedF32 } from "../receiver.js";
+import { clearLine, triage } from "../triage.js";
 import { FS, WINDOW_LEN } from "../model.js";
 
 let failures = 0;
@@ -23,12 +24,25 @@ function check(name, ok, detail = "") {
   check("no truth stays no truth", sliceTruth(null, 0, 1) === null);
 }
 
-// --- shouldStore: log changes, not every dwell ------------------------------------
+// --- triage: alert (act) and review flag (check) are separate -----------------------
+// Every dwell is stored now; triage decides what the operator is told and,
+// on the server, how long the raw signal is kept.
 
-check("first detection stored", shouldStore(null, ["JAMMING"]));
-check("same classes (any order) not stored again", !shouldStore(["FHSS", "JAMMING"], ["JAMMING", "FHSS"]));
-check("a new emitter stored", shouldStore(["FHSS"], ["FHSS", "JAMMING"]));
-check("empty dwell never stored", !shouldStore(["FHSS"], []));
+{
+  const ev = (cls, peak) => ({ classes: [cls], peak: { [cls]: peak }, startUs: 0, endUs: 100 });
+  check("clear line is 1.5x the threshold, capped below 100%",
+    Math.abs(clearLine("LFM_RADAR") - 0.36) < 1e-9 && Math.abs(clearLine("JAMMING") - 0.945) < 1e-9);
+  const sure = triage([ev("JAMMING", 0.97)]);
+  check("clear jamming: confirmed alert, no review", sure.alertLevel === "confirmed" && !sure.needsReview);
+  const close = triage([ev("FHSS", 0.30)]);
+  check("FHSS just past its threshold: possible alert AND review", close.alertLevel === "possible" && close.needsReview);
+  const hidden = triage([ev("64QAM", 0.51)], 0.6);
+  check("unreported jamming at 60%: possible alert and review",
+    hidden.alertLevel === "possible" && hidden.threats[0].unreported && hidden.needsReview);
+  const civ = triage([ev("64QAM", 0.51)], 0.1);
+  check("clear civilian: no alert, no review", civ.alertLevel === null && !civ.needsReview);
+  check("civilian close call: review only", triage([ev("16QAM", 0.22)]).needsReview && !triage([ev("16QAM", 0.22)]).alertLevel);
+}
 
 // --- dwellLevel ---------------------------------------------------------------------
 

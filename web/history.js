@@ -141,6 +141,26 @@ export function barsHtml(pairs, { empty = "Nothing recorded yet.", sort = true }
     </div>`).join("")}</div>`;
 }
 
+/** Alert and review chips beside the verdict (local database records only). */
+export function flagsHtml(r) {
+  const chips = [];
+  if (r.alert_level === "confirmed") chips.push(`<span class="chip alert" title="Military or hostile emitter, model clearly past its threshold">alert</span>`);
+  if (r.alert_level === "possible") chips.push(`<span class="chip possible" title="Possible threat: the model only just reported it (or jamming under its reporting threshold)">possible</span>`);
+  if (r.needs_review && !r.reviewed_by) chips.push(`<span class="chip review" title="Close call: waiting for an operator to check it">needs a look</span>`);
+  if (r.needs_review && r.reviewed_by) chips.push(`<span class="chip done" title="Checked by ${esc(r.reviewed_by)}">checked</span>`);
+  return chips.length ? `<div>${chips.join(" ")}</div>` : "";
+}
+
+/** Whether the raw signal is kept, and why (src/localdb.py:retention). */
+export function retentionHtml(r) {
+  const k = r.retention;
+  if (!k) return "—";
+  const label = { kept: "Kept", rolling: "Rolling", deleted: "Deleted", none: "Not stored" }[k.kind] || k.kind;
+  return `<span class="ret ${esc(k.kind)}">${label}</span><div class="note">${esc(k.why)}</div>`;
+}
+
+export const canView = r => !!r.retention && (r.retention.kind === "kept" || r.retention.kind === "rolling");
+
 export function tableHtml(records, { canDelete = true } = {}) {
   // canDelete=false for the shared database: the anon key may insert and read
   // but not delete (web/supabase/schema.sql), so a Delete button there could
@@ -153,18 +173,22 @@ export function tableHtml(records, { canDelete = true } = {}) {
     <tr>
       <td>${esc(fmtTime(r.created_at))}</td>
       <td>${esc(r.file_name || r.case_note || r.source)}</td>
-      <td><span style="color:${TIER_COLOR[r.verdict] || "inherit"}"><b>${esc(r.verdict)}</b></span></td>
+      <td><span style="color:${TIER_COLOR[r.verdict] || "inherit"}"><b>${esc(r.verdict)}</b></span>${flagsHtml(r)}</td>
       <td>${esc((r.classes_detected || []).join(", ") || "—")}</td>
       <td class="num">${r.snr_db == null ? "—" : esc(r.snr_db)}</td>
       <td class="num">${esc(r.n_windows)}</td>
       <td>${esc(r.model)}</td>
+      <td>${retentionHtml(r)}</td>
       <td class="row-actions">
+        ${canView(r) ? `<button class="mini" data-act="view" data-id="${esc(r.id)}">View</button>` : ""}
         <button class="mini" data-act="pdf" data-id="${esc(r.id)}">PDF</button>
-        ${canDelete ? `<button class="mini" data-act="delete" data-id="${esc(r.id)}">Delete</button>` : ""}
+        ${!canDelete ? "" : r.corrected
+          ? `<span class="note" title="A human correction relies on this capture, so it is kept as the evidence behind it">evidence</span>`
+          : `<button class="mini" data-act="delete" data-id="${esc(r.id)}">Delete</button>`}
       </td>
     </tr>`).join("");
   return `<table class="history">
     <thead><tr><th>When</th><th>Capture</th><th>Verdict</th><th>Classes</th>
-      <th class="num">SNR dB</th><th class="num">Windows</th><th>Model</th><th></th></tr></thead>
+      <th class="num">SNR dB</th><th class="num">Windows</th><th>Model</th><th>Raw signal</th><th></th></tr></thead>
     <tbody>${rows}</tbody></table>`;
 }

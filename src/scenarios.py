@@ -112,6 +112,12 @@ CASES = {
     "Civilian + Radar": [("BPSK", 0.15, 0.70), ("LFM_RADAR", 0.35, 0.85)],
     "Contested band": [("QPSK", 0.05, 0.60), ("LFM_RADAR", 0.20, 0.55),
                         ("FHSS", 0.35, 0.80), ("JAMMING", 0.55, 0.95)],
+    # One civilian modulation filling the whole capture (routine traffic;
+    # web/generators.js has the same four).
+    "BPSK only": [("BPSK", 0.0, 1.0)],
+    "QPSK only": [("QPSK", 0.0, 1.0)],
+    "16QAM only": [("16QAM", 0.0, 1.0)],
+    "64QAM only": [("64QAM", 0.0, 1.0)],
 }
 
 

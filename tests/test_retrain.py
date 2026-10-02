@@ -105,17 +105,17 @@ def test_script_registers_a_candidate(trained):
     assert db.audit(limit=1)[0]["action"] == "retrain.finish"
 
 
-def test_four_eyes_and_gate_decide_activation(trained):
+def test_the_gate_decides_activation_and_the_starter_may_approve(trained):
     db, tmp, job, _ = trained
     version = db.get_job(job["id"])["model_version"]
-    with pytest.raises(PermissionError, match="Four-eyes"):
-        db.review_model(version, "approve", "", EAVAN)            # eavan started the retrain
+    # eavan started the retrain and may approve it: the exam is the safeguard
+    # on a model (the four-eyes check sits on the corrections it learned from)
     if db.get_model(version)["metrics"]["gate"]["passed"]:
-        m = db.review_model(version, "approve", "looks good", JESSY)
+        m = db.review_model(version, "approve", "looks good", EAVAN)
         assert m["status"] == "active" and db.active_model()["version"] == version
     else:
         with pytest.raises(PermissionError, match="failed its gate"):
-            db.review_model(version, "approve", "", JESSY)
+            db.review_model(version, "approve", "", EAVAN)
         # force-activate for the serving test below: the rule is enforced above
         import sqlite3
         with sqlite3.connect(db.path) as con:
@@ -203,15 +203,13 @@ def test_single_and_ensemble_activate_and_roll_back_independently(trained_both):
             m = db.get_model(v)
             m["metrics"]["gate"]["passed"] = True
             con.execute("UPDATE models SET metrics = ? WHERE version = ?", (json.dumps(m["metrics"]), v))
-    with pytest.raises(PermissionError, match="Four-eyes"):
-        db.review_model(ens_v, "approve", "", EAVAN)
     db.review_model(ens_v, "approve", "ok", JESSY)
     assert db.active_model("ensemble")["version"] == ens_v and db.active_model("single") is None
     db.review_model(single_v, "approve", "ok", JESSY)
     assert db.active_model("ensemble")["version"] == ens_v          # activating single left it alone
 
     srv = serve_local.make_server(db.path, "127.0.0.1", 0)
-    db.setup_admin("chua", "chua-pass-12")                  # sign-in is always on: an admin rolls back
+    db.setup_admin("chua", "chua-pass-12")                  # sign-in on: an analyst rolls back
     cookie = {"Cookie": f"nexa_session={db.login('chua', 'chua-pass-12')[0]}"}
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{srv.server_address[1]}"
@@ -247,6 +245,12 @@ def _fake_run(db, starter, passed_flags, kind="single"):
              for i, ok in enumerate(passed_flags)]
     db.finish_job(job["id"], True, {}, candidates=cands)
     return job, [c["version"] for c in cands]
+
+
+def test_the_analyst_who_started_a_retrain_may_activate_or_reject_it(db):
+    _, (good, other) = _fake_run(db, EAVAN, [True, True])
+    assert db.review_model(good, "approve", "", EAVAN)["status"] == "active"     # eavan started it
+    assert db.review_model(other, "reject", "not needed", EAVAN)["status"] == "rejected"
 
 
 def test_every_version_can_be_activated_with_the_right_justification(db):
@@ -295,7 +299,7 @@ def test_history_and_activate_over_http(tmp_path):
     db = LocalDB(tmp_path / "nexa.db")
     _, (v,) = _fake_run(db, EAVAN, [False])
     db.setup_admin("jessy", "jessy-pass-12")
-    db.create_user("ana", "ana-pass-123", "analyst", Actor("jessy", "admin"))
+    db.create_user("olly", "olly-pass-123", "operator", Actor("jessy", "analyst"))
     srv = serve_local.make_server(db.path, "127.0.0.1", 0)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{srv.server_address[1]}"
@@ -312,9 +316,9 @@ def test_history_and_activate_over_http(tmp_path):
         except urllib.error.HTTPError as e:
             return e.code, json.loads(e.read())
     try:
-        # an analyst may activate, but not OVERRIDE a failed exam: that is an admin's call
-        status, body = activate("ana", "ana-pass-123", True)
-        assert status == 409 and "admin role" in body["error"]
+        # an operator may not activate at all; an analyst may OVERRIDE a failed exam
+        status, body = activate("olly", "olly-pass-123", True)
+        assert status == 403 and "analyst role" in body["error"]
         status, body = activate("jessy", "jessy-pass-12", True)
         assert status == 200 and body["status"] == "active"
         cookie = {"Cookie": f"nexa_session={db.login('jessy', 'jessy-pass-12')[0]}"}

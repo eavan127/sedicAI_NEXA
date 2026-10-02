@@ -6,7 +6,7 @@ analysis, raw IQ file and audit entry lands in one SQLite file the training
 scripts can read -- nothing is sent anywhere else.
 
     python scripts/serve_local.py                 # http://localhost:8099, no sign-in:
-                                                  #   buttons switch operator / analyst / admin
+                                                  #   buttons switch operator / analyst
     python scripts/serve_local.py --port 8200 --no-browser
     python scripts/serve_local.py --sign-in       # real accounts: login page, passwords, Users page
     python scripts/serve_local.py --lan           # other machines on this network (sign-in forced on)
@@ -15,7 +15,9 @@ Standard library only, so it runs on any machine with Python and no install.
 
 API (JSON)
     GET    /api/health                 is this the NEXA server? + row counts
-    GET    /api/analyses?limit=500     newest first
+    GET    /api/analyses?limit=500     newest first, each with its retention {kind, why}
+    GET    /api/analyses/<id>/iq       a stored capture's raw IQ (410 once the rolling window deleted it)
+    POST   /api/analyses/<id>/reviewed {note}: an operator checked a flagged capture; the model was right
     POST   /api/analyses               store one record (web/storage.js buildRecord)
     DELETE /api/analyses/<id>          refused if corrections depend on it
     DELETE /api/analyses               delete all that no correction depends on
@@ -41,23 +43,23 @@ API (JSON)
     GET    /api/audit/verify           recompute the hash chain
     POST   /api/audit                  log a client-side event (e.g. report export)
     GET    /api/auth/me                sign-in on? who is signed in? may this machine set it up?
-    POST   /api/auth/setup             {username, password}: first admin; turns sign-in on (this machine only)
+    POST   /api/auth/setup             {username, password}: first analyst; turns sign-in on (this machine only)
     POST   /api/auth/login             {username, password} -> session cookie
     POST   /api/auth/logout
-    GET    /api/users                  accounts (admin)
-    POST   /api/users                  {username, password, role} (admin)
-    POST   /api/users/<name>           {role?, disabled?, password?} (admin)
+    GET    /api/users                  accounts (analyst)
+    POST   /api/users                  {username, password, role} (analyst)
+    POST   /api/users/<name>           {role?, disabled?, password?} (analyst)
 
 Sign-in (--sign-in, or --lan)
   Off by default: the page opens straight into the console, and buttons at
-  the top switch between operator / analyst / admin, so roles
+  the top switch between operator / analyst, so roles
   can be shown without logging out and in. With --sign-in (and always with
   --lan), nothing of the system is served without a session: the page, its scripts,
   the models and every API call except health/auth. A browser that is not
   signed in is sent to /login.html, which on a fresh database offers to
-  create the first admin (on this machine only). The server -- not the page
-  -- decides who did what. Roles: operator < analyst (approves) < admin
-  (retrains, manages users).
+  create the first analyst (on this machine only). The server -- not the page
+  -- decides who did what. Roles: operator < analyst (approves,
+  retrains, manages users).
 
 Safety
   * Binds to 127.0.0.1 unless --lan: other machines cannot reach it.
@@ -92,7 +94,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from src.localdb import SESSION_HOURS, Actor, LocalDB, role_at_least  # noqa: E402
+from src.localdb import ROLLING_IQ_BYTES, SESSION_HOURS, TOP_ROLE, Actor, LocalDB, role_at_least  # noqa: E402
 from src.report_export import _iq_payload, build_export  # noqa: E402
 
 WEB = ROOT / "web"
@@ -113,8 +115,8 @@ PUBLIC_STATIC = {LOGIN_PAGE, "/brand/logo.png", "/favicon.ico"}
 # Default (no --sign-in): no sign-in; the page shows one button per role and whoever was
 # clicked last is "who did it" (a cookie). Each role is its own identity, so the
 # four-eyes rule still holds on stage: the operator submits, the analyst approves.
-DEMO_PEOPLE = {"operator": "operator", "analyst": "analyst", "admin": "admin"}
-DEMO_DEFAULT = "admin"
+DEMO_PEOPLE = {"operator": "operator", "analyst": "analyst"}
+DEMO_DEFAULT = "operator"
 DEMO_COOKIE = "nexa_demo_as"
 
 
@@ -123,14 +125,14 @@ def required_role(method: str, parts: list[str]) -> str:
     head = parts[0] if parts else ""
     if head == "users" or (method, parts) in (("POST", ["retrain", "start"]), ("POST", ["models", "rollback"]),
                                               ("DELETE", ["analyses"])):
-        return "admin"
+        return TOP_ROLE
     if method == "DELETE" and head == "analyses":
         return "analyst"
     if method == "POST" and head in ("corrections", "models") and len(parts) == 3 and parts[2] == "review":
         return "analyst"
     # Putting a model version into use (approve / restore) is an analyst's
     # decision, like approving one; overriding a FAILED exam is checked
-    # separately in the route and needs an admin.
+    # separately in the route and needs the analyst role too.
     if method == "POST" and head == "models" and len(parts) == 3 and parts[2] == "activate":
         return "analyst"
     return "operator"
@@ -157,6 +159,7 @@ class Handler(SimpleHTTPRequestHandler):
     iq_dir: Path = None
     lan: bool = False
     demo: bool = False
+    keep_bytes: int = ROLLING_IQ_BYTES
     retrain_args: list = []
 
     # -- request gate ----------------------------------------------------------
@@ -331,8 +334,16 @@ class Handler(SimpleHTTPRequestHandler):
             if method == "GET" and len(parts) == 1:
                 return self._send_json(self.db.list_analyses(limit))
             if method == "POST" and len(parts) == 1:
-                return self._send_json(self.db.save_analysis(self._read_json(), self._actor()),
-                                       HTTPStatus.CREATED)
+                saved = self.db.save_analysis(self._read_json(), self._actor())
+                # Every capture is stored now, so the rolling window for
+                # routine raw IQ moves on with each one (LocalDB.retention).
+                self.db.prune_rolling_iq(self.keep_bytes)
+                return self._send_json(saved, HTTPStatus.CREATED)
+            if method == "GET" and len(parts) == 3 and parts[2] == "iq":
+                return self._analysis_iq(parts[1])
+            if method == "POST" and len(parts) == 3 and parts[2] == "reviewed":
+                return self._send_json(self.db.mark_reviewed(parts[1], self._actor(),
+                                                             self._read_json().get("note", "")))
             if method == "DELETE" and len(parts) == 2:
                 if not self.db.delete_analysis(parts[1], self._actor()):
                     return self._error(HTTPStatus.NOT_FOUND, "no such analysis")
@@ -398,9 +409,9 @@ class Handler(SimpleHTTPRequestHandler):
                     parts[1], str(body.get("decision") or ""), body.get("note"), self._actor()))
             if method == "POST" and len(parts) == 3 and parts[2] == "activate":
                 body = self._read_json()
-                if body.get("override") and not role_at_least(self._actor().role, "admin"):
+                if body.get("override") and not role_at_least(self._actor().role, TOP_ROLE):
                     raise PermissionError("Activating a version that failed its exam or was rejected "
-                                          "is an override and needs the admin role.")
+                                          "is an override and needs the analyst role.")
                 return self._send_json(self.db.activate_model(
                     parts[1], body.get("note"), self._actor(), override=bool(body.get("override"))))
 
@@ -451,7 +462,7 @@ class Handler(SimpleHTTPRequestHandler):
             body = self._read_json()
             if rest == ["setup"]:
                 # Only from the machine the server runs on: a laptop on the
-                # LAN must not be able to claim the admin account first.
+                # LAN must not be able to claim the first analyst account.
                 if client not in LOOPBACK_CLIENTS:
                     raise PermissionError("Set up sign-in on the machine running the server.")
                 self.db.setup_admin(body.get("username"), body.get("password"), client)
@@ -468,8 +479,8 @@ class Handler(SimpleHTTPRequestHandler):
     def _users(self, method, rest):
         actor = self._actor()
         if method == "GET" and not rest:
-            if not role_at_least(actor.role, "admin"):
-                raise PermissionError("Only an admin can list accounts.")
+            if not role_at_least(actor.role, TOP_ROLE):
+                raise PermissionError("Only an analyst can list accounts.")
             return self._send_json(self.db.list_users())
         body = self._read_json() if method == "POST" else {}
         if method == "POST" and not rest:
@@ -601,6 +612,32 @@ class Handler(SimpleHTTPRequestHandler):
         })
         return self._send_file(data, ctype, fname, {"X-Report-Id": meta["report_id"]})
 
+    def _send_iq(self, payload):
+        """Raw IQ for the page, with its format -- and a SigMF file's
+        annotations, so a capture saved before its truth was stored still
+        gets its dashed truth boxes when someone views it again."""
+        datatype, rate, data, meta = payload
+        headers = {"X-NEXA-Datatype": str(datatype), "X-NEXA-Sample-Rate": str(rate)}
+        notes = (meta or {}).get("annotations") or []
+        if notes:
+            text = json.dumps(notes, separators=(",", ":"))
+            if len(text) <= 6000:                   # stays a header, not a second request
+                headers["X-NEXA-Annotations"] = text
+        return self._send_file(data, "application/octet-stream", "capture.iq", headers)
+
+    def _analysis_iq(self, analysis_id):
+        """A stored capture's raw IQ, to view it again and flag a correction."""
+        a = self.db.get_analysis(analysis_id)
+        if not a:
+            return self._error(HTTPStatus.NOT_FOUND, "no such capture")
+        if a["retention"]["kind"] == "deleted":
+            return self._error(HTTPStatus.GONE, "this routine signal was deleted by the rolling window; "
+                                                "only its result is kept")
+        payload = _iq_payload(self.db.path.parent, a["file_path"]) if a.get("file_path") else None
+        if not payload:
+            return self._error(HTTPStatus.NOT_FOUND, "no raw signal was stored for this capture")
+        return self._send_iq(payload)
+
     def _correction_iq(self, correction_id):
         """The raw IQ a correction points at, so a reviewer can look at the
         signal before approving it instead of trusting the text alone."""
@@ -610,9 +647,7 @@ class Handler(SimpleHTTPRequestHandler):
         payload = _iq_payload(self.db.path.parent, c["iq_path"]) if c.get("iq_path") else None
         if not payload:
             return self._error(HTTPStatus.NOT_FOUND, "the raw IQ behind this correction is missing")
-        datatype, rate, data, _ = payload
-        return self._send_file(data, "application/octet-stream", "capture.iq",
-                               {"X-NEXA-Datatype": str(datatype), "X-NEXA-Sample-Rate": str(rate)})
+        return self._send_iq(payload)
 
     def _put_capture(self, analysis_id, name):
         if not re.fullmatch(r"[\w\-]{1,64}", analysis_id):
@@ -692,11 +727,12 @@ def pick_port(host: str, preferred: int, tries: int = 20) -> int:
 
 
 def make_server(db_path: Path, host: str, port: int, lan: bool = False,
-                retrain_args: list | None = None, demo: bool = False) -> ThreadingHTTPServer:
+                retrain_args: list | None = None, demo: bool = False,
+                keep_bytes: int = ROLLING_IQ_BYTES) -> ThreadingHTTPServer:
     db = LocalDB(db_path)
     iq_dir = Path(db_path).parent / "iq"
     iq_dir.mkdir(parents=True, exist_ok=True)
-    handler = type("NexaHandler", (Handler,), {"db": db, "iq_dir": iq_dir, "lan": lan, "demo": demo,
+    handler = type("NexaHandler", (Handler,), {"db": db, "iq_dir": iq_dir, "lan": lan, "demo": demo, "keep_bytes": keep_bytes,
                                                 "retrain_args": list(retrain_args or [])})
     server = ThreadingHTTPServer((host, port), partial(handler, directory=str(WEB)))
     server.nexa_db = db
@@ -712,8 +748,11 @@ def main():
     p.add_argument("--no-browser", action="store_true")
     p.add_argument("--sign-in", action="store_true",
                    help="require real accounts (login page, passwords, Users page). Without it, "
-                        "buttons at the top switch between an operator, an analyst and an admin")
+                        "buttons at the top switch between an operator and an analyst")
     p.add_argument("--demo", action="store_true", help=argparse.SUPPRESS)   # the default now; kept so old commands work
+    p.add_argument("--keep-gb", type=float, default=ROLLING_IQ_BYTES / 1024 ** 3,
+                   help="rolling window for ROUTINE raw signals (civilian/empty, confident, uncorrected); "
+                        "threats, close calls, corrected and training captures are always kept")
     p.add_argument("--quick-retrain", action="store_true",
                    help="demo/test: retrain on a small sample (1 epoch, 2,000 replay windows, "
                         "3,000-window exam) so a retrain takes about a minute")
@@ -731,11 +770,12 @@ def main():
         raise SystemExit("--demo and --sign-in contradict each other: pick one.")
     if a.demo and a.lan:
         raise SystemExit("--demo turns sign-in off, so anyone who can reach the server could act as "
-                         "the admin. It is refused together with --lan.")
-    # Without sign-in anyone who can reach the server could act as the admin,
+                         "the analyst. It is refused together with --lan.")
+    # Without sign-in anyone who can reach the server could act as the analyst,
     # so on the network (--lan) sign-in is always on.
     demo = not (a.sign_in or a.lan)
-    server = make_server(a.db, host, port, a.lan, retrain_args, demo=demo)
+    server = make_server(a.db, host, port, a.lan, retrain_args, demo=demo,
+                         keep_bytes=int(a.keep_gb * 1024 ** 3))
     url = f"http://localhost:{port}/index.html"          # with sign-in on, redirects to the login page first
     counts = server.nexa_db.counts()
     print(f"NEXA local server\n  open      {url}\n  database  {a.db}\n"
@@ -745,7 +785,7 @@ def main():
              if demo else "  sign-in   ON (login page; accounts in the database)\n")
           + "Press Ctrl+C to stop.")
     if not demo and not server.nexa_db.auth_enabled():
-        print("  FIRST RUN: no accounts yet. Open the page on THIS machine to create the admin account.")
+        print("  FIRST RUN: no accounts yet. Open the page on THIS machine to create the first analyst account.")
     if not a.no_browser:
         threading.Timer(0.8, webbrowser.open, (url,)).start()
     try:

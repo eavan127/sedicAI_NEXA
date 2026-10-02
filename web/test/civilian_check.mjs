@@ -39,7 +39,7 @@ for (const [cls, want] of Object.entries(ref.library)) {
 
 console.log("\n== case list ==");
 const jsNames = Object.keys(CASES);
-check("all 10 cases present", jsNames.length === ref.case_names.length,
+check(`all ${ref.case_names.length} cases present`, jsNames.length === ref.case_names.length,
       `got ${jsNames.length}, want ${ref.case_names.length}`);
 const missing = ref.case_names.filter(n => !jsNames.includes(n));
 check("names match Python CASES", missing.length === 0,

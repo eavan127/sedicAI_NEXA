@@ -153,7 +153,7 @@ def server(tmp_path):
     srv = serve_local.make_server(tmp_path / "nexa.db", "127.0.0.1", 0)
     db = srv.nexa_db
     db.setup_admin("eavan", "eavan-pass-1")
-    db.create_user("jessy", "jessy-pass-1", "analyst", Actor("eavan", "admin"))
+    db.create_user("jessy", "jessy-pass-1", "analyst", Actor("eavan", "analyst"))
     SESSIONS.clear()
     for name in ("eavan", "jessy"):
         SESSIONS[name] = db.login(name, f"{name}-pass-1")[0]
@@ -441,3 +441,98 @@ def test_a_dead_retrain_job_does_not_block_the_next_one(server):
     jobs = json.loads(call(base + "/api/retrain/jobs")[2])
     assert jobs[0]["status"] == "failed" and "no longer running" in jobs[0]["result"]["error"]
     assert db.start_retrain("try again", True, ME)["status"] == "queued"
+
+
+# --- retention: results forever, routine raw IQ only in a rolling window ----------
+
+def _stored(db, tmp_path, i, size=1000, **over):
+    """A capture whose raw IQ file really exists on disk."""
+    f = tmp_path / "iq" / i / "x.f32"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_bytes(b"\0" * size)
+    rec = record(i, **{"verdict": "Civilian", "tier_counts": {"Civilian": 3}, "classes_detected": ["QPSK"],
+                       "file_path": f"iq/{i}/x.f32", "file_sha256": "ab" * 32, "duration_s": 0.05, **over})
+    db.save_analysis(rec, ME)
+    return f
+
+
+def test_retention_says_why_each_signal_is_kept(db):
+    assert db.retention({"file_path": "x", "verdict": "Civilian"}) == ("rolling", "routine signal, kept briefly")
+    assert db.retention({"file_path": "x", "verdict": "Hostile"})[0] == "kept"
+    assert db.retention({"file_path": "x", "verdict": "Civilian", "needs_review": True})[0] == "kept"
+    assert db.retention({"file_path": "x", "verdict": "Civilian"}, corrected=True)[0] == "kept"
+    assert db.retention({"file_path": "x", "used_for_training": "ft-1"})[1] == "used to train ft-1"
+    assert db.retention({"file_path": "x", "iq_pruned_at": "2026"})[0] == "deleted"
+    assert db.retention({"verdict": "Hostile"})[0] == "none"
+
+
+def test_rolling_window_deletes_only_the_oldest_routine_signals(db, tmp_path):
+    old = _stored(db, tmp_path, "r1", created_at="2026-10-01T10:00:00.000Z")
+    threat = _stored(db, tmp_path, "h1", created_at="2026-10-01T10:00:01.000Z",
+                     verdict="Hostile", alert_level="confirmed")
+    flagged = _stored(db, tmp_path, "f1", created_at="2026-10-01T10:00:02.000Z", needs_review=True)
+    corrected = _stored(db, tmp_path, "c1", created_at="2026-10-01T10:00:03.000Z")
+    db.create_correction(correction("c1"), ME)
+    new = _stored(db, tmp_path, "r2", created_at="2026-10-01T10:00:04.000Z")
+
+    assert db.prune_rolling_iq(cap_bytes=1500) == ["r1"]        # only room for the newest routine one
+    assert not old.exists()
+    assert threat.exists() and flagged.exists() and corrected.exists() and new.exists()
+    a = db.get_analysis("r1")
+    assert a["retention"]["kind"] == "deleted" and a["verdict"] == "Civilian"   # the result stays
+    entry = db.audit(limit=1, action_prefix="iq.prune")[0]
+    assert entry["details"]["deleted"][0]["id"] == "r1" and entry["details"]["bytes_freed"] == 1000
+    assert db.prune_rolling_iq(cap_bytes=1500) == []             # nothing more to do
+    assert db.verify_audit()["ok"]
+
+
+def test_a_retrain_logs_and_keeps_the_signals_it_learned_from(db, tmp_path):
+    f = _stored(db, tmp_path, "t1")
+    c = db.create_correction(correction("t1"), ME)
+    db.review_correction(c["id"], "approve", "", EXPERT)
+    db.finish_job("job-1", True, {"seconds": 1}, candidates=[{
+        "version": "ft-test", "kind": "single", "path": "models/ft-test/best_model.onnx",
+        "source": {"corrections": [c["id"]]}, "metrics": {"gate": {"passed": True}}}])
+    a = db.get_analysis("t1")
+    assert a["used_for_training"] == "ft-test" and a["retention"]["why"] == "used to train ft-test"
+    trained = db.audit(limit=5, action_prefix="retrain.finish")[0]["details"]["trained_on"]["ft-test"]
+    assert trained == [{"correction": c["id"], "capture": "t1", "iq_sha256": "ab" * 32, "labels": ["FHSS"]}]
+    assert db.prune_rolling_iq(cap_bytes=0) == [] and f.exists()
+
+
+def test_operator_marks_a_flagged_capture_reviewed_once(db, tmp_path):
+    _stored(db, tmp_path, "q1", needs_review=True)
+    assert db.mark_reviewed("q1", ME, "model is right")["reviewed_by"] == "eavan"
+    with pytest.raises(PermissionError, match="already reviewed"):
+        db.mark_reviewed("q1", EXPERT)
+    _stored(db, tmp_path, "q2", needs_review=True)
+    db.create_correction(correction("q2"), EXPERT)              # a correction counts as a review
+    assert db.get_analysis("q2")["reviewed_by"] == "jessy"
+
+
+def test_stored_capture_can_be_viewed_until_the_window_deletes_it(server):
+    base, tmp = server
+    payload = b"\x00\x00\x80\x3f" * 256
+    assert call(base + "/api/analyses", "POST", record("w1", duration_s=0.05, verdict="Civilian"))[0] == 201
+    assert call(base + "/api/captures/w1?name=x.f32", "PUT", raw=payload,
+                headers={"Content-Type": "application/octet-stream"})[0] == 201
+    status, _, iq = call(base + "/api/analyses/w1/iq")
+    assert status == 200 and iq == payload
+    db = LocalDB(tmp / "nexa.db")
+    db.prune_rolling_iq(cap_bytes=0)
+    assert call(base + "/api/analyses/w1/iq")[0] == 410
+    assert call(base + "/api/analyses/w1/reviewed", "POST", {"note": "fine"})[0] == 200
+
+
+def test_viewing_a_sigmf_capture_sends_its_annotations_as_truth(server):
+    base, tmp = server
+    folder = tmp / "iq" / "s1"
+    folder.mkdir(parents=True)
+    (folder / "x.sigmf-data").write_bytes(b"\x00\x00\x80\x3f" * 256)
+    notes = [{"core:sample_start": 0, "core:sample_count": 64, "core:label": "QPSK"}]
+    (folder / "x.sigmf-meta").write_text(json.dumps({
+        "global": {"core:datatype": "cf32_le", "core:sample_rate": 3_200_000}, "annotations": notes}))
+    assert call(base + "/api/analyses", "POST", record("s1", duration_s=0.05,
+                                                        file_path="iq/s1/x.sigmf-data"))[0] == 201
+    status, headers, _ = call(base + "/api/analyses/s1/iq")
+    assert status == 200 and json.loads(headers["X-NEXA-Annotations"]) == notes

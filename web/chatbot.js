@@ -361,7 +361,7 @@ export async function initAssistant({ chatLog, listRecords, logEl, formEl, input
           : h("span", { class: "chat-meta" }, "nothing detected")),
       h("div", { class: "chat-actions" },
         chip("Details", () => send(`Summary of upload ${n}`), "mini"),
-        chip(picked ? "✓ Picked: now choose another" : comparePick ? `Compare with #${comparePick}` : "Compare",
+        chip(picked ? "Picked: now choose another" : comparePick ? `Compare with #${comparePick}` : "Compare",
              () => pickCompare(n), "mini"),
         onOpenRecord ? chip("Open in History ↗", () => onOpenRecord(rec), "mini") : null));
   }
@@ -401,7 +401,7 @@ export async function initAssistant({ chatLog, listRecords, logEl, formEl, input
     const has = (rec, c) => (rec.classes_detected || []).includes(c);
     const classes = [...new Set([...(a.rec.classes_detected || []), ...(b.rec.classes_detected || [])])];
     const cell = (rec, c) => has(rec, c)
-      ? h("td", {}, "✓", pk(rec, c) == null ? "" : ` ${Math.round(pk(rec, c) * 100)}%`)
+      ? h("td", {}, "yes", pk(rec, c) == null ? "" : ` ${Math.round(pk(rec, c) * 100)}%`)
       : h("td", { class: "dim" }, "—");
     const row = (label, va, vb) => h("tr", { class: String(va) !== String(vb) ? "diff" : null },
       h("th", {}, label), h("td", {}, va ?? "—"), h("td", {}, vb ?? "—"));

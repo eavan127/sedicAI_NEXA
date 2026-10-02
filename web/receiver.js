@@ -45,7 +45,7 @@ export function dwellLevel(re, im) {
   return { powerDb: db(sum / Math.max(re.length, 1)), peakDb: db(peak) };
 }
 
-import { CASES, buildScenario, caseNeedsLibrary } from "./generators.js";
+import { buildScenario, caseNeedsLibrary, resolveCase } from "./generators.js";
 import { FS, WINDOW_LEN } from "./model.js";
 
 /** Truth segments that overlap [startS, endS), re-based to the block's own
@@ -105,18 +105,20 @@ export class SimulatedReceiver {
   }
 
   async next() {
-    const { caseName, snrDb } = this.getSettings();
-    const script = CASES[caseName];
-    if (!script) throw new Error(`Unknown scenario case "${caseName}".`);
-    const library = caseNeedsLibrary(script) ? await this.getLibrary() : null;
+    const settings = this.getSettings();
+    const c = resolveCase(settings.caseName, {
+      snrDb: settings.snrDb, seed: (this.seed + this.index * 7919) >>> 0,
+      durationS: this.dwellS, index: this.index,
+    });
+    const library = caseNeedsLibrary(c.script) ? await this.getLibrary() : null;
     const sc = buildScenario({
-      totalDuration: this.dwellS, snrDb, seed: (this.seed + this.index * 7919) >>> 0,
-      script, library, librarySnrDb: library?.snrDb ?? null,
+      totalDuration: c.durationS, snrDb: c.snrDb, seed: c.seed,
+      script: c.script, library, librarySnrDb: library?.snrDb ?? null,
     });
     const i = this.index++;
     return {
       index: i, re: sc.re, im: sc.im, truth: sc.segments,
-      source: "scenario", caseNote: `LIVE · simulated receiver · dwell ${i + 1} · case \`${caseName}\``,
+      source: "scenario", caseNote: `LIVE · simulated receiver · dwell ${i + 1} · case \`${c.label}\``,
       snrDb: sc.trueSnrDb, snrCapped: sc.snrCapped, requestedSnrDb: sc.requestedSnrDb,
       startS: null, endS: null,
     };
@@ -190,19 +192,6 @@ export class FileReplay {
   }
 
   disconnect() {}
-}
-
-/**
- * Which dwells are worth writing down. Storing every dwell would bury the
- * History page (and the disk) in near-identical rows; an electronic-support
- * operator logs CHANGES -- a new emitter appears, one goes away. So a dwell
- * is stored when the set of detected classes differs from the previous
- * dwell's and is not empty.
- */
-export function shouldStore(prevClasses, classes) {
-  if (!classes.length) return false;
-  const key = c => [...c].sort().join("|");
-  return prevClasses === null || key(prevClasses) !== key(classes);
 }
 
 /** Interleaved float32 I,Q,I,Q,... -- the exact bytes a dwell arrived as,

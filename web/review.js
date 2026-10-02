@@ -105,7 +105,11 @@ export function lowConfidence(events, { below = 0.4 } = {}) {
       kind: "uncertain",
       text: `Low confidence (${Math.round(conf * 100)}%): ${classes.join(" + ")}, please check`,
       startS: e.startUs / 1e6, endS: e.endUs / 1e6, predicted: classes,
-      suggested: null, reason: "",
+      // No truth, so no right answer to suggest: the reason starts with the
+      // facts and the operator finishes it with what the waterfall shows.
+      suggested: null,
+      reason: `Model was only ${Math.round(conf * 100)}% sure of ${classes.join(" + ")} from `
+        + `${(e.startUs / 1000).toFixed(2)} to ${(e.endUs / 1000).toFixed(2)} ms. On the waterfall I see: `,
     }));
 }
 
