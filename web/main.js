@@ -975,6 +975,9 @@ async function store(file, sess = session) {
     // cannot be traced to its model cannot be trusted or re-checked later.
     if (sess.which === "single" && activeSingleVersion) record.model = `single:${activeSingleVersion}`;
     if (sess.which === "ensemble" && activeEnsembleVersion) record.model = `ensemble:${activeEnsembleVersion}`;
+    // The known answer, so "View" on a correction redraws the dashed truth
+    // boxes. Local database only: the shared Supabase table has no such column.
+    if (sess.truth?.length && readConfig().backend === "server") record.truth = sess.truth;
     const { record: saved, backend, warning } = await saveAnalysis(record, file);
     sess.record = saved;
     sess.recordBackend = backend;
@@ -1798,9 +1801,15 @@ async function viewCorrection(c) {
     const cap = histRecords.find(r => r.id === c.analysis_id);
     corrMsg.textContent = "";
     showPage("replay");
-    await analyze(re, im, { source: "upload", caseNote: cap?.case_note || "",
+    await analyze(re, im, { source: "upload", caseNote: cap?.case_note || "", truth: cap?.truth || null,
                             review: { ...c, capture: cap?.file_name || cap?.case_note || "this capture" } });
-    if (session?.review?.id === c.id) { restoreSpan(); scrollToLanes(); }
+    if (session?.review?.id === c.id) {
+      // A correction made while reviewing belongs to the stored capture, not
+      // to a new copy of it (ensureEvidence stores the session otherwise).
+      if (cap) { session.record = cap; session.recordBackend = "server"; }
+      restoreSpan();
+      scrollToLanes();
+    }
   } catch (e) {
     corrMsg.className = "corr-error";
     corrMsg.textContent = `Could not open the capture: ${e.message}`;
@@ -1817,7 +1826,10 @@ function showReviewBanner() {
     + `Model said <s>${esc(r.predicted_labels.join(" + ") || "nothing")}</s> → human says `
     + `<strong>${esc(r.corrected_labels.join(" + "))}</strong>.`
     + `<div class="note">Reason: ${esc(r.reason)}</div>`
-    + `<div class="note">The model shown is the one in use now, so its detections may differ from what the operator saw.</div></div>`
+    + `<div class="note">The model shown is the one in use now, so its detections may differ from what the operator saw.`
+    + (session.truth?.length ? " Dashed boxes are the known true answer." :
+       " No true answer was saved with this capture (dashed boxes are only kept for captures analysed after 2 Oct 2026), so judge it from the waterfall.")
+    + `</div></div>`
     + `<button class="mini" id="reviewBack">← Back to corrections</button>`;
 }
 

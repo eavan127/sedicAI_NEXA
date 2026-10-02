@@ -46,6 +46,14 @@ def test_round_trip_keeps_json_and_bool_columns(db):
     assert saved["operator"] == "eavan"
 
 
+def test_truth_is_kept_so_a_reviewer_sees_the_dashed_boxes(db):
+    truth = [{"className": "16QAM", "startS": 0.0, "endS": 0.0096}]
+    db.save_analysis(record("t1", source="scenario", truth=truth), ME)
+    db.save_analysis(record("t2"), ME)
+    assert db.get_analysis("t1")["truth"] == truth
+    assert db.get_analysis("t2")["truth"] is None             # unknown stays unknown
+
+
 def test_unknown_fields_ignored_and_required_enforced(db):
     db.save_analysis(record(not_a_column="x"), ME)
     with pytest.raises(ValueError):

@@ -80,7 +80,7 @@ ANALYSIS_COLUMNS = {
     "n_windows": "int", "hop": "int", "snr_db": "real",
     "requested_snr_db": "real", "snr_capped": "bool",
     "classes_detected": "json", "peak_probability": "json", "n_events": "int",
-    "tier_counts": "json", "verdict": "text", "app_version": "text",
+    "tier_counts": "json", "verdict": "text", "app_version": "text", "truth": "json",
     "operator": "text",
 }
 REQUIRED = ("id", "created_at", "source")
@@ -242,6 +242,10 @@ MIGRATIONS = [
     # before this were single-model versions, hence the default.
     ("models", "kind", "TEXT NOT NULL DEFAULT 'single'"),
     ("jobs", "scope", "TEXT NOT NULL DEFAULT 'single'"),
+    # The known answer of a synthesized scenario or annotated SigMF file
+    # ([{className, startS, endS}]), so a reviewer opening the capture later
+    # sees the same dashed truth boxes the operator saw. NULL when unknown.
+    ("analyses", "truth", "TEXT"),
 ]
 
 MODEL_KINDS = ("single", "ensemble")
