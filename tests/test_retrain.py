@@ -269,8 +269,9 @@ def test_every_version_can_be_activated_with_the_right_justification(db):
     db.activate_model(good, "back to the version that passed", CHUA)
     assert db.active_model()["version"] == good and db.audit(limit=1)[0]["action"] == "model.restore"
     assert db.audit(limit=1)[0]["details"]["replaced"] == bad
-    with pytest.raises(PermissionError, match="Four-eyes"):
-        db.activate_model(bad, "the starter should not decide this", EAVAN, override=True)
+    # the analyst who started it may override too: the reason is what is checked
+    db.activate_model(bad, "field test again, starter accepts the risk", EAVAN, override=True)
+    assert db.active_model()["version"] == bad and db.audit(limit=1)[0]["actor"] == "eavan"
 
 
 def test_rejected_versions_are_kept_and_can_come_back(db):

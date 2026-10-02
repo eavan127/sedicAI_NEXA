@@ -184,6 +184,12 @@ export function detectServer({ timeoutMs = 1500 } = {}) {
       const body = res.ok ? await res.json() : null;
       serverInfo = body?.app === "nexa-local" ? body : null;
     } catch { serverInfo = null; }
+    // No real server (the public site judges open on a phone): answer the same
+    // API inside this browser, so every feature works without a database.
+    if (!serverInfo) {
+      try { serverInfo = await (await import("./demo_server.js")).startPhoneDemo(); }
+      catch (e) { console.error("Phone demo could not start:", e); serverInfo = null; }
+    }
     return serverInfo;
   })();
   return detecting;

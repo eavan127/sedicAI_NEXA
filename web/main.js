@@ -1558,7 +1558,10 @@ queueList.addEventListener("click", async (ev) => {
 async function renderHistory() {
   await detectServer();
   const cfg = readConfig();
-  histBackendNote.textContent = cfg.backend === "server"
+  histBackendNote.textContent = cfg.server?.demo_in_browser
+    ? "Phone demo: everything is kept in this browser only, with the same rules as the laptop version "
+      + "(roles, retention, audit trail). Nothing is sent anywhere. Retraining is simulated here."
+    : cfg.backend === "server"
     ? `Stored in the local NEXA database (${cfg.server.db}) on this machine, with uploaded raw IQ `
       + "beside it. Nothing leaves this machine, and every change is written to the audit trail below."
     : usingSupabase(cfg)
