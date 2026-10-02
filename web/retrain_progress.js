@@ -46,9 +46,47 @@ export function retrainProgress(job, nowMs = Date.now()) {
   }
 
   let etaS = null;
-  if (fraction >= 0.15) etaS = Math.max(0, elapsedS / fraction - elapsedS);
+  const tail = (done && done >= total) || /exam: the averaged 5-model/.test(log) ? finishEstimate(log, job.scope, nowMs) : null;
+  if (tail) {
+    // After the last epoch the run is the exam + export, which for the
+    // ensemble is 10 model passes over the whole test split: time it from
+    // this run's own single-model exam instead of a fixed share.
+    etaS = tail.leftS;
+    fraction = Math.min(0.99, elapsedS / (elapsedS + etaS));
+    stage = tail.stage;
+  } else if (fraction >= 0.15) etaS = Math.max(0, elapsedS / fraction - elapsedS);
   else if (NOMINAL_S[job.scope]) etaS = Math.max(0, NOMINAL_S[job.scope] - elapsedS);
   return { fraction: Math.min(fraction, 0.99), stage, etaS, elapsedS };
+}
+
+/** Seconds of the day for each "[HH:MM:SS] text" log line that matches `re` (last match). */
+function stamp(log, re) {
+  let t = null;
+  for (const line of log.split("\n")) {
+    const m = /^\[(\d\d):(\d\d):(\d\d)\]/.exec(line);
+    if (m && re.test(line)) t = (+m[1]) * 3600 + (+m[2]) * 60 + (+m[3]);
+  }
+  return t;
+}
+
+/** The exam-and-export tail, estimated from this run's log. The single
+ *  model's exam judges 2 models (old and new) and its export writes 1 file;
+ *  the ensemble's judges 10 and writes 5 -- so 5x each. */
+function finishEstimate(log, scope, nowMs) {
+  const singleEpoch = stamp(log, /single epoch \d+\/\d+/), singleGate = stamp(log, /Single model GATE/);
+  const singleDone = stamp(log, /single model done in/);
+  const now = new Date(nowMs), nowS = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+  const since = t => ((nowS - t) % 86400 + 86400) % 86400;             // survives midnight
+  if (scope === "both") {
+    const examStart = stamp(log, /exam: the averaged 5-model ensemble/);
+    if (examStart == null || singleEpoch == null || singleGate == null || singleDone == null) return null;
+    const exam = 5 * Math.max(1, singleGate - singleEpoch), exportS = 5 * Math.max(1, singleDone - singleGate);
+    const spent = since(examStart);
+    return { leftS: Math.max(5, exam + exportS - spent),
+             stage: spent < exam ? "Examining old and new ensembles on the test split (10 model passes)"
+                                 : "Exporting the 5 new members to ONNX" };
+  }
+  return null;
 }
 
 /** "about 7 min" / "about 40 s" / "less than 10 s". */

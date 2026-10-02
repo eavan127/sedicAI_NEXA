@@ -41,6 +41,16 @@
         "web"
       ],
       "port": 8094
+    },
+    {
+      "name": "static-web",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "C:/Users/User/AppData/Local/Temp/claude/D--github-clone-sedicAI-NEXA/3036384d-6251-4d0e-93dd-74921587b4aa/scratchpad/static_server.py",
+        "8094",
+        "web"
+      ],
+      "port": 8094
     }
   ]
 }

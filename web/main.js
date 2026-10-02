@@ -8,7 +8,7 @@ import { annotationsToTruth, decodeSamples, describe, isSigmfName, parseDatatype
 import { FileReplay, SimulatedReceiver, dwellLevel, toInterleavedF32 } from "./receiver.js";
 import { peakScore, triage } from "./triage.js";
 import { formatEta, retrainProgress } from "./retrain_progress.js";
-import { detectedIn, spanAt, suggestCorrections } from "./review.js";
+import { coveredBy, detectedIn, spanAt, suggestCorrections } from "./review.js";
 import { eventRows, headerLine, latestBlock, printHeaderHtml, statusBlock } from "./panels.js";
 import {
   breakdownTableHtml, drawAttention, drawBreakdown, animateBreakdown, drawPerClassRecall,
@@ -521,12 +521,15 @@ corrForm.addEventListener("submit", async (ev) => {
       + `${corrCtx.predicted.join(" + ") || "nothing"} → ${corrected.join(" + ")}. `
       + "It waits in History ▸ Human corrections until another person approves it.";
     eventsNote.textContent = done;
-    // Opened from a recommended correction: mark that row, where the operator
-    // is looking, so it is not reviewed (and submitted) a second time.
-    const sugg = corrCtx.suggIndex !== null && corrCtx.sess === session
-      ? session.suggestions?.items[corrCtx.suggIndex] : null;
-    if (sugg) {
-      sugg.submitted = true;
+    // Mark the recommended rows this correction answers, so none is reviewed
+    // (and submitted) a second time: the one it was opened from, and any the
+    // submitted stretch covers -- a correction made by clicking or dragging on
+    // the timeline answers them just as well as one made from the list.
+    const items = corrCtx.sess === session ? session.suggestions?.items || [] : [];
+    const hit = new Set(coveredBy(items, Number(corrStart.value) / 1000, Number(corrEnd.value) / 1000));
+    if (corrCtx.suggIndex !== null && items[corrCtx.suggIndex]) hit.add(corrCtx.suggIndex);
+    if (hit.size) {
+      for (const i of hit) items[i].submitted = true;
       renderSuggestions();
       suggestStatus.textContent = done;
     }
@@ -639,7 +642,9 @@ consoleCanvas.addEventListener("pointerup", (ev) => {
   }
   startCorrection({ predicted: s.predicted, startS: s.startS, endS: s.endS, suggested,
                     reason: s.reason || "", missed: !s.predicted.length,
-                    title: s.from === "suggestion" ? `Review: ${s.text}` : null });
+                    title: s.from === "suggestion" ? `Review: ${s.text}` : null,
+                    suggIndex: s.from === "suggestion"
+                      ? suggestions.findIndex(x => x.startS === s.startS && x.endS === s.endS) : null });
 });
 
 // Clicks on the time plot are for correcting; the zoom view stays on the
@@ -691,9 +696,20 @@ function renderSuggestions() {
         + "detections it was least sure about (below 40%): check them against the waterfall."
       : "No ground truth for this capture, and every detection is confident (40% or more).";
   }
+  // Bulk submit needs a recommended answer: an "unsure" row has none, so a
+  // person must still say what is there.
+  const bulkable = s => !s.submitted && !!s.suggested?.length;
+  const nBulk = items.slice(0, SUGGEST_SHOWN).filter(bulkable).length;
+  suggBulk.hidden = !nBulk;
+  suggBulk.innerHTML = nBulk ? `<label><input type="checkbox" id="suggAll"> Select all with a recommended answer</label>`
+    + `<button class="mini" id="suggSubmitSel" disabled>Submit selected</button><span class="bulk-n" id="suggN">0 selected</span>`
+    + `<span class="bulk-n">Each is filed with its recommended answer and reason, as if reviewed one by one.</span>` : "";
   suggestList.innerHTML = items.slice(0, SUGGEST_SHOWN).map((s, i) =>
     `<div class="sugg${i === session.suggFocus ? " sel" : ""}" data-sugg="${i}" tabindex="0" `
-    + `title="Show this stretch on the timeline"><span class="sugg-kind ${s.kind}">${KIND_LABEL[s.kind]}</span>`
+    + `title="Show this stretch on the timeline">`
+    + `<input type="checkbox" class="sugg-pick" data-pick="${i}" ${bulkable(s) ? "" : "disabled"} `
+    + `title="${s.submitted ? "Already submitted" : bulkable(s) ? "Select for bulk submit" : "No recommended answer: review it yourself"}" aria-label="Select">`
+    + `<span class="sugg-kind ${s.kind}">${KIND_LABEL[s.kind]}</span>`
     + `<span class="sugg-time">${(s.startS * 1000).toFixed(2)}–${(s.endS * 1000).toFixed(2)} ms</span>`
     + `<span class="sugg-text">${esc(s.text)}</span>`
     + (s.submitted ? `<span class="sugg-done">Submitted</span>`
@@ -731,8 +747,52 @@ suggestList.addEventListener("keydown", (ev) => {
   if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); jumpToSuggestion(Number(row.dataset.sugg)); }
 });
 
+// ---- bulk submit of recommended corrections ----
+const suggBulk = el("suggBulk");
+const picked = () => [...suggestList.querySelectorAll(".sugg-pick:checked")].map(b => Number(b.dataset.pick));
+function paintSuggPick() {
+  const n = picked().length, all = suggestList.querySelectorAll(".sugg-pick:not(:disabled)").length;
+  const btn = el("suggSubmitSel"), box = el("suggAll");
+  if (btn) { btn.disabled = !n; btn.textContent = n ? `Submit ${n} selected` : "Submit selected"; }
+  if (el("suggN")) el("suggN").textContent = `${n} selected`;
+  if (box) { box.checked = n > 0 && n === all; box.indeterminate = n > 0 && n < all; }
+}
+suggBulk.addEventListener("change", (ev) => {
+  if (ev.target.id !== "suggAll") return;
+  for (const b of suggestList.querySelectorAll(".sugg-pick:not(:disabled)")) b.checked = ev.target.checked;
+  paintSuggPick();
+});
+suggBulk.addEventListener("click", async (ev) => {
+  if (ev.target.id !== "suggSubmitSel" || !session?.suggestions) return;
+  if (!(await supportsCorrections())) { suggestStatus.textContent = "Corrections need the local server."; return; }
+  const sess = session, items = sess.suggestions.items, idx = picked();
+  ev.target.disabled = true;
+  suggestStatus.className = "note";
+  suggestStatus.textContent = `Submitting ${idx.length} corrections…`;
+  let ok = 0; const failed = [];
+  try {
+    const rec = await ensureEvidence(sess);              // one stored capture for all of them
+    for (const i of idx) {
+      const s = items[i];
+      try {
+        await submitCorrection({ analysis_id: rec.id, start_s: s.startS, end_s: s.endS,
+          predicted_labels: s.predicted, corrected_labels: s.suggested,
+          reason: s.reason || `Recommended from the ground truth: ${s.text}`, model: sess.which });
+        s.submitted = true; ok++;
+      } catch (e) { failed.push(`${(s.startS * 1000).toFixed(2)} ms: ${e.message.replace(/^Local database correction failed \(\d+\)\. /, "")}`); }
+    }
+  } catch (e) { failed.push(e.message); }
+  if (sess !== session) return;
+  renderSuggestions();
+  suggestStatus.className = failed.length ? "corr-error" : "note";
+  suggestStatus.textContent = `${ok} correction${ok === 1 ? "" : "s"} submitted by ${operatorName()}; `
+    + "they wait in History, Human corrections, for another person to approve."
+    + (failed.length ? ` Not submitted: ${failed.join("; ")}` : "");
+});
+
 suggestList.addEventListener("click", (ev) => {
   if (!session?.suggestions) return;
+  if (ev.target.classList?.contains("sugg-pick")) { paintSuggPick(); return; }   // ticking is not opening
   const btn = ev.target.closest("button[data-review-sugg]");
   if (!btn) {
     const row = ev.target.closest("[data-sugg]");
@@ -1530,7 +1590,9 @@ function paintQueue() {
   queueList.innerHTML = !waiting.length
     ? `<div class="note">Nothing waiting: every close call has been checked.</div>`
     : `<div class="note">${waiting.length} waiting${waiting.length > QUEUE_SHOWN ? `, newest ${QUEUE_SHOWN} shown` : ""}.</div>`
-      + `<table><tbody>` + waiting.slice(0, QUEUE_SHOWN).map(r => `<tr>`
+      + `<div class="bulkbar"><label><input type="checkbox" id="queueAll"> Select all shown</label>`
+      + `<button class="mini" id="queueRightSel" disabled>Mark selected: model is right</button><span class="bulk-n" id="queueN">0 selected</span></div>`
+      + `<table><tbody>` + waiting.slice(0, QUEUE_SHOWN).map(r => `<tr><td style="width:34px"><input type="checkbox" class="row-pick" data-pick="${esc(r.id)}" aria-label="Select"></td>`
         + `<td>${esc(new Date(r.created_at).toLocaleString())}</td>`
         + `<td>${esc(r.file_name || r.case_note || r.source)}</td>`
         + `<td><b style="color:${TIER_COLOR[r.verdict] || "inherit"}">${esc(r.verdict)}</b>${flagsHtml(r)}</td>`
@@ -1540,6 +1602,36 @@ function paintQueue() {
         + `<button class="mini" data-q="right" data-id="${esc(r.id)}">Model is right</button></td></tr>`).join("")
       + `</tbody></table>`;
 }
+
+function paintQueuePick() {
+  const n = queueList.querySelectorAll(".row-pick:checked").length, all = queueList.querySelectorAll(".row-pick").length;
+  const btn = el("queueRightSel");
+  if (btn) { btn.disabled = !n; btn.textContent = n ? `Mark ${n} selected: model is right` : "Mark selected: model is right"; }
+  if (el("queueN")) el("queueN").textContent = `${n} selected`;
+  const box = el("queueAll");
+  if (box) { box.checked = n > 0 && n === all; box.indeterminate = n > 0 && n < all; }
+}
+queueList.addEventListener("change", (ev) => {
+  if (ev.target.id === "queueAll") for (const b of queueList.querySelectorAll(".row-pick")) b.checked = ev.target.checked;
+  if (ev.target.id === "queueAll" || ev.target.classList.contains("row-pick")) paintQueuePick();
+});
+queueList.addEventListener("click", async (ev) => {
+  if (ev.target.id !== "queueRightSel") return;
+  const ids = [...queueList.querySelectorAll(".row-pick:checked")].map(b => b.dataset.pick);
+  queueMsg.className = "note";
+  let ok = 0; const failed = [];
+  for (const id of ids) {
+    try {
+      await markReviewed(id, "checked from the review queue (bulk)");
+      const rec = histRecords.find(r => r.id === id); if (rec) rec.reviewed_by = operatorName();
+      ok++;
+    } catch (e) { failed.push(e.message); }
+  }
+  queueMsg.className = failed.length ? "corr-error" : "note";
+  queueMsg.textContent = `${ok} marked checked by ${operatorName()}: the model was right.` + (failed.length ? ` ${failed.length} not: ${failed[0]}` : "");
+  paintHistory();
+  renderAudit();
+});
 
 queueList.addEventListener("click", async (ev) => {
   const btn = ev.target.closest("button[data-q]");
@@ -1796,7 +1888,7 @@ async function renderAudit() {
 }
 
 // ---------------------------------------------------------------------------
-// Retraining trigger: the gauge and the checklist (History and Model pages)
+// Retraining trigger: one bar per rule, ticked when met (History and Model pages)
 // ---------------------------------------------------------------------------
 
 /** Draws the trigger into `box`. Returns the status (or null without the
@@ -1807,19 +1899,39 @@ async function renderTrigger(box) {
   block.hidden = false;
   try {
     const st = await retrainStatus();
-    const scaleMax = Math.max(st.rules.max_rate * 2, st.rate * 1.1);
-    const pct = x => `${Math.min(100, x / scaleMax * 100).toFixed(1)}%`;
+    const r = st.rules, cond = Object.fromEntries(st.conditions.map(c => [c.id, c]));
     const state = st.recommended ? "go" : st.triggered ? "warn" : "ok";
+    const best = Math.max(0, ...Object.values(st.approved_new_per_class || {}));
+    const bestCls = Object.entries(st.approved_new_per_class || {}).find(([, n]) => n === best && n > 0)?.[0];
+    const pctOf = (v, t) => Math.max(0, Math.min(100, v / t * 100));
+    const rateMax = Math.max(r.max_rate * 2, st.rate * 1.1);
+    // One row per rule, each with its own bar: a correction rate past 15%
+    // means nothing on its own while another rule is still unmet.
+    const reqs = [
+      { id: "volume", name: `Captures analysed in the last ${r.window_days} days`, val: `${st.analysed} / ${r.min_reviewed}`,
+        fill: pctOf(st.analysed, r.min_reviewed), note: "Enough traffic for the correction rate to mean something." },
+      { id: "rate", name: `Correction rate above ${Math.round(r.max_rate * 100)}%`, val: `${(st.rate * 100).toFixed(1)}%`,
+        fill: pctOf(st.rate, rateMax), mark: pctOf(r.max_rate, rateMax), markLabel: `${Math.round(r.max_rate * 100)}%`,
+        note: `${st.corrected} of ${st.analysed} captures had a correction that was not rejected`
+          + (cond.volume?.met ? "." : `; it only counts once ${r.min_reviewed} captures are reached.`) },
+      { id: "data", name: `Approved corrections in one class`, val: `${best} / ${r.min_per_class}`,
+        fill: pctOf(best, r.min_per_class), note: bestCls ? `Most so far: ${bestCls}.` : "None approved since the last retrain yet." },
+      { id: "cooldown", name: `Days since the last retrain`, val: st.days_since_retrain == null ? "never retrained" : `${st.days_since_retrain.toFixed(1)} / ${r.cooldown_days}`,
+        fill: st.days_since_retrain == null ? 100 : pctOf(st.days_since_retrain, r.cooldown_days), note: "Stops the model being retrained too often." },
+    ];
+    const metCount = reqs.filter(q => cond[q.id]?.met).length;
     box.innerHTML =
       `<div class="gauge-head"><span class="gauge-state ${state}">${st.recommended ? "RETRAIN RECOMMENDED"
-        : st.triggered ? "TRIGGERED" : "NOT TRIGGERED"}</span><span>${st.summary}</span></div>`
-      + `<div class="gauge" role="img" aria-label="Correction rate ${(st.rate * 100).toFixed(1)} percent, threshold ${(st.rules.max_rate * 100).toFixed(0)} percent">`
-      + `<div class="gauge-fill ${st.rate > st.rules.max_rate ? "over" : ""}" style="width:${pct(st.rate)}"></div>`
-      + `<div class="gauge-mark" style="left:${pct(st.rules.max_rate)}"><span>${(st.rules.max_rate * 100).toFixed(0)}% trigger</span></div></div>`
-      + `<div class="note">Correction rate, last ${st.rules.window_days} days: <strong>${(st.rate * 100).toFixed(1)}%</strong> `
-      + `(${st.corrected} of ${st.analysed} analysed captures had a correction that was not rejected).</div>`
-      + `<ul class="checklist">${st.conditions.map(c =>
-        `<li class="${c.met ? "met" : "unmet"}"><span aria-hidden="true">${c.met ? "" : ""}</span> ${c.text}</li>`).join("")}</ul>`;
+        : st.triggered ? "TRIGGERED" : "NOT TRIGGERED"}</span><span>${st.summary}</span>`
+      + `<span class="req-count">${metCount} of ${reqs.length} requirements met</span></div>`
+      + `<div class="req-list">${reqs.map(q => {
+        const met = !!cond[q.id]?.met;
+        return `<div class="req ${met ? "met" : "unmet"}"><span class="req-mark" role="img" aria-label="${met ? "met" : "not met"}"></span>`
+          + `<div class="req-body"><div class="req-top"><span class="req-name">${q.name}</span><span class="req-val">${q.val}</span></div>`
+          + `<div class="req-bar"><div class="req-fill" style="width:${q.fill.toFixed(1)}%"></div>`
+          + (q.mark != null ? `<div class="req-tick" style="left:${q.mark.toFixed(1)}%" title="${q.markLabel} line"></div>` : "") + `</div>`
+          + `<div class="req-note">${q.note}</div></div></div>`;
+      }).join("")}</div>`;
     return st;
   } catch (e) {
     box.textContent = `Could not read the retraining trigger: ${e.message}`;
@@ -1843,7 +1955,14 @@ async function renderCorrections() {
     corrStats.textContent = `${s.pending} waiting for review · ${s.approved} approved · ${s.rejected} rejected. `
       + `Approved labels ready for retraining: ${perClass}.`;
     const byId = new Map(histRecords.map(r => [r.id, r]));
-    corrTable.innerHTML = rows.length ? `<table><thead><tr><th>Submitted</th><th>Capture · span</th>`
+    // Bulk review: analysts only, and never your own (four-eyes)
+    const mayReview = currentAuth().user?.role === "analyst" || !currentAuth().user;
+    const canPick = c => mayReview && c.status === "pending" && c.operator.toLowerCase() !== operatorName().toLowerCase();
+    const nPick = rows.filter(canPick).length;
+    const bar = nPick ? `<div class="bulkbar"><label><input type="checkbox" id="corrAll"> Select all I may review (${nPick})</label>`
+      + `<button class="mini" data-bulk="approve" disabled>Approve selected</button>`
+      + `<button class="mini" data-bulk="reject" disabled>Reject selected</button><span class="bulk-n" id="corrN">0 selected</span></div>` : "";
+    corrTable.innerHTML = rows.length ? bar + `<table><thead><tr><th style="width:34px"></th><th>Submitted</th><th>Capture · span</th>`
       + `<th>Model said → human says</th><th>Reason</th><th>By</th><th>Status</th><th></th></tr></thead><tbody>`
       + rows.map(c => {
         const cap = byId.get(c.analysis_id);
@@ -1858,7 +1977,8 @@ async function renderCorrections() {
           : own ? `<span class="note">Your own correction:<br>another person must review it</span>`
           : `<button class="mini" data-review="approve" data-id="${esc(c.id)}">Approve</button> `
             + `<button class="mini" data-review="reject" data-id="${esc(c.id)}">Reject</button>`);
-        return `<tr><td>${esc(new Date(c.created_at).toLocaleString())}</td>`
+        return `<tr><td>${canPick(c) ? `<input type="checkbox" class="row-pick" data-pick="${esc(c.id)}" aria-label="Select">` : ""}</td>`
+          + `<td>${esc(new Date(c.created_at).toLocaleString())}</td>`
           + `<td>${esc(cap?.file_name || cap?.case_note?.slice(0, 40) || c.analysis_id.slice(0, 8))}<div class="note">${span}</div></td>`
           + `<td><s>${esc(c.predicted_labels.join(" + ") || "nothing")}</s> → <strong>${esc(c.corrected_labels.join(" + "))}</strong></td>`
           + `<td>${esc(c.reason)}</td><td>${esc(c.operator)}</td><td>${status}</td><td class="row-actions">${actions}</td></tr>`;
@@ -1870,6 +1990,45 @@ async function renderCorrections() {
 }
 
 corrStatusSel.addEventListener("change", renderCorrections);
+
+// ---- bulk approve / reject ----
+const corrPicked = () => [...corrTable.querySelectorAll(".row-pick:checked")].map(b => b.dataset.pick);
+function paintCorrPick() {
+  const n = corrPicked().length, all = corrTable.querySelectorAll(".row-pick").length;
+  for (const b of corrTable.querySelectorAll("button[data-bulk]")) {
+    b.disabled = !n;
+    b.textContent = `${b.dataset.bulk === "approve" ? "Approve" : "Reject"} ${n ? `${n} ` : ""}selected`;
+  }
+  if (el("corrN")) el("corrN").textContent = `${n} selected`;
+  const box = el("corrAll");
+  if (box) { box.checked = n > 0 && n === all; box.indeterminate = n > 0 && n < all; }
+}
+corrTable.addEventListener("change", (ev) => {
+  if (ev.target.id === "corrAll") for (const b of corrTable.querySelectorAll(".row-pick")) b.checked = ev.target.checked;
+  if (ev.target.id === "corrAll" || ev.target.classList.contains("row-pick")) paintCorrPick();
+});
+corrTable.addEventListener("click", async (ev) => {
+  const bulk = ev.target.closest("button[data-bulk]");
+  if (!bulk) return;
+  const ids = corrPicked(), decision = bulk.dataset.bulk;
+  const note = window.prompt(decision === "approve"
+    ? `Approve ${ids.length} corrections as ${operatorName()}? Optional note (applies to all):`
+    : `Reject ${ids.length} corrections as ${operatorName()}. Why? (required, applies to all)`, "");
+  if (note === null) return;
+  corrMsg.className = "note";
+  corrMsg.textContent = `${decision === "approve" ? "Approving" : "Rejecting"} ${ids.length}…`;
+  let ok = 0; const failed = [];
+  for (const id of ids) {
+    try { await reviewCorrection(id, decision, note); ok++; }
+    catch (e) { failed.push(e.message.replace(/^Local database review failed \(\d+\)\. /, "")); }
+  }
+  corrMsg.className = failed.length ? "corr-error" : "note";
+  corrMsg.textContent = `${ok} correction${ok === 1 ? "" : "s"} ${decision === "approve" ? "approved" : "rejected"} by ${operatorName()}.`
+    + (failed.length ? ` ${failed.length} not: ${[...new Set(failed)].join("; ")}` : "");
+  await renderCorrections();
+  await renderAudit();
+  await renderTrigger(el("histTrigger"));
+});
 
 corrTable.addEventListener("click", async (ev) => {
   const viewBtn = ev.target.closest("button[data-view]");

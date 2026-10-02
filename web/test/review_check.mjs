@@ -1,7 +1,7 @@
 // Recommended corrections (web/review.js): comparing detections with truth,
 // low-confidence picks, and what a click on the timeline opens.
 //     node web/test/review_check.mjs
-import { compareWithTruth, detectedIn, lowConfidence, spanAt, suggestCorrections } from "../review.js";
+import { compareWithTruth, coveredBy, detectedIn, lowConfidence, spanAt, suggestCorrections } from "../review.js";
 
 let failures = 0;
 function check(name, ok, detail = "") {
@@ -74,6 +74,15 @@ check("slivers shorter than minS are dropped",
   check("click on empty time opens a 1 ms span, clipped to the capture",
     n.from === "empty" && near(n.startS, 0.049) && near(n.endS, 0.05) && n.predicted.length === 0);
   check("detectedIn unions classes over a dragged span", detectedIn(events, 0.025, 0.031).join() === "BPSK,FHSS,JAMMING");
+}
+
+// --- coveredBy: a correction made anywhere marks the rows it answers --------------
+{
+  const items = [{ startS: 0.010, endS: 0.020 }, { startS: 0.030, endS: 0.034 }, { startS: 0.040, endS: 0.050 }];
+  check("a drag over a row's span marks that row", JSON.stringify(coveredBy(items, 0.009, 0.021)) === "[0]");
+  check("half or more of a row counts, either direction", JSON.stringify(coveredBy(items, 0.0335, 0.028)) === "[1]");
+  check("a sliver of a row does not", coveredBy(items, 0.049, 0.060).length === 0);
+  check("one wide correction can answer several rows", JSON.stringify(coveredBy(items, 0, 0.05)) === "[0,1,2]");
 }
 
 console.log(failures ? `\n${failures} FAILED` : "\nall checks passed");

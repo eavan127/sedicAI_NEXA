@@ -143,6 +143,18 @@ export function suggestCorrections({ events, truth, durationS }) {
  * the cursor if there is one, else the detection event under it, else a
  * 1 ms span around it (a signal the model did not report at all).
  */
+/** Indices of the suggestions a submitted correction over [aS, bS] answers:
+ *  those it covers for at least half their length. However the correction
+ *  was started (timeline click or drag, events table, Review button), the
+ *  list then shows those rows as submitted. */
+export function coveredBy(suggestions, aS, bS) {
+  const lo = Math.min(aS, bS), hi = Math.max(aS, bS);
+  return suggestions.flatMap((x, i) => {
+    const len = x.endS - x.startS, overlap = Math.min(hi, x.endS) - Math.max(lo, x.startS);
+    return len > 0 && overlap >= 0.5 * len ? [i] : [];
+  });
+}
+
 export function spanAt(t, { suggestions = [], events = [], durationS }) {
   const s = suggestions.find(x => x.startS <= t && t < x.endS);
   if (s) return { ...s, from: "suggestion" };
