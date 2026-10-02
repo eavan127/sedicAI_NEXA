@@ -1035,7 +1035,9 @@ async function store(file, sess = session) {
     printBtn.disabled = false;
     if (warning) statusEl.textContent += `  Storage: ${warning}`;
     else statusEl.textContent += {
-      server: saved.file_path ? "  Saved to the local database, with its raw IQ." : "  Saved to the local database.",
+      server: readConfig().server?.demo_in_browser
+        ? (saved.file_path ? "  Saved on this phone (demo), with its raw signal." : "  Saved on this phone (demo).")
+        : saved.file_path ? "  Saved to the local database, with its raw IQ." : "  Saved to the local database.",
       supabase: "  Saved to Supabase.",
     }[backend] || "  Saved to this browser.";
   } catch (e) {
@@ -1365,6 +1367,7 @@ function pollJob(id) {
 el("rtStart").addEventListener("click", async () => {
   setOperatorName(rtOperator.value);
   const scope = document.querySelector("input[name=rtScope]:checked")?.value || "single";
+  rtMsg.className = "note";
   rtMsg.textContent = "Checking the training packages and starting…";
   el("rtStart").disabled = true;
   try {
@@ -1376,6 +1379,7 @@ el("rtStart").addEventListener("click", async () => {
     rtOverride.checked = false;
     pollJob(job.id);
   } catch (e) {
+    rtMsg.className = "corr-error";          // a refusal must be seen, not cut off beside the button
     rtMsg.textContent = e.message.replace(/^Local database retrain start failed \(\d+\)\. /, "");
     el("rtStart").disabled = false;
   }
