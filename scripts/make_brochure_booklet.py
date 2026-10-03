@@ -1,4 +1,7 @@
-"""Build docs/NEXA_eBrochure_booklet.pdf from docs/NEXA_eBrochure.pdf: back cover + booklet imposition."""
+"""Build docs/NEXA_eBrochure_booklet.pdf from docs/NEXA_eBrochure.pdf: a back cover plus booklet imposition.
+
+Run from the repo root after regenerating docs/NEXA_eBrochure.pdf.
+"""
 import fitz, os
 src = fitz.open("docs/NEXA_eBrochure.pdf")
 assert src.page_count == 7, "booklet layout assumes a 7-page brochure"
@@ -15,14 +18,14 @@ def centre(text, y, size, color, font="hebo"):
     pg.insert_text((cx - w/2, y), text, fontname=font, fontsize=size, color=color)
 centre("A Dual-Branch Fusion CNN for", 270, 17, white)
 centre("Multi-Label RF Signal Classification", 292, 17, white)
-centre("SEE IT RUN", 372, 11, orange)
-centre("Scan to open the live console or keep this brochure", 396, 13, white, "helv")
-clip = fitz.Rect(163, 610, 433, 790); s = 1.25          # the two QR cards on the team page
-w, h = clip.width * s, clip.height * s
-box = fitz.Rect(cx - w/2, 425, cx + w/2, 425 + h)
-pg.draw_rect(box + (-10, -10, 10, 10), color=None, fill=white, radius=0.06)
-pg.show_pdf_page(box, src, 6, clip=clip)
-centre("sedic-ai-nexa.vercel.app", 700, 12, white, "cour")
+# No QR codes here: they live on the team page (inside back cover), so nothing is repeated.
+pg.draw_line((cx - 60, 345), (cx + 60, 345), color=orange, width=2)
+centre("AI-powered RF spectrum intelligence", 392, 15, white, "helv")
+centre("Offline  ·  In the browser  ·  Human in the loop", 418, 11.5, dim, "helv")
+centre("LIVE CONSOLE", 520, 10, orange)
+centre("sedic-ai-nexa.vercel.app", 546, 16, white, "cour")
+centre("Scan the codes inside this cover for the console,", 600, 10.5, dim, "helv")
+centre("the demo video and this brochure.", 615, 10.5, dim, "helv")
 centre("Group NEXA  ·  Universiti Teknologi PETRONAS", 756, 10.5, dim, "helv")
 centre("SEDIC 2026 Grand Finale  ·  7 October 2026", 772, 10.5, dim, "helv")
 pages = [(src, i) for i in range(7)] + [(bc, 0)]

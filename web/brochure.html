@@ -446,8 +446,8 @@
   .tag-pin.advisor b { background: var(--orange); color: var(--ink); }
   .person.advisor .pin-no { background: var(--orange); border-color: var(--orange); color: var(--ink); }
   .person .lead-tag { font: 700 11px var(--mono); color: var(--amber); letter-spacing: 0.08em; margin-top: 8px; text-transform: uppercase; }
-  .qrs { display: grid; grid-template-columns: repeat(2, minmax(0, 260px)); gap: 18px; margin-top: 48px; justify-content: center; }
-  @media (max-width: 560px) { .qrs { grid-template-columns: 1fr 1fr; gap: 12px; } }
+  .qrs { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 240px)); gap: 18px; margin-top: 48px; justify-content: center; }
+  @media (max-width: 560px) { .qrs { grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 8px; } .qr { padding: 10px; } .qr b { font-size: 12.5px; } .qr span { font-size: 11px; } }
   .qr { background: #fff; color: var(--ink); border: 1px solid var(--line); border-radius: 16px; padding: 16px; text-align: center; }
   .qr .code { width: 100%; aspect-ratio: 1; display: grid; place-items: center; }
   .qr .code img, .qr .code canvas { width: 100% !important; height: auto !important; image-rendering: pixelated; }
@@ -485,25 +485,25 @@
     #how { height: auto; margin-top: 4mm; padding-top: 4mm !important; border-top: 1px solid var(--line); }
     #how .page-brand { display: none; }
     #mission h2, #how h2 { font-size: 19pt; }
-    #mission .lead, #how .lead { font-size: 9.5pt; margin-top: 5px; }
+    #mission .lead, #how .lead { font-size: 9.5pt; margin-top: 5px; max-width: none; }
     #mission .folio, #how .folio { margin-bottom: 6px; }
     #mission .tiers { margin-top: 12px; }
     #mission .callout { margin-top: 8px; padding: 8px 12px; }
     #how .pipe { margin-top: 12px; }
-    .arch { margin-top: 12px; padding: 12px 10px 8px; gap: 5px; border-radius: 12px; }
+    .arch { margin-top: 10px; padding: 13px 12px 9px; gap: 6px; border-radius: 12px; }
     #how .why { display: none; }
-    .arch-tag { font-size: 6pt; top: -8px; padding: 1px 8px; }
-    .arch-layer h4 { font-size: 7pt; margin-bottom: 3px; gap: 5px; }
-    .arch-layer h4 i { width: 12px; height: 12px; font-size: 6.5pt; }
+    .arch-tag { font-size: 6.6pt; top: -8px; padding: 1px 8px; }
+    .arch-layer h4 { font-size: 8pt; margin-bottom: 4px; gap: 6px; }
+    .arch-layer h4 i { width: 14px; height: 14px; font-size: 7pt; }
     .arch-row { gap: 5px 12px; }
     .arch-row.n3 { --n: 3; } .arch-row.n4 { --n: 4; } .arch-row.n5 { --n: 5; }
     .arch-roles { grid-template-columns: 3fr 5fr; gap: 6px 12px; }
-    .arch-box { padding: 4px 6px; border-width: 1.2px; border-radius: 7px; box-shadow: none !important; }
-    .arch-box b { font-size: 7.5pt; }
-    .arch-box span { font-size: 6.3pt; margin-top: 1px; }
-    .arch-box .pill { font-size: 5pt; padding: 0 4px; margin-right: 3px; }
+    .arch-box { padding: 5px 8px; border-width: 1.4px; border-radius: 8px; box-shadow: none !important; }
+    .arch-box b { font-size: 8.4pt; }
+    .arch-box span { font-size: 7pt; margin-top: 1px; }
+    .arch-box .pill { font-size: 5.6pt; padding: 0 4px; margin-right: 3px; }
     .arch-row.flow .arch-box + .arch-box::before { display: block; left: -9.5px; width: 5px; height: 5px; border-width: 1.2px; }
-    .role-tag { font-size: 5.5pt; padding: 1px 6px; margin-bottom: 3px; }
+    .role-tag { font-size: 6.2pt; padding: 1px 7px; margin-bottom: 4px; }
     #how .stage { padding: 9px 9px; }
     #how .why { margin-top: 10px; gap: 10px 16px; }
     #how .why p { font-size: 8.5pt; }
@@ -617,7 +617,7 @@
     .group-photo img { aspect-ratio: 16 / 9; height: auto; box-shadow: 8px 8px 0 var(--navy); }
     .group-photo figcaption { font-size: 8.5pt; margin-top: 6px; }
     .tag-pin { bottom: 8px; font-size: 8pt; }
-    .qrs { grid-template-columns: repeat(2, 44mm); margin-top: 16px; }
+    .qrs { grid-template-columns: repeat(3, 44mm); margin-top: 16px; }
     .qr { padding: 10px; }
     .stage, .feat, .tier, .aud article, .kpi, .person { break-inside: avoid; }
     .stage.lit { background: var(--panel); color: var(--text); }
@@ -1089,6 +1089,11 @@
         <b>Try the live console</b>
         <span>Same AI, on your phone</span>
       </div>
+      <div class="qr" id="qrVideoCard">
+        <div class="code" id="qrVideo"></div>
+        <b>Watch the demo</b>
+        <span>NEXA running, on video</span>
+      </div>
       <div class="qr">
         <div class="code" id="qrSelf"></div>
         <b>Keep this brochure</b>
@@ -1329,7 +1334,7 @@
   });
 
   /* ---------- demo video: paste the link here; until then the card opens the live console ---------- */
-  const DEMO_VIDEO_URL = "";
+  const DEMO_VIDEO_URL = "https://canva.link/rqno27jh02rd9bz";
   {
     const a = document.getElementById("demoLink");
     if (DEMO_VIDEO_URL) { a.href = DEMO_VIDEO_URL; }
@@ -1373,6 +1378,8 @@
     const here = location.href.split("#")[0];
     const demo = new URL("./", here).href;
     const targets = [["qrDemo", demo], ["qrSelf", here]];
+    if (DEMO_VIDEO_URL) targets.push(["qrVideo", DEMO_VIDEO_URL]);
+    else document.getElementById("qrVideoCard").hidden = true;
     for (const [id, url] of targets) {
       const box = document.getElementById(id);
       if (location.protocol === "file:" || typeof QRCode === "undefined") {
