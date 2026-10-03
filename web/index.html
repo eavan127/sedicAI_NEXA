@@ -715,14 +715,6 @@
         </div>
       </div>
 
-      <div class="block" hidden>
-        <div class="block-label">Model health: retraining trigger</div>
-        <div class="note">The model is retrained when experts keep correcting it: more than 15% of the
-          captures they review in a week. The other two rules make sure there is enough approved data to
-          learn from, and that it does not retrain too often. A person always starts the retrain (Model page).</div>
-        <div id="histTrigger"></div>
-      </div>
-
       <div class="block">
         <div class="block-label">Everything analysed so far</div>
         <div id="histSummary"></div>
@@ -998,7 +990,7 @@
   });
   const label = b => b.querySelector(":scope > .block-label");
   // Short names for the outline; the three small charts share one entry.
-  const SHORT = [["Report builder", "Report"], ["Model health", "Model health"], ["Everything analysed", "Summary"],
+  const SHORT = [["Report builder", "Report"], ["Everything analysed", "Summary"],
     ["Captures containing", "Charts"], ["Captures by SNR", "Charts"], ["Captures per day", "Charts"],
     ["Review required", "Review queue"], ["Stored analyses", "Stored analyses"], ["Human corrections", "Corrections"]];
   const shortName = full => (SHORT.find(([k]) => full.startsWith(k)) || [, full.split(":")[0]])[1];

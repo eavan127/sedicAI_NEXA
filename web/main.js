@@ -1680,7 +1680,6 @@ async function renderHistory() {
         + "Start the page with scripts/serve_local.py (web/start_demo.bat) to use the local database.";
   renderAudit();
   renderCorrections();
-  renderTrigger(el("histTrigger"));
   histStatus.textContent = "Loading…";
   try {
     const { records, warning } = await listAnalyses();
@@ -2053,7 +2052,6 @@ corrTable.addEventListener("click", async (ev) => {
     + (failed.length ? ` ${failed.length} not: ${[...new Set(failed)].join("; ")}` : "");
   await renderCorrections();
   await renderAudit();
-  await renderTrigger(el("histTrigger"));
 });
 
 corrTable.addEventListener("click", async (ev) => {
@@ -2076,7 +2074,6 @@ corrTable.addEventListener("click", async (ev) => {
     corrMsg.textContent = `Correction ${decision === "approve" ? "approved" : "rejected"} by ${operatorName()}.`;
     await renderCorrections();
     await renderAudit();
-    await renderTrigger(el("histTrigger"));
   } catch (e) {
     corrMsg.className = "corr-error";       // a refusal must not look like a footnote
     corrMsg.textContent = e.message.replace(/^Local database review failed \(\d+\)\. /, "");
