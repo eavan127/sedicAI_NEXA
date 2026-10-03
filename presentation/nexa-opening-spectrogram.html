@@ -341,5 +341,24 @@
   requestAnimationFrame(frame);
 })();
 </script>
+<style>
+  /* Navigation hides while the mouse is still, so in fullscreen it never sits on the slide */
+  .next-btn, .back-btn, .fs-btn, .replay-btn { transition: opacity .4s; }
+  body.nav-idle .next-btn, body.nav-idle .back-btn, body.nav-idle .fs-btn, body.nav-idle .replay-btn { opacity: 0 !important; pointer-events: none; }
+</style>
+<script>
+(() => {
+  /* Shown again by any mouse move or touch; the arrow keys and a clicker work either way. */
+  let t;
+  const hovering = () => document.querySelector(".next-btn:hover, .back-btn:hover, .fs-btn:hover, .replay-btn:hover");
+  const wake = () => {
+    document.body.classList.remove("nav-idle");
+    clearTimeout(t);
+    t = setTimeout(() => { if (!hovering()) document.body.classList.add("nav-idle"); }, 2000);
+  };
+  ["mousemove", "pointerdown", "touchstart"].forEach(e => addEventListener(e, wake, { passive: true }));
+  wake();
+})();
+</script>
 </body>
 </html>

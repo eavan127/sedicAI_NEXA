@@ -1024,7 +1024,7 @@ printBtn.addEventListener("click", async () => {
       { target_type: "analysis", target_id: lastRecord.id });
     statusEl.textContent += "  Report downloaded.";
   } catch (e) {
-    statusEl.textContent = `PDF library unavailable (${e.message}) — using the print dialog.`;
+    statusEl.textContent = `PDF library unavailable (${e.message}); using the print dialog instead.`;
     window.print();
   } finally {
     printBtn.disabled = false;

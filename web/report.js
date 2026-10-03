@@ -194,7 +194,7 @@ export async function buildSingle(record, { classes = [] } = {}) {
     `${record.file_name || record.case_note || record.source} · ${when}`);
 
   s.heading("Verdict");
-  s.text(`${record.verdict} — ${(record.classes_detected || []).join(", ") || "no emitter detected"}`,
+  s.text(`${record.verdict}: ${(record.classes_detected || []).join(", ") || "no emitter detected"}`,
     { size: 11, bold: true });
 
   s.heading("Capture");

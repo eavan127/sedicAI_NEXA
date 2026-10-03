@@ -127,6 +127,14 @@
     opacity:0;animation:fadeIn .5s ease forwards;animation-delay:6s;z-index:10;
   }
   .replay-btn:hover{background:#333;}
+  /* Previous slide: bottom-left, matching the posters' navigation */
+  .back-btn{position:fixed;left:26px;bottom:20px;z-index:10;background:#22306B;color:#fff;text-decoration:none;
+    padding:11px 18px;border-radius:26px;font-size:14px;font-weight:700;box-shadow:0 6px 18px rgba(0,0,0,.3);opacity:.9;}
+  .back-btn:hover,.back-btn:focus-visible{opacity:1;outline:2px solid #F0A020;outline-offset:2px;}
+  /* Fullscreen, as on the other slides (F toggles it too) */
+  .fs-btn{position:fixed;right:210px;bottom:24px;z-index:10;font:600 12px Arial,Helvetica,sans-serif;color:#5B5B5B;
+    background:rgba(255,255,255,.92);border:1px solid #E3E3E3;border-radius:14px;padding:6px 12px;cursor:pointer;opacity:.75;}
+  .fs-btn:hover,.fs-btn:focus-visible{opacity:1;outline:2px solid #2C5AAC;}
 
   /* ---- effects carried over from the Animated version ---- */
   #curve .grid line{stroke:#D9D9D9;stroke-width:1;}
@@ -221,7 +229,7 @@
       <thead><tr><th>CATEGORY</th><th>BASIS</th><th>SCALING</th><th>LOWEST ESTIMATE (RM)</th></tr></thead>
       <tbody id="t3body">
         <tr class="row-hidden"><td>Model &amp; AI Pipeline</td><td class="basis">Market rate for a professional team (1 senior + 1 mid ML engineer, plus part-time backend/MLOps) over about 2.5 months, covering the 5-model ensemble, ONNX export and governance system.</td><td class="scaling">One-time</td><td class="rm" data-val="150000">RM 0</td></tr>
-        <tr class="row-hidden"><td>Systems Integration</td><td class="basis">JSON / CSV / SigMF export, operator review UI &mdash; real paid integration labour for a 5-station deployment.</td><td class="scaling">Scales per station</td><td class="rm" data-val="163200">RM 0</td></tr>
+        <tr class="row-hidden"><td>Systems Integration</td><td class="basis">JSON / CSV / SigMF export and operator review UI: real paid integration labour for a 5-station deployment.</td><td class="scaling">Scales per station</td><td class="rm" data-val="163200">RM 0</td></tr>
         <tr class="row-hidden"><td>Software / System Accreditation</td><td class="basis">Certifying the model, audit trail &amp; governance design (distinct from hardware accreditation).</td><td class="scaling">One-time</td><td class="rm" data-val="61200">RM 0</td></tr>
         <tr class="row-hidden"><td>Maintenance / Support</td><td class="basis">10% of Systems Integration cost only.</td><td class="scaling">Scales per station</td><td class="rm" data-val="16320">RM 0</td></tr>
         <tr class="row-hidden"><td>Cybersecurity / Supply-chain Vetting</td><td class="basis">Code &amp; dependency security review.</td><td class="scaling">One-time</td><td class="rm" data-val="61200">RM 0</td></tr>
@@ -234,6 +242,8 @@
 </div>
 
 <button class="replay-btn" id="replayBtn">&#8635; Replay animation</button>
+<a class="back-btn" id="back" href="nexa-tv-poster-2-system.html" title="Previous slide (← or Page Up)">&larr; Back</a>
+<button class="fs-btn" id="fs" type="button">Fullscreen (F)</button>
 
 <script>
 (function(){
@@ -311,6 +321,32 @@
 
   document.getElementById('replayBtn').addEventListener('click', function(){ location.reload(); });
   window.addEventListener('load', runSequence);
+  /* ← / Page Up: previous slide, so a presentation clicker works too */
+  window.addEventListener('keydown', function(e){ if (e.key === 'ArrowLeft' || e.key === 'PageUp') location.href = document.getElementById('back').href; });
+  var fsBtn = document.getElementById('fs');
+  function toggleFs(){ try { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen().catch(function(){}); } catch (e) {} }
+  fsBtn.addEventListener('click', toggleFs);
+  window.addEventListener('keydown', function(e){ if (e.key === 'f' || e.key === 'F') toggleFs(); });
+  document.addEventListener('fullscreenchange', function(){ fsBtn.hidden = !!document.fullscreenElement; });
+})();
+</script>
+<style>
+  /* Navigation hides while the mouse is still, so in fullscreen it never sits on the slide */
+  .next-btn, .back-btn, .fs-btn, .replay-btn { transition: opacity .4s; }
+  body.nav-idle .next-btn, body.nav-idle .back-btn, body.nav-idle .fs-btn, body.nav-idle .replay-btn { opacity: 0 !important; pointer-events: none; }
+</style>
+<script>
+(() => {
+  /* Shown again by any mouse move or touch; the arrow keys and a clicker work either way. */
+  let t;
+  const hovering = () => document.querySelector(".next-btn:hover, .back-btn:hover, .fs-btn:hover, .replay-btn:hover");
+  const wake = () => {
+    document.body.classList.remove("nav-idle");
+    clearTimeout(t);
+    t = setTimeout(() => { if (!hovering()) document.body.classList.add("nav-idle"); }, 2000);
+  };
+  ["mousemove", "pointerdown", "touchstart"].forEach(e => addEventListener(e, wake, { passive: true }));
+  wake();
 })();
 </script>
 </body>
