@@ -187,6 +187,45 @@
   .stage.lit { background: var(--slate); border-color: var(--slate); color: var(--on-dark); }
   .stage.lit p { color: var(--on-dark-dim); }
   .stage.lit .spec, .stage.lit::before { color: var(--accent-hot); }
+  /* System architecture: four layers in one offline frame, after the finale poster's page 2. */
+  .arch { position: relative; margin-top: 48px; padding: 30px 22px 22px; border: 1.5px dashed #AEB9C8; border-radius: 18px;
+    background: #F3F6FB; display: grid; gap: 22px; }
+  .arch-tag { position: absolute; top: -12px; left: 18px; padding: 3px 12px; border-radius: 6px; background: var(--paper);
+    border: 1px solid #AEB9C8; font: 800 10.5px var(--font); letter-spacing: 0.12em; text-transform: uppercase; color: var(--mute); }
+  .arch-layer h4 { display: flex; align-items: center; gap: 8px; font: 800 12.5px var(--font); letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--c); margin-bottom: 10px; }
+  .arch-layer h4 i { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--c);
+    color: #fff; font: 700 11px var(--mono); font-style: normal; letter-spacing: 0; }
+  .arch-row { display: grid; gap: 10px 18px; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); }
+  .arch-row.n3 { --n: 3; } .arch-row.n4 { --n: 4; } .arch-row.n5 { --n: 5; }
+  .arch-box { position: relative; background: var(--paper); border: 2px solid var(--c); border-radius: 12px; padding: 10px 12px;
+    transition: box-shadow .5s; }
+  .arch-box b { display: block; font-size: 14.5px; color: var(--ink); line-height: 1.25; }
+  .arch-box span { display: block; font-size: 12.5px; color: var(--mute); margin-top: 3px; line-height: 1.35; }
+  .arch-row.flow .arch-box + .arch-box::before { content: ""; position: absolute; left: -15px; top: 50%; width: 9px; height: 9px;
+    border-top: 2px solid var(--c); border-right: 2px solid var(--c); transform: translateY(-50%) rotate(45deg); opacity: 0.7; }
+  .arch-box .pill { display: inline-block; margin-right: 6px; padding: 0 7px; border-radius: 5px; color: #fff;
+    font: 800 9.5px var(--font); letter-spacing: 0.08em; text-transform: uppercase; font-style: normal; vertical-align: 1px; }
+  .arch-box .pill.alert { background: var(--red); }
+  .arch-box .pill.review { background: var(--orange); color: var(--ink); }
+  .arch-box.triage { border-color: var(--red); }
+  .arch-roles { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 4fr); gap: 14px 22px; }
+  .role-tag { display: inline-block; margin-bottom: 8px; padding: 2px 10px; border-radius: 6px; color: #fff;
+    font: 800 10px var(--font); letter-spacing: 0.12em; text-transform: uppercase; }
+  .role-tag.op { background: var(--orange); color: var(--ink); }
+  .role-tag.an { background: var(--navy); }
+  .arch-role:first-child .arch-box { border-color: var(--orange); }
+  .arch-layer.lit .arch-box { box-shadow: 0 0 0 4px color-mix(in srgb, var(--c) 20%, transparent); }
+  @media (max-width: 900px) {
+    .arch-row.n4, .arch-row.n5 { --n: 2; } .arch-row.n3 { --n: 3; }
+    .arch-roles { grid-template-columns: 1fr; }
+    .arch-row.flow .arch-box + .arch-box::before { display: none; }
+  }
+  @media (max-width: 560px) {
+    .arch { padding: 26px 14px 16px; }
+    .arch-row.n3, .arch-row.n4, .arch-row.n5 { --n: 1; }
+    .arch-tag { font-size: 9px; letter-spacing: 0.06em; left: 10px; right: 10px; text-align: center; }
+  }
   .why { display: grid; grid-template-columns: repeat(2, 1fr); gap: 28px; margin-top: 44px; }
   @media (max-width: 900px) { .why { grid-template-columns: 1fr; } }
   .why h4 { font-size: 16px; }
@@ -451,6 +490,20 @@
     #mission .tiers { margin-top: 12px; }
     #mission .callout { margin-top: 8px; padding: 8px 12px; }
     #how .pipe { margin-top: 12px; }
+    .arch { margin-top: 12px; padding: 12px 10px 8px; gap: 5px; border-radius: 12px; }
+    #how .why { display: none; }
+    .arch-tag { font-size: 6pt; top: -8px; padding: 1px 8px; }
+    .arch-layer h4 { font-size: 7pt; margin-bottom: 3px; gap: 5px; }
+    .arch-layer h4 i { width: 12px; height: 12px; font-size: 6.5pt; }
+    .arch-row { gap: 5px 12px; }
+    .arch-row.n3 { --n: 3; } .arch-row.n4 { --n: 4; } .arch-row.n5 { --n: 5; }
+    .arch-roles { grid-template-columns: 3fr 5fr; gap: 6px 12px; }
+    .arch-box { padding: 4px 6px; border-width: 1.2px; border-radius: 7px; box-shadow: none !important; }
+    .arch-box b { font-size: 7.5pt; }
+    .arch-box span { font-size: 6.3pt; margin-top: 1px; }
+    .arch-box .pill { font-size: 5pt; padding: 0 4px; margin-right: 3px; }
+    .arch-row.flow .arch-box + .arch-box::before { display: block; left: -9.5px; width: 5px; height: 5px; border-width: 1.2px; }
+    .role-tag { font-size: 5.5pt; padding: 1px 6px; margin-bottom: 3px; }
     #how .stage { padding: 9px 9px; }
     #how .why { margin-top: 10px; gap: 10px 16px; }
     #how .why p { font-size: 8.5pt; }
@@ -657,35 +710,64 @@
   <div class="inner">
     <div class="page-brand" aria-hidden="true"><img class="pb-nexa" src="img/nexa-logo.png" alt="" width="1100" height="264"><img class="pb-sedic" src="img/sedic-logo.png" alt="" width="831" height="238"></div>
     <div class="folio"><span class="num">03</span>How it works</div>
-    <h2 class="reveal">From raw samples to a threat verdict in five steps.</h2>
-    <p class="lead reveal">Every window is 512 IQ samples at 3.2 MHz: 160 microseconds of radio. The same
-      format is enforced for every source, so the model learns the signal and not where it came from.</p>
+    <h2 class="reveal">Inside NEXA: the system architecture.</h2>
+    <p class="lead reveal">From signal acquisition to model adaptation: every capture is recorded and every
+      decision is accountable, all on one offline workstation.</p>
 
-    <div class="pipe" id="pipe">
-      <div class="stage">
-        <h4>Capture</h4>
-        <p>Raw IQ from a receiver, a recording or a SigMF file, cut into windows.</p>
-        <div class="spec">2 × 512 · 3.2 MHz</div>
+    <div class="arch reveal" id="pipe" role="img" aria-label="NEXA system architecture in four layers, all running offline on a single workstation: signal acquisition; detection and classification in the browser; recording in a local database; human review and model adaptation.">
+      <span class="arch-tag">Offline · single workstation · no data leaves the machine</span>
+
+      <div class="arch-layer" style="--c: var(--blue)">
+        <h4><i>1</i>Signal acquisition</h4>
+        <div class="arch-row n3">
+          <div class="arch-box"><b>Simulated receiver</b><span>live stream, demonstration presets</span></div>
+          <div class="arch-box"><b>File upload</b><span>recorded SigMF or .bin, replayed as live</span></div>
+          <div class="arch-box"><b>Synthesis</b><span>generated test capture, one shot</span></div>
+        </div>
       </div>
-      <div class="stage">
-        <h4>Signal processing</h4>
-        <p>Normalise power, then build a spectrogram (STFT) alongside the raw samples.</p>
-        <div class="spec">IQ + time-frequency</div>
+
+      <div class="arch-layer" style="--c: var(--amber)">
+        <h4><i>2</i>Detection and classification · in-browser</h4>
+        <div class="arch-row n5 flow">
+          <div class="arch-box"><b>Signal processing</b><span>160 µs windows, spectrogram</span></div>
+          <div class="arch-box"><b>Ensemble classifier</b><span>five models, eight classes</span></div>
+          <div class="arch-box"><b>Decision layer</b><span>thresholds, events, threat tier</span></div>
+          <div class="arch-box triage"><b>Triage</b><span><em class="pill alert">Alert</em>threat assessment</span><span><em class="pill review">Review</em>confidence check</span></div>
+          <div class="arch-box"><b>Operator display</b><span>waterfall, timeline, alerts</span></div>
+        </div>
       </div>
-      <div class="stage">
-        <h4>Two-branch AI</h4>
-        <p>One branch reads phase in the raw IQ; the other reads chirps and hops in the spectrogram. They are fused.</p>
-        <div class="spec">dilated 1D-CNN ‖ 2D-CNN</div>
+
+      <div class="arch-layer" style="--c: var(--green)">
+        <h4><i>3</i>Recording · local database</h4>
+        <div class="arch-row n4">
+          <div class="arch-box"><b>Capture log</b><span>results, ground truth, flags</span></div>
+          <div class="arch-box"><b>Raw signal retention</b><span>threats, low confidence, corrected, training; rolling 2 GB</span></div>
+          <div class="arch-box"><b>Audit trail</b><span>hash-chained, tamper-evident</span></div>
+          <div class="arch-box"><b>Model registry</b><span>all versions retained, rollback</span></div>
+        </div>
       </div>
-      <div class="stage">
-        <h4>Eight decisions</h4>
-        <p>A separate calibrated yes/no per class, so overlapping signals are all reported.</p>
-        <div class="spec">8 × sigmoid · 5-model ensemble</div>
-      </div>
-      <div class="stage">
-        <h4>Verdict</h4>
-        <p>Detections are grouped into events on a timeline and ranked Hostile, Military, Civilian.</p>
-        <div class="spec">tier + event log</div>
+
+      <div class="arch-layer" style="--c: var(--navy)">
+        <h4><i>4</i>Human review and model adaptation</h4>
+        <div class="arch-roles">
+          <div class="arch-role">
+            <span class="role-tag op">Operator</span>
+            <div class="arch-row n3 flow">
+              <div class="arch-box"><b>Review</b><span>low-confidence detections</span></div>
+              <div class="arch-box"><b>Inspection</b><span>stored signal, ground truth</span></div>
+              <div class="arch-box"><b>Correction</b><span>label and justification</span></div>
+            </div>
+          </div>
+          <div class="arch-role">
+            <span class="role-tag an">Analyst</span>
+            <div class="arch-row n4 flow">
+              <div class="arch-box"><b>Approval</b><span>independent verification</span></div>
+              <div class="arch-box"><b>Retraining trigger</b><span>over 15% corrected in 7 days</span></div>
+              <div class="arch-box"><b>Retraining and evaluation</b><span>tested against the model in use</span></div>
+              <div class="arch-box"><b>Deployment</b><span>approved model activated</span></div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -1214,19 +1296,19 @@
   document.querySelectorAll(".reveal").forEach(n => io.observe(n));
   if (reduce) document.querySelectorAll("[data-w]").forEach(m => m.style.width = m.dataset.w + "%");
 
-  // Pipeline: stages light up one after another once it is on screen.
-  const stages = [...document.querySelectorAll("#pipe .stage")];
+  // Architecture: the four layers light up one after another once the diagram is on screen.
+  const stages = [...document.querySelectorAll("#pipe .arch-layer")];
   new IntersectionObserver(([en], obs) => {
     if (!en.isIntersecting) return;
     obs.disconnect();
-    if (reduce) { stages.forEach(s => s.classList.add("lit")); return; }
+    if (reduce) return;
     let i = 0;
     (function next() {
       stages.forEach((s, j) => s.classList.toggle("lit", j === i));
       i = (i + 1) % (stages.length + 1);
       setTimeout(next, i === 0 ? 1400 : 1100);
     })();
-  }, { threshold: 0.35 }).observe(document.getElementById("pipe"));
+  }, { threshold: 0.2 }).observe(document.getElementById("pipe"));
 
   // Highlight the current section in the top bar.
   const links = [...document.querySelectorAll(".bar nav a")];
