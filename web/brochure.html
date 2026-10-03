@@ -391,7 +391,7 @@
 
   /* ---------- team ---------- */
   .group-photo { margin: 28px 0 0; max-width: 100%; }
-  .photo-frame { position: relative; margin: 18px 14px 14px 0; }
+  .photo-frame { position: relative; margin: 18px 14px 14px 14px; }
   /* the poster's orange pill and blue dot, sitting on the photo's top edge */
   .photo-frame::before, .photo-frame::after { content: ""; position: absolute; top: -14px; z-index: 2; }
   .photo-frame::before { left: 28px; width: 92px; height: 28px; border-radius: 14px; background: var(--orange); }
@@ -624,7 +624,8 @@
     .person.advisor { grid-column: auto; }
     .person { padding: 14px; }
     .group-photo { margin-top: 14px; }
-    .group-photo { max-width: 160mm; }
+    .group-photo { max-width: none; margin-left: auto; margin-right: auto; }
+    .photo-frame { margin: 14px 8px 8px 8px; }
     .group-photo img { aspect-ratio: 16 / 9; height: auto; box-shadow: 8px 8px 0 var(--navy); }
     .group-photo figcaption { font-size: 8.5pt; margin-top: 6px; }
     .tag-pin { bottom: 8px; font-size: 8pt; }
