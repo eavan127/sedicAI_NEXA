@@ -135,7 +135,7 @@
   .src .hex { width: 30px; height: 26px; display: grid; place-items: center; color: #fff; font-size: 11px; font-weight: 800;
     clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%); background: var(--c); }
   .src b { display: block; font-size: 14px; font-weight: 800; }
-  .src span { font-size: 12px; color: var(--mute); font-weight: 600; }
+  .src span { display: block; font-size: 12px; line-height: 1.4; color: var(--mute); font-weight: 600; margin-top: 1px; }
   .split-wrap { position: absolute; left: 14px; right: 14px; top: 300px; }
   .split { display: flex; height: 52px; border-radius: 10px; overflow: hidden; color: #fff; }
   .split div { display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.2; }
@@ -296,8 +296,8 @@
     <div class="body">
       <div class="ds-left">
         <div><div class="bignum">128,400</div><div class="cap" style="margin-top:4px">labelled windows · 8 classes</div></div>
-        <div class="src" style="--c:var(--blue)"><div class="hex">01</div><div><b>RadioML 2018.01A</b><span>real civilian comms</span></div></div>
-        <div class="src" style="--c:var(--orange)"><div class="hex">02</div><div><b>RadChar</b><span>real radar, sets 3.2 MHz / 512</span></div></div>
+        <div class="src" style="--c:var(--blue)"><div class="hex">01</div><div><b>RadioML 2018.01A</b><span>published civilian comms dataset</span></div></div>
+        <div class="src" style="--c:var(--orange)"><div class="hex">02</div><div><b>RadChar</b><span>published radar dataset, sets 3.2 MHz / 512</span></div></div>
         <div class="src" style="--c:var(--red)"><div class="hex">03</div><div><b>Our generators</b><span>FHSS, jamming, noise, mixtures</span></div></div>
       </div>
       <div class="split-wrap">
