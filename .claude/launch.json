@@ -51,6 +51,18 @@
         "web"
       ],
       "port": 8094
+    },
+    {
+      "name": "posters",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8098",
+        "--directory",
+        "presentation"
+      ],
+      "port": 8098
     }
   ]
 }

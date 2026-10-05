@@ -249,7 +249,7 @@
   /* ---- the tour ---- */
   const capEl = document.getElementById("sysCap"), capNum = document.getElementById("sysNum"), capText = document.getElementById("sysText");
   const tour = [
-    { k: ["src"], c: [], t: "Signals are acquired from the simulated receiver, recorded files, uploads or, in future, a software-defined radio" },
+    { k: ["src"], c: [], t: "Signals come from the simulated receiver, an uploaded recording, a synthesized capture or, in future, a software-defined radio" },
     { k: ["src", "dsp"], c: ["w1"], t: "Signal processing segments the input into 160 µs windows and computes the spectrogram" },
     { k: ["dsp", "model"], c: ["w2"], t: "A five-model ensemble scores all eight classes within the browser" },
     { k: ["model", "dec"], c: ["w3"], t: "Per-class thresholds convert the scores into detections, events and a threat tier" },
@@ -266,8 +266,18 @@
   ];
   let si = -1, sT0 = 0, sActive = [];
   const seenK = new Set(), seenC = new Set();
+  /* Played once: after the last step every box and wire stays in full colour. */
+  function sysFinish() {
+    sActive = []; pT0 = null; paintProgress(100);
+    sysEl.classList.remove("touring");
+    sysEl.querySelectorAll(".sn").forEach(n => { n.classList.remove("on"); n.classList.add("seen"); });
+    sysEl.querySelectorAll(".conn").forEach(p => { p.classList.remove("on"); p.classList.add("seen"); seenC.add(p.id); });
+    capEl.classList.add("fade0");
+    setTimeout(() => { capNum.textContent = "✓"; capNum.style.background = "var(--navy)"; capText.textContent = "Acquisition → detection → recording → human review, with approved corrections adapting the model"; capEl.classList.remove("fade0"); }, 300);
+  }
   function sysStep() {
-    si = (si + 1) % tour.length; const st = tour[si]; sT0 = performance.now(); sActive = st.c;
+    if (si === tour.length - 1) { sysFinish(); return; }
+    si = si + 1; const st = tour[si]; sT0 = performance.now(); sActive = st.c;
     if (si === 0) { seenK.clear(); seenC.clear(); paintProgress(0); }
     st.k.forEach(k => seenK.add(k)); st.c.forEach(c => seenC.add(c));
     sysEl.querySelectorAll(".sn").forEach(n => { n.classList.toggle("on", st.k.includes(n.dataset.k)); n.classList.toggle("seen", seenK.has(n.dataset.k)); });
