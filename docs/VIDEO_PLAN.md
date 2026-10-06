@@ -60,15 +60,15 @@ close. Pop-ups carry content in or out; they do not run under a talking head for
 
 ### Two changes made 7 Sept
 
-**External validation was cut from the video.** The out-of-distribution test against real recorded
-GNSS jamming **remains in the technical brief, §7.2**, unchanged. A five-minute video cannot cover
+**External validation was cut from the video.** The out-of-distribution test against an independently
+generated GNSS jamming dataset **remains in the technical brief, §7.2**, unchanged. A five-minute video cannot cover
 everything in a brief, and omitting a topic is not the same as reporting half of it — but be clear
 about what it costs:
 
 - Every number spoken in the video is now measured on data we generated and evaluated ourselves.
   There is no external check anywhere in the video.
-- **If a judge asks**, the answer is direct: we ran it, it is in brief §7.2, recall on real recorded
-  jamming was 57.6% aggregate with zero false alarms, and the chirp category showed our generator's
+- **If a judge asks**, the answer is direct: we ran it, it is in brief §7.2, recall on that external
+  jamming set was 57.6% aggregate with zero false alarms, and the chirp category showed our generator's
   fingerprint. Never suggest the test was not run.
 - **Eavan loses his only face-to-camera moment.** He now appears only as the head inset over the
   architecture slides, and drops to 42 s. If you want him back on camera, the cheapest fix is a short

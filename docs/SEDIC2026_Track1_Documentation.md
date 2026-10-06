@@ -38,7 +38,7 @@ This document is the complete technical plan for attempting the SEDIC 2026 RF/Si
 
 **Known risk (stated up front, not buried):** ~~the mandatory benchmark is measured against the organizer's own "Qualifier IQ Data Stream" — a file your team has not seen.~~ **Corrected 6 Sept 2026: no such file exists.** The organiser provides no data; the benchmark (>80% on Military/CEMA and Jamming — confirmed 2026-08-14, down from the original >90% announcement) is measured on our own held-out test split.
 
-The rest of the risk stands, and is in fact sharper without an organiser stream: training data for the military/jamming classes had to be synthesized ourselves (no public dataset covers it), with no signal-processing expert available to validate it. The self-QA methodology below partially mitigates that. What closed the gap further — and was not anticipated when this was written — is out-of-distribution testing against a real recorded jamming dataset from outside the project (brief §7.2), which measures generalisation in a way self-QA cannot.
+The rest of the risk stands, and is in fact sharper without an organiser stream: training data for the military/jamming classes had to be synthesized ourselves (no public dataset covers it), with no signal-processing expert available to validate it. The self-QA methodology below partially mitigates that. What closed the gap further — and was not anticipated when this was written — is out-of-distribution testing against an independently generated jamming dataset from outside the project (brief §7.2), which measures generalisation in a way self-QA cannot.
 
 ---
 
@@ -382,7 +382,7 @@ for snr in snr_bins:
 
 **Structural risk to note explicitly**: Days 1–2 have no independent check — the same 4 people generating the synthetic signals are also the ones QA-checking them.
 
-*Outcome, 6 Sept 2026:* this risk was real, and it never resolved the way this paragraph expected. There is no organiser stream, so a flaw surviving self-QA would never have been caught by the submission at all — it would simply have gone unmeasured. What actually surfaced it was out-of-distribution testing against a real recorded jamming dataset (brief §7.2): 57.6% recall externally against 84.44% on our own test split, with SingleChirp at 20.0% where our synthetic sweep scores 95.7%. The generator's signature *had* been partly learned. Self-QA alone would never have shown that.
+*Outcome, 6 Sept 2026:* this risk was real, and it never resolved the way this paragraph expected. There is no organiser stream, so a flaw surviving self-QA would never have been caught by the submission at all — it would simply have gone unmeasured. What actually surfaced it was out-of-distribution testing against an independently generated jamming dataset (brief §7.2): 57.6% recall externally against 84.44% on our own test split, with SingleChirp at 20.0% where our synthetic sweep scores 95.7%. The generator's signature *had* been partly learned. Self-QA alone would never have shown that.
 
 ---
 

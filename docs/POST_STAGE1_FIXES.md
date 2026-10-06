@@ -33,7 +33,7 @@ branch it gets worse (see item 2).
 - The §6.5 sweep recall of 95.7% is measured on the same near-flat sweep
   (`scripts/jamming_subtype_breakdown.py` calls the same generator with the same 2 ms), so it
   means "recognises our near-flat sweep", not "recognises a sweeping signal".
-- Likely cause of the §7.2 result: 20% recall on real recorded SingleChirp jamming.
+- Likely cause of the §7.2 result: 20% recall on the external (independently generated) SingleChirp jamming.
 - A spectrogram of one of our sweep jammers shows a flat line.
 
 **Fix.**

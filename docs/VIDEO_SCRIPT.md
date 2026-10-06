@@ -28,8 +28,8 @@ so each person can time their own take. If a read runs long, cut adjectives, nev
 
 **Per person:** Jessy 154 s · Eileen 52 s · Eavan 38 s · Chua 36 s.
 
-> **External validation was cut from the video on 7 Sept.** The out-of-distribution test against real
-> recorded GNSS jamming **remains in the technical brief, §7.2**, unchanged. The video simply does not
+> **External validation was cut from the video on 7 Sept.** The out-of-distribution test against an
+> independently generated GNSS jamming dataset **remains in the technical brief, §7.2**, unchanged. The video simply does not
 > cover it — a five-minute video cannot cover everything in the brief, and omitting a topic is not the
 > same as reporting half of it.
 >
@@ -37,7 +37,7 @@ so each person can time their own take. If a read runs long, cut adjectives, nev
 > - Every number spoken in the video is now measured on data we generated and evaluated ourselves.
 >   There is no external check anywhere in the video.
 > - **If a judge asks** — in Phase 2 or in writing — the answer is direct: we ran it, it is in brief
->   §7.2, recall on real recorded jamming was 57.6% aggregate with zero false alarms, and the chirp
+>   §7.2, recall on that external jamming set was 57.6% aggregate with zero false alarms, and the chirp
 >   category showed our generator's fingerprint. Never suggest the test was not run.
 > - Eavan loses his only face-to-camera moment; he now appears only as the head inset over the
 >   architecture slides.
@@ -464,7 +464,7 @@ reintroduce the pooling number unless it goes into the brief first.
 ### 9.6 What the report added that the plan didn't have
 
 The out-of-distribution test (§7.2) did not exist when the video plan was written, and it is the
-single most valuable credibility asset in the submission — real recorded GNSS jamming, never trained
+single most valuable credibility asset in the submission — an independently generated GNSS jamming dataset, never trained
 on, 57.6% recall at 0.0% false alarm. It earned its own segment (§7), and gained ten seconds on
 7 Sept when the live demo was compressed.
 

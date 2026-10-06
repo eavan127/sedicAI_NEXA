@@ -83,8 +83,8 @@ Two qualifications that belong next to those numbers, not in a footnote:
   failed the benchmark. This is random weight initialisation, not a defect, but it means the shipped
   figures come from one retained set of five checkpoints evaluated in a single run. **Any future
   retrain must be re-verified, never assumed to reproduce these numbers.**
-- **Out-of-distribution recall is well below in-distribution.** Against real recorded GNSS jamming
-  (Zenodo 4629685), never trained on: 57.6% recall at a 0.0% false-alarm rate. SingleChirp at 20.0% is
+- **Out-of-distribution recall is well below in-distribution.** Against an independently generated GNSS
+  jamming dataset (Zenodo 4629685, MATLAB-simulated, not ours), never trained on: 57.6% recall at a 0.0% false-alarm rate. SingleChirp at 20.0% is
   the instructive case — our own synthetic sweep scores 95.7%, so the model learned some of the
   generator's signature rather than the general concept.
 
@@ -112,7 +112,7 @@ own. Nothing needs to be verified against a file that will never arrive.
   worst observed run still clears 80%" is a much stronger claim than one lucky run.
 - ~~**Chua**: draft the dtype-verification procedure for the Qualifier IQ Stream.~~ **Dropped 6 Sept** —
   there is no organiser stream to verify against. The effort went into out-of-distribution validation
-  against real recorded GNSS jamming instead (brief §7.2), which serves the same purpose better: it
+  against an independently generated GNSS jamming dataset instead (brief §7.2), which serves the same purpose better: it
   tests generalisation against data we did not produce.
 - **Everyone**: skim `docs/pipeline/` and this document once — no need to re-read code, the reasoning is
   already written down.
@@ -158,7 +158,7 @@ own terms:
 - **Comms-vs-jamming metric front and center** — the rules explicitly call this out for higher technical
   scores, so it shouldn't be buried inside a 7×7 confusion matrix.
 - ~~**Verify the Qualifier Stream format assumption.**~~ **Done differently, 6 Sept** — no organiser
-  stream exists. Generalisation is now tested against real recorded GNSS jamming instead (brief §7.2):
+  stream exists. Generalisation is now tested against an independently generated GNSS jamming dataset instead (brief §7.2):
   57.6% recall, 0.0% false alarm, on data from outside this project entirely.
 - ~~**Team name**, decided and used consistently.~~ **Done** — NEXA.
 

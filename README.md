@@ -8,7 +8,7 @@ AI model that detects and classifies radio signals from raw IQ data: civilian
 modulations (BPSK/QPSK/16QAM/64QAM), military/tactical signals (LFM radar,
 FHSS), and hostile jamming — across clean and noisy (low-SNR) conditions, and
 when more than one of these overlaps in the same window (e.g. a jammer
-overlaid on top of a real signal).
+overlaid on top of a victim signal).
 
 ## Documentation
 
@@ -82,7 +82,7 @@ branch handling "type A" and the other "type B".
 produce one shared feature vector before any per-class decision is made.
 Multi-label capability lives entirely in the last step — an independent
 sigmoid per class, not "one winner" — not in how many branches feed into it.
-A window containing a real signal with a jammer overlaid on top correctly
+A window containing a victim signal with a jammer overlaid on top correctly
 reads as both classes present, e.g. `{QPSK, JAMMING}`.
 
 ---
@@ -91,11 +91,11 @@ reads as both classes present, e.g. `{QPSK, JAMMING}`.
 
 Four sources combine into the training set (`src/data/build_dataset.py`):
 
-| Source | Classes | Real or synthetic |
+| Source | Classes | Origin |
 |---|---|---|
-| RadioML 2018.01A | BPSK, QPSK, 16QAM, 64QAM | Real, external |
-| RadChar | LFM_RADAR (partial, `radchar_fraction`) | Real, external |
-| In-house generators (`src/generators/`) | LFM_RADAR (remainder), FHSS, JAMMING, NOISE_FLOOR | Synthetic |
+| RadioML 2018.01A | BPSK, QPSK, 16QAM, 64QAM | Published dataset, external (not recorded by us) |
+| RadChar | LFM_RADAR (partial, `radchar_fraction`) | Published dataset, external (not recorded by us) |
+| In-house generators (`src/generators/`) | LFM_RADAR (remainder), FHSS, JAMMING, NOISE_FLOOR | Synthetic, our generators |
 | Composite overlay (`src/data/composite.py`) | Jammer overlaid on any of the above 6 (not NOISE_FLOOR, not JAMMING-on-JAMMING) | Combines the sources above |
 
 No usable public dataset exists for FHSS or JAMMING — checked and confirmed,

@@ -14,8 +14,8 @@ shows the model learned *our* data.
 **Corrected 6 Sept 2026:** there is no Qualifier IQ Stream. The organiser provides
 no data at all, so no external number is ever measured for us. That makes this
 concern sharper, not weaker — nothing downstream will catch a generation flaw.
-The nearest substitute we have is the out-of-distribution check against real
-recorded GNSS jamming (brief §7.2), which is the only measurement in the project
+The nearest substitute we have is the out-of-distribution check against an
+independently generated GNSS jamming dataset (brief §7.2), which is the only measurement in the project
 taken on signals nobody here produced.
 
 Everything we do is therefore aimed at one question: **does this hold up on
