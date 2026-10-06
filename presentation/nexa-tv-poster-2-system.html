@@ -172,7 +172,7 @@
 </div>
 <button class="fs-btn" id="fs" type="button">Fullscreen (F)</button>
 <a class="back-btn" id="back" href="nexa-tv-poster-1.html" title="Previous slide (← or Page Up)">← Back</a>
-<a class="next-btn" id="next" href="nexa-scalability-cost-breakdown.html" title="Next slide (→ or Page Down)">Next →</a>
+<a class="next-btn" id="next" href="nexa-tv-poster-3.html" title="Next slide (→ or Page Down)">Next →</a>
 
 <script>
 (() => {
@@ -248,6 +248,15 @@
 
   /* ---- the tour ---- */
   const capEl = document.getElementById("sysCap"), capNum = document.getElementById("sysNum"), capText = document.getElementById("sysText");
+  /* A caption too long for one line would wrap below the slide: shrink just that one until it fits. */
+  function fitCap() {
+    capText.style.fontSize = "";
+    capText.style.whiteSpace = "nowrap";
+    const room = capEl.clientWidth - capNum.offsetWidth - parseFloat(getComputedStyle(capEl).columnGap || 0);
+    let fs = parseFloat(getComputedStyle(capText).fontSize);
+    while (capText.offsetWidth > room && fs > 18) capText.style.fontSize = --fs + "px";
+    capText.style.whiteSpace = "";
+  }
   const tour = [
     { k: ["src"], c: [], t: "Signals come from the simulated receiver, an uploaded recording, a synthesized capture or, in future, a software-defined radio" },
     { k: ["src", "dsp"], c: ["w1"], t: "Signal processing segments the input into 160 µs windows and computes the spectrogram" },
@@ -287,7 +296,7 @@
     capEl.classList.add("fade0");
     const tgt = sysEl.querySelector(`.sn[data-k="${st.k[st.k.length > 1 ? 1 : 0]}"]`);
     const col = tgt ? tgt.style.getPropertyValue("--c") : "var(--navy)";
-    setTimeout(() => { capNum.textContent = si + 1; capNum.style.background = col; capText.textContent = st.t; capEl.classList.remove("fade0"); }, 300);
+    setTimeout(() => { capNum.textContent = si + 1; capNum.style.background = col; capText.textContent = st.t; fitCap(); capEl.classList.remove("fade0"); }, 300);
     setTimeout(sysStep, st.p ? 6200 : si === tour.length - 1 ? 4800 : 3600);
   }
   function frame(now) {
