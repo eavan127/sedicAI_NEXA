@@ -2,6 +2,8 @@
 data/**
 !data/**/
 !data/**/.gitkeep
+# ...except shard manifests: small JSON recipes, see README "Shared data workflow"
+!data/manifests/*.json
 
 # --- Model checkpoints (use Git LFS if one truly must be shared) ---
 *.pt

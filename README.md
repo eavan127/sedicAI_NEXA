@@ -117,6 +117,103 @@ composite-victim pool) is in
 Labels (`y.npy`) are multi-hot, shape `(N, 8)` — one column per class, `1` if
 present. A standalone example has one `1`; a composite example has two.
 
+### Shared data workflow (several people generating, one person training)
+
+**Git holds the recipe, not the data.** Signal arrays never go in git: the
+repo is public, GitHub rejects files over 100 MB, and some external datasets
+(RadChar is CC BY-NC; RadioML's licence is unconfirmed) may not be
+redistributed. `.gitignore` already blocks `data/**`, `*.npy`, `*.npz` and
+`*.h5`. What goes in git:
+
+| In git | Not in git |
+|---|---|
+| Generator code (`src/generators/`, `src/data/`) | Generated shards (`.npz`) |
+| Config + class list (`configs/default.yaml`) | Downloaded external datasets |
+| Shard manifests (`data/manifests/*.json`, a few KB each) | Checkpoints (`*.pt`) |
+
+**The data lives in one shared Google Drive folder**, synced to each laptop
+by Google Drive for desktop (and mountable from Colab if training runs there):
+
+```
+NEXA_data/
+  external/   # downloaded ONCE by one person (RadioML, HisarMod, RadChar, RadDet)
+  shards/
+    jam/      # Chua
+    pulse/    # Chua
+    spread/   # Chua
+    yolo/     # Chua (wideband scenes + box labels, separate from the classifier set)
+    radar/    # Jessy
+    analog/   # Eileen
+    multicarrier/  # Eileen
+    apsk/     # Eileen
+    fskpsk/   # Eavan (FSK, PSK, QAM)
+    mix/      # composite windows (Eavan, at merge time)
+  combined/   # the merged train/val/test set the trainer uses
+```
+
+**Owners** (week 1):
+
+| Person | Classes (every one is generated) | Shard folder | External data they use |
+|---|---|---|---|
+| Chua (17 + YOLO) | **Jamming:** barrage, spot, tone, multi-tone, swept, chirp, pulsed, partial-band, reactive, DRFM deception (RGPO/VGPO). **Noise:** NOISE_FLOOR. **Pulse comms:** PPM (ADS-B), AFSK (APRS), SSR/IFF (1030 MHz). **Spread:** FHSS, DSSS, LoRa CSS. **Plus** the YOLO wideband scenes | `jam/`, `pulse/`, `spread/`, `yolo/` | RadDet (YOLO radar scenes); Jammertest + Zenodo jamming sets for testing only |
+| Jessy (18, radar only) | **Week 1:** plain pulse, LFM, Barker, polyphase Barker, Frank, Costas, FMCW, CW Doppler. **Week 2:** P1, P2, P3, P4, T1, T2, T3, T4, NLFM, stepped frequency. **Later, not a CNN class:** a pulse-train analyser for staggered PRI, jittered PRI and frequency-agile radars, which only show up across many pulses, far longer than one 512-sample window | `radar/` | RadChar |
+| Eileen (17) | **Analog:** AM-DSB-WC, AM-DSB-SC, AM-SSB-WC, AM-SSB-SC, WBFM, NBFM, PM. **ASK:** OOK, 4ASK, 8ASK. **Multicarrier:** OFDM, LTE-like, 5G NR-like. **APSK:** 16APSK, 32APSK, 64APSK, 128APSK | `analog/`, `multicarrier/`, `apsk/` | RadioML 2018, HisarMod; TorchSig (OFDM generator) |
+| Eavan (18 + merge + training) | **FSK:** 2FSK, 4FSK, 8FSK, GFSK, GMSK, MSK, CPFSK. **PSK:** BPSK, QPSK, OQPSK, 8PSK, 16PSK, 32PSK. **QAM:** 16QAM, 32QAM, 64QAM, 128QAM, 256QAM. **Also:** downloads external data once, builds `mix/`, merges, trains | `fskpsk/`, `mix/` | RadioML 2018, HisarMod, CSPB |
+
+External datasets are downloaded **once, by one person, straight into
+`external/`** from a Colab session. Nobody downloads them to a laptop.
+
+**Shard contract** — every shard, whoever made it, must match this exactly or
+it cannot be merged:
+
+| Key | dtype / shape | Meaning |
+|---|---|---|
+| `iq` | `complex64 (N, 512)` | 3.2 MS/s windows |
+| `y` | `uint8 (N, C)` | Multi-hot labels, column order = class list in `configs/default.yaml` |
+| `snr_db` | `float32 (N,)` | SNR used to generate the window |
+| `source` | `str (N,)` | `gen` or the external dataset's name |
+| `seed` | `int64 (N,)` | Generator seed, so any window can be regenerated |
+
+File name: `<group>_<split>_seed<seed>_<part>.npz`, at most 50,000 windows,
+e.g. `radar_train_seed101_003.npz`. Train/val/test use **different seeds** and
+never share a source file.
+
+**Every shard gets a manifest** committed to `data/manifests/` with the same
+base name: shard file name, `git` commit hash of the generator code, seed,
+split, class-list version, per-class window counts, and the file's SHA-256.
+The person training checks out the commits in the manifests, reads the
+manifests to know exactly what to load from Drive, and checks each SHA-256 so
+a half-uploaded shard is caught before training. If a shard is lost, its
+manifest (commit + seed) is enough to regenerate it.
+
+**Step by step:**
+
+1. **Chua, Jessy, Eileen** (and Eavan for `fskpsk/`), each for **every class
+   in their row** of the owners table: run their generators
+   **on their own laptop** with their assigned seeds, writing the `.npz`
+   shards into their folder under `NEXA_data/shards/`. With Google Drive for
+   desktop installed, that folder is a normal local folder (e.g.
+   `G:\My Drive\NEXA_data\...`) and uploads by itself. Then `git push` the
+   generator code and the matching `data/manifests/*.json`.
+2. **Eavan**: `git pull`, wait for Drive to finish syncing, and run the merge
+   step locally against `data/manifests/`. It loads every owner's shards,
+   builds the composite windows into `mix/`, and writes one combined
+   train/val/test set into `NEXA_data/combined/`. The YOLO scenes in `yolo/`
+   are a separate dataset and are not merged into it.
+3. **Training** (Colab or local) uses only `NEXA_data/combined/`.
+
+Seeds must not overlap between people: give each person their own seed
+block (e.g. Chua 1000–1999, Jessy 2000–2999, Eileen 3000–3999, Eavan
+4000–4999).
+
+Shortcut: the generators are seeded, so Eavan can instead `git pull` and
+**re-run** a teammate's generator locally with the seeds in their manifests,
+getting the same windows without any upload (as long as the code commit and
+library versions match). Use Drive when generation is slow; regenerate when
+it is quick.
+
+The merge step (`scripts/merge_shards.py`) is planned, not written yet.
+
 ---
 
 ## Project structure
