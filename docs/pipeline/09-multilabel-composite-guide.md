@@ -48,14 +48,14 @@ Kaggle account → Settings → **Create New API Token** → downloads
 kaggle datasets download -d pinxau1000/radioml2018 -p data/raw --unzip
 ```
 
-Confirm the result is at exactly `data/raw/GOLD_XYZ_OSC.0001_1024.hdf5` —
+Confirm the result is at exactly `data/raw/radioml/GOLD_XYZ_OSC.0001_1024.hdf5` —
 Kaggle sometimes unzips into a nested folder or a slightly different name;
 rename/move it if so. `src/data/build_dataset.py` prints a clear "not found"
 warning with the exact expected path if this is wrong — it will not error
 out silently, it'll just run with civilian classes empty.
 
 Also grab RadChar (real LFM radar data) the same way, into
-`data/raw/RadChar-Tiny.h5`:
+`data/raw/radchar/RadChar-Tiny.h5`:
 
 ```bash
 kaggle datasets download -d abcxyzi/radchar-icassp-2023 -p data/raw --unzip
@@ -157,8 +157,8 @@ processed arrays only.
 
 ## Definition of done
 
-- [ ] RadioML present at `data/raw/GOLD_XYZ_OSC.0001_1024.hdf5`
-- [ ] RadChar present at `data/raw/RadChar-Tiny.h5`
+- [ ] RadioML present at `data/raw/radioml/GOLD_XYZ_OSC.0001_1024.hdf5`
+- [ ] RadChar present at `data/raw/radchar/RadChar-Tiny.h5`
 - [ ] `python -m src.data.build_dataset` run, all 4 civilian classes non-zero
       in the printed summary
 - [ ] `pytest tests/ -q` passes (104 tests)

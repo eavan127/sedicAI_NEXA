@@ -33,10 +33,21 @@ RADCHAR_FS = 3.2e6          # fixed by the dataset
 RADCHAR_LEN = 512           # samples per waveform
 
 _RAW = REPO_ROOT / CFG["paths"]["raw_data"]
-# Prefer the larger variant when present -- RadChar-Small has ~10x Tiny's real
-# LFM examples per SNR bin, so a machine with both should use Small. Falls
-# back to Tiny so a machine with only Tiny still works unchanged.
-DEFAULT_PATH = _RAW / "RadChar-Small.h5" if (_RAW / "RadChar-Small.h5").exists() else _RAW / "RadChar-Tiny.h5"
+
+
+def _default_path():
+    """Prefer the larger variant when present -- RadChar-Small has ~10x Tiny's
+    real LFM examples per SNR bin, so a machine with both should use Small.
+    Looks in data/raw/radchar/ (one folder per external dataset, since week 1)
+    first, then the old flat data/raw/ for machines that have not moved it."""
+    for folder in (_RAW / "radchar", _RAW):
+        for name in ("RadChar-Small.h5", "RadChar-Tiny.h5"):
+            if (folder / name).exists():
+                return folder / name
+    return _RAW / "radchar" / "RadChar-Tiny.h5"
+
+
+DEFAULT_PATH = _default_path()
 
 
 def load_radchar_lfm(path=None, per_snr=None, snr_bins=None, seed=42):
@@ -51,7 +62,7 @@ def load_radchar_lfm(path=None, per_snr=None, snr_bins=None, seed=42):
     if not path.exists():
         raise FileNotFoundError(
             f"RadChar not found at {path}\n"
-            "Download RadChar-Tiny.h5 into data/raw/ — see docs/pipeline/01-data-sources.md"
+            "Download RadChar-Tiny.h5 into data/raw/radchar/ — see docs/pipeline/01-data-sources.md"
         )
 
     rng = np.random.default_rng(seed)

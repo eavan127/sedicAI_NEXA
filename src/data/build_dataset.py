@@ -26,7 +26,13 @@ SYNTHETIC_GENERATORS = {
     "JAMMING": random_jamming_example,
 }
 
-RADIOML_PATH = REPO_ROOT / CFG["paths"]["raw_data"] / "GOLD_XYZ_OSC.0001_1024.hdf5"
+# data/raw/radioml/ since week 1 (one folder per external dataset); the old flat
+# data/raw/ location still works for teammates who have not moved the file.
+_RADIOML_NAME = "GOLD_XYZ_OSC.0001_1024.hdf5"
+_RAW_DIR = REPO_ROOT / CFG["paths"]["raw_data"]
+RADIOML_PATH = _RAW_DIR / "radioml" / _RADIOML_NAME
+if not RADIOML_PATH.exists() and (_RAW_DIR / _RADIOML_NAME).exists():
+    RADIOML_PATH = _RAW_DIR / _RADIOML_NAME
 
 # RadioML2018.01A stores /X, /Y, /Z with /Y a one-hot over 24 classes, laid out
 # class-major then SNR-major: 4096 examples per (class, SNR), 26 SNRs per class
