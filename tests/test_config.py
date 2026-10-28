@@ -117,3 +117,47 @@ def test_fhss_channel_comb_respects_nyquist():
     max_n = max(CFG["fhss"]["n_channels"])
     max_spacing = max(CFG["fhss"]["channel_spacing_hz"])
     assert (max_n / 2) * max_spacing < nyquist
+
+
+# --- Week-1 dataset taxonomy (dataset_classes / class_groups) ---------------
+# Its order is the label-column order every teammate's shards are written in,
+# so a duplicate, a renamed class or a stray group member silently mislabels
+# data that someone else generated.
+
+from src.config import CLASS_GROUPS, DATASET_CLASSES  # noqa: E402
+
+
+def test_dataset_classes_are_unique_strings():
+    assert len(DATASET_CLASSES) == len(set(DATASET_CLASSES))
+    # YAML turns some bare tokens into numbers; every name must stay a string.
+    assert all(isinstance(c, str) for c in DATASET_CLASSES)
+
+
+def test_every_group_member_is_a_dataset_class():
+    for group, members in CLASS_GROUPS.items():
+        for c in members:
+            assert c in DATASET_CLASSES, f"{group} lists unknown class {c!r}"
+
+
+def test_no_class_is_in_two_groups():
+    seen = {}
+    for group, members in CLASS_GROUPS.items():
+        for c in members:
+            assert c not in seen, f"{c!r} is in both {seen.get(c)} and {group}"
+            seen[c] = group
+
+
+def test_kept_deployed_names_survive_into_the_dataset():
+    """Classes carried over from the deployed model keep their names, so old
+    and new scorecards compare like with like. JAMMING alone is split up."""
+    for c in CLASSES:
+        if c == "JAMMING":
+            assert c in CLASS_GROUPS and c not in DATASET_CLASSES
+        else:
+            assert c in DATASET_CLASSES, f"deployed class {c!r} was renamed"
+
+
+def test_dataset_snr_grid_is_even_and_inside_radioml():
+    """Even steps inside RadioML's -20..+30 dB, or civilian bins come back empty."""
+    for snr in CFG["dataset_snr_bins_db"]:
+        assert snr % 2 == 0 and -20 <= snr <= 30

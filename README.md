@@ -131,12 +131,12 @@ redistributed. `.gitignore` already blocks `data/**`, `*.npy`, `*.npz` and
 | Config + class list (`configs/default.yaml`) | Downloaded external datasets |
 | Shard manifests (`data/manifests/*.json`, a few KB each) | Checkpoints (`*.pt`) |
 
-**The data lives in one shared Google Drive folder**, synced to each laptop
-by Google Drive for desktop (and mountable from Colab if training runs there):
+**Raw data stays on each person's own laptop** (in `data/raw/`); only
+**processed shards** go to one shared Google Drive folder, synced to each
+laptop by Google Drive for desktop:
 
 ```
 NEXA_data/
-  external/   # downloaded ONCE by one person (RadioML, HisarMod, RadChar, RadDet)
   shards/
     jam/      # Chua
     pulse/    # Chua
@@ -147,9 +147,11 @@ NEXA_data/
     multicarrier/  # Eileen
     apsk/     # Eileen
     fskpsk/   # Eavan (FSK, PSK, QAM)
-    mix/      # composite windows (Eavan, at merge time)
-  combined/   # the merged train/val/test set the trainer uses
 ```
+
+The merged set is **not** on Drive: Eavan writes it locally as
+`data/processed/X.npy`, `y.npy` and `snr_labels.npy`, the same files
+`src/train.py` already reads.
 
 **Owners** (week 1):
 
@@ -158,10 +160,11 @@ NEXA_data/
 | Chua (17 + YOLO) | **Jamming:** barrage, spot, tone, multi-tone, swept, chirp, pulsed, partial-band, reactive, DRFM deception (RGPO/VGPO). **Noise:** NOISE_FLOOR. **Pulse comms:** PPM (ADS-B), AFSK (APRS), SSR/IFF (1030 MHz). **Spread:** FHSS, DSSS, LoRa CSS. **Plus** the YOLO wideband scenes | `jam/`, `pulse/`, `spread/`, `yolo/` | RadDet (YOLO radar scenes); Jammertest + Zenodo jamming sets for testing only |
 | Jessy (18, radar only) | **Week 1:** plain pulse, LFM, Barker, polyphase Barker, Frank, Costas, FMCW, CW Doppler. **Week 2:** P1, P2, P3, P4, T1, T2, T3, T4, NLFM, stepped frequency. **Later, not a CNN class:** a pulse-train analyser for staggered PRI, jittered PRI and frequency-agile radars, which only show up across many pulses, far longer than one 512-sample window | `radar/` | RadChar |
 | Eileen (17) | **Analog:** AM-DSB-WC, AM-DSB-SC, AM-SSB-WC, AM-SSB-SC, WBFM, NBFM, PM. **ASK:** OOK, 4ASK, 8ASK. **Multicarrier:** OFDM, LTE-like, 5G NR-like. **APSK:** 16APSK, 32APSK, 64APSK, 128APSK | `analog/`, `multicarrier/`, `apsk/` | RadioML 2018, HisarMod; TorchSig (OFDM generator) |
-| Eavan (18 + merge + training) | **FSK:** 2FSK, 4FSK, 8FSK, GFSK, GMSK, MSK, CPFSK. **PSK:** BPSK, QPSK, OQPSK, 8PSK, 16PSK, 32PSK. **QAM:** 16QAM, 32QAM, 64QAM, 128QAM, 256QAM. **Also:** downloads external data once, builds `mix/`, merges, trains | `fskpsk/`, `mix/` | RadioML 2018, HisarMod, CSPB |
+| Eavan (18 + merge + training) | **FSK:** 2FSK, 4FSK, 8FSK, GFSK, GMSK, MSK, CPFSK. **PSK:** BPSK, QPSK, OQPSK, 8PSK, 16PSK, 32PSK. **QAM:** 16QAM, 32QAM, 64QAM, 128QAM, 256QAM. **Also:** builds the mixtures, merges, trains | `fskpsk/` | RadioML 2018, HisarMod, CSPB |
 
-External datasets are downloaded **once, by one person, straight into
-`external/`** from a Colab session. Nobody downloads them to a laptop.
+Each person downloads only the raw datasets in their own row, into their
+own `data/raw/`. Raw files never go on Drive or in git; only the shards made
+from them do.
 
 **Shard contract** — every shard, whoever made it, must match this exactly or
 it cannot be merged:
@@ -169,7 +172,7 @@ it cannot be merged:
 | Key | dtype / shape | Meaning |
 |---|---|---|
 | `iq` | `complex64 (N, 512)` | 3.2 MS/s windows |
-| `y` | `uint8 (N, C)` | Multi-hot labels, column order = class list in `configs/default.yaml` |
+| `y` | `uint8 (N, C)` | Multi-hot labels, column order = `dataset_classes` in `configs/default.yaml` (60 classes) |
 | `snr_db` | `float32 (N,)` | SNR used to generate the window |
 | `source` | `str (N,)` | `gen` or the external dataset's name |
 | `seed` | `int64 (N,)` | Generator seed, so any window can be regenerated |
@@ -197,10 +200,11 @@ manifest (commit + seed) is enough to regenerate it.
    generator code and the matching `data/manifests/*.json`.
 2. **Eavan**: `git pull`, wait for Drive to finish syncing, and run the merge
    step locally against `data/manifests/`. It loads every owner's shards,
-   builds the composite windows into `mix/`, and writes one combined
-   train/val/test set into `NEXA_data/combined/`. The YOLO scenes in `yolo/`
-   are a separate dataset and are not merged into it.
-3. **Training** (Colab or local) uses only `NEXA_data/combined/`.
+   adds the composite (mixture) windows, and writes one concatenated set to
+   `data/processed/X.npy` (`float32 (N, 2, 512)`, normalised IQ),
+   `y.npy` (`float32 (N, C)`, multi-hot) and `snr_labels.npy`. The YOLO
+   scenes in `yolo/` are a separate dataset and are not merged into it.
+3. **Training** uses only those `data/processed/` files.
 
 Seeds must not overlap between people: give each person their own seed
 block (e.g. Chua 1000–1999, Jessy 2000–2999, Eileen 3000–3999, Eavan

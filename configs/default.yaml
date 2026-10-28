@@ -29,6 +29,16 @@ signal:
 # RadioML is the binding constraint.
 snr_bins_db: [-10, -6, -2, 2, 6, 10]
 
+# Week 1 dataset SNR grid: -10..+20 dB in 2 dB steps (16 levels), the shard
+# contract in README "Shared data workflow". Kept apart from snr_bins_db, which
+# the current pipeline, the deployed model's processed data and the UI's
+# civilian library are all built on. Even numbers for the same RadioML reason.
+dataset_snr_bins_db: [-10, -8, -6, -4, -2, 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20]
+
+# Classes of the model that is deployed today (results/ensemble_*.pt,
+# web/models/*.onnx, the local server). Every checkpoint has exactly these
+# outputs, so this list must not change until a model trained on
+# dataset_classes replaces them.
 classes:
   - BPSK
   - QPSK
@@ -43,6 +53,96 @@ classes:
   # That reports a hostile emitter on empty spectrum -- the costliest false
   # alarm available. Not judged; exists to protect the judged classes.
   - NOISE_FLOOR
+
+# Week 1 dataset classes: 60, grouped by owner (README "Owners" table). This
+# order IS the column order of every shard's `y` and of the merged y.npy, so
+# never reorder it -- append new classes at the end. Names kept from `classes`
+# (BPSK, QPSK, 16QAM, 64QAM, LFM_RADAR, FHSS, NOISE_FLOOR) mean the same signal;
+# the old single JAMMING class is split into the ten JAM_* classes (see
+# class_groups). Becomes `classes` once the week-1 model is trained.
+dataset_classes:
+  # --- Chua (17): jamming, noise, pulse comms, spread spectrum ---
+  - JAM_BARRAGE
+  - JAM_SPOT
+  - JAM_TONE
+  - JAM_MULTITONE
+  - JAM_SWEPT
+  - JAM_CHIRP
+  - JAM_PULSED
+  - JAM_PARTIAL_BAND
+  - JAM_REACTIVE
+  - JAM_DRFM
+  - NOISE_FLOOR
+  - PPM
+  - AFSK
+  - SSR_IFF
+  - FHSS
+  - DSSS
+  - LORA_CSS
+  # --- Jessy (8 this week): radar waveforms ---
+  - RADAR_PULSE
+  - LFM_RADAR
+  - RADAR_BARKER
+  - RADAR_POLY_BARKER
+  - RADAR_FRANK
+  - RADAR_COSTAS
+  - RADAR_FMCW
+  - RADAR_CW
+  # --- Eileen (17): analog, ASK, multicarrier, APSK ---
+  - AM_DSB_WC
+  - AM_DSB_SC
+  - AM_SSB_WC
+  - AM_SSB_SC
+  - WBFM
+  - NBFM
+  - PM
+  - OOK
+  - 4ASK
+  - 8ASK
+  - OFDM
+  - LTE_LIKE
+  - NR_LIKE
+  - 16APSK
+  - 32APSK
+  - 64APSK
+  - 128APSK
+  # --- Eavan (18): FSK, PSK, QAM ---
+  - 2FSK
+  - 4FSK
+  - 8FSK
+  - GFSK
+  - GMSK
+  - MSK
+  - CPFSK
+  - BPSK
+  - QPSK
+  - OQPSK
+  - 8PSK
+  - 16PSK
+  - 32PSK
+  - 16QAM
+  - 32QAM
+  - 64QAM
+  - 128QAM
+  - 256QAM
+
+# Families of dataset_classes, for reporting and for the judged groups once
+# the 60-class model ships: JAMMING is then no longer one class, and a window
+# counts as jamming when any member fires.
+class_groups:
+  JAMMING: [JAM_BARRAGE, JAM_SPOT, JAM_TONE, JAM_MULTITONE, JAM_SWEPT,
+            JAM_CHIRP, JAM_PULSED, JAM_PARTIAL_BAND, JAM_REACTIVE, JAM_DRFM]
+  RADAR: [RADAR_PULSE, LFM_RADAR, RADAR_BARKER, RADAR_POLY_BARKER,
+          RADAR_FRANK, RADAR_COSTAS, RADAR_FMCW, RADAR_CW]
+  PULSE_COMMS: [PPM, AFSK, SSR_IFF]
+  SPREAD: [FHSS, DSSS, LORA_CSS]
+  ANALOG: [AM_DSB_WC, AM_DSB_SC, AM_SSB_WC, AM_SSB_SC, WBFM, NBFM, PM]
+  ASK: [OOK, 4ASK, 8ASK]
+  MULTICARRIER: [OFDM, LTE_LIKE, NR_LIKE]
+  APSK: [16APSK, 32APSK, 64APSK, 128APSK]
+  FSK: [2FSK, 4FSK, 8FSK, GFSK, GMSK, MSK, CPFSK]
+  PSK: [BPSK, QPSK, OQPSK, 8PSK, 16PSK, 32PSK]
+  QAM: [16QAM, 32QAM, 64QAM, 128QAM, 256QAM]
 
 # Which classes the benchmark is judged on.
 judged_classes: [LFM_RADAR, FHSS, JAMMING]

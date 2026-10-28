@@ -27,6 +27,14 @@ CFG = load_config()
 CLASSES = CFG["classes"]
 CLASS_TO_IDX = {c: i for i, c in enumerate(CLASSES)}
 
+# The week-1 60-class taxonomy that shards and the merged X/y are labelled in.
+# Separate from CLASSES (the deployed model's outputs) until a model trained on
+# it ships; see configs/default.yaml. Configs without it (configs/smoke.yaml)
+# fall back to CLASSES so importing this module never breaks a smoke run.
+DATASET_CLASSES = CFG.get("dataset_classes", CLASSES)
+DATASET_CLASS_TO_IDX = {c: i for i, c in enumerate(DATASET_CLASSES)}
+CLASS_GROUPS = CFG.get("class_groups", {})
+
 # Operational grouping used by the UI ribbon and the Alerts page, and by
 # evaluate.py's per-tier reporting. Lives here rather than in evaluate.py so
 # that importing it does not pull in matplotlib and sklearn -- src/timeline.py
