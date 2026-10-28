@@ -1,0 +1,45 @@
+{
+  "shard": "fskpsk_train_seed4000_004.npz",
+  "group": "fskpsk",
+  "split": "train",
+  "seed": 4000,
+  "part": 4,
+  "n_windows": 30400,
+  "class_list_version": "c907b0415a74",
+  "class_counts": {
+    "64QAM": 4800,
+    "128QAM": 12800,
+    "256QAM": 12800
+  },
+  "source_counts": {
+    "gen": 21280,
+    "radioml2018": 9120
+  },
+  "snr_db": [
+    -10.0,
+    -8.0,
+    -6.0,
+    -4.0,
+    -2.0,
+    0.0,
+    2.0,
+    4.0,
+    6.0,
+    8.0,
+    10.0,
+    12.0,
+    14.0,
+    16.0,
+    18.0,
+    20.0
+  ],
+  "git_commit": "d60660efe4ea1c4989bb78d0d3e1e0ef80eba854",
+  "git_dirty": false,
+  "sha256": "281f5db3cb417d5eb5c18e70613f09792ef52d97d1131a04e63c7cfb23cf4f01",
+  "created_utc": "2026-10-28T06:38:27+00:00",
+  "notes": {
+    "script": "scripts/make_fskpsk_shards.py",
+    "n_per_bin": 1000,
+    "ext_frac": 0.3
+  }
+}

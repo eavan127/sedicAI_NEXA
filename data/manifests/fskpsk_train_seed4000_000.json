@@ -1,0 +1,46 @@
+{
+  "shard": "fskpsk_train_seed4000_000.npz",
+  "group": "fskpsk",
+  "split": "train",
+  "seed": 4000,
+  "part": 0,
+  "n_windows": 50000,
+  "class_list_version": "c907b0415a74",
+  "class_counts": {
+    "2FSK": 12800,
+    "4FSK": 12800,
+    "8FSK": 12800,
+    "GFSK": 11600
+  },
+  "source_counts": {
+    "gen": 39200,
+    "hisarmod2019": 10800
+  },
+  "snr_db": [
+    -10.0,
+    -8.0,
+    -6.0,
+    -4.0,
+    -2.0,
+    0.0,
+    2.0,
+    4.0,
+    6.0,
+    8.0,
+    10.0,
+    12.0,
+    14.0,
+    16.0,
+    18.0,
+    20.0
+  ],
+  "git_commit": "d60660efe4ea1c4989bb78d0d3e1e0ef80eba854",
+  "git_dirty": false,
+  "sha256": "36f7408c4bcddaf41db1a429420cb80c6656f82baae751f4f4560ce2b36477c6",
+  "created_utc": "2026-10-28T06:37:14+00:00",
+  "notes": {
+    "script": "scripts/make_fskpsk_shards.py",
+    "n_per_bin": 1000,
+    "ext_frac": 0.3
+  }
+}

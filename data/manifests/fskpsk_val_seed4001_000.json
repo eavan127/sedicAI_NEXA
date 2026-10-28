@@ -1,0 +1,61 @@
+{
+  "shard": "fskpsk_val_seed4001_000.npz",
+  "group": "fskpsk",
+  "split": "val",
+  "seed": 4001,
+  "part": 0,
+  "n_windows": 28800,
+  "class_list_version": "c907b0415a74",
+  "class_counts": {
+    "2FSK": 1600,
+    "4FSK": 1600,
+    "8FSK": 1600,
+    "GFSK": 1600,
+    "GMSK": 1600,
+    "MSK": 1600,
+    "CPFSK": 1600,
+    "BPSK": 1600,
+    "QPSK": 1600,
+    "OQPSK": 1600,
+    "8PSK": 1600,
+    "16PSK": 1600,
+    "32PSK": 1600,
+    "16QAM": 1600,
+    "32QAM": 1600,
+    "64QAM": 1600,
+    "128QAM": 1600,
+    "256QAM": 1600
+  },
+  "source_counts": {
+    "gen": 21690,
+    "hisarmod2019": 1350,
+    "radioml2018": 5760
+  },
+  "snr_db": [
+    -10.0,
+    -8.0,
+    -6.0,
+    -4.0,
+    -2.0,
+    0.0,
+    2.0,
+    4.0,
+    6.0,
+    8.0,
+    10.0,
+    12.0,
+    14.0,
+    16.0,
+    18.0,
+    20.0
+  ],
+  "git_commit": "d60660efe4ea1c4989bb78d0d3e1e0ef80eba854",
+  "git_dirty": false,
+  "sha256": "fc083e99e4082cbd80681119007d367e12be1fbf54592e82c4e90176420039b7",
+  "created_utc": "2026-10-28T06:38:35+00:00",
+  "notes": {
+    "script": "scripts/make_fskpsk_shards.py",
+    "n_per_bin": 1000,
+    "ext_frac": 0.3
+  }
+}

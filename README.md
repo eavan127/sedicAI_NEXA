@@ -218,6 +218,56 @@ it is quick.
 
 The merge step (`scripts/merge_shards.py`) is planned, not written yet.
 
+#### Making your shards (Chua, Jessy, Eileen: read this before you start)
+
+A complete working example already exists:
+[`scripts/make_fskpsk_shards.py`](scripts/make_fskpsk_shards.py) (Eavan's 18
+classes). Copy it as `scripts/make_<group>_shards.py` and change only the
+class list, the generator calls, the group name and the seed block. The
+pieces it uses are shared — **use them, do not write your own `.npz` code**:
+
+| Piece | What it gives you |
+|---|---|
+| `src.data.shards.ShardWriter` | Writes contract-checked shards of at most 50,000 windows **and** their manifests. It refuses to save a shard with a wrong dtype, shape or label column, so mistakes show up on your laptop, not at merge time |
+| `src.data.shards.load_shard(path, manifest)` | Loads a shard back and checks it against its manifest SHA-256 |
+| `src.data.external.radioml_windows(...)` / `hisarmod_windows(...)` | External windows for your classes, first 512 samples, rows never reused across train/val/test. `RADIOML_NAMES` and `HISARMOD_LABELS` say which dataset classes each one covers |
+| `src.config.DATASET_CLASSES`, `CFG["dataset_snr_bins_db"]` | The 60 class names and the 16 SNR levels. Use these names exactly |
+
+Watch out for:
+
+1. **Class names**: only names in `dataset_classes` (`configs/default.yaml`),
+   spelled exactly (e.g. `JAM_BARRAGE`, `AM_DSB_WC`, `LORA_CSS`). Anything
+   else and `ShardWriter` raises. Never reorder or rename that list; tell
+   Eavan if a class is missing.
+2. **Window format**: complex64, 512 samples at 3.2 MS/s, signal at unit
+   average power, AWGN added at the window's SNR (`src.data.preprocess.add_awgn`).
+   NOISE_FLOOR is the one exception: pure noise, no SNR.
+3. **Generator shape**: `generate_window(cls, snr_db, rng) -> (iq, params)`,
+   where `snr_db=None` returns the clean signal for tests. Take every random
+   number from the `rng` you are given, so the same seed always gives the
+   same window. See `src/generators/digital.py`.
+4. **Seeds**: stay inside your block (Chua 1000–1999, Jessy 2000–2999, Eileen
+   3000–3999). Train, val and test use seed, seed + 1, seed + 2. Store each
+   generated window's own seed (`window_seed()` in the example script).
+5. **Split**: 80 / 10 / 10 train / val / test per (class, SNR), as in the
+   example script. Everyone must use the same split.
+6. **External data**: at most **30%** of any (class, SNR) bin; the rest from
+   your generator. Use `source="gen"` for generated rows and the dataset
+   name (`"radioml2018"`, `"hisarmod2019"`, `"radchar"` …) otherwise.
+7. **No impairments in your generator**: frequency offset, drift, IQ
+   imbalance, fading etc. come from the shared impairment module (Jessy), so
+   every class gets them the same way.
+8. **Tests**: add tests next to `tests/test_digital.py` that check each class
+   is built the way you say (e.g. number of tones, chirp slope, duty cycle).
+9. **Try small first**, into a scratch folder so no manifest is committed by
+   accident, then look at a few windows:
+   ```
+   python scripts/make_<group>_shards.py --n-per-bin 10 --out data/interim/try --manifests data/interim/try_manifests
+   ```
+   Full run: `--out "G:/My Drive/NEXA_data/shards/<your folder>"` (manifests
+   go to `data/manifests/` by default), then commit and push the manifests
+   and your code. Never commit `.npz` files.
+
 ---
 
 ## Project structure
