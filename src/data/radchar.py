@@ -1,16 +1,18 @@
 """
-RadChar loader — real labelled radar IQ (Huang et al., ICASSP 2023).
+RadChar loader — labelled radar IQ (Huang et al., ICASSP 2023). Synthetic, like
+our own generators, but generated independently of them.
 Owner: P2.
 
-Dataset facts (from the official spec):
-    iq      : (N, 512) complex64, sampled at 3.2 MHz
+Dataset facts (official spec, checked against RadChar-Small.h5):
+    iq      : (N, 512) complex128 in the file, sampled at 3.2 MHz
     labels  : structured array, one row per waveform, fields:
                 index, signal_type, number_of_pulses, pulse_width,
                 time_delay, pulse_repetition_interval, signal_to_noise_ratio
+    SNR     : -20..+20 dB in 1 dB steps; Small holds 100,000 waveforms per type
 
-We want signal_type == 4 (linear_frequency_modulated). The other four types are
-radar too, so they are available as extra military examples if we choose — see
-`SIGNAL_TYPES` below.
+The old 8-class pipeline uses only signal_type 4 (LFM_RADAR, via
+load_radchar_lfm). The week-1 dataset uses all five types: radchar_windows()
+returns them in the shard format for the RADAR_* classes in RADCHAR_CLASSES.
 
 Usage:
     python -m src.data.radchar          # QA: stats + spectrogram vs our generator
@@ -31,6 +33,17 @@ SIGNAL_TYPES = {
 LFM = 4
 RADCHAR_FS = 3.2e6          # fixed by the dataset
 RADCHAR_LEN = 512           # samples per waveform
+
+# Week-1 dataset class (configs/default.yaml dataset_classes) -> RadChar
+# signal_type. RADAR_COSTAS, RADAR_FMCW and RADAR_CW have no RadChar
+# counterpart and come from the generators only.
+RADCHAR_CLASSES = {
+    "RADAR_PULSE": 0,
+    "RADAR_BARKER": 1,
+    "RADAR_POLY_BARKER": 2,
+    "RADAR_FRANK": 3,
+    "LFM_RADAR": 4,
+}
 
 _RAW = REPO_ROOT / CFG["paths"]["raw_data"]
 
@@ -99,6 +112,90 @@ def load_radchar_lfm(path=None, per_snr=None, snr_bins=None, seed=42):
         snr_of = snr_of[order]
 
     return [(iq[i], "LFM_RADAR", float(snr_of[i])) for i in range(len(iq))]
+
+
+def radchar_windows(classes, snr_bins, counts, seed, path=None, chunk_rows=20_000):
+    """{(class, snr_db, split): (iq complex64 (k, 512), source_rows int64 (k,))}
+
+    Same contract as src.data.external.radioml_windows, so a shard script
+    treats RadChar exactly like RadioML: counts = {"train": 240, "val": 30,
+    "test": 30} windows per (class, SNR); rows are picked at random but
+    disjointly across splits, so one RadChar waveform never sits in two
+    splits. Classes not in RADCHAR_CLASSES, and SNRs the file lacks, are
+    absent from the result -- the caller fills them from the generator.
+
+    RadChar windows already carry noise at their labelled SNR and are 512
+    samples at 3.2 MHz, so they are returned as stored (cast to complex64).
+    """
+    import h5py
+
+    path = Path(path) if path else DEFAULT_PATH
+    if not path.exists():
+        raise FileNotFoundError(
+            f"RadChar not found at {path}\n"
+            "Download RadChar-Small.h5 into data/raw/radchar/ — see docs/pipeline/01-data-sources.md"
+        )
+
+    rng = np.random.default_rng(seed)
+    with h5py.File(path, "r") as f:
+        labels = f["labels"][...]
+        types, snrs = labels["signal_type"], labels["signal_to_noise_ratio"]
+
+        wanted = {}
+        for cls in classes:
+            sig_type = RADCHAR_CLASSES.get(cls)
+            if sig_type is None:
+                continue
+            for snr in snr_bins:
+                perm = rng.permutation(np.flatnonzero((types == sig_type) & (snrs == snr)))
+                start = 0
+                for split, k in counts.items():
+                    rows = np.sort(perm[start:start + k])
+                    start += k
+                    if rows.size:
+                        wanted[(cls, snr, split)] = rows
+        if not wanted:
+            return {}
+
+        # The picked rows are scattered over the whole file. Reading them as
+        # contiguous chunks is far faster than HDF5 point selection, and a
+        # chunk at a time keeps memory to ~160 MB instead of the 4 GB file.
+        all_rows = np.unique(np.concatenate(list(wanted.values())))
+        iq_all = np.empty((len(all_rows), RADCHAR_LEN), dtype=np.complex64)
+        dset = f["iq"]
+        for lo in range(0, dset.shape[0], chunk_rows):
+            hit = np.flatnonzero((all_rows >= lo) & (all_rows < lo + chunk_rows))
+            if hit.size:
+                block = dset[lo:all_rows[hit[-1]] + 1]
+                iq_all[hit] = block[all_rows[hit] - lo, :RADCHAR_LEN]
+
+    return {key: (iq_all[np.searchsorted(all_rows, rows)], rows.astype(np.int64))
+            for key, rows in wanted.items()}
+
+
+def describe_types(path=None):
+    """Measured parameters for every RadChar type, so each radar generator's
+    ranges can be checked against the dataset it shares a class with."""
+    import h5py
+
+    path = Path(path) if path else DEFAULT_PATH
+    with h5py.File(path, "r") as f:
+        labels = f["labels"][...]
+
+    print(f"RadChar per type ({path.name}):")
+    print(f"  {'type':<28}{'n':>8}  {'pulse width us':>16}  {'PRI us':>14}  "
+          f"{'pulses':>7}  {'duty %':>12}")
+    for sig_type, name in SIGNAL_TYPES.items():
+        sub = labels[labels["signal_type"] == sig_type]
+        if not len(sub):
+            continue
+        pw = sub["pulse_width"] * 1e6
+        pri = sub["pulse_repetition_interval"] * 1e6
+        npulse = sub["number_of_pulses"]
+        duty = 100 * sub["pulse_width"] / sub["pulse_repetition_interval"]
+        print(f"  {name:<28}{len(sub):>8,}  {pw.min():>7.2f}-{pw.max():<8.2f}  "
+              f"{pri.min():>6.2f}-{pri.max():<7.2f}  {npulse.min():>3}-{npulse.max():<3}  "
+              f"{duty.min():>5.1f}-{duty.max():<6.1f}")
 
 
 def describe(path=None):
@@ -254,6 +351,8 @@ def plot_lfm_gallery(path=None, snr_db=20, n=4):
 
 if __name__ == "__main__":
     describe()
+    print()
+    describe_types()
     print()
     plot_lfm_gallery()
     _qa_plot()
