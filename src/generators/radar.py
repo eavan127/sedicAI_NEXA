@@ -319,27 +319,27 @@ def _pulse(cls, rng):
     return _edges(pulse, rng), p
 
 
-def _pulse_train(pulse, rng):
-    """Fill a window with copies of `pulse` at a random pulse repetition
-    interval, one whole copy at a random position. Returns (window, pri, n_full)."""
+def _pulse_train(pulse, rng, n_samples=WINDOW_LEN):
+    """Fill n_samples with copies of `pulse` at a random pulse repetition
+    interval, one whole copy at a random position. Returns (signal, pri, n_full)."""
     pw = len(pulse)
     duty = _log_uniform(rng, *DUTY_RANGE)
     pri = max(pw + MIN_GAP_SAMPLES, int(round(pw / duty)))
-    start = int(rng.integers(0, WINDOW_LEN - pw + 1))
+    start = int(rng.integers(0, n_samples - pw + 1))
     while start - pri + pw > 0:      # walk back to the first pulse that shows
         start -= pri
-    out = np.zeros(WINDOW_LEN, dtype=complex)
+    out = np.zeros(n_samples, dtype=complex)
     n_full = 0
-    for s in range(start, WINDOW_LEN, pri):
-        lo, hi = max(s, 0), min(s + pw, WINDOW_LEN)
+    for s in range(start, n_samples, pri):
+        lo, hi = max(s, 0), min(s + pw, n_samples)
         out[lo:hi] = pulse[lo - s:hi - s]
-        n_full += (s >= 0 and s + pw <= WINDOW_LEN)
+        n_full += (s >= 0 and s + pw <= n_samples)
     return out, pri, n_full
 
 
-def _continuous(cls, rng):
+def _continuous(cls, rng, n_samples=WINDOW_LEN):
     p = dict.fromkeys(PARAM_KEYS, np.nan)
-    n = np.arange(WINDOW_LEN)
+    n = np.arange(n_samples)
     if cls == "RADAR_FMCW":
         period = int(rng.integers(FMCW_PERIOD_SAMPLES[0], FMCW_PERIOD_SAMPLES[1] + 1))
         bw = rng.uniform(*FMCW_BANDWIDTH_HZ)
@@ -368,24 +368,37 @@ def _active_power(sig):
     return mag_sq[mag_sq > 0.01 * mag_sq.max()].mean()
 
 
+def _build(cls, rng, n_samples):
+    if cls in PULSED_CLASSES:
+        pulse, params = _pulse(cls, rng)
+        sig, pri, n_full = _pulse_train(pulse, rng, n_samples)
+        params.update(pri_us=pri / FS * 1e6, duty=len(pulse) / pri, n_full_pulses=n_full)
+    elif cls in CONTINUOUS_CLASSES:
+        sig, params = _continuous(cls, rng, n_samples)
+    else:
+        raise ValueError(f"{cls!r} is not a radar class; choose from {CLASSES}")
+    sig = sig * np.exp(1j * rng.uniform(0, 2 * np.pi)) / np.sqrt(_active_power(sig))
+    return sig, params
+
+
 def generate_window(cls, snr_db, rng):
     """One window of radar class `cls`: (complex64 (WINDOW_LEN,), params dict).
 
     snr_db=None returns the clean signal (unit power while the radar is on) --
     used by the tests to check the physics without noise in the way.
     """
-    if cls in PULSED_CLASSES:
-        pulse, params = _pulse(cls, rng)
-        sig, pri, n_full = _pulse_train(pulse, rng)
-        params.update(pri_us=pri / FS * 1e6, duty=len(pulse) / pri, n_full_pulses=n_full)
-    elif cls in CONTINUOUS_CLASSES:
-        sig, params = _continuous(cls, rng)
-    else:
-        raise ValueError(f"{cls!r} is not a radar class; choose from {CLASSES}")
-    sig = sig * np.exp(1j * rng.uniform(0, 2 * np.pi)) / np.sqrt(_active_power(sig))
+    sig, params = _build(cls, rng, WINDOW_LEN)
     if snr_db is not None:
         sig = add_awgn(sig, snr_db, rng=rng, reference="active")
     return sig.astype(np.complex64), params
+
+
+def generate_burst(cls, n_samples, rng):
+    """A clean emitter of class `cls` lasting n_samples, its parameters fixed
+    for the whole burst (unit power while on, centred on 0 Hz) -- for the
+    detector's multi-millisecond scenes. With n_samples == WINDOW_LEN it is
+    exactly generate_window(cls, None, rng)."""
+    return _build(cls, rng, n_samples)
 
 
 def generate(cls, n, snr_db, rng):

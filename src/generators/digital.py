@@ -116,20 +116,20 @@ FSK_CLASSES = tuple(FSK_PARAMS)
 CLASSES = LINEAR_CLASSES + FSK_CLASSES
 
 
-def _crop(sig, rng):
-    """A random WINDOW_LEN slice from the steady middle, so the window never
+def _crop(sig, rng, n_samples=WINDOW_LEN):
+    """A random n_samples slice from the steady middle, so the window never
     starts on a symbol boundary in a fixed place and never contains the
     filter's start-up or tail."""
-    start = rng.integers(0, len(sig) - WINDOW_LEN + 1)
-    return sig[start:start + WINDOW_LEN]
+    start = rng.integers(0, len(sig) - n_samples + 1)
+    return sig[start:start + n_samples]
 
 
-def _linear(cls, rng):
+def _linear(cls, rng, n_samples=WINDOW_LEN):
     points = CONSTELLATIONS[cls]
     sps = int(rng.choice(LINEAR_SPS))
     beta = rng.uniform(*RRC_BETA_RANGE)
     taps = rrc_taps(sps, beta=beta)
-    n_sym = WINDOW_LEN // sps + 2 * RRC_SPAN_SYMBOLS + 2
+    n_sym = n_samples // sps + 2 * RRC_SPAN_SYMBOLS + 2
     symbols = points[rng.integers(0, len(points), n_sym)]
 
     def shape(sym):
@@ -149,7 +149,7 @@ def _linear(cls, rng):
     edge = RRC_SPAN_SYMBOLS * sps
     sig = sig[edge:-edge]
     sig = sig * np.exp(1j * rng.uniform(0, 2 * np.pi))
-    return _crop(sig, rng), {"sps": sps, "beta": beta, "h": np.nan, "bt": np.nan}
+    return _crop(sig, rng, n_samples), {"sps": sps, "beta": beta, "h": np.nan, "bt": np.nan}
 
 
 def _gaussian_pulse(bt, sps, span=4):
@@ -161,14 +161,14 @@ def _gaussian_pulse(bt, sps, span=4):
     return g / g.sum()
 
 
-def _fsk(cls, rng):
+def _fsk(cls, rng, n_samples=WINDOW_LEN):
     m, continuous, bt_range, h_range = FSK_PARAMS[cls]
     h = rng.uniform(*h_range)
     # Outer tone sits at (M-1) * h / (2 * sps) cycles/sample; pick sps so it
     # stays under FSK_MAX_FREQ.
     sps_min = max(FSK_SPS_RANGE[0], int(np.ceil((m - 1) * h / (2 * FSK_MAX_FREQ))))
     sps = int(rng.integers(sps_min, FSK_SPS_RANGE[1] + 1))
-    n_sym = WINDOW_LEN // sps + 8
+    n_sym = n_samples // sps + 8
     levels = 2 * rng.integers(0, m, n_sym) - (m - 1)  # -(M-1) ... +(M-1)
     freq = np.repeat(levels * h / (2 * sps), sps)    # cycles per sample
     bt = np.nan
@@ -187,7 +187,7 @@ def _fsk(cls, rng):
         phase = 2 * np.pi * freq * (n - sym_start) + start_phase
     sig = np.exp(1j * (phase + rng.uniform(0, 2 * np.pi)))
     edge = 2 * sps  # skip the Gaussian filter's start-up
-    return _crop(sig[edge:-edge], rng), {"sps": sps, "beta": np.nan, "h": h, "bt": bt}
+    return _crop(sig[edge:-edge], rng, n_samples), {"sps": sps, "beta": np.nan, "h": h, "bt": bt}
 
 
 def generate_window(cls, snr_db, rng):
@@ -196,16 +196,27 @@ def generate_window(cls, snr_db, rng):
     snr_db=None returns the clean signal (unit average power) -- used by the
     tests to check the physics without noise in the way.
     """
-    if cls in CONSTELLATIONS:
-        sig, params = _linear(cls, rng)
-    elif cls in FSK_PARAMS:
-        sig, params = _fsk(cls, rng)
-    else:
-        raise ValueError(f"{cls!r} is not a digital.py class; choose from {CLASSES}")
-    sig = sig / np.sqrt(np.mean(np.abs(sig) ** 2))
+    sig, params = _build(cls, rng, WINDOW_LEN)
     if snr_db is not None:
         sig = add_awgn(sig, snr_db, rng=rng, reference="mean")
     return sig.astype(np.complex64), params
+
+
+def _build(cls, rng, n_samples):
+    if cls in CONSTELLATIONS:
+        sig, params = _linear(cls, rng, n_samples)
+    elif cls in FSK_PARAMS:
+        sig, params = _fsk(cls, rng, n_samples)
+    else:
+        raise ValueError(f"{cls!r} is not a digital.py class; choose from {CLASSES}")
+    return sig / np.sqrt(np.mean(np.abs(sig) ** 2)), params
+
+
+def generate_burst(cls, n_samples, rng):
+    """A clean emitter of class `cls` lasting n_samples with its parameters
+    fixed for the whole burst (unit power, centred on 0 Hz) -- for the
+    detector's multi-millisecond scenes (src/detect/scenes.py)."""
+    return _build(cls, rng, n_samples)
 
 
 def generate(cls, n, snr_db, rng):
