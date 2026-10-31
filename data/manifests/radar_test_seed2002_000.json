@@ -1,0 +1,52 @@
+{
+  "shard": "radar_test_seed2002_000.npz",
+  "group": "radar",
+  "split": "test",
+  "seed": 2002,
+  "part": 0,
+  "n_windows": 12800,
+  "class_list_version": "c907b0415a74",
+  "class_counts": {
+    "RADAR_PULSE": 1600,
+    "LFM_RADAR": 1600,
+    "RADAR_BARKER": 1600,
+    "RADAR_POLY_BARKER": 1600,
+    "RADAR_FRANK": 1600,
+    "RADAR_COSTAS": 1600,
+    "RADAR_FMCW": 1600,
+    "RADAR_CW": 1600
+  },
+  "source_counts": {
+    "gen": 10400,
+    "radchar": 2400
+  },
+  "snr_db": [
+    -10.0,
+    -8.0,
+    -6.0,
+    -4.0,
+    -2.0,
+    0.0,
+    2.0,
+    4.0,
+    6.0,
+    8.0,
+    10.0,
+    12.0,
+    14.0,
+    16.0,
+    18.0,
+    20.0
+  ],
+  "git_commit": "dfdc73f66ca3f17d0b43ea672c8db4be25292055",
+  "git_dirty": false,
+  "sha256": "798363736ded3718af46f9f313ce69828ac77752ed710e008d1931d90661fe37",
+  "created_utc": "2026-10-31T03:19:22+00:00",
+  "notes": {
+    "script": "scripts/make_radar_shards.py",
+    "n_per_bin": 1000,
+    "ext_frac": 0.3,
+    "impairments": true,
+    "radchar_file": "RadChar-Small.h5"
+  }
+}

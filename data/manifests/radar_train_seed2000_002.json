@@ -1,0 +1,31 @@
+{
+  "shard": "radar_train_seed2000_002.npz",
+  "group": "radar",
+  "split": "train",
+  "seed": 2000,
+  "part": 2,
+  "n_windows": 2400,
+  "class_list_version": "c907b0415a74",
+  "class_counts": {
+    "RADAR_CW": 2400
+  },
+  "source_counts": {
+    "gen": 2400
+  },
+  "snr_db": [
+    16.0,
+    18.0,
+    20.0
+  ],
+  "git_commit": "dfdc73f66ca3f17d0b43ea672c8db4be25292055",
+  "git_dirty": false,
+  "sha256": "fb1e4fe42ca1120601b8a7057221e96faabf86c010d785304cb4d139dba492ab",
+  "created_utc": "2026-10-31T03:19:03+00:00",
+  "notes": {
+    "script": "scripts/make_radar_shards.py",
+    "n_per_bin": 1000,
+    "ext_frac": 0.3,
+    "impairments": true,
+    "radchar_file": "RadChar-Small.h5"
+  }
+}
