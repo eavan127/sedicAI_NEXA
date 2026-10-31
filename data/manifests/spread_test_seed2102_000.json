@@ -1,0 +1,45 @@
+{
+  "shard": "spread_test_seed2102_000.npz",
+  "group": "spread",
+  "split": "test",
+  "seed": 2102,
+  "part": 0,
+  "n_windows": 4800,
+  "class_list_version": "c907b0415a74",
+  "class_counts": {
+    "FHSS": 1600,
+    "DSSS": 1600,
+    "LORA_CSS": 1600
+  },
+  "source_counts": {
+    "gen": 4800
+  },
+  "snr_db": [
+    -10.0,
+    -8.0,
+    -6.0,
+    -4.0,
+    -2.0,
+    0.0,
+    2.0,
+    4.0,
+    6.0,
+    8.0,
+    10.0,
+    12.0,
+    14.0,
+    16.0,
+    18.0,
+    20.0
+  ],
+  "git_commit": "63033e8435242cf98baf29d3ae96eeea9466e0a4",
+  "git_dirty": false,
+  "sha256": "607c4c730eb192ade4b29f6f44701ff211e7965c608c2527dd8d9462186e4342",
+  "created_utc": "2026-10-31T03:26:16+00:00",
+  "notes": {
+    "script": "scripts/make_spread_shards.py",
+    "n_per_bin": 1000,
+    "ext_frac": 0.0,
+    "impairments": true
+  }
+}

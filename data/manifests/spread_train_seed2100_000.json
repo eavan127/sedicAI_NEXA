@@ -1,0 +1,45 @@
+{
+  "shard": "spread_train_seed2100_000.npz",
+  "group": "spread",
+  "split": "train",
+  "seed": 2100,
+  "part": 0,
+  "n_windows": 38400,
+  "class_list_version": "c907b0415a74",
+  "class_counts": {
+    "FHSS": 12800,
+    "DSSS": 12800,
+    "LORA_CSS": 12800
+  },
+  "source_counts": {
+    "gen": 38400
+  },
+  "snr_db": [
+    -10.0,
+    -8.0,
+    -6.0,
+    -4.0,
+    -2.0,
+    0.0,
+    2.0,
+    4.0,
+    6.0,
+    8.0,
+    10.0,
+    12.0,
+    14.0,
+    16.0,
+    18.0,
+    20.0
+  ],
+  "git_commit": "63033e8435242cf98baf29d3ae96eeea9466e0a4",
+  "git_dirty": false,
+  "sha256": "2b6702b3f4947216c1fb80c2c03ae55d71d33e46c886fa8f8f1fe98e1602f194",
+  "created_utc": "2026-10-31T03:26:01+00:00",
+  "notes": {
+    "script": "scripts/make_spread_shards.py",
+    "n_per_bin": 1000,
+    "ext_frac": 0.0,
+    "impairments": true
+  }
+}
