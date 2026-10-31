@@ -152,7 +152,11 @@ PULSE_WIDTH_S = (1e-6, 100e-6)
 LFM_PULSE_WIDTH_S = (5e-6, 100e-6)
 LFM_BANDWIDTH_HZ = (100e3, MAX_BANDWIDTH_HZ)
 FMCW_PERIOD_SAMPLES = (64, WINDOW_LEN)
-FMCW_BANDWIDTH_HZ = (200e3, MAX_BANDWIDTH_HZ)
+# Starts at 600 kHz so it never overlaps LORA_CSS (src/generators/spread.py,
+# 500 kHz at most): a LoRa preamble is a train of identical up-chirps, the
+# same shape as a sawtooth FMCW sweep, so the two classes are kept apart by
+# bandwidth.
+FMCW_BANDWIDTH_HZ = (600e3, MAX_BANDWIDTH_HZ)
 # A CW radar is one tone. Generated a few kHz off 0 Hz so it is never pure DC
 # (which window normalisation would flatten); the impairment module places it.
 CW_OFFSET_HZ = (1e3, 20e3)
