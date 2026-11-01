@@ -1,0 +1,45 @@
+{
+  "shard": "pulse_test_seed1102_000.npz",
+  "group": "pulse",
+  "split": "test",
+  "seed": 1102,
+  "part": 0,
+  "n_windows": 4800,
+  "class_list_version": "c907b0415a74",
+  "class_counts": {
+    "PPM": 1600,
+    "AFSK": 1600,
+    "SSR_IFF": 1600
+  },
+  "source_counts": {
+    "gen": 4800
+  },
+  "snr_db": [
+    -10.0,
+    -8.0,
+    -6.0,
+    -4.0,
+    -2.0,
+    0.0,
+    2.0,
+    4.0,
+    6.0,
+    8.0,
+    10.0,
+    12.0,
+    14.0,
+    16.0,
+    18.0,
+    20.0
+  ],
+  "git_commit": "fc5eb84d38547a968c27808afe8f7c75ad08da9a",
+  "git_dirty": false,
+  "sha256": "dfc1fc3e287f9f34faf154f93879e9e68161f5834cbd8c13e98ca5ccd4124f38",
+  "created_utc": "2026-11-01T13:20:14+00:00",
+  "notes": {
+    "script": "scripts/make_pulse_shards.py",
+    "n_per_bin": 1000,
+    "ext_frac": 0.0,
+    "impairments": true
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "shard": "jam_train_seed1000_000.npz",
+  "group": "jam",
+  "split": "train",
+  "seed": 1000,
+  "part": 0,
+  "n_windows": 50000,
+  "class_list_version": "c907b0415a74",
+  "class_counts": {
+    "JAM_BARRAGE": 12800,
+    "JAM_SPOT": 12800,
+    "JAM_TONE": 12800,
+    "JAM_MULTITONE": 11600
+  },
+  "source_counts": {
+    "gen": 50000
+  },
+  "snr_db": [
+    -10.0,
+    -8.0,
+    -6.0,
+    -4.0,
+    -2.0,
+    0.0,
+    2.0,
+    4.0,
+    6.0,
+    8.0,
+    10.0,
+    12.0,
+    14.0,
+    16.0,
+    18.0,
+    20.0
+  ],
+  "git_commit": "fc5eb84d38547a968c27808afe8f7c75ad08da9a",
+  "git_dirty": false,
+  "sha256": "764a3d4ca776168e6ccce67f832d156b6418c3b2231d6f3200daf1b71de915d8",
+  "created_utc": "2026-11-01T13:14:46+00:00",
+  "notes": {
+    "script": "scripts/make_jam_shards.py",
+    "n_per_bin": 1000,
+    "ext_frac": 0.0,
+    "impairments": true
+  }
+}
