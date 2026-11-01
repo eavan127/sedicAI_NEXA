@@ -37,8 +37,7 @@ import numpy as np
 
 from src.config import CFG
 from src.data import impairments
-from src.generators import digital, radar, spread
-from src.generators.jamming import random_jamming_example
+from src.generators import digital, jam, pulse, radar, spread
 
 FS = CFG["signal"]["fs"]
 N_FFT = 128                       # 25 kHz rows, 40 us columns, no overlap
@@ -63,7 +62,8 @@ GROUPS = {
     "radar": (radar, radar.CLASSES),
     "spread": (spread, spread.CLASSES),
     "comms": (digital, digital.CLASSES),
-    "jamming": (None, ("JAMMING",)),
+    "jam": (jam, tuple(c for c in jam.CLASSES if c != "NOISE_FLOOR")),
+    "pulse": (pulse, pulse.CLASSES),
 }
 GROUP_NAMES = tuple(GROUPS)
 
@@ -78,12 +78,7 @@ def _active_power(x):
 
 
 def _burst(group, cls, n_samples, rng):
-    """Clean emitter lasting n_samples: (signal, already_placed). Jammers come
-    from the old generator, which places them in the band itself."""
-    if group == "jamming":
-        sig = random_jamming_example(fs=FS, total_duration=(n_samples + 1) / FS, rng=rng)
-        sig = np.resize(sig, n_samples) if len(sig) < n_samples else sig[:n_samples]
-        return sig / np.sqrt(_active_power(sig)), True
+    """Clean emitter lasting n_samples: (signal, already_placed)."""
     gen = GROUPS[group][0]
     sig, _ = gen.generate_burst(cls, n_samples, rng)
     return np.asarray(sig, dtype=complex), False

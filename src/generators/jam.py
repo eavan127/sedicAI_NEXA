@@ -77,6 +77,11 @@ DRFM_DELAY_SAMPLES = (2, 64)       # range-gate pull-off, frozen at one instant
 DRFM_DOPPLER_HZ = (1e3, 50e3)      # velocity-gate pull-off, frozen at one instant
 DRFM_GAIN_DB = (3, 12)             # the false target is louder than the skin return
 DRFM_PHASE_BITS = (2, 3, 4)        # DRFMs store the pulse with few bits
+# Bursts longer than one window (detector scenes) repeat the pulse every PRI;
+# over the burst the copy's delay grows by DRFM_PULL_SAMPLES, and each PRI
+# leaves up to DRFM_PRI_EXTRA_SAMPLES of silence after the copy.
+DRFM_PULL_SAMPLES = (16, 128)
+DRFM_PRI_EXTRA_SAMPLES = 1024
 
 PARAM_KEYS = ("bandwidth_hz", "n_tones", "period_samples", "duty", "onset_sample",
               "delay_samples", "doppler_hz")
@@ -97,18 +102,18 @@ def band_noise(rng, bandwidth_hz, n=WINDOW_LEN):
 
 
 def _noise_jammer(bw_range):
-    def build(rng):
+    def build(rng, n):
         bw = _log_uniform(rng, *bw_range)
-        return band_noise(rng, bw), dict(bandwidth_hz=bw)
+        return band_noise(rng, bw, n), dict(bandwidth_hz=bw)
     return build
 
 
-def _tone(rng):
-    sig = np.exp(1j * rng.uniform(0, 2 * np.pi)) * np.ones(WINDOW_LEN)
+def _tone(rng, n):
+    sig = np.exp(1j * rng.uniform(0, 2 * np.pi)) * np.ones(n)
     return sig, dict(bandwidth_hz=FS / WINDOW_LEN, n_tones=1)
 
 
-def _multitone(rng):
+def _multitone(rng, n):
     k = int(rng.integers(MULTITONE_N[0], MULTITONE_N[1] + 1))
     # Draw tones until they are all at least MULTITONE_MIN_SPACING_HZ apart.
     while True:
@@ -116,56 +121,56 @@ def _multitone(rng):
         if np.all(np.diff(f) >= MULTITONE_MIN_SPACING_HZ):
             break
     f -= (f[0] + f[-1]) / 2                           # centre the comb on 0 Hz
-    n = np.arange(WINDOW_LEN)
+    t = np.arange(n)
     amp = rng.uniform(0.5, 1.0, k)
     phase = rng.uniform(0, 2 * np.pi, k)
-    sig = (amp[:, None] * np.exp(1j * (2 * np.pi * f[:, None] / FS * n + phase[:, None]))).sum(0)
+    sig = (amp[:, None] * np.exp(1j * (2 * np.pi * f[:, None] / FS * t + phase[:, None]))).sum(0)
     return sig, dict(bandwidth_hz=f[-1] - f[0] + MULTITONE_MIN_SPACING_HZ, n_tones=k)
 
 
-def _sawtooth(rng, bw, period):
+def _sawtooth(rng, bw, period, n):
     """Sawtooth frequency sweep across `bw`, repeating every `period` samples,
     at a random point in its cycle."""
-    n = np.arange(WINDOW_LEN)
-    pos = ((n + rng.uniform(0, period)) % period) / period      # 0 .. 1
+    t = np.arange(n)
+    pos = ((t + rng.uniform(0, period)) % period) / period      # 0 .. 1
     if rng.random() < 0.5:
         pos = 1 - pos                                           # sweep down
     freq = (pos - 0.5) * bw / FS                                # cycles per sample
     return np.exp(1j * (2 * np.pi * np.cumsum(freq) + rng.uniform(0, 2 * np.pi)))
 
 
-def _swept(rng):
+def _swept(rng, n):
     bw = rng.uniform(*SWEPT_BW_HZ)
     period = _log_uniform(rng, *SWEPT_PERIOD_SAMPLES)
-    return _sawtooth(rng, bw, period), dict(bandwidth_hz=bw, period_samples=period)
+    return _sawtooth(rng, bw, period, n), dict(bandwidth_hz=bw, period_samples=period)
 
 
-def _chirp(rng):
+def _chirp(rng, n):
     bw = rng.uniform(*CHIRP_BW_HZ)
     period = rng.uniform(*CHIRP_PERIOD_SAMPLES)
-    return _sawtooth(rng, bw, period), dict(bandwidth_hz=bw, period_samples=period)
+    return _sawtooth(rng, bw, period, n), dict(bandwidth_hz=bw, period_samples=period)
 
 
-def _pulsed(rng):
+def _pulsed(rng, n):
     bw = _log_uniform(rng, *PULSED_BW_HZ)
     # Period at most a third of the window, so every window shows at least two
     # bursts -- one burst alone would look like JAM_REACTIVE switching on.
     period = int(rng.integers(PULSED_PERIOD_SAMPLES[0], PULSED_PERIOD_SAMPLES[1] + 1))
     burst = max(4, int(round(period * rng.uniform(*PULSED_DUTY))))
-    n = np.arange(WINDOW_LEN)
-    gate = ((n + rng.integers(0, period)) % period) < burst
-    return band_noise(rng, bw) * gate, dict(bandwidth_hz=bw, period_samples=period,
-                                            duty=burst / period)
+    t = np.arange(n)
+    gate = ((t + rng.integers(0, period)) % period) < burst
+    return band_noise(rng, bw, n) * gate, dict(bandwidth_hz=bw, period_samples=period,
+                                               duty=burst / period)
 
 
-def _reactive(rng):
+def _reactive(rng, n):
     bw = _log_uniform(rng, *PULSED_BW_HZ)
-    onset = int(rng.uniform(*REACTIVE_ONSET_FRAC) * WINDOW_LEN)
-    gate = np.arange(WINDOW_LEN) >= onset
-    return band_noise(rng, bw) * gate, dict(bandwidth_hz=bw, onset_sample=onset)
+    onset = int(rng.uniform(*REACTIVE_ONSET_FRAC) * n)
+    gate = np.arange(n) >= onset
+    return band_noise(rng, bw, n) * gate, dict(bandwidth_hz=bw, onset_sample=onset)
 
 
-def _drfm(rng):
+def _drfm(rng, n):
     # One radar pulse, reusing the radar generator so the pulse shapes match.
     while True:
         pulse, p = radar._pulse(str(rng.choice(DRFM_RADAR_CLASSES)), rng)
@@ -182,17 +187,35 @@ def _drfm(rng):
     m = np.arange(len(pulse))
     copy = gain * np.abs(pulse) * np.exp(1j * (q_phase + 2 * np.pi * doppler / FS * m))
 
-    sig = np.zeros(WINDOW_LEN, dtype=complex)
-    start = int(rng.integers(0, WINDOW_LEN - len(pulse) - delay + 1))
-    sig[start:start + len(pulse)] += pulse
-    sig[start + delay:start + delay + len(pulse)] += copy
+    sig = np.zeros(n, dtype=complex)
+    if n <= WINDOW_LEN:
+        # One window: the pulse and its copy, frozen at one instant.
+        start = int(rng.integers(0, n - len(pulse) - delay + 1))
+        sig[start:start + len(pulse)] += pulse
+        sig[start + delay:start + delay + len(pulse)] += copy
+    else:
+        # A burst spans many pulses: the pulse repeats every PRI and the copy
+        # walks away from it (range-gate pull-off), its delay growing pulse by pulse.
+        pull = int(rng.integers(DRFM_PULL_SAMPLES[0], DRFM_PULL_SAMPLES[1] + 1))
+        busy = len(pulse) + delay + pull
+        pri = int(rng.integers(busy + 8, busy + DRFM_PRI_EXTRA_SAMPLES + 1))
+        starts = np.arange(int(rng.integers(0, pri)), n - busy + 1, pri)
+        if len(starts) == 0:
+            starts = np.array([0])
+        for j, start in enumerate(starts):
+            d = delay + int(round(pull * j / max(len(starts) - 1, 1)))
+            seg = min(len(pulse), n - start)
+            sig[start:start + seg] += pulse[:seg]
+            seg = min(len(pulse), n - start - d)
+            if seg > 0:
+                sig[start + d:start + d + seg] += copy[:seg]
     sig *= np.exp(1j * rng.uniform(0, 2 * np.pi))
     return sig, dict(bandwidth_hz=p["bandwidth_hz"] + abs(doppler), delay_samples=delay,
                      doppler_hz=doppler)
 
 
-def _noise_floor(rng):
-    return band_noise(rng, FS), {}
+def _noise_floor(rng, n):
+    return band_noise(rng, FS, n), {}
 
 
 _BUILDERS = {
@@ -210,6 +233,15 @@ _BUILDERS = {
 }
 
 
+def _build(cls, rng, n_samples):
+    if cls not in _BUILDERS:
+        raise ValueError(f"{cls!r} is not a jam class; choose from {CLASSES}")
+    sig, built = _BUILDERS[cls](rng, n_samples)
+    params = dict.fromkeys(PARAM_KEYS, np.nan)
+    params.update(built)
+    return sig / np.sqrt(np.mean(np.abs(sig) ** 2)), params
+
+
 def generate_window(cls, snr_db, rng):
     """One window of class `cls`: (complex64 (WINDOW_LEN,), params dict).
 
@@ -217,16 +249,19 @@ def generate_window(cls, snr_db, rng):
     tests and by the impairment module. NOISE_FLOOR ignores snr_db: it is
     noise already.
     """
-    if cls not in _BUILDERS:
-        raise ValueError(f"{cls!r} is not a jam class; choose from {CLASSES}")
-    sig, built = _BUILDERS[cls](rng)
-    params = dict.fromkeys(PARAM_KEYS, np.nan)
-    params.update(built)
-    sig = sig / np.sqrt(np.mean(np.abs(sig) ** 2))
+    sig, params = _build(cls, rng, WINDOW_LEN)
     if snr_db is not None and cls != "NOISE_FLOOR":
         # "active": pulsed / reactive / DRFM windows are partly silent.
         sig = add_awgn(sig, snr_db, rng=rng)
     return sig.astype(np.complex64), params
+
+
+def generate_burst(cls, n_samples, rng):
+    """A clean emitter of class `cls` lasting n_samples with its parameters
+    fixed for the whole burst (unit average power, centred on 0 Hz) -- for the
+    detector's multi-millisecond scenes (src/detect/scenes.py). With
+    n_samples == WINDOW_LEN it is exactly generate_window(cls, None, rng)."""
+    return _build(cls, rng, n_samples)
 
 
 def generate(cls, n, snr_db, rng):

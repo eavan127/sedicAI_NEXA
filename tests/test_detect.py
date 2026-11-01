@@ -8,12 +8,12 @@ import pytest
 import torch
 
 from src.detect import baseline, model as det, scenes
-from src.generators import digital, radar, spread
+from src.generators import digital, jam, pulse, radar, spread
 
 
 # --- bursts --------------------------------------------------------------------
 
-@pytest.mark.parametrize("gen", [radar, spread, digital])
+@pytest.mark.parametrize("gen", [radar, spread, digital, jam, pulse])
 def test_burst_at_window_length_is_the_clean_window(gen):
     for cls in gen.CLASSES[:4]:
         a, _ = gen.generate_window(cls, None, np.random.default_rng(3))
@@ -21,9 +21,9 @@ def test_burst_at_window_length_is_the_clean_window(gen):
         assert np.array_equal(a, b.astype(np.complex64))
 
 
-@pytest.mark.parametrize("gen", [radar, spread, digital])
+@pytest.mark.parametrize("gen", [radar, spread, digital, jam, pulse])
 def test_long_bursts_have_the_asked_length_and_unit_power(gen):
-    """Radar is unit power while on; spread and comms are unit average power,
+    """Radar is unit power while on; spread, comms, jam and pulse are unit average power,
     the same conventions as their generate_window."""
     for cls in gen.CLASSES:
         sig, _ = gen.generate_burst(cls, 20_000, np.random.default_rng(1))
