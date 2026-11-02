@@ -5,6 +5,7 @@ trained on (and, with --model, what it finds).
     python scripts/show_scenes.py                         # 8 new random scenes
     python scripts/show_scenes.py --split test --n 6      # scenes from data/detect/test.npz
     python scripts/show_scenes.py --split test --model    # + the trained detector's boxes
+    python scripts/show_scenes.py --split test --data data/detect_torchsig   # another scene folder
 
 Each panel is 10.24 ms (x, 256 columns of 40 us) by 3.2 MHz (y, 128 rows of
 25 kHz, centre = 0 Hz). Brightness is dB above the noise floor (0-40 dB).
@@ -41,7 +42,8 @@ def fresh(n, seed):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--split", choices=("train", "val", "test"), help="draw from data/detect/<split>.npz")
+    p.add_argument("--split", choices=("train", "val", "test"), help="draw from <data>/<split>.npz")
+    p.add_argument("--data", default=str(REPO_ROOT / "data" / "detect"), help="folder holding the split files")
     p.add_argument("--n", type=int, default=8)
     p.add_argument("--start", type=int, default=0, help="first scene index in the split")
     p.add_argument("--seed", type=int, default=7000, help="seed of the first new scene")
@@ -56,7 +58,7 @@ def main():
     import matplotlib.pyplot as plt
     from matplotlib.patches import Rectangle
 
-    items = list(from_split(REPO_ROOT / "data" / "detect" / f"{args.split}.npz", args.n, args.start)
+    items = list(from_split(Path(args.data) / f"{args.split}.npz", args.n, args.start)
                  if args.split else fresh(args.n, args.seed))
 
     net, thr = None, args.score
