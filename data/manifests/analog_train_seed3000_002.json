@@ -1,0 +1,46 @@
+{
+  "shard": "analog_train_seed3000_002.npz",
+  "group": "analog",
+  "split": "train",
+  "seed": 3000,
+  "part": 2,
+  "n_windows": 28000,
+  "class_list_version": "c907b0415a74",
+  "class_counts": {
+    "OOK": 2400,
+    "4ASK": 12800,
+    "8ASK": 12800
+  },
+  "source_counts": {
+    "gen": 19600,
+    "radioml2018": 8400
+  },
+  "snr_db": [
+    -10.0,
+    -8.0,
+    -6.0,
+    -4.0,
+    -2.0,
+    0.0,
+    2.0,
+    4.0,
+    6.0,
+    8.0,
+    10.0,
+    12.0,
+    14.0,
+    16.0,
+    18.0,
+    20.0
+  ],
+  "git_commit": "73dda243aeed6ba97c566f77ebcd806349d978d1",
+  "git_dirty": false,
+  "sha256": "ecabcc91ef06af599cf4e7b60e135b66a58b55f1ecaf41fbf1f82aee1071bdfa",
+  "created_utc": "2026-11-02T10:42:03+00:00",
+  "notes": {
+    "script": "scripts/make_analog_shards.py",
+    "n_per_bin": 1000,
+    "ext_frac": 0.3,
+    "impairments": true
+  }
+}

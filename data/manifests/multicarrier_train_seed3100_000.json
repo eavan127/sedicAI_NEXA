@@ -1,0 +1,44 @@
+{
+  "shard": "multicarrier_train_seed3100_000.npz",
+  "group": "multicarrier",
+  "split": "train",
+  "seed": 3100,
+  "part": 0,
+  "n_windows": 38400,
+  "class_list_version": "c907b0415a74",
+  "class_counts": {
+    "OFDM": 12800,
+    "LTE_LIKE": 12800,
+    "NR_LIKE": 12800
+  },
+  "source_counts": {
+    "gen": 38400
+  },
+  "snr_db": [
+    -10.0,
+    -8.0,
+    -6.0,
+    -4.0,
+    -2.0,
+    0.0,
+    2.0,
+    4.0,
+    6.0,
+    8.0,
+    10.0,
+    12.0,
+    14.0,
+    16.0,
+    18.0,
+    20.0
+  ],
+  "git_commit": "73dda243aeed6ba97c566f77ebcd806349d978d1",
+  "git_dirty": false,
+  "sha256": "70628fe767fdfa00838f395194ccb5affd86bf4d187af6982e1724b8cda72ee1",
+  "created_utc": "2026-11-02T10:44:33+00:00",
+  "notes": {
+    "script": "scripts/make_multicarrier_shards.py",
+    "n_per_bin": 1000,
+    "impairments": true
+  }
+}

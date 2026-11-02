@@ -1,0 +1,53 @@
+{
+  "shard": "analog_val_seed3001_000.npz",
+  "group": "analog",
+  "split": "val",
+  "seed": 3001,
+  "part": 0,
+  "n_windows": 16000,
+  "class_list_version": "c907b0415a74",
+  "class_counts": {
+    "AM_DSB_WC": 1600,
+    "AM_DSB_SC": 1600,
+    "AM_SSB_WC": 1600,
+    "AM_SSB_SC": 1600,
+    "WBFM": 1600,
+    "NBFM": 1600,
+    "PM": 1600,
+    "OOK": 1600,
+    "4ASK": 1600,
+    "8ASK": 1600
+  },
+  "source_counts": {
+    "gen": 12640,
+    "radioml2018": 3360
+  },
+  "snr_db": [
+    -10.0,
+    -8.0,
+    -6.0,
+    -4.0,
+    -2.0,
+    0.0,
+    2.0,
+    4.0,
+    6.0,
+    8.0,
+    10.0,
+    12.0,
+    14.0,
+    16.0,
+    18.0,
+    20.0
+  ],
+  "git_commit": "73dda243aeed6ba97c566f77ebcd806349d978d1",
+  "git_dirty": false,
+  "sha256": "65ff74f0c7ac7a10e8d0c8a631293f44b2611e1451c979b7749447017037ad69",
+  "created_utc": "2026-11-02T10:42:30+00:00",
+  "notes": {
+    "script": "scripts/make_analog_shards.py",
+    "n_per_bin": 1000,
+    "ext_frac": 0.3,
+    "impairments": true
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "shard": "apsk_train_seed3200_001.npz",
+  "group": "apsk",
+  "split": "train",
+  "seed": 3200,
+  "part": 1,
+  "n_windows": 1200,
+  "class_list_version": "c907b0415a74",
+  "class_counts": {
+    "128APSK": 1200
+  },
+  "source_counts": {
+    "gen": 960,
+    "radioml2018": 240
+  },
+  "snr_db": [
+    18.0,
+    20.0
+  ],
+  "git_commit": "73dda243aeed6ba97c566f77ebcd806349d978d1",
+  "git_dirty": false,
+  "sha256": "3e9e2a094ea57ed0396942d78280444b2fec7ee9f2cb3864d9cc000a83f7771c",
+  "created_utc": "2026-11-02T10:46:27+00:00",
+  "notes": {
+    "script": "scripts/make_apsk_shards.py",
+    "n_per_bin": 1000,
+    "ext_frac": 0.3,
+    "impairments": true
+  }
+}
