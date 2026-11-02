@@ -21,6 +21,11 @@ Usage (each group is a folder of .npz shards under --shards):
     python scripts/pilot_train_shards.py --shards /content/shards --out /content/pilot
 A few seconds on a laptop, to check the code runs:
     python scripts/pilot_train_shards.py --shards data/interim/pilot --manifests data/interim/pilot_m --out data/interim/pilot_out --limit 800 --epochs 1
+
+--wide-iq swaps in WideIQBranch to test whether a longer view helps. It lives
+here rather than in src/models/ because the shared model is not changed yet.
+--fraction keeps a share of every shard as it loads, so a run over all 60
+classes fits in Colab's memory.
 """
 import argparse
 import json
@@ -36,13 +41,30 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.config import CFG, DATASET_CLASSES  # noqa: E402
 from src.data.shards import MANIFEST_DIR, SPLITS, load_shard  # noqa: E402
-from src.models.amc_cnn import AMC_CNN  # noqa: E402
+from src.models.amc_cnn import AMC_CNN, IQBranch  # noqa: E402
 from src.train import compute_class_weights, compute_snr_weights, set_seed  # noqa: E402
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 GROUPS = ("analog", "multicarrier", "apsk")
 THRESHOLD = 0.5
 TOP_CONFUSIONS = 5
+
+
+class WideIQBranch(IQBranch):
+    """IQBranch plus two more dilated layers: each output position sees about
+    520 samples instead of 43, enough to span the whole window."""
+
+    def __init__(self, out_channels=128):
+        super().__init__(out_channels)
+        self.dilated3 = nn.Conv1d(out_channels, out_channels, kernel_size=7, padding=48, dilation=16)
+        self.bn4 = nn.BatchNorm1d(out_channels)
+        self.dilated4 = nn.Conv1d(out_channels, out_channels, kernel_size=7, padding=192, dilation=64)
+        self.bn5 = nn.BatchNorm1d(out_channels)
+
+    def forward(self, x):
+        x = super().forward(x)
+        x = self.relu(self.bn4(self.dilated3(x)))
+        return self.relu(self.bn5(self.dilated4(x)))
 
 
 def normalise(iq):
@@ -54,17 +76,23 @@ def normalise(iq):
     return ((arr - mean) / (std + 1e-8)).astype(np.float32)
 
 
-def load_split(shards, groups, split, limit=None, manifest_dir=MANIFEST_DIR):
+def load_split(shards, groups, split, limit=None, manifest_dir=MANIFEST_DIR, fraction=1.0):
     """All windows of one split as (X, y over DATASET_CLASSES, snr_db). Each
-    shard is checked against its manifest when one is present."""
+    shard is checked against its manifest when one is present, then cut to
+    `fraction` of its windows, the same ones on every run."""
     parts = []
+    rng = np.random.default_rng(0)
     paths = [p for g in groups for p in sorted((Path(shards) / g).glob(f"{g}_{split}_seed*.npz"))]
     if not paths:
         raise FileNotFoundError(f"no {split} shards for {groups} under {shards}")
     for path in paths:
         manifest_path = Path(manifest_dir) / f"{path.stem}.json"
         manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else None
-        parts.append(load_shard(path, manifest=manifest))
+        shard = load_shard(path, manifest=manifest)
+        if fraction < 1:
+            keep = rng.choice(len(shard["iq"]), int(len(shard["iq"]) * fraction), replace=False)
+            shard = {k: shard[k][keep] for k in ("iq", "y", "snr_db")}
+        parts.append(shard)
         print(f"  {path.name}: {len(parts[-1]['iq'])} windows"
               f"{'' if manifest else ' (no manifest, not checked)'}")
     iq = np.concatenate([p["iq"] for p in parts])
@@ -113,6 +141,7 @@ def scorecard(probs, y, snr, names):
         }
     return {"threshold": THRESHOLD, "n_windows": len(y),
             "macro_recall": float(np.mean([c["recall"] for c in per_class.values()])),
+            "macro_top1": float(np.mean([c["top1_recall"] for c in per_class.values()])),
             "per_class": per_class}
 
 
@@ -125,6 +154,8 @@ def main():
     p.add_argument("--epochs", type=int, default=CFG["training"]["epochs"])
     p.add_argument("--seed", type=int, default=99, help="not 1-5: those are the ensemble's")
     p.add_argument("--limit", type=int, default=None, help="max windows per split (quick check)")
+    p.add_argument("--fraction", type=float, default=1.0, help="share of each shard to keep")
+    p.add_argument("--wide-iq", action="store_true", help="use WideIQBranch")
     args = p.parse_args()
 
     out = Path(args.out)
@@ -132,7 +163,8 @@ def main():
     t = CFG["training"]
     set_seed(args.seed)
 
-    data = {s: load_split(args.shards, args.groups, s, args.limit, args.manifests) for s in SPLITS}
+    data = {s: load_split(args.shards, args.groups, s, args.limit, args.manifests, args.fraction)
+            for s in SPLITS}
     cols, names = present_classes(data["train"][1])
     data = {s: (X, y[:, cols], snr) for s, (X, y, snr) in data.items()}
     print(f"{len(names)} classes on {DEVICE}: {names}")
@@ -147,7 +179,10 @@ def main():
         TensorDataset(torch.from_numpy(X_va), torch.tensor(y_va, dtype=torch.float32)),
         batch_size=t["batch_size"])
 
-    model = AMC_CNN(num_classes=len(names), input_len=X_tr.shape[-1]).to(DEVICE)
+    model = AMC_CNN(num_classes=len(names), input_len=X_tr.shape[-1])
+    if args.wide_iq:
+        model.iq_branch = WideIQBranch()
+    model = model.to(DEVICE)
     criterion = nn.BCEWithLogitsLoss(pos_weight=compute_class_weights(y_tr, len(names)).to(DEVICE))
     optimizer = torch.optim.Adam(model.parameters(), lr=t["learning_rate"])
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=t["scheduler_patience"])
@@ -197,7 +232,7 @@ def main():
     model.load_state_dict(torch.load(out / "pilot_best.pt", map_location=DEVICE)["model"])
     X_te, y_te, snr_te = data["test"]
     card = scorecard(predict(model, X_te, t["batch_size"]), y_te, snr_te, names)
-    card.update(groups=args.groups, seed=args.seed, epochs=len(history))
+    card.update(groups=args.groups, seed=args.seed, epochs=len(history), wide_iq=args.wide_iq)
     (out / "scorecard.json").write_text(json.dumps(card, indent=2))
 
     print(f"\nTest set, {card['n_windows']} windows, macro recall {card['macro_recall']:.3f}")

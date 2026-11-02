@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import torch
 
 from src.config import DATASET_CLASSES
 from src.data.preprocess import preprocess_window
@@ -47,3 +48,27 @@ def test_scorecard_counts_recall_false_alarm_and_confusion():
 def test_missing_shards_are_reported(tmp_path):
     with pytest.raises(FileNotFoundError):
         pilot.load_split(tmp_path, ["analog"], "train")
+
+
+def test_wide_branch_keeps_length_and_sees_the_whole_window():
+    branch = pilot.WideIQBranch().eval()
+    x = torch.zeros(1, 2, 512, requires_grad=True)
+    out = branch(x)
+    assert out.shape == (1, 128, 512)
+    out[0, :, 256].sum().backward()
+    seen = torch.nonzero(x.grad.abs().sum(dim=(0, 1))).squeeze()
+    assert seen.max() - seen.min() > 450
+
+
+def test_fraction_keeps_the_same_share_of_each_shard(tmp_path):
+    (tmp_path / "analog").mkdir()
+    for k in range(2):
+        y = np.zeros((100, len(DATASET_CLASSES)), np.uint8)
+        y[:, k] = 1
+        iq = (np.ones((100, 512)) + np.arange(100).reshape(-1, 1) * 1j).astype(np.complex64)
+        np.savez(tmp_path / "analog" / f"analog_train_seed{k}.npz", iq=iq, y=y,
+                 snr_db=np.zeros(100, np.float32), source=np.array(["t"] * 100), seed=np.arange(100))
+    run = lambda: pilot.load_split(tmp_path, ["analog"], "train", manifest_dir=tmp_path, fraction=0.25)
+    X, y, _ = run()
+    assert len(X) == 50 and list(y.sum(axis=0)[:2]) == [25, 25]
+    np.testing.assert_array_equal(X, run()[0])
