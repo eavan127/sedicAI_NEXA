@@ -110,6 +110,14 @@ def present_classes(y):
     return cols, [DATASET_CLASSES[c] for c in cols]
 
 
+def sampling_weights(snr, y, names):
+    """compute_snr_weights for shards that hold NOISE_FLOOR. Its windows are
+    stored with NaN SNR, which would turn every weight into NaN, so they count
+    as 0 dB here and are then given weight 1 as neutral examples."""
+    neutral = [names.index("NOISE_FLOOR")] if "NOISE_FLOOR" in names else []
+    return compute_snr_weights(np.nan_to_num(snr, nan=0.0), y, neutral)
+
+
 def predict(model, X, batch_size):
     model.eval()
     out = []
@@ -135,7 +143,7 @@ def scorecard(probs, y, snr, names):
             "false_alarm": float(preds[neg, i].mean()),
             "top1_recall": float((top[pos] == i).mean()),
             "recall_by_snr": {str(int(s)): float(preds[pos & (snr == s), i].mean())
-                              for s in np.unique(snr[pos])},
+                              for s in np.unique(snr[pos & np.isfinite(snr)])},
             "confused_with": dict(sorted(((k, v) for k, v in confused.items() if v),
                                          key=lambda kv: -kv[1])[:TOP_CONFUSIONS]),
         }
@@ -173,7 +181,7 @@ def main():
     loader = DataLoader(
         TensorDataset(torch.from_numpy(X_tr), torch.tensor(y_tr, dtype=torch.float32)),
         batch_size=t["batch_size"],
-        sampler=WeightedRandomSampler(compute_snr_weights(snr_tr), len(X_tr), replacement=True))
+        sampler=WeightedRandomSampler(sampling_weights(snr_tr, y_tr, names), len(X_tr), replacement=True))
     X_va, y_va, _ = data["val"]
     va_loader = DataLoader(
         TensorDataset(torch.from_numpy(X_va), torch.tensor(y_va, dtype=torch.float32)),

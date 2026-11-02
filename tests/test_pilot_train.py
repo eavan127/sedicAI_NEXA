@@ -72,3 +72,18 @@ def test_fraction_keeps_the_same_share_of_each_shard(tmp_path):
     X, y, _ = run()
     assert len(X) == 50 and list(y.sum(axis=0)[:2]) == [25, 25]
     np.testing.assert_array_equal(X, run()[0])
+
+
+def test_noise_floor_nan_snr_gives_valid_sampling_weights():
+    y = np.array([[1, 0], [0, 1], [0, 1]], np.uint8)
+    snr = np.array([np.nan, -10, 10], np.float32)
+    weights = pilot.sampling_weights(snr, y, ["NOISE_FLOOR", "BPSK"]).numpy()
+    assert np.isfinite(weights).all() and (weights > 0).all()
+    assert weights[0] == 1 and weights[1] > weights[2]
+
+
+def test_scorecard_skips_nan_snr():
+    y = np.array([[1, 0], [0, 1]], np.uint8)
+    card = pilot.scorecard(np.array([[0.9, 0.1], [0.1, 0.9]]), y,
+                           np.array([np.nan, 0], np.float32), ["NOISE_FLOOR", "BPSK"])
+    assert card["per_class"]["NOISE_FLOOR"]["recall_by_snr"] == {}
