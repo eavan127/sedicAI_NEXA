@@ -109,8 +109,20 @@ def test_polar_features_give_amplitude_and_frequency():
     torch.testing.assert_close(feats[0, 1, 1:], torch.full((511,), 0.2), atol=1e-4, rtol=0)
 
 
+def test_spectrum_branch_ignores_where_a_tone_sits():
+    branch = pilot.SpectrumBranch().eval()
+    n = torch.arange(512, dtype=torch.float64)
+    # Phase wrapped exactly, so float error doesn't leave a different noise floor per tone.
+    tones = [torch.exp(1j * 2 * torch.pi * ((k * n) % 512) / 512) for k in (100, 300)]
+    x = torch.stack([torch.stack([t.real, t.imag]) for t in tones]).float()
+    out = branch(x)
+    assert out.shape == (2, branch.out_channels)
+    torch.testing.assert_close(out[0], out[1], atol=1e-3, rtol=1e-3)
+
+
 @pytest.mark.parametrize("options", [{"features": True}, {"stft_nfft": 64},
-                                     {"features": True, "stft_nfft": 64}])
+                                     {"features": True, "stft_nfft": 64},
+                                     {"stft_nfft": 64, "full_spectrum": True}])
 def test_build_model_options_run_end_to_end(options):
     model = pilot.build_model(5, 512, **options).eval()
     assert model(torch.randn(3, 2, 512)).shape == (3, 5)

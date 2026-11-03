@@ -24,8 +24,9 @@ A few seconds on a laptop, to check the code runs:
 
 --wide-iq swaps in WideIQBranch to test whether a longer view helps. It lives
 here rather than in src/models/ because the shared model is not changed yet.
---features (amplitude and instantaneous frequency as extra IQ inputs) and
---stft-nfft (finer STFT bins) are tests of the same kind.
+--features (amplitude and instantaneous frequency as extra IQ inputs),
+--stft-nfft (finer STFT bins) and --full-spectrum (a branch reading the
+whole-window spectrum) are tests of the same kind.
 --fraction keeps a share of every shard as it loads, so a run over all 60
 classes fits in Colab's memory.
 
@@ -98,13 +99,46 @@ class FeatureIQBranch(IQBranch):
         return super().forward(torch.cat([x, polar_features(x)], dim=1))
 
 
-def build_model(num_classes, input_len, wide_iq=False, features=False, stft_nfft=16):
+class SpectrumBranch(nn.Module):
+    """Log power spectrum of the whole window, 6.25 kHz per bin at 512 samples:
+    fine enough for subcarrier spacing, sidebands and narrow analog signals,
+    which the STFT's short frames can't resolve. Convolution along frequency
+    then max and mean over it, so the result doesn't depend on where random
+    placement put the signal. Output is one vector per window, (batch,
+    out_channels)."""
+
+    def __init__(self, channels=64):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Conv1d(1, 32, kernel_size=7, padding=3), nn.BatchNorm1d(32), nn.ReLU(), nn.MaxPool1d(2),
+            nn.Conv1d(32, channels, kernel_size=7, padding=3), nn.BatchNorm1d(channels), nn.ReLU(), nn.MaxPool1d(2),
+            nn.Conv1d(channels, channels, kernel_size=5, padding=2), nn.BatchNorm1d(channels), nn.ReLU())
+        self.out_channels = 2 * channels
+
+    def forward(self, x):
+        z = torch.complex(x[:, 0], x[:, 1]) * torch.hann_window(x.shape[-1], device=x.device)
+        power = torch.log(torch.fft.fftshift(torch.fft.fft(z), dim=-1).abs() ** 2 + 1e-6)
+        power = power - power.mean(dim=-1, keepdim=True)
+        f = self.net(power.unsqueeze(1))
+        return torch.cat([f.amax(dim=-1), f.mean(dim=-1)], dim=1)
+
+
+def build_model(num_classes, input_len, wide_iq=False, features=False, stft_nfft=16,
+                full_spectrum=False):
     """AMC_CNN with this script's test options swapped in. stft_nfft other than
     16 rebuilds the STFT branch with finer frequency bins (fs / stft_nfft each),
-    keeping its other settings."""
+    keeping its other settings. full_spectrum adds SpectrumBranch in the slot
+    AMC_CNN keeps for cumulant features, whose output joins the pooled vector
+    before fc1, so AMC_CNN itself needs no change."""
     if wide_iq and features:
         raise ValueError("--wide-iq and --features are separate tests; pick one")
     model = AMC_CNN(num_classes=num_classes, input_len=input_len)
+    if full_spectrum:
+        if model.cumulant_branch is not None:
+            raise ValueError("--full-spectrum needs model.cumulant_features off")
+        model.cumulant_branch = SpectrumBranch()
+        model.fc1 = nn.Linear(model.fc1.in_features + model.cumulant_branch.out_channels,
+                              model.fc1.out_features)
     if wide_iq:
         model.iq_branch = WideIQBranch()
     if features:
@@ -241,6 +275,7 @@ def main():
     p.add_argument("--wide-iq", action="store_true", help="use WideIQBranch")
     p.add_argument("--features", action="store_true", help="use FeatureIQBranch")
     p.add_argument("--stft-nfft", type=int, default=16, help="STFT length; 64 gives 50 kHz bins")
+    p.add_argument("--full-spectrum", action="store_true", help="add SpectrumBranch")
     args = p.parse_args()
 
     out = Path(args.out)
@@ -265,7 +300,7 @@ def main():
         batch_size=t["batch_size"])
 
     model = build_model(len(names), X_tr.shape[-1], args.wide_iq, args.features,
-                        args.stft_nfft).to(DEVICE)
+                        args.stft_nfft, args.full_spectrum).to(DEVICE)
     criterion = nn.BCEWithLogitsLoss(pos_weight=compute_class_weights(y_tr, len(names)).to(DEVICE))
     optimizer = torch.optim.Adam(model.parameters(), lr=t["learning_rate"])
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=t["scheduler_patience"])
@@ -318,7 +353,8 @@ def main():
     X_te, y_te, snr_te = data["test"]
     card = scorecard(predict(model, X_te, t["batch_size"]), y_te, snr_te, names, thresholds)
     card.update(groups=args.groups, seed=args.seed, epochs=len(history), wide_iq=args.wide_iq,
-                features=args.features, stft_nfft=args.stft_nfft)
+                features=args.features, stft_nfft=args.stft_nfft,
+                full_spectrum=args.full_spectrum)
     (out / "scorecard.json").write_text(json.dumps(card, indent=2))
 
     print(f"\nTest set, {card['n_windows']} windows. Macro top-1 {card['macro_top1']:.3f}, "
