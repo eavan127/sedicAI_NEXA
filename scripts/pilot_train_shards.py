@@ -24,29 +24,38 @@ A few seconds on a laptop, to check the code runs:
 
 --wide-iq swaps in WideIQBranch to test whether a longer view helps. It lives
 here rather than in src/models/ because the shared model is not changed yet.
+--features (amplitude and instantaneous frequency as extra IQ inputs) and
+--stft-nfft (finer STFT bins) are tests of the same kind.
 --fraction keeps a share of every shard as it loads, so a run over all 60
 classes fits in Colab's memory.
+
+The scorecard also gives each class its own threshold, picked on the
+validation set, alongside the fixed 0.5. Rerunning a finished --out with the
+same options trains nothing and just rescores the saved model.
 """
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset, WeightedRandomSampler
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.config import CFG, DATASET_CLASSES  # noqa: E402
 from src.data.shards import MANIFEST_DIR, SPLITS, load_shard  # noqa: E402
-from src.models.amc_cnn import AMC_CNN, IQBranch  # noqa: E402
+from src.models.amc_cnn import AMC_CNN, IQBranch, STFTBranch  # noqa: E402
 from src.train import compute_class_weights, compute_snr_weights, set_seed  # noqa: E402
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 GROUPS = ("analog", "multicarrier", "apsk")
 THRESHOLD = 0.5
+CALIBRATION_GRID = np.linspace(0.02, 0.98, 49)
 TOP_CONFUSIONS = 5
 
 
@@ -65,6 +74,47 @@ class WideIQBranch(IQBranch):
         x = super().forward(x)
         x = self.relu(self.bn4(self.dilated3(x)))
         return self.relu(self.bn5(self.dilated4(x)))
+
+
+def polar_features(x):
+    """(batch, 2, time) I/Q to (batch, 2, time): amplitude, and the phase step
+    between neighbouring samples over pi (instantaneous frequency as a share of
+    fs/2). The first sample has no step, so its frequency is 0."""
+    z = torch.complex(x[:, 0], x[:, 1])
+    freq = torch.angle(z[:, 1:] * z[:, :-1].conj()) / math.pi
+    return torch.stack([z.abs(), F.pad(freq, (1, 0))], dim=1)
+
+
+class FeatureIQBranch(IQBranch):
+    """IQBranch fed amplitude and instantaneous frequency alongside I and Q.
+    AM moves the first, FM and PM the second, and a constant tone leaves both
+    flat; from raw I/Q the network has to work these out itself."""
+
+    def __init__(self, out_channels=128):
+        super().__init__(out_channels)
+        self.conv1 = nn.Conv1d(4, 64, kernel_size=7, padding=3)
+
+    def forward(self, x):
+        return super().forward(torch.cat([x, polar_features(x)], dim=1))
+
+
+def build_model(num_classes, input_len, wide_iq=False, features=False, stft_nfft=16):
+    """AMC_CNN with this script's test options swapped in. stft_nfft other than
+    16 rebuilds the STFT branch with finer frequency bins (fs / stft_nfft each),
+    keeping its other settings."""
+    if wide_iq and features:
+        raise ValueError("--wide-iq and --features are separate tests; pick one")
+    model = AMC_CNN(num_classes=num_classes, input_len=input_len)
+    if wide_iq:
+        model.iq_branch = WideIQBranch()
+    if features:
+        model.iq_branch = FeatureIQBranch()
+    if stft_nfft != model.stft_branch.n_fft:
+        old = model.stft_branch
+        model.stft_branch = STFTBranch(n_fft=stft_nfft, hop_length=old.hop_length,
+                                       out_channels=old.conv2.out_channels,
+                                       freq_summary=old.freq_summary, keep_rows=old.keep_rows)
+    return model
 
 
 def normalise(iq):
@@ -128,10 +178,29 @@ def predict(model, X, batch_size):
     return np.concatenate(out)
 
 
-def scorecard(probs, y, snr, names):
+def calibrate(probs, y):
+    """One threshold per class, the one on CALIBRATION_GRID with the best F1 on
+    these (validation) windows. A class no threshold finds keeps THRESHOLD."""
+    truth = y.astype(bool)[:, :, None]
+    preds = probs[:, :, None] > CALIBRATION_GRID                 # (N, classes, grid)
+    tp = (preds & truth).sum(axis=0)
+    f1 = 2 * tp / np.maximum(preds.sum(axis=0) + truth.sum(axis=0), 1)
+    best = CALIBRATION_GRID[f1.argmax(axis=1)]
+    return np.where(f1.max(axis=1) > 0, best, THRESHOLD)
+
+
+def _at_threshold(preds, pos, neg, snr):
+    return {"recall": float(preds[pos].mean()),
+            "false_alarm": float(preds[neg].mean()),
+            "recall_by_snr": {str(int(s)): float(preds[pos & (snr == s)].mean())
+                              for s in np.unique(snr[pos & np.isfinite(snr)])}}
+
+
+def scorecard(probs, y, snr, names, thresholds=None):
     """Per-class recall and false alarm at the threshold, recall per SNR, and
-    each class's commonest wrong answers (highest score that isn't the truth)."""
-    preds = probs > THRESHOLD
+    each class's commonest wrong answers (highest score that isn't the truth).
+    With `thresholds` (from calibrate), each class also gets the same counts
+    at its own threshold under "calibrated"."""
     truth = y.astype(bool)
     top = probs.argmax(axis=1)
     per_class = {}
@@ -139,18 +208,24 @@ def scorecard(probs, y, snr, names):
         pos, neg = truth[:, i], ~truth[:, i]
         confused = {names[j]: int(np.sum(top[pos] == j)) for j in range(len(names)) if j != i}
         per_class[name] = {
-            "recall": float(preds[pos, i].mean()),
-            "false_alarm": float(preds[neg, i].mean()),
+            **_at_threshold(probs[:, i] > THRESHOLD, pos, neg, snr),
             "top1_recall": float((top[pos] == i).mean()),
-            "recall_by_snr": {str(int(s)): float(preds[pos & (snr == s), i].mean())
-                              for s in np.unique(snr[pos & np.isfinite(snr)])},
             "confused_with": dict(sorted(((k, v) for k, v in confused.items() if v),
                                          key=lambda kv: -kv[1])[:TOP_CONFUSIONS]),
         }
-    return {"threshold": THRESHOLD, "n_windows": len(y),
-            "macro_recall": float(np.mean([c["recall"] for c in per_class.values()])),
-            "macro_top1": float(np.mean([c["top1_recall"] for c in per_class.values()])),
-            "per_class": per_class}
+        if thresholds is not None:
+            per_class[name]["calibrated"] = {
+                "threshold": float(thresholds[i]),
+                **_at_threshold(probs[:, i] > thresholds[i], pos, neg, snr)}
+    macro = lambda key, sub=None: float(np.mean(
+        [(c[sub] if sub else c)[key] for c in per_class.values()]))
+    card = {"threshold": THRESHOLD, "n_windows": len(y),
+            "macro_recall": macro("recall"), "macro_false_alarm": macro("false_alarm"),
+            "macro_top1": macro("top1_recall"), "per_class": per_class}
+    if thresholds is not None:
+        card.update(calibrated_macro_recall=macro("recall", "calibrated"),
+                    calibrated_macro_false_alarm=macro("false_alarm", "calibrated"))
+    return card
 
 
 def main():
@@ -164,6 +239,8 @@ def main():
     p.add_argument("--limit", type=int, default=None, help="max windows per split (quick check)")
     p.add_argument("--fraction", type=float, default=1.0, help="share of each shard to keep")
     p.add_argument("--wide-iq", action="store_true", help="use WideIQBranch")
+    p.add_argument("--features", action="store_true", help="use FeatureIQBranch")
+    p.add_argument("--stft-nfft", type=int, default=16, help="STFT length; 64 gives 50 kHz bins")
     args = p.parse_args()
 
     out = Path(args.out)
@@ -187,10 +264,8 @@ def main():
         TensorDataset(torch.from_numpy(X_va), torch.tensor(y_va, dtype=torch.float32)),
         batch_size=t["batch_size"])
 
-    model = AMC_CNN(num_classes=len(names), input_len=X_tr.shape[-1])
-    if args.wide_iq:
-        model.iq_branch = WideIQBranch()
-    model = model.to(DEVICE)
+    model = build_model(len(names), X_tr.shape[-1], args.wide_iq, args.features,
+                        args.stft_nfft).to(DEVICE)
     criterion = nn.BCEWithLogitsLoss(pos_weight=compute_class_weights(y_tr, len(names)).to(DEVICE))
     optimizer = torch.optim.Adam(model.parameters(), lr=t["learning_rate"])
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=t["scheduler_patience"])
@@ -238,16 +313,22 @@ def main():
         (out / "history.json").write_text(json.dumps(history, indent=2))
 
     model.load_state_dict(torch.load(out / "pilot_best.pt", map_location=DEVICE)["model"])
+    # Thresholds come from validation, so the test set stays unseen.
+    thresholds = calibrate(predict(model, X_va, t["batch_size"]), y_va)
     X_te, y_te, snr_te = data["test"]
-    card = scorecard(predict(model, X_te, t["batch_size"]), y_te, snr_te, names)
-    card.update(groups=args.groups, seed=args.seed, epochs=len(history), wide_iq=args.wide_iq)
+    card = scorecard(predict(model, X_te, t["batch_size"]), y_te, snr_te, names, thresholds)
+    card.update(groups=args.groups, seed=args.seed, epochs=len(history), wide_iq=args.wide_iq,
+                features=args.features, stft_nfft=args.stft_nfft)
     (out / "scorecard.json").write_text(json.dumps(card, indent=2))
 
-    print(f"\nTest set, {card['n_windows']} windows, macro recall {card['macro_recall']:.3f}")
-    print(f"{'class':<12}{'recall':>8}{'false alarm':>13}  most confused with")
-    for name, c in sorted(card["per_class"].items(), key=lambda kv: kv[1]["recall"]):
-        print(f"{name:<12}{c['recall']:>8.3f}{c['false_alarm']:>13.3f}  "
-              f"{', '.join(list(c['confused_with'])[:2])}")
+    print(f"\nTest set, {card['n_windows']} windows. Macro top-1 {card['macro_top1']:.3f}, "
+          f"recall at {THRESHOLD} {card['macro_recall']:.3f}, "
+          f"recall at calibrated thresholds {card['calibrated_macro_recall']:.3f} "
+          f"(false alarm {card['calibrated_macro_false_alarm']:.4f})")
+    print(f"{'class':<18}{'top-1':>7}{'recall':>8}{'calibrated':>12}{'threshold':>11}  most confused with")
+    for name, c in sorted(card["per_class"].items(), key=lambda kv: kv[1]["calibrated"]["recall"]):
+        print(f"{name:<18}{c['top1_recall']:>7.3f}{c['recall']:>8.3f}{c['calibrated']['recall']:>12.3f}"
+              f"{c['calibrated']['threshold']:>11.2f}  {', '.join(list(c['confused_with'])[:2])}")
     print(f"\nSaved to {out}")
 
 

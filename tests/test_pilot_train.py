@@ -82,6 +82,47 @@ def test_noise_floor_nan_snr_gives_valid_sampling_weights():
     assert weights[0] == 1 and weights[1] > weights[2]
 
 
+def test_calibrate_picks_the_best_f1_threshold_per_class():
+    y = np.array([[1, 0], [1, 0], [0, 1], [0, 0]], np.uint8)
+    # A sits at 0.3 for its own windows and 0.1 elsewhere; B is never found.
+    probs = np.array([[0.3, 0.0], [0.3, 0.0], [0.1, 0.0], [0.1, 0.0]])
+    thresholds = pilot.calibrate(probs, y)
+    assert 0.09 < thresholds[0] < 0.3
+    assert thresholds[1] == pilot.THRESHOLD
+
+
+def test_scorecard_reports_calibrated_recall():
+    y = np.array([[1, 0], [0, 1]], np.uint8)
+    probs = np.array([[0.3, 0.1], [0.1, 0.9]])
+    card = pilot.scorecard(probs, y, np.zeros(2, np.float32), ["A", "B"], np.array([0.2, 0.5]))
+    assert card["per_class"]["A"]["recall"] == 0
+    assert card["per_class"]["A"]["calibrated"]["recall"] == 1
+    assert card["calibrated_macro_recall"] == 1 and card["calibrated_macro_false_alarm"] == 0
+
+
+def test_polar_features_give_amplitude_and_frequency():
+    n = torch.arange(512, dtype=torch.float32)
+    tone = 2 * torch.exp(1j * 2 * torch.pi * 0.1 * n)        # 0.1 fs = 0.2 of fs/2
+    feats = pilot.polar_features(torch.stack([tone.real, tone.imag]).unsqueeze(0))
+    assert feats.shape == (1, 2, 512)
+    torch.testing.assert_close(feats[0, 0], torch.full((512,), 2.0))
+    torch.testing.assert_close(feats[0, 1, 1:], torch.full((511,), 0.2), atol=1e-4, rtol=0)
+
+
+@pytest.mark.parametrize("options", [{"features": True}, {"stft_nfft": 64},
+                                     {"features": True, "stft_nfft": 64}])
+def test_build_model_options_run_end_to_end(options):
+    model = pilot.build_model(5, 512, **options).eval()
+    assert model(torch.randn(3, 2, 512)).shape == (3, 5)
+    if "stft_nfft" in options:
+        assert model.stft_branch.n_fft == 64
+
+
+def test_build_model_rejects_two_iq_branches():
+    with pytest.raises(ValueError):
+        pilot.build_model(5, 512, wide_iq=True, features=True)
+
+
 def test_scorecard_skips_nan_snr():
     y = np.array([[1, 0], [0, 1]], np.uint8)
     card = pilot.scorecard(np.array([[0.9, 0.1], [0.1, 0.9]]), y,
