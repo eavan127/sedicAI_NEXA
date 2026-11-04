@@ -93,7 +93,7 @@ def m_sequence(degree, state=None):
     return np.array(bits[:n], dtype=np.int8)
 
 
-def _fhss(rng):
+def _fhss(rng, n_samples=WINDOW_LEN):
     spacing = _log_uniform(rng, *FHSS_SPACING_HZ)
     n_ch = int(rng.integers(FHSS_MIN_CHANNELS,
                             min(FHSS_MAX_CHANNELS, int(MAX_BANDWIDTH_HZ // spacing)) + 1))
@@ -101,7 +101,7 @@ def _fhss(rng):
     hop_rate = _log_uniform(rng, *FHSS_HOP_RATE_HZ)
     dwell = FS / hop_rate
 
-    n = np.arange(WINDOW_LEN)
+    n = np.arange(n_samples)
     hop = np.floor((n + rng.uniform(0, dwell)) / dwell).astype(int)
     n_hops = hop[-1] + 1
     channel = np.empty(n_hops, dtype=int)
@@ -122,7 +122,7 @@ def _fhss(rng):
     return np.exp(1j * phase), params
 
 
-def _dsss(rng):
+def _dsss(rng, n_samples=WINDOW_LEN):
     degree = int(rng.choice(list(M_SEQUENCE_TAPS)))
     state = rng.integers(0, 2, degree)
     if not state.any():
@@ -132,7 +132,7 @@ def _dsss(rng):
     sps = int(rng.choice(DSSS_CHIP_SPS))
     beta = rng.uniform(*DSSS_BETA)
 
-    n_chips = WINDOW_LEN // sps + 2 * RRC_SPAN_SYMBOLS + 2
+    n_chips = n_samples // sps + 2 * RRC_SPAN_SYMBOLS + 2
     k = np.arange(n_chips) + rng.integers(n_code)                     # random code phase
     if rng.random() < 0.5:
         alphabet = np.array([1, -1], dtype=complex)                   # BPSK data
@@ -146,11 +146,11 @@ def _dsss(rng):
     sig = np.convolve(up, rrc_taps(sps, beta=beta), mode="same")
     edge = RRC_SPAN_SYMBOLS * sps
     sig = sig[edge:-edge]
-    start = rng.integers(0, len(sig) - WINDOW_LEN + 1)
+    start = rng.integers(0, len(sig) - n_samples + 1)
     chip_rate = FS / sps
     params = dict(bandwidth_hz=chip_rate * (1 + beta), chip_rate_hz=chip_rate,
                   code_length=n_code, symbol_rate_hz=chip_rate / n_code)
-    return sig[start:start + WINDOW_LEN] * np.exp(1j * rng.uniform(0, 2 * np.pi)), params
+    return sig[start:start + n_samples] * np.exp(1j * rng.uniform(0, 2 * np.pi)), params
 
 
 def lora_frame(bw, sf, rng, n_preamble=8, n_data=8):
@@ -178,17 +178,31 @@ def lora_frame(bw, sf, rng, n_preamble=8, n_data=8):
     return np.concatenate(freq)
 
 
-def _lora(rng):
+def _lora(rng, n_samples=WINDOW_LEN):
     bw, sf = LORA_SETTINGS[int(rng.integers(len(LORA_SETTINGS)))]
-    freq = lora_frame(bw, sf, rng, n_preamble=int(rng.integers(*LORA_PREAMBLE)),
-                      n_data=int(rng.integers(*LORA_DATA_SYMBOLS)))
-    start = rng.integers(0, len(freq) - WINDOW_LEN + 1)
-    phase = 2 * np.pi * np.cumsum(freq[start:start + WINDOW_LEN] / FS)
+    n_pre = int(rng.integers(*LORA_PREAMBLE))
+    n_data = int(rng.integers(*LORA_DATA_SYMBOLS))
+    # A long burst needs enough data symbols for the frame to cover it. Never
+    # binds at WINDOW_LEN (the shortest frame is ~14 symbols of >= 64 us).
+    symbol_samples = 2 ** sf / bw * FS
+    n_data = max(n_data, int(np.ceil(n_samples / symbol_samples - (n_pre + 4.25))) + 1)
+    freq = lora_frame(bw, sf, rng, n_preamble=n_pre, n_data=n_data)
+    start = rng.integers(0, len(freq) - n_samples + 1)
+    phase = 2 * np.pi * np.cumsum(freq[start:start + n_samples] / FS)
     params = dict(bandwidth_hz=bw, spreading_factor=sf, symbol_rate_hz=bw / 2 ** sf)
     return np.exp(1j * (phase + rng.uniform(0, 2 * np.pi))), params
 
 
 _BUILDERS = {"FHSS": _fhss, "DSSS": _dsss, "LORA_CSS": _lora}
+
+
+def _build(cls, rng, n_samples):
+    if cls not in _BUILDERS:
+        raise ValueError(f"{cls!r} is not a spread class; choose from {CLASSES}")
+    sig, built = _BUILDERS[cls](rng, n_samples)
+    params = dict.fromkeys(PARAM_KEYS, np.nan)
+    params.update(built)
+    return sig / np.sqrt(np.mean(np.abs(sig) ** 2)), params
 
 
 def generate_window(cls, snr_db, rng):
@@ -197,15 +211,17 @@ def generate_window(cls, snr_db, rng):
     snr_db=None returns the clean signal (unit average power) -- used by the
     tests to check the physics without noise in the way.
     """
-    if cls not in _BUILDERS:
-        raise ValueError(f"{cls!r} is not a spread class; choose from {CLASSES}")
-    sig, built = _BUILDERS[cls](rng)
-    params = dict.fromkeys(PARAM_KEYS, np.nan)
-    params.update(built)
-    sig = sig / np.sqrt(np.mean(np.abs(sig) ** 2))
+    sig, params = _build(cls, rng, WINDOW_LEN)
     if snr_db is not None:
         sig = add_awgn(sig, snr_db, rng=rng, reference="mean")
     return sig.astype(np.complex64), params
+
+
+def generate_burst(cls, n_samples, rng):
+    """A clean emitter of class `cls` lasting n_samples with its parameters
+    fixed for the whole burst (unit power, centred on 0 Hz) -- for the
+    detector's multi-millisecond scenes."""
+    return _build(cls, rng, n_samples)
 
 
 def generate(cls, n, snr_db, rng):
