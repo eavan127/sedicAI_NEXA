@@ -128,9 +128,8 @@ def merge_split(split, manifests, args, split_seed):
             data = {k: v[rows] for k, v in data.items()}
         # Mixture components are chosen by the class each window was generated
         # as, before the label rules add a second label to some of them.
-        generated_as = data["y"].argmax(axis=1)
-        one_class = data["y"].sum(axis=1) == 1
-        data["y"], n_drfm = labels.fix_shard_labels(data, m)
+        generated_as = labels.generated_class(data["y"], m["group"])      # -1: not one emitter
+        data["y"], relabelled = labels.fix_shard_labels(data, m)
         snr = merge.fill_noise_floor_snr(data["snr_db"], data["y"], np.random.default_rng([m["seed"], m["part"]]))
         ext = np.isin(data["source"], merge.EXTERNAL_SOURCES) if args.external_fix else np.zeros(len(snr), bool)
         if ext.any():
@@ -141,13 +140,13 @@ def merge_split(split, manifests, args, split_seed):
             out.write(data["iq"][s:s + CHUNK], data["y"][s:s + CHUNK], snr[s:s + CHUNK])
         # Mixture components: one generated emitter, high-SNR, never NOISE_FLOOR.
         # Each keeps its full label row, so a DRFM component brings its radar
-        # label into the mixture too.
-        usable = one_class & (snr >= args.pool_min_snr) & (data["y"][:, NOISE_IDX] == 0)
+        # label into the mixture too (and a straight sweep both sweep labels).
+        usable = (generated_as >= 0) & (snr >= args.pool_min_snr) & (data["y"][:, NOISE_IDX] == 0)
         for idx in np.unique(generated_as[usable]):
             sel = usable & (generated_as == idx)
             pool[DATASET_CLASSES[idx]].append((data["iq"][sel], data["y"][sel]))
         print(f"  {m['shard']}: {len(snr)} windows ({int(ext.sum())} external harmonized"
-              f"{f', {n_drfm} DRFM labelled with their radar' if n_drfm else ''})")
+              + "".join(f", {n} {c} given a second label by replay" for c, n in relabelled.items()) + ")")
     pool = {c: (np.concatenate([p[0] for p in parts]), np.concatenate([p[1] for p in parts]))
             for c, parts in pool.items()}
 

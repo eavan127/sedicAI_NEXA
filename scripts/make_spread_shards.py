@@ -31,7 +31,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.config import CFG, DATASET_CLASS_TO_IDX  # noqa: E402
-from src.data import impairments  # noqa: E402
+from src.data import impairments, labels  # noqa: E402
 from src.data.shards import MANIFEST_DIR, SPLITS, ShardWriter  # noqa: E402
 from src.generators import spread  # noqa: E402
 
@@ -88,10 +88,13 @@ def main():
                         s = window_seed(split_seed[split], cls, snr, i)
                         rng = np.random.default_rng(s)
                         if args.no_impair:
-                            window, _ = spread.generate_window(cls, snr, rng)
+                            window, params = spread.generate_window(cls, snr, rng)
                         else:
-                            window, _ = impairments.generate_impaired(spread, cls, snr, rng)
-                        w.add(window, {cls}, snr, "gen", s)
+                            window, info = impairments.generate_impaired(spread, cls, snr, rng)
+                            params = {k[4:]: v for k, v in info.items() if k.startswith("gen_")}
+                        # A LoRa window that is one straight sweep is also
+                        # labelled JAM_SWEPT (src/data/labels.py).
+                        w.add(window, labels.window_labels(cls, params, ambiguous=False), snr, "gen", s)
         total = sum(m["n_windows"] for m in w.written)
         print(f"{split}: {total} windows in {len(w.written)} shard(s), {time.time() - t0:.0f}s")
     print(f"Shards in {args.out}\nManifests in {args.manifests}")

@@ -32,9 +32,13 @@ Scope decisions, because a 160 us window cannot show everything:
     not Barker codes, and never stops (RADAR_BARKER is pulsed); FHSS never
     stops (RADAR_COSTAS hops within one pulse, then goes silent); LORA_CSS
     stays at or below 500 kHz while RADAR_FMCW sweeps 600 kHz or more.
-  * Kept apart from JAM_SWEPT, whose sweep rates overlap LoRa's: every LoRa
-    window contains a chirp boundary (a wrap or a change of direction), so no
-    LoRa window is one plain straight sweep.
+  * LORA_CSS and JAM_SWEPT can look the same. A window is cut from the frame
+    at any place, as a receiver's would be, so with long symbols it often
+    falls inside one chirp: a single straight sweep, which a slow sweep jammer
+    also makes. Such a window reports lora_like_sweep = 1 and is labelled
+    LORA_CSS AND JAM_SWEPT (src/data/labels.py), and so is a JAM_SWEPT window
+    that is a straight sweep at a LoRa rate. A window showing a chirp boundary
+    (a wrap or a change of direction) is LORA_CSS alone.
 """
 import numpy as np
 
@@ -72,12 +76,20 @@ LORA_SETTINGS = tuple((bw, sf) for bw, sfs in ((500e3, range(5, 9)),
                                                (125e3, range(5, 7))) for sf in sfs)
 LORA_PREAMBLE = (6, 12)      # up-chirps before the sync word
 LORA_DATA_SYMBOLS = (4, 16)
-# Every LoRa window holds a chirp boundary (a wrap or a change of direction)
-# at least this many samples (20 us) inside it -- see lora_window_starts.
+# A chirp boundary (a wrap or a change of direction) is visible when it is at
+# least this many samples (20 us) inside the window -- see looks_like_lora_sweep.
 LORA_EVENT_MARGIN = 64
+# A straight sweep within this fraction of a LoRa chirp's rate could be LoRa.
+LORA_SLOPE_TOL = 0.10
+# A jump bigger than this between two samples is a wrap: a LoRa chirp moves at
+# most ~2.5 kHz per sample (500 kHz SF5).
+SWEEP_JUMP_HZ = 20e3
 
+# lora_like_sweep: 1 when the window is one straight sweep at a LoRa chirp's
+# rate (labelled LORA_CSS + JAM_SWEPT), else 0; NaN for FHSS and DSSS.
 PARAM_KEYS = ("bandwidth_hz", "hop_rate_hz", "n_channels", "channel_spacing_hz",
-              "chip_rate_hz", "code_length", "spreading_factor", "symbol_rate_hz")
+              "chip_rate_hz", "code_length", "spreading_factor", "symbol_rate_hz",
+              "lora_like_sweep")
 
 
 def _log_uniform(rng, lo, hi):
@@ -184,30 +196,36 @@ def lora_frame(bw, sf, rng, n_preamble=8, n_data=8):
     return np.concatenate(freq)
 
 
-def lora_events(freq, bw):
-    """Sample indices where a LoRa frame's sweep visibly breaks: a wrap (the
-    frequency jumps by more than a quarter of the band) or a change of sweep
-    direction (up-chirps to down-chirps and back)."""
+def lora_events(freq, jump_hz=SWEEP_JUMP_HZ):
+    """Sample indices where a sweep visibly breaks: a wrap (the frequency
+    jumps by more than jump_hz between two samples) or a change of sweep
+    direction (up-chirps to down-chirps and back). `freq` in Hz per sample."""
     d = np.diff(freq)
-    jump = np.abs(d) > 0.25 * bw
+    jump = np.abs(d) > jump_hz
     s = np.where(jump, 0, np.sign(d))
     moving = np.flatnonzero(s)                    # skip flat steps between sweeps
     turn = moving[1:][s[moving[1:]] != s[moving[:-1]]]
     return np.union1d(np.flatnonzero(jump), turn) + 1
 
 
-def lora_window_starts(freq, bw, n_samples=WINDOW_LEN, margin=LORA_EVENT_MARGIN):
-    """Window starts whose window holds a chirp boundary at least `margin`
-    samples from either edge. Without one, a LoRa window is a single straight
-    sweep and cannot be told from JAM_SWEPT (same slopes, same look). Falls
-    back to every start if the frame has no such position."""
-    n_starts = len(freq) - n_samples + 1
-    ok = np.zeros(n_starts, dtype=bool)
-    for e in lora_events(freq, bw):
-        lo, hi = max(e - n_samples + margin, 0), min(e - margin, n_starts - 1)
-        if lo <= hi:
-            ok[lo:hi + 1] = True
-    return np.flatnonzero(ok) if ok.any() else np.arange(n_starts)
+def lora_slopes(n_samples=WINDOW_LEN, margin=LORA_EVENT_MARGIN):
+    """Chirp rates (Hz per sample) of the LoRa settings whose symbol is long
+    enough for a window to show no visible boundary."""
+    return np.array(sorted({bw * bw / 2 ** sf / FS for bw, sf in LORA_SETTINGS
+                            if 2 ** sf / bw * FS > n_samples - 2 * margin}))
+
+
+def looks_like_lora_sweep(freq, margin=LORA_EVENT_MARGIN):
+    """True when a window's frequency track (Hz, one value per sample) is one
+    straight sweep -- no wrap or change of direction at least `margin` samples
+    inside -- at a rate within LORA_SLOPE_TOL of a LoRa chirp's. One window
+    cannot tell such a sweep from LoRa or from a slow sweep jammer, so it gets
+    both labels (src/data/labels.py)."""
+    ev = lora_events(freq)
+    if ((ev >= margin) & (ev <= len(freq) - margin)).any():
+        return False
+    rate = abs(float(np.median(np.diff(freq))))
+    return bool(np.any(np.abs(rate / lora_slopes(len(freq), margin) - 1) <= LORA_SLOPE_TOL))
 
 
 def _lora(rng, n_samples=WINDOW_LEN):
@@ -219,10 +237,13 @@ def _lora(rng, n_samples=WINDOW_LEN):
     symbol_samples = 2 ** sf / bw * FS
     n_data = max(n_data, int(np.ceil(n_samples / symbol_samples - (n_pre + 4.25))) + 1)
     freq = lora_frame(bw, sf, rng, n_preamble=n_pre, n_data=n_data)
-    starts = lora_window_starts(freq, bw, n_samples)
-    start = int(starts[rng.integers(len(starts))])
-    phase = 2 * np.pi * np.cumsum(freq[start:start + n_samples] / FS)
-    params = dict(bandwidth_hz=bw, spreading_factor=sf, symbol_rate_hz=bw / 2 ** sf)
+    # Cut anywhere in the frame, as a receiver would (same draws as the shards
+    # made on 2026-10-31, so those still replay from their seeds).
+    start = rng.integers(0, len(freq) - n_samples + 1)
+    cut = freq[start:start + n_samples]
+    phase = 2 * np.pi * np.cumsum(cut / FS)
+    params = dict(bandwidth_hz=bw, spreading_factor=sf, symbol_rate_hz=bw / 2 ** sf,
+                  lora_like_sweep=float(looks_like_lora_sweep(cut)))
     return np.exp(1j * (phase + rng.uniform(0, 2 * np.pi))), params
 
 

@@ -31,13 +31,17 @@ Kept apart from look-alike classes in other generators:
     64-512 samples. Same sawtooth shape, separated by repetition period.
   * JAM_PULSED bursts are noise; RADAR_PULSE pulses are a clean carrier.
   * JAM_TONE is the same shape as RADAR_CW (one tone). Within one window the
-    two cannot be told apart -- raise with Jessy/Eavan before training.
+    two cannot be told apart, so both carry both labels (configs week1.
+    ambiguous_labels, src/data/labels.py).
+  * A JAM_SWEPT window that is one straight sweep at a LoRa chirp's rate looks
+    like a piece of a LoRa chirp: it is labelled JAM_SWEPT + LORA_CSS
+    (lora_like_sweep, src/generators/spread.py looks_like_lora_sweep).
 """
 import numpy as np
 
 from src.config import CFG
 from src.data.preprocess import add_awgn
-from src.generators import radar
+from src.generators import radar, spread
 
 WINDOW_LEN = CFG["signal"]["window_len"]
 FS = CFG["signal"]["fs"]
@@ -86,8 +90,10 @@ DRFM_PRI_EXTRA_SAMPLES = 1024
 # copied_radar: for JAM_DRFM, the index in radar.CLASSES of the pulse the jammer
 # copied. The window holds that radar's own pulse too, so it is labelled with
 # both classes (src/data/labels.py).
+# lora_like_sweep: for JAM_SWEPT, 1 when the window is one straight sweep at a
+# LoRa chirp's rate, so it is labelled JAM_SWEPT + LORA_CSS.
 PARAM_KEYS = ("bandwidth_hz", "n_tones", "period_samples", "duty", "onset_sample",
-              "delay_samples", "doppler_hz", "copied_radar")
+              "delay_samples", "doppler_hz", "copied_radar", "lora_like_sweep")
 
 
 def _log_uniform(rng, lo, hi):
@@ -145,7 +151,12 @@ def _sawtooth(rng, bw, period, n):
 def _swept(rng, n):
     bw = rng.uniform(*SWEPT_BW_HZ)
     period = _log_uniform(rng, *SWEPT_PERIOD_SAMPLES)
-    return _sawtooth(rng, bw, period, n), dict(bandwidth_hz=bw, period_samples=period)
+    sig = _sawtooth(rng, bw, period, n)
+    # One straight sweep at a LoRa chirp's rate looks like LoRa: labelled both
+    # (src/data/labels.py). Measured on the signal, so no extra random draws.
+    freq = np.diff(np.unwrap(np.angle(sig))) / (2 * np.pi) * FS
+    return sig, dict(bandwidth_hz=bw, period_samples=period,
+                     lora_like_sweep=float(spread.looks_like_lora_sweep(freq)))
 
 
 def _chirp(rng, n):

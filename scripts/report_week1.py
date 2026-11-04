@@ -135,7 +135,7 @@ def main():
     mixed = ~single
     pred05 = logits > 0  # sigmoid > 0.5
     high = snr >= args.high_snr
-    p_hit, p_top, p_snr, p_high = hit[rows], labels.scored_prediction(true, top[rows]), snr[rows], high[rows]
+    p_hit, p_top, p_snr, p_high = hit[rows], labels.scored_prediction(true, top[rows], yt[rows]), snr[rows], high[rows]
 
     bins = sorted(set(CFG["dataset_snr_bins_db"]) | set(np.unique(snr).tolist()))
     by_snr = []

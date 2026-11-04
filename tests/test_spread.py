@@ -141,24 +141,54 @@ def test_lora_frame_structure(bw, sf):
     assert n_down == pytest.approx(2.25 * ts * FS, abs=4)
 
 
-def test_every_lora_window_shows_a_chirp_boundary():
-    """No LoRa window may be one plain straight sweep (that is JAM_SWEPT)."""
-    for seed in range(200):
-        sig, p = spread.generate_window("LORA_CSS", None, np.random.default_rng(seed))
-        f = inst_freq_hz(sig)
-        bw = p["bandwidth_hz"]
-        events = spread.lora_events(f, bw)
-        m = spread.LORA_EVENT_MARGIN - 2         # inst_freq_hz is one sample shorter
-        assert ((events >= m) & (events <= len(f) - m)).any(), seed
-
-
 def test_lora_events_find_wraps_and_turns():
     bw = 500e3
     up = np.linspace(-bw / 2, bw / 2, 100, endpoint=False)
     freq = np.concatenate([up, up, up[::-1]])
-    ev = spread.lora_events(freq, bw).tolist()
+    ev = spread.lora_events(freq).tolist()
     assert 100 in ev                              # wrap
     assert any(195 <= e <= 205 for e in ev)       # up -> down
+
+
+def _sweep(rate, n=spread.WINDOW_LEN, wrap_at=None):
+    f = (np.arange(n) - n / 2) * rate
+    if wrap_at is not None:
+        f[wrap_at:] -= 400e3
+    return f
+
+
+def test_looks_like_lora_sweep():
+    slopes = spread.lora_slopes()
+    assert len(slopes) and slopes.max() < 1300          # only the long-symbol settings
+    s = float(slopes[0])
+    assert spread.looks_like_lora_sweep(_sweep(s))
+    assert spread.looks_like_lora_sweep(-_sweep(s * 1.05))         # down, within 10%
+    assert not spread.looks_like_lora_sweep(_sweep(s * 1.4)) or np.any(
+        np.abs(s * 1.4 / slopes - 1) <= spread.LORA_SLOPE_TOL)     # off every LoRa rate
+    assert not spread.looks_like_lora_sweep(_sweep(s, wrap_at=256))  # visible wrap
+    assert spread.looks_like_lora_sweep(_sweep(s, wrap_at=10))       # wrap at the very edge
+
+
+def test_lora_flag_matches_what_the_window_shows():
+    """lora_like_sweep is 1 exactly when the window is a straight LoRa-rate
+    sweep -- about a third of windows, as a receiver would cut them."""
+    flags = []
+    for seed in range(300):
+        sig, p = spread.generate_window("LORA_CSS", None, np.random.default_rng(seed))
+        assert p["lora_like_sweep"] in (0.0, 1.0)
+        assert spread.looks_like_lora_sweep(inst_freq_hz(sig)) == bool(p["lora_like_sweep"]), seed
+        flags.append(p["lora_like_sweep"])
+    assert 0.15 < np.mean(flags) < 0.5
+    _, p = spread.generate_window("FHSS", None, np.random.default_rng(0))
+    assert np.isnan(p["lora_like_sweep"])
+
+
+def test_some_jam_swept_windows_look_like_lora():
+    from src.generators import jam
+    flags = [jam.generate_window("JAM_SWEPT", None, np.random.default_rng(s))[1]["lora_like_sweep"]
+             for s in range(300)]
+    assert set(flags) <= {0.0, 1.0}
+    assert 0.05 < np.mean(flags) < 0.5
 
 
 def test_lora_window_stays_in_its_band():

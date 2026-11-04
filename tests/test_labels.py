@@ -5,7 +5,7 @@ import pytest
 
 from src.config import DATASET_CLASS_TO_IDX, DATASET_CLASSES
 from src.data import impairments, labels
-from src.generators import jam, radar
+from src.generators import jam, radar, spread
 
 C = len(DATASET_CLASSES)
 IDX = DATASET_CLASS_TO_IDX
@@ -42,8 +42,14 @@ def test_window_labels():
     assert labels.window_labels("FHSS") == {"FHSS"}
     assert labels.window_labels("JAM_TONE") == {"JAM_TONE", "RADAR_CW"}
     assert labels.window_labels("JAM_TONE", ambiguous=False) == {"JAM_TONE"}
-    with pytest.raises(ValueError):
-        labels.window_labels("JAM_DRFM")
+    both = {"LORA_CSS", "JAM_SWEPT"}
+    assert labels.window_labels("LORA_CSS", {"lora_like_sweep": 1.0}) == both
+    assert labels.window_labels("LORA_CSS", {"lora_like_sweep": 0.0}) == {"LORA_CSS"}
+    assert labels.window_labels("JAM_SWEPT", {"lora_like_sweep": 1.0}) == both
+    assert labels.window_labels("JAM_SWEPT", {"lora_like_sweep": 0.0}) == {"JAM_SWEPT"}
+    for cls in ("JAM_DRFM", "LORA_CSS", "JAM_SWEPT"):
+        with pytest.raises(ValueError):
+            labels.window_labels(cls)
 
 
 @pytest.mark.parametrize("impaired", [False, True])
@@ -74,53 +80,82 @@ def test_standalone_pairs():
                   onehot("JAM_DRFM", "RADAR_BARKER"),      # DRFM pair
                   onehot("RADAR_CW", "JAM_TONE"),          # ambiguous group
                   onehot("FHSS", "DSSS"),                  # mixture
-                  onehot("JAM_DRFM", "RADAR_BARKER", "FHSS")])  # DRFM inside a mixture
+                  onehot("JAM_DRFM", "RADAR_BARKER", "FHSS"),  # DRFM inside a mixture
+                  onehot("LORA_CSS", "JAM_SWEPT")])        # straight sweep
     rows, cls = labels.standalone_pairs(y)
     got = sorted((int(r), DATASET_CLASSES[c]) for r, c in zip(rows, cls))
-    assert got == [(0, "FHSS"), (1, "JAM_DRFM"), (2, "JAM_TONE"), (2, "RADAR_CW")]
+    assert got == [(0, "FHSS"), (1, "JAM_DRFM"), (2, "JAM_TONE"), (2, "RADAR_CW"),
+                   (5, "JAM_SWEPT"), (5, "LORA_CSS")]
 
 
-def test_scored_prediction_merges_the_group():
-    true = np.array([IDX["RADAR_CW"], IDX["RADAR_CW"], IDX["FHSS"]])
-    top = np.array([IDX["JAM_TONE"], IDX["DSSS"], IDX["JAM_TONE"]])
-    out = labels.scored_prediction(true, top)
-    assert out.tolist() == [IDX["RADAR_CW"], IDX["DSSS"], IDX["JAM_TONE"]]
+def test_scored_prediction_merges_only_the_windows_own_labels():
+    y = np.stack([onehot("RADAR_CW", "JAM_TONE"), onehot("RADAR_CW", "JAM_TONE"), onehot("FHSS"),
+                  onehot("LORA_CSS", "JAM_SWEPT"), onehot("LORA_CSS")])
+    true = np.array([IDX[c] for c in ("RADAR_CW", "RADAR_CW", "FHSS", "LORA_CSS", "LORA_CSS")])
+    top = np.array([IDX[c] for c in ("JAM_TONE", "DSSS", "JAM_TONE", "JAM_SWEPT", "JAM_SWEPT")])
+    out = labels.scored_prediction(true, top, y)
+    # A LoRa window that shows its wrap, called JAM_SWEPT, is still a mistake.
+    assert [DATASET_CLASSES[i] for i in out] == ["RADAR_CW", "DSSS", "JAM_TONE", "LORA_CSS", "JAM_SWEPT"]
 
 
-def _old_style_shard(impaired, n=6, snr=10):
-    """A jam shard as made before the fix: JAM_DRFM rows labelled alone."""
-    iq, y, seeds = [], [], []
+def test_generated_class():
+    y = np.stack([onehot("FHSS"), onehot("JAM_DRFM", "RADAR_PULSE"), onehot("LORA_CSS", "JAM_SWEPT"),
+                  onehot("FHSS", "DSSS")])
+    assert [DATASET_CLASSES[i] if i >= 0 else None for i in labels.generated_class(y, "spread")] == \
+        ["FHSS", "JAM_DRFM", "LORA_CSS", None]
+    assert DATASET_CLASSES[labels.generated_class(y, "jam")[2]] == "JAM_SWEPT"
+
+
+def _old_style_shard(impaired, module=jam, classes=("JAM_DRFM", "JAM_TONE", "JAM_SWEPT"), n=24, snr=10):
+    """A shard as made before the rules: every row labelled with its class alone."""
+    iq, y, seeds, made = [], [], [], []
     for i in range(n):
-        cls = "JAM_DRFM" if i % 2 == 0 else "JAM_TONE"
+        cls = classes[i % len(classes)]
         s = 9000 + i
         rng = np.random.default_rng(s)
-        x = (impairments.generate_impaired(jam, cls, snr, rng)[0] if impaired
-             else jam.generate_window(cls, snr, rng)[0])
+        x = (impairments.generate_impaired(module, cls, snr, rng)[0] if impaired
+             else module.generate_window(cls, snr, rng)[0])
         iq.append(x)
         y.append(onehot(cls))
         seeds.append(s)
+        made.append(cls)
     return {"iq": np.stack(iq), "y": np.stack(y), "seed": np.array(seeds),
-            "snr_db": np.full(n, float(snr)), "source": np.array(["gen"] * n)}
+            "snr_db": np.full(n, float(snr)), "source": np.array(["gen"] * n)}, made
 
 
 @pytest.mark.parametrize("impaired", [False, True])
-def test_fix_shard_labels_adds_the_copied_radar(impaired):
-    data = _old_style_shard(impaired)
-    y, n_fixed = labels.fix_shard_labels(data, {"notes": {"impairments": impaired}})
-    assert n_fixed == 3
-    for r in range(len(y)):
+def test_fix_shard_labels_on_an_old_jam_shard(impaired):
+    data, made = _old_style_shard(impaired)
+    y, fixed = labels.fix_shard_labels(data, {"notes": {"impairments": impaired}})
+    n_swept_both = sum(labels.class_names(y[r]) == {"JAM_SWEPT", "LORA_CSS"}
+                       for r, c in enumerate(made) if c == "JAM_SWEPT")
+    assert fixed == {"JAM_DRFM": 8, **({"JAM_SWEPT": n_swept_both} if n_swept_both else {})}
+    for r, cls in enumerate(made):
         names = labels.class_names(y[r])
-        if r % 2 == 0:
+        if cls == "JAM_DRFM":
             assert names == {"JAM_DRFM", labels.drfm_copied_class(data["seed"][r])}
-        else:
+        elif cls == "JAM_TONE":
             assert names == {"JAM_TONE", "RADAR_CW"}
-    # Already fixed rows are left alone on a second pass.
+        else:
+            _, p = jam.generate_window(cls, None, np.random.default_rng(int(data["seed"][r])))
+            assert names == labels.window_labels(cls, p)
+    # Already fixed rows are left alone on a second pass (sweeps that stayed
+    # single are replayed again, harmlessly).
     data["y"] = y
-    assert labels.fix_shard_labels(data)[1] == 0
+    y2, again = labels.fix_shard_labels(data, {"notes": {"impairments": impaired}})
+    assert "JAM_DRFM" not in again and np.array_equal(y2, y)
+
+
+def test_fix_shard_labels_on_an_old_spread_shard():
+    data, made = _old_style_shard(True, spread, ("LORA_CSS", "FHSS"), n=40)
+    y, fixed = labels.fix_shard_labels(data, {"notes": {"impairments": True}})
+    both = [labels.class_names(y[r]) == {"LORA_CSS", "JAM_SWEPT"} for r, c in enumerate(made) if c == "LORA_CSS"]
+    assert 0 < sum(both) < len(both)
+    assert fixed == {"LORA_CSS": sum(both)}
 
 
 def test_fix_shard_labels_refuses_a_window_it_cannot_replay():
-    data = _old_style_shard(impaired=True)
+    data, _ = _old_style_shard(impaired=True)
     data["iq"][0] = data["iq"][0] * 1.01
     with pytest.raises(RuntimeError, match="regenerate"):
         labels.fix_shard_labels(data, {"notes": {"impairments": True}})

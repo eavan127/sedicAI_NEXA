@@ -635,5 +635,7 @@ week1:
   # tone once the impairment module places them (RADAR_CW was right 3% of the
   # time in the seed-1 report, 31% called JAM_TONE). Radar CW vs tone jammer
   # is left to context: the tracker (duration, power, location).
+  # (LORA_CSS / JAM_SWEPT is decided window by window instead, not here: only
+  # a straight sweep at a LoRa rate gets both -- src/data/labels.py SWEEP.)
   ambiguous_labels:
     - [RADAR_CW, JAM_TONE]
