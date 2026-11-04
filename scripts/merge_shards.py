@@ -8,6 +8,8 @@ For each split it:
      class-list version and SHA-256 -- a half-synced or edited shard stops
      the merge before anything is trained on it;
   2. fills the NaN SNR of NOISE_FLOOR windows (see merge.fill_noise_floor_snr);
+  2b. brings external windows (RadioML, HisarMod) into the generated
+     windows' SNR and placement conventions (merge.harmonize_external);
   3. builds the mixtures -- signal + jammer, signal + signal, 3-signal scenes
      -- from that split's own high-SNR windows only, so no window is shared
      across splits, and writes them as mix/ shards with manifests like any
@@ -52,6 +54,10 @@ NOISE_IDX = DATASET_CLASSES.index("NOISE_FLOOR")
 def window_seed(split_seed, i):
     """Deterministic per-mixture seed, non-negative so it fits int64."""
     return int(np.random.SeedSequence([split_seed, i]).generate_state(1, dtype=np.uint64)[0] >> 1)
+
+
+def fix_salt(args):
+    return merge.EXTERNAL_FIX if args.external_fix else ""
 
 
 def read_manifests(folder):
@@ -118,6 +124,11 @@ def merge_split(split, manifests, args, split_seed):
             rows = np.linspace(0, len(data["iq"]) - 1, min(limit, len(data["iq"]))).astype(int)
             data = {k: v[rows] for k, v in data.items()}
         snr = merge.fill_noise_floor_snr(data["snr_db"], data["y"], np.random.default_rng([m["seed"], m["part"]]))
+        ext = np.isin(data["source"], merge.EXTERNAL_SOURCES) if args.external_fix else np.zeros(len(snr), bool)
+        if ext.any():
+            iq = data["iq"].copy()
+            iq[ext], snr[ext] = merge.harmonize_external(iq[ext], snr[ext], np.random.default_rng([m["seed"], m["part"], 1]))
+            data["iq"] = iq
         for s in range(0, len(snr), CHUNK):
             out.write(data["iq"][s:s + CHUNK], data["y"][s:s + CHUNK], snr[s:s + CHUNK])
         # Mixture components: single-label, high-SNR, never NOISE_FLOOR.
@@ -125,7 +136,7 @@ def merge_split(split, manifests, args, split_seed):
         pool_iq, labels = data["iq"][usable], data["y"][usable].argmax(axis=1)
         for idx in np.unique(labels):
             pool[DATASET_CLASSES[idx]].append(pool_iq[labels == idx])
-        print(f"  {m['shard']}: {len(snr)} windows")
+        print(f"  {m['shard']}: {len(snr)} windows ({int(ext.sum())} external harmonized)")
     pool = {c: np.concatenate(parts) for c, parts in pool.items()}
 
     emitters = [c for c in merge.EMITTERS if c in pool]
@@ -136,7 +147,8 @@ def merge_split(split, manifests, args, split_seed):
     bins = CFG["dataset_snr_bins_db"]
     notes = {"script": "scripts/merge_shards.py", "pool_min_snr_db": args.pool_min_snr,
              "mix_weights": dict(zip(merge.MIX_KINDS, args.mix_weights)),
-             "inputs_version": merge.combined_version(manifests)}
+             "inputs_version": merge.combined_version(manifests, fix_salt(args)),
+             "external_fix": fix_salt(args)}
     with ShardWriter(args.mix_out, MIX_GROUP, split, split_seed, manifest_dir=args.mix_manifests,
                      notes=notes) as writer:
         buf_iq, buf_y, buf_snr = [], [], []
@@ -177,6 +189,10 @@ def main():
     p.add_argument("--x-dtype", choices=["float16", "float32"], default="float16",
                    help="float16 halves X (3.9 -> 2.0 GB for train); its rounding is ~66 dB below "
                         "the signal, far under the noise of even a +20 dB window")
+    p.add_argument("--no-external-fix", dest="external_fix", action="store_false",
+                   help="keep RadioML / HisarMod windows as shipped (the pre-2026-11-04 behaviour); "
+                        "by default they are re-noised to their SNR label and placed at a random frequency "
+                        "(merge.harmonize_external)")
     p.add_argument("--limit-per-shard", type=int, default=0, help="quick check: first N windows of each shard")
     args = p.parse_args()
 
@@ -203,7 +219,8 @@ def main():
 
     commit, dirty = _git_commit()
     info = {
-        "combined_version": merge.combined_version(manifests + mix_manifests),
+        "combined_version": merge.combined_version(manifests + mix_manifests, fix_salt(args)),
+        "external_fix": fix_salt(args),
         "class_list_version": class_list_version(),
         "classes": DATASET_CLASSES,
         "git_commit": commit,

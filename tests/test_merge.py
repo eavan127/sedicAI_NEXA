@@ -83,3 +83,62 @@ def test_combined_version_ignores_order():
     a = [{"shard": "x.npz", "sha256": "1"}, {"shard": "y.npz", "sha256": "2"}]
     assert merge.combined_version(a) == merge.combined_version(a[::-1])
     assert merge.combined_version(a) != merge.combined_version([a[0], {"shard": "y.npz", "sha256": "3"}])
+
+
+def _external_like(rng, snr_true_db, n=8):
+    """Narrow 8-samples/symbol QPSK at 0 Hz with white noise at snr_true_db
+    over the full band -- the shape of a RadioML window."""
+    from src.dsp import rrc_taps
+    sym = (rng.choice([1, -1], (n, L // 8 + 16)) + 1j * rng.choice([1, -1], (n, L // 8 + 16))) / np.sqrt(2)
+    up = np.zeros((n, sym.shape[1] * 8), complex)
+    up[:, ::8] = sym
+    taps = rrc_taps(8)
+    sig = np.array([np.convolve(u, taps, mode="same")[64:64 + L] for u in up])
+    sig /= np.sqrt(np.mean(np.abs(sig) ** 2, axis=1, keepdims=True))
+    noise = (rng.standard_normal((n, L)) + 1j * rng.standard_normal((n, L))) / np.sqrt(2)
+    return (sig + noise * 10 ** (-snr_true_db / 20)).astype(np.complex64)
+
+
+def _full_band_snr(x):
+    f = np.fft.fftfreq(L, 1 / CFG["signal"]["fs"])
+    X = np.abs(np.fft.fft(x)) ** 2 / L
+    p_noise = X[np.abs(f) > 1.0e6].mean()
+    return 10 * np.log10((X.sum() / L - p_noise) / p_noise)
+
+
+def test_harmonize_external_adds_noise_down_to_the_label(rng):
+    """A window much cleaner than its label (RadioML at high SNR) gets white
+    noise until its full-band SNR matches the label, and keeps the label.
+    Measured before moving: the placement shift would move signal into the
+    band edges the measurement uses as its noise reference."""
+    from unittest import mock
+    x = _external_like(rng, snr_true_db=30)
+    with mock.patch("src.data.impairments.frequency_shift", side_effect=lambda v, off: v):
+        out, snr = merge.harmonize_external(x, np.full(len(x), 10.0), rng)
+    assert out.dtype == np.complex64 and out.shape == x.shape
+    assert list(snr) == [10.0] * len(x)
+    for w in out:
+        assert _full_band_snr(w) == pytest.approx(10, abs=1.5)
+
+
+def test_harmonize_external_relabels_a_window_noisier_than_its_label(rng):
+    """Noise cannot be removed, so the label moves down to the bin at or below
+    the measured SNR instead (RadioML at -10 dB is really about -19 dB)."""
+    x = _external_like(rng, snr_true_db=3)
+    out, snr = merge.harmonize_external(x, np.full(len(x), 14.0), rng)
+    bins = CFG["dataset_snr_bins_db"]
+    assert all(s in bins and s <= 4 for s in snr)
+
+
+def test_harmonize_external_moves_windows_off_zero_hz(rng):
+    x = _external_like(rng, snr_true_db=30, n=40)
+    out, _ = merge.harmonize_external(x, np.full(len(x), 20.0), rng)
+    f = np.fft.fftfreq(L, 1 / CFG["signal"]["fs"])
+    centroid = [np.sum(f * np.abs(np.fft.fft(w)) ** 4) / np.sum(np.abs(np.fft.fft(w)) ** 4) for w in out]
+    assert np.std(centroid) > 300e3, "windows should be spread over the band, not all at 0 Hz"
+    assert max(abs(c) for c in centroid) < 0.95 * CFG["signal"]["fs"] / 2
+
+
+def test_combined_version_changes_with_the_merge_salt():
+    a = [{"shard": "x.npz", "sha256": "1"}]
+    assert merge.combined_version(a) != merge.combined_version(a, "external-v1")

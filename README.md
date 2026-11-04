@@ -203,7 +203,10 @@ manifest (commit + seed) is enough to regenerate it.
    adds the composite (mixture) windows, and writes one set per split to
    `data/combined/<split>/X.npy` (`float16 (N, 2, 512)`, normalised IQ),
    `y.npy` (`uint8 (N, C)`, multi-hot) and `snr_labels.npy`; the trainer
-   casts them to float32 per batch. The YOLO
+   casts them to float32 per batch. External windows (RadioML, HisarMod)
+   are re-noised to their SNR label under the full-band convention and
+   placed at a random frequency during the merge (`merge.harmonize_external`;
+   `--no-external-fix` keeps them as shipped). The YOLO
    scenes in `yolo/` are a separate dataset and are not merged into it.
 3. **Training** uses only those `data/combined/` files (`src/train.py` still
    reads `data/processed/` until the SED-11 training update lands).

@@ -88,10 +88,10 @@
     18.0,
     20.0
   ],
-  "git_commit": "db771b642d62973768f934cf480bbb01e504ad5d",
+  "git_commit": "0f7af4139d95c1a5d7fb4a1ea276356e8c59a430",
   "git_dirty": true,
-  "sha256": "355a7e41950356fcc728b1326695e3595a79bfcea1a3156286c194687c390066",
-  "created_utc": "2026-11-04T01:42:28+00:00",
+  "sha256": "4fd68851c7a99ad6a2384235f38bdf65cfcdbbd7d4825ff8ae6feeb59f237521",
+  "created_utc": "2026-11-04T05:55:30+00:00",
   "notes": {
     "script": "scripts/merge_shards.py",
     "pool_min_snr_db": 16,
@@ -100,6 +100,7 @@
       "signal+signal": 0.4,
       "three": 0.2
     },
-    "inputs_version": "be79b75984b3"
+    "inputs_version": "fee5ce79160d",
+    "external_fix": "external-v1"
   }
 }

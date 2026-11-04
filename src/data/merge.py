@@ -92,8 +92,81 @@ def mix_windows(components, snr_db, rng):
     return add_awgn(mixed, snr_db, rng).astype(np.complex64)
 
 
-def combined_version(manifests):
-    """Short fingerprint of exactly which shards went in. Two combined sets
-    with the same value were built from byte-identical shards."""
+def combined_version(manifests, salt=""):
+    """Short fingerprint of exactly which shards went in, plus `salt` naming
+    any change the merge itself makes to their windows. Two combined sets
+    with the same value were built from byte-identical shards the same way."""
     keys = sorted(f"{m['shard']}:{m['sha256']}" for m in manifests)
+    if salt:
+        keys.append(f"merge:{salt}")
     return hashlib.sha256("\n".join(keys).encode()).hexdigest()[:12]
+
+
+# --- external windows ---------------------------------------------------------
+# Shards keep external windows (RadioML 2018, HisarMod 2019) exactly as the
+# datasets ship them; the merge brings them into the generated windows'
+# conventions. Measured on the test shards (2026-11-04), external windows
+# differed from generated ones in two ways a model can latch onto:
+#   * RadioML's SNR label is not our full-band SNR. Noise measured beyond
+#     +-0.9 MHz (where its 8 samples/symbol signals have no energy) puts a
+#     window labelled +10 dB at about +20 dB, +18 dB at about +30 dB, and
+#     -10 dB at about -19 dB. At high SNR the band edges are therefore
+#     almost empty (0.1% of the power beyond +-0.8 MHz, against 2-19% for
+#     generated windows): "signal in the middle, nothing at the edges", the
+#     look of JAM_PARTIAL_BAND, which is what the seed-1 model called much of
+#     APSK. HisarMod's labels match (within ~1.5 dB).
+#   * Both sit at 0 Hz, while impairments.py places every generated window
+#     at a random frequency.
+# harmonize_external re-noises each window to its label under our convention
+# (white noise over the full band, power = signal power / 10^(SNR/10)) and
+# moves it to a random frequency, like impairments' placement. A window
+# already noisier than its label cannot be cleaned, so its label is moved
+# down to the nearest bin at or below its measured SNR instead, when it is
+# more than RELABEL_TOLERANCE_DB under.
+EXTERNAL_SOURCES = ("radioml2018", "hisarmod2019")
+EXTERNAL_FIX = "external-v1"
+_EDGE_HZ = 0.9e6
+# One window's noise estimate wobbles by about a dB; only relabel a window
+# clearly noisier than its label (HisarMod sits within ~1.5 dB, RadioML's low
+# bins 3-9 dB under).
+RELABEL_TOLERANCE_DB = 1.5
+
+
+def _snap_down(snr, bins):
+    below = [b for b in bins if b <= snr + 1e-6]
+    return float(max(below)) if below else float(min(bins))
+
+
+def harmonize_external(iq, snr_db, rng, fs=None, bins=None):
+    """iq complex (B, L), snr_db (B,) -> (new iq complex64 (B, L), new snr_db float32 (B,))."""
+    from src.data.impairments import PROFILE, frequency_shift
+
+    fs = fs or CFG["signal"]["fs"]
+    bins = bins or CFG["dataset_snr_bins_db"]
+    out = np.empty(iq.shape, dtype=np.complex64)
+    snr_out = np.asarray(snr_db, dtype=np.float32).copy()
+    L = iq.shape[1]
+    f = np.fft.fftfreq(L, 1 / fs)
+    edge = np.abs(f) > _EDGE_HZ
+    room_max = PROFILE["placement"]["band_fraction"] * fs / 2
+    for i, x in enumerate(np.asarray(iq, dtype=complex)):
+        X = np.abs(np.fft.fft(x)) ** 2 / L                 # sums to L * mean power
+        n_bin = float(X[edge].mean())                       # existing noise per bin
+        p_noise = n_bin                                     # per-sample noise power
+        p_sig = max(float(X.sum() / L) - p_noise, 1e-12)
+        target = p_sig / 10 ** (snr_out[i] / 10)
+        measured = 10 * np.log10(p_sig / max(p_noise, 1e-12))
+        if target > p_noise:
+            add = target - p_noise
+            x = x + np.sqrt(add / 2) * (rng.standard_normal(L) + 1j * rng.standard_normal(L))
+        elif measured < snr_out[i] - RELABEL_TOLERANCE_DB:
+            snr_out[i] = _snap_down(measured, bins)
+        # Occupied width of the signal itself (noise floor removed), for the
+        # placement room: 99% of the above-floor power.
+        sig = np.fft.fftshift(np.maximum(X - n_bin, 0))
+        c = np.cumsum(sig) / max(sig.sum(), 1e-12)
+        lo, hi = np.searchsorted(c, 0.005), np.searchsorted(c, 0.995)
+        bw = max((hi - lo + 1) * fs / L, 0.1e6)
+        room = max(0.0, room_max - bw / 2)
+        out[i] = frequency_shift(x, rng.uniform(-room, room)).astype(np.complex64)
+    return out, snr_out
