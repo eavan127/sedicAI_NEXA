@@ -610,3 +610,17 @@ paths:
   processed_data: data/processed
   checkpoints: results
   evals: evals
+
+# Week-1 60-class model (WEEK1_PLAN): trained by scripts/train_week1.py on
+# data/combined/ (scripts/merge_shards.py), one seed per teammate. Separate
+# from `model` / `training` above so the deployed 8-class ensemble and its
+# scripts are untouched. Every seed must use these same values.
+week1:
+  combined_data: data/combined
+  # 50 kHz STFT bins instead of 200 kHz; see AMC_CNN's stft_n_fft. Agreed
+  # 2026-11-04 from Eileen's fixes test.
+  stft_n_fft: 64
+  # Only NOISE_FLOOR's dampen carries over from class_weight_multipliers: the
+  # LFM_RADAR / FHSS boosts were tuned on the 8-class model.
+  class_weight_multipliers:
+    NOISE_FLOOR: 0.5

@@ -373,8 +373,13 @@ class CumulantFeatures(nn.Module):
 
 class AMC_CNN(nn.Module):
     def __init__(self, num_classes, input_len=1024, stft_freq_summary=None,
-                 stft_keep_rows=None, cumulant_features=None):
+                 stft_keep_rows=None, cumulant_features=None, stft_n_fft=16):
         super().__init__()
+        # stft_n_fft: 16 (200 kHz bins) for every checkpoint in results/; the
+        # week-1 60-class model uses 64 (50 kHz bins, configs week1.stft_n_fft)
+        # after Eileen's test on 2026-11-03 (top-1 35.7% -> 38.5%, classes at 0
+        # from 9 to 3, FHSS not hurt with keep_rows on). Explicit, not read
+        # from config, so the deployed 8-class models can never pick it up.
         if stft_freq_summary is None:
             from src.config import CFG
             stft_freq_summary = CFG.get("model", {}).get("stft_freq_summary", False)
@@ -387,8 +392,8 @@ class AMC_CNN(nn.Module):
 
         iq_out_channels = 128
         self.iq_branch = IQBranch(out_channels=iq_out_channels)
-        self.stft_branch = STFTBranch(out_channels=64, freq_summary=stft_freq_summary,
-                                       keep_rows=stft_keep_rows)
+        self.stft_branch = STFTBranch(n_fft=stft_n_fft, out_channels=64,
+                                       freq_summary=stft_freq_summary, keep_rows=stft_keep_rows)
         # Computed from what the branches actually produce, not hardcoded --
         # stft_branch.out_channels is 64 with the flag off, 67 with it on.
         fused_channels = iq_out_channels + self.stft_branch.out_channels

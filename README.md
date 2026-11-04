@@ -150,8 +150,8 @@ NEXA_data/
 ```
 
 The merged set is **not** on Drive: Eavan writes it locally as
-`data/processed/X.npy`, `y.npy` and `snr_labels.npy`, the same files
-`src/train.py` already reads.
+`data/combined/<split>/X.npy`, `y.npy` and `snr_labels.npy`, one folder per
+split (train / val / test), so the shards' own splits are kept.
 
 **Owners** (week 1):
 
@@ -200,11 +200,13 @@ manifest (commit + seed) is enough to regenerate it.
    generator code and the matching `data/manifests/*.json`.
 2. **Eavan**: `git pull`, wait for Drive to finish syncing, and run the merge
    step locally against `data/manifests/`. It loads every owner's shards,
-   adds the composite (mixture) windows, and writes one concatenated set to
-   `data/processed/X.npy` (`float32 (N, 2, 512)`, normalised IQ),
-   `y.npy` (`float32 (N, C)`, multi-hot) and `snr_labels.npy`. The YOLO
+   adds the composite (mixture) windows, and writes one set per split to
+   `data/combined/<split>/X.npy` (`float16 (N, 2, 512)`, normalised IQ),
+   `y.npy` (`uint8 (N, C)`, multi-hot) and `snr_labels.npy`; the trainer
+   casts them to float32 per batch. The YOLO
    scenes in `yolo/` are a separate dataset and are not merged into it.
-3. **Training** uses only those `data/processed/` files.
+3. **Training** uses only those `data/combined/` files (`src/train.py` still
+   reads `data/processed/` until the SED-11 training update lands).
 
 Seeds must not overlap between people: give each person their own seed
 block (e.g. Chua 1000–1999, Jessy 2000–2999, Eileen 3000–3999, Eavan
@@ -216,7 +218,12 @@ getting the same windows without any upload (as long as the code commit and
 library versions match). Use Drive when generation is slow; regenerate when
 it is quick.
 
-The merge step (`scripts/merge_shards.py`) is planned, not written yet.
+The merge step is `scripts/merge_shards.py`. It reads shards from
+`data/shards/<group>/`, checks each SHA-256, builds the `mix/` shards
+(signal + jammer, signal + signal, 3-signal scenes) and writes
+`data/combined/<split>/X.npy`, `y.npy` and `snr_labels.npy`, plus
+`data/combined/combined.json` with the combined version to record in each
+run log.
 
 #### Making your shards (Chua, Jessy, Eileen: read this before you start)
 
