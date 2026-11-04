@@ -436,7 +436,7 @@ def print_compare(new, base):
 
 # --------------------------------------------------------------------------- main
 
-MODEL_FLAGS = ("stft_freq_summary", "stft_keep_rows", "cumulant_features")
+MODEL_FLAGS = ("stft_freq_summary", "stft_keep_rows", "cumulant_features", "expert_features")
 
 
 def resolve_flags(checkpoints, args):
@@ -485,6 +485,8 @@ def main():
     ap.add_argument("--stft-keep-rows", action="store_true")
     ap.add_argument("--cumulant-features", action="store_true",
                     help="build the model with model.cumulant_features on (|C40|,|C42|,|C63|)")
+    ap.add_argument("--expert-features", action="store_true",
+                    help="build the model with the amplitude-histogram + delay-correlation branch")
     ap.add_argument("--name", default="experiment")
     ap.add_argument("--margin", type=float, default=0.03, help="safety margin above the benchmark when calibrating")
     ap.add_argument("--out", type=Path, default=None, help="evaluation JSON (default results/eval_<name>.json)")

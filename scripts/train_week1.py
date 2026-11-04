@@ -13,7 +13,8 @@ What it does differently:
     windows and nothing leaks across splits;
   * loads X as float16 (train is 2 GB) and casts each batch to float32 on the
     GPU, so it fits in free Colab RAM;
-  * builds AMC_CNN with 60 outputs and week1.stft_n_fft (64);
+  * builds AMC_CNN with 60 outputs and week1.stft_n_fft (64), plus the
+    expert-feature branch when week1.expert_features or --expert-features;
   * saves <ckpt-dir>/last.pt after EVERY epoch and resumes from it when run
     again with the same arguments -- a dropped Colab session costs at most one
     epoch;
@@ -126,6 +127,8 @@ def main():
     p.add_argument("--eval-test", action="store_true", help="score the test split at the end -> scorecard.json")
     p.add_argument("--limit", type=int, default=0, help="quick check: first N train windows (N/8 val/test)")
     p.add_argument("--fresh", action="store_true", help="ignore an existing last.pt and start over")
+    p.add_argument("--expert-features", action="store_true",
+                   help="add the amplitude-histogram + delay-correlation branch (overrides week1.expert_features)")
     args = p.parse_args()
 
     ckpt_dir = Path(args.ckpt_dir or REPO_ROOT / CFG["paths"]["checkpoints"] / f"week1_seed{args.seed}")
@@ -142,7 +145,10 @@ def main():
     print(f"train {len(Xtr)}  val {len(Xva)}")
 
     set_seed(args.seed)
-    model = AMC_CNN(num_classes=C, input_len=Xtr.shape[-1], stft_n_fft=w["stft_n_fft"]).to(DEVICE)
+    model_flags = {k: CFG.get("model", {}).get(k, False)
+                   for k in ("stft_freq_summary", "stft_keep_rows", "cumulant_features")}
+    model_flags["expert_features"] = bool(args.expert_features or w.get("expert_features", False))
+    model = AMC_CNN(num_classes=C, input_len=Xtr.shape[-1], stft_n_fft=w["stft_n_fft"], **model_flags).to(DEVICE)
     dampen = {DATASET_CLASSES.index(c): m for c, m in w.get("class_weight_multipliers", {}).items()}
     criterion = nn.BCEWithLogitsLoss(pos_weight=compute_class_weights(ytr, C, dampen=dampen).to(DEVICE))
     opt = torch.optim.Adam(model.parameters(), lr=t["learning_rate"])
@@ -151,8 +157,7 @@ def main():
 
     meta = {"format": "nexa-week1-member-v1", "classes": DATASET_CLASSES, "seed": args.seed,
             "stft_n_fft": w["stft_n_fft"], "input_len": int(Xtr.shape[-1]),
-            "model_flags": {k: CFG.get("model", {}).get(k, False)
-                            for k in ("stft_freq_summary", "stft_keep_rows", "cumulant_features")},
+            "model_flags": model_flags,
             "combined_version": combined_version, "git_commit": commit, "git_dirty": dirty,
             "batch_size": args.batch_size, "limit": args.limit}
 
@@ -160,8 +165,8 @@ def main():
     last = ckpt_dir / "last.pt"
     if last.exists() and not args.fresh:
         state = torch.load(last, map_location=DEVICE, weights_only=False)
-        for key in ("seed", "stft_n_fft", "combined_version", "batch_size", "limit"):
-            if state["meta"][key] != meta[key]:
+        for key in ("seed", "stft_n_fft", "combined_version", "batch_size", "limit", "model_flags"):
+            if state["meta"].get(key) != meta[key]:
                 sys.exit(f"{last} was saved with {key}={state['meta'][key]!r}, this run has {meta[key]!r}. "
                          "Use the same arguments to resume, or --fresh to start over.")
         model.load_state_dict(state["model"])

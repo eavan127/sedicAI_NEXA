@@ -624,3 +624,8 @@ week1:
   # LFM_RADAR / FHSS boosts were tuned on the 8-class model.
   class_weight_multipliers:
     NOISE_FLOOR: 0.5
+  # Amplitude-histogram + delay-correlation branch (src/expert_features.py,
+  # AMC_CNN's ExpertFeatures). Off until scripts/fair_check_expert.py shows
+  # it adds to a trained CNN; scripts/train_week1.py --expert-features turns
+  # it on for one run without editing this file.
+  expert_features: false

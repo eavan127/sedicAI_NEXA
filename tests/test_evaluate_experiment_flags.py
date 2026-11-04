@@ -17,7 +17,7 @@ import pytest
 
 from scripts.evaluate_experiment import MODEL_FLAGS, resolve_flags
 
-ALL_OFF = {"stft_freq_summary": False, "stft_keep_rows": False, "cumulant_features": False}
+ALL_OFF = {f: False for f in MODEL_FLAGS}
 
 
 def args(**over):
@@ -46,7 +46,7 @@ def test_flags_are_read_from_the_sidecar_when_none_are_given(tmp_path):
              {"stft_freq_summary": True, "stft_keep_rows": False, "cumulant_features": True},
              seed=2000, parameters=149709)
     assert resolve_flags([p], args()) == {
-        "stft_freq_summary": True, "stft_keep_rows": False, "cumulant_features": True}
+        **ALL_OFF, "stft_freq_summary": True, "cumulant_features": True}
 
 
 def test_a_checkpoint_without_a_sidecar_stays_all_off(tmp_path):
@@ -82,6 +82,8 @@ def test_every_model_flag_is_covered(tmp_path):
     from src.models.amc_cnn import AMC_CNN
     import inspect
 
+    # stft_n_fft is a number, not an on/off flag: the 8-class models this
+    # resolver builds all use its default (16); week-1 passes it explicitly.
     params = set(inspect.signature(AMC_CNN.__init__).parameters) - {
-        "self", "num_classes", "input_len"}
+        "self", "num_classes", "input_len", "stft_n_fft"}
     assert params == set(MODEL_FLAGS), f"model takes {sorted(params)}, resolver knows {sorted(MODEL_FLAGS)}"

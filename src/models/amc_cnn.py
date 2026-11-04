@@ -11,6 +11,8 @@ existing checkpoint loads into this. Needs a full retrain and validation
 (measure_variance.py) against main's numbers before being trusted for
 anything.
 """
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -371,9 +373,91 @@ class CumulantFeatures(nn.Module):
         return feats.detach()
 
 
+class ExpertFeatures(nn.Module):
+    """Batched GPU version of src/expert_features.py: amplitude histogram and
+    delay correlation of a channelized copy of each window (see that module
+    for what they are and the probe numbers behind them).
+
+    EXPERIMENTAL, behind AMC_CNN(expert_features=True) (configs week1.
+    expert_features). Written with real arithmetic only -- the DFT is a
+    matrix product with fixed cos / sin tables, the quantile a sort -- so the
+    model still exports to ONNX, which has no complex tensors. The tables
+    are non-persistent buffers: rebuilt from window_len, never stored in a
+    checkpoint. No gradient flows through this branch; AMC_CNN normalises
+    its output with a BatchNorm1d before fc1.
+    """
+
+    def __init__(self, window_len):
+        super().__init__()
+        from src import expert_features as ef
+        self.ef = ef
+        L = window_len
+        n = torch.arange(L, dtype=torch.float64)
+        ang = 2 * math.pi * torch.outer(n, n) / L
+        self.register_buffer("cos", torch.cos(ang).float(), persistent=False)
+        self.register_buffer("sin", torch.sin(ang).float(), persistent=False)
+        k = torch.fft.fftfreq(L, d=1.0 / L)
+        self.register_buffer("k", k.float(), persistent=False)
+        self.register_buffer("n", n.float(), persistent=False)
+        self.register_buffer("centers", torch.tensor(ef.AMP_CENTERS, dtype=torch.float32), persistent=False)
+        self.L = L
+        self.lags = [int(v) for v in ef.LAGS]
+        q = ef.FLOOR_QUANTILE * (L - 1)
+        self.q_lo, self.q_frac = int(math.floor(q)), q - math.floor(q)
+        self.out_channels = ef.EXPERT_DIM
+
+    def _dft(self, re, im):
+        return re @ self.cos + im @ self.sin, im @ self.cos - re @ self.sin
+
+    def _idft(self, re, im):
+        return (re @ self.cos - im @ self.sin) / self.L, (im @ self.cos + re @ self.sin) / self.L
+
+    def forward(self, x):
+        ef = self.ef
+        with torch.no_grad():
+            zr, zi = x[:, 0, :].float(), x[:, 1, :].float()
+            Zr, Zi = self._dft(zr, zi)
+            P = Zr ** 2 + Zi ** 2
+            h = ef.SMOOTH // 2
+            Ps = F.avg_pool1d(torch.cat([P[:, -h:], P, P[:, :h]], dim=1).unsqueeze(1),
+                              ef.SMOOTH, stride=1).squeeze(1)
+            srt = torch.sort(Ps, dim=1).values
+            floor = srt[:, self.q_lo] * (1 - self.q_frac) + srt[:, self.q_lo + 1] * self.q_frac
+            mask = (Ps > ef.FLOOR_FACTOR * floor.unsqueeze(1)).float()
+            w = torch.clamp(Ps - floor.unsqueeze(1), min=0) * mask
+            fc = (w * self.k).sum(1) / torch.clamp(w.sum(1), min=1e-12)
+            bins = torch.clamp(mask.sum(1), min=float(ef.MIN_BINS))
+
+            ph = -2 * math.pi * fc.unsqueeze(1) * self.n / self.L
+            c, s = torch.cos(ph), torch.sin(ph)
+            yr, yi = zr * c - zi * s, zr * s + zi * c
+            Yr, Yi = self._dft(yr, yi)
+            keep = (self.k.abs().unsqueeze(0) <= ef.KEEP * bins.unsqueeze(1)).float()
+            yr, yi = self._idft(Yr * keep, Yi * keep)
+
+            a = torch.sqrt(yr ** 2 + yi ** 2)
+            a = a / (torch.sqrt((a ** 2).mean(1, keepdim=True)) + 1e-12)
+            hist = torch.exp(-0.5 * ((a.unsqueeze(2) - self.centers) / ef.AMP_WIDTH) ** 2).mean(1)
+            mu = a.mean(1, keepdim=True)
+            var = ((a - mu) ** 2).mean(1)
+            kurt = ((a - mu) ** 4).mean(1) / (var ** 2 + 1e-12)
+
+            yr, yi = yr - yr.mean(1, keepdim=True), yi - yi.mean(1, keepdim=True)
+            r0 = (yr ** 2 + yi ** 2).sum(1)
+            corr = []
+            for lag in self.lags:
+                re = (yr[:, lag:] * yr[:, :-lag] + yi[:, lag:] * yi[:, :-lag]).sum(1)
+                im = (yi[:, lag:] * yr[:, :-lag] - yr[:, lag:] * yi[:, :-lag]).sum(1)
+                corr.append(torch.sqrt(re ** 2 + im ** 2) / (r0 + 1e-12))
+            out = torch.cat([hist, torch.sqrt(var).unsqueeze(1), torch.log1p(kurt).unsqueeze(1),
+                             (bins / self.L).unsqueeze(1), torch.stack(corr, dim=1)], dim=1)
+        return out.detach()
+
+
 class AMC_CNN(nn.Module):
     def __init__(self, num_classes, input_len=1024, stft_freq_summary=None,
-                 stft_keep_rows=None, cumulant_features=None, stft_n_fft=16):
+                 stft_keep_rows=None, cumulant_features=None, stft_n_fft=16,
+                 expert_features=None):
         super().__init__()
         # stft_n_fft: 16 (200 kHz bins) for every checkpoint in results/; the
         # week-1 60-class model uses 64 (50 kHz bins, configs week1.stft_n_fft)
@@ -389,6 +473,9 @@ class AMC_CNN(nn.Module):
         if cumulant_features is None:
             from src.config import CFG
             cumulant_features = CFG.get("model", {}).get("cumulant_features", False)
+        if expert_features is None:
+            from src.config import CFG
+            expert_features = CFG.get("model", {}).get("expert_features", False)
 
         iq_out_channels = 128
         self.iq_branch = IQBranch(out_channels=iq_out_channels)
@@ -413,6 +500,15 @@ class AMC_CNN(nn.Module):
         # cumulant scalars (CumulantFeatures.out_channels) with it on.
         fc1_in = fused_channels + (
             self.cumulant_branch.out_channels if self.cumulant_branch is not None else 0)
+        # EXPERIMENTAL, behind expert_features (week1.expert_features): the
+        # amplitude-histogram + delay-correlation branch (ExpertFeatures).
+        # Off -> None, no parameters, old checkpoints load unchanged. On ->
+        # its 104 values are batch-normalised (they range from 0-1 histogram
+        # bins to log-kurtosis) and joined to the pooled vector before fc1.
+        self.expert_branch = ExpertFeatures(input_len) if expert_features else None
+        self.expert_norm = nn.BatchNorm1d(self.expert_branch.out_channels) if expert_features else None
+        if self.expert_branch is not None:
+            fc1_in += self.expert_branch.out_channels
 
         # No dummy forward pass needed -- attention pooling always outputs
         # exactly `fused_channels` values regardless of input_len. input_len
@@ -443,6 +539,8 @@ class AMC_CNN(nn.Module):
         if self.cumulant_branch is not None:
             cum_feats = self.cumulant_branch(x)   # (batch, 3): |C40|,|C42|,|C63|
             pooled = torch.cat([pooled, cum_feats], dim=1)
+        if self.expert_branch is not None:
+            pooled = torch.cat([pooled, self.expert_norm(self.expert_branch(x))], dim=1)
 
         out = self.dropout(self.relu(self.fc1(pooled)))
         return self.fc2(out)
