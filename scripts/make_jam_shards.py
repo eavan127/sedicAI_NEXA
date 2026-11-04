@@ -32,7 +32,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.config import CFG, DATASET_CLASS_TO_IDX  # noqa: E402
-from src.data import impairments  # noqa: E402
+from src.data import impairments, labels  # noqa: E402
 from src.data.shards import MANIFEST_DIR, SPLITS, ShardWriter  # noqa: E402
 from src.generators import jam  # noqa: E402
 
@@ -89,10 +89,15 @@ def main():
                         s = window_seed(split_seed[split], cls, snr, i)
                         rng = np.random.default_rng(s)
                         if args.no_impair:
-                            window, _ = jam.generate_window(cls, snr, rng)
+                            window, params = jam.generate_window(cls, snr, rng)
                         else:
-                            window, _ = impairments.generate_impaired(jam, cls, snr, rng)
-                        w.add(window, {cls}, np.nan if cls == "NOISE_FLOOR" else snr, "gen", s)
+                            window, info = impairments.generate_impaired(jam, cls, snr, rng)
+                            params = {k[4:]: v for k, v in info.items() if k.startswith("gen_")}
+                        # A DRFM window also holds the radar it copied
+                        # (src/data/labels.py); ambiguous groups such as
+                        # RADAR_CW / JAM_TONE are applied later, at merge time.
+                        w.add(window, labels.window_labels(cls, params, ambiguous=False),
+                              np.nan if cls == "NOISE_FLOOR" else snr, "gen", s)
         total = sum(m["n_windows"] for m in w.written)
         print(f"{split}: {total} windows in {len(w.written)} shard(s), {time.time() - t0:.0f}s")
     print(f"Shards in {args.out}\nManifests in {args.manifests}")

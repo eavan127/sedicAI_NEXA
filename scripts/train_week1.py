@@ -43,6 +43,7 @@ import torch.nn as nn
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.config import CFG, DATASET_CLASSES, REPO_ROOT  # noqa: E402
+from src.data import labels  # noqa: E402
 from src.data.shards import _git_commit  # noqa: E402
 from src.models.amc_cnn import AMC_CNN  # noqa: E402
 from src.train import compute_class_weights, compute_snr_weights, set_seed  # noqa: E402
@@ -94,10 +95,11 @@ def evaluate(model, criterion, X, y):
             hits += int(hit.sum())
             tp += (pred & yt).sum(axis=0)
             pos += yt.sum(axis=0)
-            single = yt.sum(axis=1) == 1
-            cls = yt[single].argmax(axis=1)
+            # One emitter per window: one label, a DRFM pair or an ambiguous
+            # group (src/data/labels.py), each scored under its own class.
+            rows, cls = labels.standalone_pairs(yt)
             np.add.at(top1_n, cls, 1)
-            np.add.at(top1_hit, cls, hit[single])
+            np.add.at(top1_hit, cls, hit[rows])
     recall = np.where(pos > 0, tp / np.maximum(pos, 1), np.nan)
     top1 = np.where(top1_n > 0, top1_hit / np.maximum(top1_n, 1), np.nan)
     return {"loss": loss / len(X), "top1": hits / len(X),

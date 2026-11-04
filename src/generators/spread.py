@@ -32,6 +32,9 @@ Scope decisions, because a 160 us window cannot show everything:
     not Barker codes, and never stops (RADAR_BARKER is pulsed); FHSS never
     stops (RADAR_COSTAS hops within one pulse, then goes silent); LORA_CSS
     stays at or below 500 kHz while RADAR_FMCW sweeps 600 kHz or more.
+  * Kept apart from JAM_SWEPT, whose sweep rates overlap LoRa's: every LoRa
+    window contains a chirp boundary (a wrap or a change of direction), so no
+    LoRa window is one plain straight sweep.
 """
 import numpy as np
 
@@ -69,6 +72,9 @@ LORA_SETTINGS = tuple((bw, sf) for bw, sfs in ((500e3, range(5, 9)),
                                                (125e3, range(5, 7))) for sf in sfs)
 LORA_PREAMBLE = (6, 12)      # up-chirps before the sync word
 LORA_DATA_SYMBOLS = (4, 16)
+# Every LoRa window holds a chirp boundary (a wrap or a change of direction)
+# at least this many samples (20 us) inside it -- see lora_window_starts.
+LORA_EVENT_MARGIN = 64
 
 PARAM_KEYS = ("bandwidth_hz", "hop_rate_hz", "n_channels", "channel_spacing_hz",
               "chip_rate_hz", "code_length", "spreading_factor", "symbol_rate_hz")
@@ -178,6 +184,32 @@ def lora_frame(bw, sf, rng, n_preamble=8, n_data=8):
     return np.concatenate(freq)
 
 
+def lora_events(freq, bw):
+    """Sample indices where a LoRa frame's sweep visibly breaks: a wrap (the
+    frequency jumps by more than a quarter of the band) or a change of sweep
+    direction (up-chirps to down-chirps and back)."""
+    d = np.diff(freq)
+    jump = np.abs(d) > 0.25 * bw
+    s = np.where(jump, 0, np.sign(d))
+    moving = np.flatnonzero(s)                    # skip flat steps between sweeps
+    turn = moving[1:][s[moving[1:]] != s[moving[:-1]]]
+    return np.union1d(np.flatnonzero(jump), turn) + 1
+
+
+def lora_window_starts(freq, bw, n_samples=WINDOW_LEN, margin=LORA_EVENT_MARGIN):
+    """Window starts whose window holds a chirp boundary at least `margin`
+    samples from either edge. Without one, a LoRa window is a single straight
+    sweep and cannot be told from JAM_SWEPT (same slopes, same look). Falls
+    back to every start if the frame has no such position."""
+    n_starts = len(freq) - n_samples + 1
+    ok = np.zeros(n_starts, dtype=bool)
+    for e in lora_events(freq, bw):
+        lo, hi = max(e - n_samples + margin, 0), min(e - margin, n_starts - 1)
+        if lo <= hi:
+            ok[lo:hi + 1] = True
+    return np.flatnonzero(ok) if ok.any() else np.arange(n_starts)
+
+
 def _lora(rng, n_samples=WINDOW_LEN):
     bw, sf = LORA_SETTINGS[int(rng.integers(len(LORA_SETTINGS)))]
     n_pre = int(rng.integers(*LORA_PREAMBLE))
@@ -187,7 +219,8 @@ def _lora(rng, n_samples=WINDOW_LEN):
     symbol_samples = 2 ** sf / bw * FS
     n_data = max(n_data, int(np.ceil(n_samples / symbol_samples - (n_pre + 4.25))) + 1)
     freq = lora_frame(bw, sf, rng, n_preamble=n_pre, n_data=n_data)
-    start = rng.integers(0, len(freq) - n_samples + 1)
+    starts = lora_window_starts(freq, bw, n_samples)
+    start = int(starts[rng.integers(len(starts))])
     phase = 2 * np.pi * np.cumsum(freq[start:start + n_samples] / FS)
     params = dict(bandwidth_hz=bw, spreading_factor=sf, symbol_rate_hz=bw / 2 ** sf)
     return np.exp(1j * (phase + rng.uniform(0, 2 * np.pi))), params

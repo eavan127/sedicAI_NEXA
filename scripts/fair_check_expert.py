@@ -33,6 +33,7 @@ import torch.nn as nn
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.config import CFG, CLASS_GROUPS, DATASET_CLASSES, REPO_ROOT  # noqa: E402
+from src.data import labels  # noqa: E402
 from src.models.amc_cnn import AMC_CNN, ExpertFeatures  # noqa: E402
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -98,17 +99,18 @@ def top1_hits(logits, y):
 
 
 def scores(hits, y, snr, high=10):
-    single = y.sum(1) == 1
-    true = y.argmax(1)
+    # One emitter per window (src/data/labels.py), each scored under its class.
+    rows, true = labels.standalone_pairs(y)
+    p_hits, p_high = hits[rows], snr[rows] >= high
     fam = np.array([FAMILY[DATASET_CLASSES[t]] for t in true])
     out = {"top1": float(hits.mean()), "top1_high": float(hits[snr >= high].mean()),
            "family_high": {}, "class_high": {}}
     for g in sorted(set(FAMILY.values())):
-        m = single & (fam == g) & (snr >= high)
-        out["family_high"][g] = float(hits[m].mean()) if m.any() else float("nan")
+        m = (fam == g) & p_high
+        out["family_high"][g] = float(p_hits[m].mean()) if m.any() else float("nan")
     for i, c in enumerate(DATASET_CLASSES):
-        m = single & (true == i) & (snr >= high)
-        out["class_high"][c] = float(hits[m].mean()) if m.any() else float("nan")
+        m = (true == i) & p_high
+        out["class_high"][c] = float(p_hits[m].mean()) if m.any() else float("nan")
     return out
 
 

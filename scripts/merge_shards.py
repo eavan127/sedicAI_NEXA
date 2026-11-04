@@ -41,7 +41,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.config import CFG, DATASET_CLASSES, REPO_ROOT  # noqa: E402
-from src.data import merge  # noqa: E402
+from src.data import labels, merge  # noqa: E402
 from src.data.shards import (MANIFEST_DIR, SPLITS, ShardWriter, _git_commit,  # noqa: E402
                              class_list_version, load_shard)
 
@@ -57,7 +57,10 @@ def window_seed(split_seed, i):
 
 
 def fix_salt(args):
-    return merge.EXTERNAL_FIX if args.external_fix else ""
+    """Names every change the merge makes to the shards' windows or labels,
+    so it goes into combined_version: the external fix (if on) and the label
+    rules (src/data/labels.py, always on)."""
+    return "+".join(([merge.EXTERNAL_FIX] if args.external_fix else []) + [labels.LABEL_RULES])
 
 
 def read_manifests(folder):
@@ -123,6 +126,11 @@ def merge_split(split, manifests, args, split_seed):
             # rows keep every class and SNR in a quick check, a prefix would not.
             rows = np.linspace(0, len(data["iq"]) - 1, min(limit, len(data["iq"]))).astype(int)
             data = {k: v[rows] for k, v in data.items()}
+        # Mixture components are chosen by the class each window was generated
+        # as, before the label rules add a second label to some of them.
+        generated_as = data["y"].argmax(axis=1)
+        one_class = data["y"].sum(axis=1) == 1
+        data["y"], n_drfm = labels.fix_shard_labels(data, m)
         snr = merge.fill_noise_floor_snr(data["snr_db"], data["y"], np.random.default_rng([m["seed"], m["part"]]))
         ext = np.isin(data["source"], merge.EXTERNAL_SOURCES) if args.external_fix else np.zeros(len(snr), bool)
         if ext.any():
@@ -131,13 +139,17 @@ def merge_split(split, manifests, args, split_seed):
             data["iq"] = iq
         for s in range(0, len(snr), CHUNK):
             out.write(data["iq"][s:s + CHUNK], data["y"][s:s + CHUNK], snr[s:s + CHUNK])
-        # Mixture components: single-label, high-SNR, never NOISE_FLOOR.
-        usable = (data["y"].sum(axis=1) == 1) & (snr >= args.pool_min_snr) & (data["y"][:, NOISE_IDX] == 0)
-        pool_iq, labels = data["iq"][usable], data["y"][usable].argmax(axis=1)
-        for idx in np.unique(labels):
-            pool[DATASET_CLASSES[idx]].append(pool_iq[labels == idx])
-        print(f"  {m['shard']}: {len(snr)} windows ({int(ext.sum())} external harmonized)")
-    pool = {c: np.concatenate(parts) for c, parts in pool.items()}
+        # Mixture components: one generated emitter, high-SNR, never NOISE_FLOOR.
+        # Each keeps its full label row, so a DRFM component brings its radar
+        # label into the mixture too.
+        usable = one_class & (snr >= args.pool_min_snr) & (data["y"][:, NOISE_IDX] == 0)
+        for idx in np.unique(generated_as[usable]):
+            sel = usable & (generated_as == idx)
+            pool[DATASET_CLASSES[idx]].append((data["iq"][sel], data["y"][sel]))
+        print(f"  {m['shard']}: {len(snr)} windows ({int(ext.sum())} external harmonized"
+              f"{f', {n_drfm} DRFM labelled with their radar' if n_drfm else ''})")
+    pool = {c: (np.concatenate([p[0] for p in parts]), np.concatenate([p[1] for p in parts]))
+            for c, parts in pool.items()}
 
     emitters = [c for c in merge.EMITTERS if c in pool]
     jammers = [c for c in merge.JAMMERS if c in pool]
@@ -148,7 +160,8 @@ def merge_split(split, manifests, args, split_seed):
     notes = {"script": "scripts/merge_shards.py", "pool_min_snr_db": args.pool_min_snr,
              "mix_weights": dict(zip(merge.MIX_KINDS, args.mix_weights)),
              "inputs_version": merge.combined_version(manifests, fix_salt(args)),
-             "external_fix": fix_salt(args)}
+             "external_fix": merge.EXTERNAL_FIX if args.external_fix else "",
+             "label_rules": labels.LABEL_RULES}
     with ShardWriter(args.mix_out, MIX_GROUP, split, split_seed, manifest_dir=args.mix_manifests,
                      notes=notes) as writer:
         buf_iq, buf_y, buf_snr = [], [], []
@@ -157,12 +170,14 @@ def merge_split(split, manifests, args, split_seed):
             r = np.random.default_rng(wseed)
             kind = merge.MIX_KINDS[r.choice(len(merge.MIX_KINDS), p=args.mix_weights)]
             classes = merge.pick_mixture_classes(r, kind, emitters, jammers)
-            comps = [(c, pool[c][r.integers(len(pool[c]))]) for c in classes]
+            picks = [(c, r.integers(len(pool[c][0]))) for c in classes]
+            comps = [(c, pool[c][0][j]) for c, j in picks]
+            y_mix = np.max([pool[c][1][j] for c, j in picks], axis=0).astype(np.uint8)
             snr_db = float(r.choice(bins))
             iq = merge.mix_windows(comps, snr_db, r)
-            writer.add(iq, classes, snr_db, "mix", wseed)
+            writer.add(iq, labels.class_names(y_mix), snr_db, "mix", wseed)
             buf_iq.append(iq)
-            buf_y.append(np.isin(DATASET_CLASSES, classes).astype(np.uint8))
+            buf_y.append(y_mix)
             buf_snr.append(snr_db)
             if len(buf_iq) == CHUNK or i == n_mix - 1:
                 out.write(np.stack(buf_iq), np.stack(buf_y), np.asarray(buf_snr, dtype=np.float32))
@@ -220,7 +235,9 @@ def main():
     commit, dirty = _git_commit()
     info = {
         "combined_version": merge.combined_version(manifests + mix_manifests, fix_salt(args)),
-        "external_fix": fix_salt(args),
+        "external_fix": merge.EXTERNAL_FIX if args.external_fix else "",
+        "label_rules": labels.LABEL_RULES,
+        "ambiguous_labels": [list(g) for g in labels.AMBIGUOUS_GROUPS],
         "class_list_version": class_list_version(),
         "classes": DATASET_CLASSES,
         "git_commit": commit,

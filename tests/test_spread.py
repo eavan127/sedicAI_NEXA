@@ -141,6 +141,26 @@ def test_lora_frame_structure(bw, sf):
     assert n_down == pytest.approx(2.25 * ts * FS, abs=4)
 
 
+def test_every_lora_window_shows_a_chirp_boundary():
+    """No LoRa window may be one plain straight sweep (that is JAM_SWEPT)."""
+    for seed in range(200):
+        sig, p = spread.generate_window("LORA_CSS", None, np.random.default_rng(seed))
+        f = inst_freq_hz(sig)
+        bw = p["bandwidth_hz"]
+        events = spread.lora_events(f, bw)
+        m = spread.LORA_EVENT_MARGIN - 2         # inst_freq_hz is one sample shorter
+        assert ((events >= m) & (events <= len(f) - m)).any(), seed
+
+
+def test_lora_events_find_wraps_and_turns():
+    bw = 500e3
+    up = np.linspace(-bw / 2, bw / 2, 100, endpoint=False)
+    freq = np.concatenate([up, up, up[::-1]])
+    ev = spread.lora_events(freq, bw).tolist()
+    assert 100 in ev                              # wrap
+    assert any(195 <= e <= 205 for e in ev)       # up -> down
+
+
 def test_lora_window_stays_in_its_band():
     for seed in range(30):
         sig, p = spread.generate_window("LORA_CSS", None, np.random.default_rng(seed))

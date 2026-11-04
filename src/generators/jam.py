@@ -83,8 +83,11 @@ DRFM_PHASE_BITS = (2, 3, 4)        # DRFMs store the pulse with few bits
 DRFM_PULL_SAMPLES = (16, 128)
 DRFM_PRI_EXTRA_SAMPLES = 1024
 
+# copied_radar: for JAM_DRFM, the index in radar.CLASSES of the pulse the jammer
+# copied. The window holds that radar's own pulse too, so it is labelled with
+# both classes (src/data/labels.py).
 PARAM_KEYS = ("bandwidth_hz", "n_tones", "period_samples", "duty", "onset_sample",
-              "delay_samples", "doppler_hz")
+              "delay_samples", "doppler_hz", "copied_radar")
 
 
 def _log_uniform(rng, lo, hi):
@@ -173,7 +176,8 @@ def _reactive(rng, n):
 def _drfm(rng, n):
     # One radar pulse, reusing the radar generator so the pulse shapes match.
     while True:
-        pulse, p = radar._pulse(str(rng.choice(DRFM_RADAR_CLASSES)), rng)
+        copied = str(rng.choice(DRFM_RADAR_CLASSES))
+        pulse, p = radar._pulse(copied, rng)
         if len(pulse) <= DRFM_MAX_PULSE_SAMPLES:
             break
     delay = int(rng.integers(DRFM_DELAY_SAMPLES[0], DRFM_DELAY_SAMPLES[1] + 1))
@@ -211,7 +215,7 @@ def _drfm(rng, n):
                 sig[start + d:start + d + seg] += copy[:seg]
     sig *= np.exp(1j * rng.uniform(0, 2 * np.pi))
     return sig, dict(bandwidth_hz=p["bandwidth_hz"] + abs(doppler), delay_samples=delay,
-                     doppler_hz=doppler)
+                     doppler_hz=doppler, copied_radar=float(radar.CLASSES.index(copied)))
 
 
 def _noise_floor(rng, n):

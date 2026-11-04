@@ -33,6 +33,7 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.config import CFG, DATASET_CLASSES, REPO_ROOT  # noqa: E402
+from src.data import labels  # noqa: E402
 from src.models.amc_cnn import AMC_CNN  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -125,11 +126,16 @@ def main():
     yt = y.astype(bool)
     top = logits.argmax(axis=1)
     hit = yt[np.arange(len(yt)), top]
-    single = yt.sum(axis=1) == 1
+    # One emitter per window: one label, a DRFM pair or an ambiguous group
+    # (src/data/labels.py). Each is scored under its own class; an ambiguous
+    # group's windows count under every member, as one merged result.
+    rows, true = labels.standalone_pairs(yt)
+    single = np.zeros(len(yt), dtype=bool)
+    single[rows] = True
     mixed = ~single
-    true = yt.argmax(axis=1)
     pred05 = logits > 0  # sigmoid > 0.5
     high = snr >= args.high_snr
+    p_hit, p_top, p_snr, p_high = hit[rows], labels.scored_prediction(true, top[rows]), snr[rows], high[rows]
 
     bins = sorted(set(CFG["dataset_snr_bins_db"]) | set(np.unique(snr).tolist()))
     by_snr = []
@@ -141,12 +147,12 @@ def main():
                        "all": rate(hit, at)[0], "n": int(at.sum()),
                        "single": rate(hit, at & single)[0], "mixtures": rate(hit, at & mixed)[0]})
 
-    conf_all, counts_all = confusion(true[single], top[single])
-    conf_high, _ = confusion(true[single & high], top[single & high])
+    conf_all, counts_all = confusion(true, p_top)
+    conf_high, _ = confusion(true[p_high], p_top[p_high])
 
     per_class = []
     for i, c in enumerate(DATASET_CLASSES):
-        mine = single & (true == i)
+        mine = true == i
         row = counts_all[i].copy()
         row[i] = 0
         j = int(row.argmax())
@@ -154,13 +160,13 @@ def main():
         per_class.append({
             "class": c,
             "n_single": int(mine.sum()),
-            "top1": rate(hit, mine)[0],
-            "top1_high": rate(hit, mine & high)[0],
+            "top1": rate(p_hit, mine)[0],
+            "top1_high": rate(p_hit, mine & p_high)[0],
             "recall_05": tp / max(int(yt[:, i].sum()), 1),
             "precision_05": tp / max(int(pred05[:, i].sum()), 1),
             "most_confused_with": DATASET_CLASSES[j] if row[j] else "",
             "confused_share": float(row[j] / max(counts_all[i].sum(), 1)),
-            "top1_by_snr": {str(b): rate(hit, mine & (snr == b))[0] for b in CFG["dataset_snr_bins_db"]},
+            "top1_by_snr": {str(b): rate(p_hit, mine & (p_snr == b))[0] for b in CFG["dataset_snr_bins_db"]},
         })
 
     pairs = [(DATASET_CLASSES[i], DATASET_CLASSES[j], float(conf_all[i, j]))
