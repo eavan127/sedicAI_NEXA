@@ -88,10 +88,10 @@
     18.0,
     20.0
   ],
-  "git_commit": "0f7af4139d95c1a5d7fb4a1ea276356e8c59a430",
-  "git_dirty": true,
+  "git_commit": "8806bdc8b2def8b44202ad691f698faab35a8ea5",
+  "git_dirty": false,
   "sha256": "7fffd0bef5abe6ac4ef3fbb4a6b4a419916344799aaad29be89013c44ebd0ae7",
-  "created_utc": "2026-11-04T05:51:06+00:00",
+  "created_utc": "2026-11-04T05:59:42+00:00",
   "notes": {
     "script": "scripts/merge_shards.py",
     "pool_min_snr_db": 16,
