@@ -473,6 +473,7 @@
       <div class="menu-label">Menu</div>
       <button class="active" data-page="replay">RF Replay</button>
       <button data-page="signal">Signal Analysis</button>
+      <button data-page="intel">Comms Intel</button>
       <button data-page="history">History</button>
       <button data-page="audit">Audit trail</button>
       <button data-page="performance">Performance</button>
@@ -665,6 +666,12 @@
           </div>
         </div>
       </div>
+    </section>
+
+    <!-- Decoded receiver audio + local-LLM reading (web/intel.js, /api/intel). -->
+    <section id="page-intel" hidden>
+      <h3 class="page-title">Comms Intel</h3>
+      <div id="intelRoot"></div>
     </section>
 
     <section id="page-history" hidden>

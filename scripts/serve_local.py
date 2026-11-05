@@ -49,6 +49,9 @@ API (JSON)
     GET    /api/users                  accounts (analyst)
     POST   /api/users                  {username, password, role} (analyst)
     POST   /api/users/<name>           {role?, disabled?, password?} (analyst)
+    GET    /api/intel                  Comms Intel: decoded receiver-audio recordings
+                                       (written by scripts/comms_intel.py into --intel-dir)
+    GET    /api/intel/<id>             one recording: transmissions, activity, LLM reading
 
 Sign-in (--sign-in, or --lan)
   Off by default: the page opens straight into the console, and buttons at
@@ -99,6 +102,8 @@ from src.report_export import _iq_payload, build_export  # noqa: E402
 
 WEB = ROOT / "web"
 DEFAULT_DB = ROOT / "data" / "local" / "nexa.db"
+DEFAULT_INTEL = ROOT / "results" / "comms_intel"
+INTEL_ID = re.compile(r"[A-Za-z0-9_.-]{1,200}")
 APP_ID = "nexa-local"
 MAX_JSON = 1 << 20            # 1 MB: a record is ~2 KB
 MAX_CAPTURE = 1 << 30         # 1 GB: ~40 s of 3.2 MS/s float32
@@ -165,6 +170,7 @@ class Handler(SimpleHTTPRequestHandler):
     demo: bool = False
     keep_bytes: int = ROLLING_IQ_BYTES
     retrain_args: list = []
+    intel_dir: Path = DEFAULT_INTEL
 
     # -- request gate ----------------------------------------------------------
 
@@ -316,6 +322,28 @@ class Handler(SimpleHTTPRequestHandler):
     def do_DELETE(self):
         self._dispatch("DELETE")
 
+    # -- comms intel (read-only files from scripts/comms_intel.py) --------------
+
+    def _intel(self, rest):
+        """The decoded recordings. Files only, never written here; the id is
+        checked so a request cannot reach outside the folder."""
+        d = self.intel_dir
+        if not rest:
+            index = d / "index.json"
+            if not index.is_file():
+                return self._send_json({"recordings": [], "folder": str(d),
+                                        "hint": "run: python scripts/comms_intel.py --in <folder of .wav>"})
+            data = json.loads(index.read_text(encoding="utf-8"))
+            data["folder"] = str(d)
+            return self._send_json(data)
+        rid = rest[0]
+        if len(rest) != 1 or not INTEL_ID.fullmatch(rid) or rid == "index":
+            return self._error(HTTPStatus.NOT_FOUND, "no such recording")
+        f = d / f"{rid}.json"
+        if not f.is_file():
+            return self._error(HTTPStatus.NOT_FOUND, "no such recording")
+        return self._send_json(json.loads(f.read_text(encoding="utf-8")))
+
     # -- routes ---------------------------------------------------------------
 
     def _route(self, method, parts, query):
@@ -329,6 +357,8 @@ class Handler(SimpleHTTPRequestHandler):
                                     "active_model": single["version"] if single else None,
                                     "active_ensemble": ens["version"] if ens else None})
 
+        if head == "intel" and method == "GET":
+            return self._intel(parts[1:])
         if head == "auth":
             return self._auth(method, parts[1:])
         if head == "users":
@@ -732,12 +762,13 @@ def pick_port(host: str, preferred: int, tries: int = 20) -> int:
 
 def make_server(db_path: Path, host: str, port: int, lan: bool = False,
                 retrain_args: list | None = None, demo: bool = False,
-                keep_bytes: int = ROLLING_IQ_BYTES) -> ThreadingHTTPServer:
+                keep_bytes: int = ROLLING_IQ_BYTES, intel_dir: Path = DEFAULT_INTEL) -> ThreadingHTTPServer:
     db = LocalDB(db_path)
     iq_dir = Path(db_path).parent / "iq"
     iq_dir.mkdir(parents=True, exist_ok=True)
     handler = type("NexaHandler", (Handler,), {"db": db, "iq_dir": iq_dir, "lan": lan, "demo": demo, "keep_bytes": keep_bytes,
-                                                "retrain_args": list(retrain_args or [])})
+                                                "retrain_args": list(retrain_args or []),
+                                                "intel_dir": Path(intel_dir)})
     server = ThreadingHTTPServer((host, port), partial(handler, directory=str(WEB)))
     server.nexa_db = db
     return server
@@ -763,6 +794,8 @@ def main():
     p.add_argument("--synthetic-exam", action="store_true",
                    help="demo: judge retrained models on the fixed synthetic exam even when "
                         "data/processed exists (the Model page labels it as synthetic)")
+    p.add_argument("--intel-dir", type=Path, default=DEFAULT_INTEL,
+                   help="results of scripts/comms_intel.py shown on the Comms Intel page")
     a = p.parse_args()
 
     host = "0.0.0.0" if a.lan else "127.0.0.1"
@@ -779,7 +812,7 @@ def main():
     # so on the network (--lan) sign-in is always on.
     demo = not (a.sign_in or a.lan)
     server = make_server(a.db, host, port, a.lan, retrain_args, demo=demo,
-                         keep_bytes=int(a.keep_gb * 1024 ** 3))
+                         keep_bytes=int(a.keep_gb * 1024 ** 3), intel_dir=a.intel_dir)
     url = f"http://localhost:{port}/index.html"          # with sign-in on, redirects to the login page first
     counts = server.nexa_db.counts()
     print(f"NEXA local server\n  open      {url}\n  database  {a.db}\n"

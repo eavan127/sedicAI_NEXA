@@ -30,6 +30,7 @@ import {
 import { applyFilters, barsHtml, canView, flagsHtml, summarise, summaryHtml as histSummaryHtml, tableHtml } from "./history.js";
 import { buildReport, buildSingle } from "./report.js";
 import { installZoom, registerZoom } from "./zoom.js";
+import { renderIntel } from "./intel.js";
 
 installZoom();
 
@@ -1140,6 +1141,7 @@ function showPage(page) {
   if (page === "performance") renderPerformance();
   if (page === "model") renderModel();
   if (page === "users") renderUsers();
+  if (page === "intel") renderIntel(document.getElementById("intelRoot"), { server: readConfig().backend === "server" });
   if (page === "replay" && session) render();
 }
 

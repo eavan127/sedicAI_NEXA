@@ -63,6 +63,21 @@
         "presentation"
       ],
       "port": 8098
+    },
+    {
+      "name": "intel-demo",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "scripts/serve_local.py",
+        "--port",
+        "8193",
+        "--no-browser",
+        "--db",
+        "C:/Users/User/AppData/Local/Temp/claude/4ceab0f120985116/90328246-1c5d-4a8a-b878-8f15fc2cd241/scratchpad/ci_demo_db/nexa.db",
+        "--intel-dir",
+        "C:/Users/User/AppData/Local/Temp/claude/4ceab0f120985116/90328246-1c5d-4a8a-b878-8f15fc2cd241/scratchpad/ci_demo"
+      ],
+      "port": 8193
     }
   ]
 }
