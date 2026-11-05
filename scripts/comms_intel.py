@@ -196,10 +196,11 @@ def main():
         print(f"[{i}/{len(files)}] {f.name}", flush=True)
         try:
             if target.exists() and not args.force:
-                if not args.relabel:
+                rec = json.loads(target.read_text(encoding="utf-8"))
+                failed = "error" in (rec.get("reading") or {})      # e.g. Ollama timed out last time
+                if not (args.relabel or (failed and not args.no_llm)):
                     print("    done before (--force to redo)")
                     continue
-                rec = json.loads(target.read_text(encoding="utf-8"))
             else:
                 rec = process(f, args)
             rec = add_reading(rec, args)

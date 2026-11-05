@@ -10,6 +10,10 @@ variety of shapes for free.
 
 Writes --out/emitter_detector.pt (the best epoch by validation AP@0.5, with
 its settings) and --out/history.json.
+
+Uses a CUDA GPU when there is one (Colab / Kaggle), else every CPU core;
+--device cpu forces the CPU. The saved weights are CPU tensors either way, so
+the file loads on any machine.
 """
 import argparse
 import json
@@ -47,12 +51,12 @@ def augment(img, boxes, rng):
     return img, boxes
 
 
-def evaluate(net, imgs, boxes, ignore, score_thr=0.05, batch=64):
+def evaluate(net, imgs, boxes, ignore, score_thr=0.05, batch=64, device="cpu"):
     net.eval()
     tps, scores, n_gt = [], [], 0
     with torch.no_grad():
         for s in range(0, len(imgs), batch):
-            preds = det.decode(net(imgs[s:s + batch]), score_thr=score_thr)
+            preds = det.decode(net(imgs[s:s + batch].to(device)).cpu(), score_thr=score_thr)
             for (pb, ps), gb, gi in zip(preds, boxes[s:s + batch], ignore[s:s + batch]):
                 tp, sc, _ = det.match(pb, ps, gb, gi)
                 tps.append(tp)
@@ -71,7 +75,10 @@ def main():
     p.add_argument("--width", type=int, default=32)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--limit", type=int, default=0, help="use only this many training scenes (smoke runs)")
+    p.add_argument("--device", default="auto", help="auto (GPU if available), cpu or cuda")
     args = p.parse_args()
+    device = torch.device("cuda" if args.device == "auto" and torch.cuda.is_available()
+                          else "cpu" if args.device == "auto" else args.device)
 
     torch.manual_seed(args.seed)
     torch.set_num_threads(os.cpu_count())
@@ -83,14 +90,16 @@ def main():
     _, _, img_h, img_w = tr_imgs.shape
     gh, gw = img_h // det.STRIDE, img_w // det.STRIDE
 
-    net = det.EmitterDetector(args.width)
+    net = det.EmitterDetector(args.width).to(device)
     opt = torch.optim.AdamW(net.parameters(), lr=args.lr, weight_decay=1e-4)
     steps = args.epochs * int(np.ceil(len(tr_imgs) / args.batch))
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=args.lr, total_steps=steps, pct_start=0.1)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     print(f"{len(tr_imgs)} train / {len(va_imgs)} val scenes, "
-          f"{sum(x.numel() for x in net.parameters()):,} parameters, CPU threads {torch.get_num_threads()}")
+          f"{sum(x.numel() for x in net.parameters()):,} parameters, "
+          + (f"GPU {torch.cuda.get_device_name(device)}" if device.type == "cuda"
+             else f"CPU threads {torch.get_num_threads()}"))
 
     history, best = [], -1.0
     for epoch in range(args.epochs):
@@ -105,7 +114,8 @@ def main():
                 batch_imgs.append(img)
                 batch_boxes.append(bx)
             obj, box, weight = det.encode(batch_boxes, [tr_ign[i] for i in idx], gh, gw)
-            loss, lp = det.loss(net(torch.stack(batch_imgs)), obj, box, weight)
+            loss, lp = det.loss(net(torch.stack(batch_imgs).to(device)),
+                                obj.to(device), box.to(device), weight.to(device))
             opt.zero_grad()
             loss.backward()
             opt.step()
@@ -113,14 +123,14 @@ def main():
             total += loss.item() * len(idx)
             for k in parts:
                 parts[k] += lp[k] * len(idx)
-        ap = evaluate(net, va_imgs, va_boxes, va_ign)
+        ap = evaluate(net, va_imgs, va_boxes, va_ign, device=device)
         n = len(order)
         history.append({"epoch": epoch + 1, "loss": total / n, "obj": parts["obj"] / n,
                         "box": parts["box"] / n, "val_ap50": ap, "seconds": time.time() - t0})
         flag = ""
         if ap > best:
             best = ap
-            torch.save({"state_dict": net.state_dict(), "width": args.width, "stride": det.STRIDE,
+            torch.save({"state_dict": {k: v.cpu() for k, v in net.state_dict().items()}, "width": args.width, "stride": det.STRIDE,
                         "img_h": img_h, "img_w": img_w, "epoch": epoch + 1, "val_ap50": ap},
                        out / "emitter_detector.pt")
             flag = "  <- saved"
