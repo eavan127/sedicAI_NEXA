@@ -10,10 +10,25 @@ Per (class, SNR, split) the windows are:
     data (GFSK, MSK, CPFSK; RadioML has nothing past its range, HisarMod stops
     at +18 dB) are 100% generated.
 
+Impairments: generated windows get the full chain (channel, placement in the
+band, noise at the labelled SNR, receiver effects) via
+impairments.generate_impaired, like every other family; external windows
+already carry their own noise, so they get the chain without noise
+(impairments.apply with snr_db=None), as in make_radar_shards.py.
+--no-impair turns both off.
+
+Why (SED-39, 2026-11-06): these 18 classes used to be generated with no
+impairments, so every window sat exactly at 0 Hz while every other family was
+placed anywhere in the band. The 60-class model learned "at 0 Hz -> FSK / PSK /
+QAM": BPSK was right 100% at 0 Hz and 4% at +300 kHz (called DSSS), and DSSS
+was called BPSK every time it was centred.
+
 Seeds: --seed is the train seed; val and test use --seed + 1 and + 2, so the
 three splits never share a generated window. Every generated window stores
 its own seed, derived from (split seed, class, SNR, index), and can be
-regenerated alone with digital.generate_window(cls, snr, default_rng(seed)).
+regenerated alone with
+    impairments.generate_impaired(digital, cls, snr, default_rng(seed))
+(or digital.generate_window(cls, snr, default_rng(seed)) with --no-impair).
 
 Quick check first (a few windows, separate output folders):
     python scripts/make_fskpsk_shards.py --n-per-bin 10 --out data/interim/try --manifests data/interim/try_manifests
@@ -30,7 +45,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.config import CFG, DATASET_CLASS_TO_IDX  # noqa: E402
-from src.data import external  # noqa: E402
+from src.data import external, impairments  # noqa: E402
 from src.data.shards import MANIFEST_DIR, SPLITS, ShardWriter  # noqa: E402
 from src.generators import digital  # noqa: E402
 
@@ -65,6 +80,8 @@ def main():
     p.add_argument("--classes", nargs="+", default=CLASSES)
     p.add_argument("--no-radioml", action="store_true")
     p.add_argument("--no-hisarmod", action="store_true")
+    p.add_argument("--no-impair", action="store_true",
+                   help="old behaviour: no impairments, every window at 0 Hz (debug only)")
     args = p.parse_args()
 
     if not (SEED_BLOCK[0] <= args.seed and args.seed + 2 <= SEED_BLOCK[1]):
@@ -78,7 +95,7 @@ def main():
     ext_counts = {s: int(args.ext_frac * n) for s, n in counts.items()}
     split_seed = {s: args.seed + k for k, s in enumerate(SPLITS)}
     print(f"{len(args.classes)} classes x {len(snr_bins)} SNRs; per bin {counts}, "
-          f"external at most {ext_counts}")
+          f"external at most {ext_counts}; impairments {'OFF' if args.no_impair else 'on'}")
 
     ext = {}
     t0 = time.time()
@@ -104,7 +121,9 @@ def main():
         n_ext_total = 0
         with ShardWriter(args.out, GROUP, split, split_seed[split], manifest_dir=args.manifests,
                          notes={"script": "scripts/make_fskpsk_shards.py",
-                                "n_per_bin": args.n_per_bin, "ext_frac": args.ext_frac}) as w:
+                                "n_per_bin": args.n_per_bin, "ext_frac": args.ext_frac,
+                                "impairments": not args.no_impair}) as w:
+            ext_rng = np.random.default_rng([split_seed[split], 1])
             for cls in args.classes:
                 for snr in snr_bins:
                     n = counts[split]
@@ -112,6 +131,8 @@ def main():
                     if got is not None:
                         (iq, rows), source = got
                         for window, row in zip(iq[:n], rows[:n]):
+                            if not args.no_impair:
+                                window, _ = impairments.apply(window, None, ext_rng)
                             w.add(window, {cls}, snr, source, row)
                         n_ext = min(n, len(iq))
                         n_ext_total += n_ext
@@ -119,7 +140,11 @@ def main():
                         n_ext = 0
                     for i in range(n - n_ext):
                         s = window_seed(split_seed[split], cls, snr, i)
-                        window, _ = digital.generate_window(cls, snr, np.random.default_rng(s))
+                        rng = np.random.default_rng(s)
+                        if args.no_impair:
+                            window, _ = digital.generate_window(cls, snr, rng)
+                        else:
+                            window, _ = impairments.generate_impaired(digital, cls, snr, rng)
                         w.add(window, {cls}, snr, "gen", s)
         total = sum(m["n_windows"] for m in w.written)
         print(f"{split}: {total} windows ({n_ext_total} external) in {len(w.written)} shard(s), "
