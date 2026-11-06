@@ -106,6 +106,14 @@ class AMC_CNN_ONNX(nn.Module):
         # this the exported graph feeds fc1 192 inputs where the trained
         # weights expect 195, which fails at export time rather than silently.
         self.cumulant_branch = model.cumulant_branch
+        # ExpertFeatures and SpectrumBranch were written for export from the
+        # start: real arithmetic only, the DFT a matmul with fixed cos / sin
+        # tables, no complex tensors. Shared as-is, like the cumulants. Each is
+        # None when its flag is off. They were missing here until SED-39, so a
+        # week-1 model with either flag on fed fc1 too few inputs.
+        self.expert_branch = model.expert_branch
+        self.expert_norm = model.expert_norm
+        self.spectrum_branch = model.spectrum_branch
         self.attn_pool = model.attn_pool
         self.relu = model.relu
         self.dropout = model.dropout
@@ -133,6 +141,10 @@ class AMC_CNN_ONNX(nn.Module):
         # after the pooled features, not before them.
         if self.cumulant_branch is not None:
             pooled = torch.cat([pooled, self.cumulant_branch(iq)], dim=1)
+        if self.expert_branch is not None:
+            pooled = torch.cat([pooled, self.expert_norm(self.expert_branch(iq))], dim=1)
+        if self.spectrum_branch is not None:
+            pooled = torch.cat([pooled, self.spectrum_branch(iq)], dim=1)
 
         x = self.dropout(self.relu(self.fc1(pooled)))
         return self.fc2(x), weights[:, 0, :]

@@ -4,11 +4,19 @@ output on random inputs.
 
 Usage:
     python scripts/export_onnx.py
+    python scripts/export_onnx.py --ckpt <week-1 best.pt> --out <file.onnx>
 
 Writes to results/onnx/: best_model.onnx, ensemble_0.onnx .. ensemble_4.onnx.
+With --ckpt it exports that one checkpoint instead: either a plain state_dict
+(the 8-class models above) or a week-1 checkpoint ({"state_dict", "meta"},
+written by scripts/train_week1.py), whose meta gives the class count, window
+length, STFT n_fft and model flags (expert features, full spectrum, ...).
+The --ckpt file is saved as ONE self-contained .onnx (no .onnx.data sidecar),
+since onnxruntime-web loads a single file.
 Exits non-zero if any export fails to match its source checkpoint, so a
 green run is a real guarantee, not just "no exception was thrown".
 """
+import argparse
 import sys
 from pathlib import Path
 
@@ -26,20 +34,31 @@ from src.models.onnx_export import (AMC_CNN_ONNX, compute_stft_mag,
 CKPT_DIR = REPO_ROOT / CFG["paths"]["checkpoints"]
 OUT_DIR = CKPT_DIR / "onnx"
 WINDOW_LEN = CFG["signal"]["window_len"]
-N_FFT, HOP = 16, 4          # must match STFTBranch's own defaults
 ATOL = 1e-4                  # logits are unbounded reals; this is a tight bar
 
 
-def _load_model(ckpt_path: Path) -> AMC_CNN:
-    model = AMC_CNN(num_classes=len(CLASSES), input_len=WINDOW_LEN)
-    model.load_state_dict(torch.load(ckpt_path, map_location="cpu"))
+def _load_model(ckpt_path: Path):
+    """(model in eval mode, window_len). A week-1 checkpoint carries its own
+    shape and flags in "meta"; a plain state_dict is one of the 8-class
+    models, built from the config like before."""
+    ck = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+    if isinstance(ck, dict) and "meta" in ck and "state_dict" in ck:
+        meta = ck["meta"]
+        window_len = meta["input_len"]
+        model = AMC_CNN(num_classes=len(meta["classes"]), input_len=window_len,
+                        stft_n_fft=meta["stft_n_fft"], **meta.get("model_flags", {}))
+        model.load_state_dict(ck["state_dict"])
+    else:
+        window_len = WINDOW_LEN
+        model = AMC_CNN(num_classes=len(CLASSES), input_len=window_len)
+        model.load_state_dict(ck)
     model.eval()
-    return model
+    return model, window_len
 
 
-def _sample_inputs(batch: int, seed: int):
+def _sample_inputs(batch: int, seed: int, window_len: int = WINDOW_LEN):
     rng = np.random.default_rng(seed)
-    iq = torch.tensor(rng.standard_normal((batch, 2, WINDOW_LEN)),
+    iq = torch.tensor(rng.standard_normal((batch, 2, window_len)),
                        dtype=torch.float32)
     return iq
 
@@ -50,12 +69,15 @@ def export_and_verify(ckpt_path: Path, out_path: Path) -> bool:
     sizes and two random seeds (catches shape bugs static-shape export can
     hide, and makes sure it isn't a one-seed fluke)."""
     print(f"\n== {ckpt_path.name} -> {out_path.name} ==")
-    model = _load_model(ckpt_path)
+    model, window_len = _load_model(ckpt_path)
     wrapper = AMC_CNN_ONNX(model).eval()
     window = model.stft_branch.window
+    n_fft, hop = model.stft_branch.n_fft, model.stft_branch.hop_length
+    print(f"  window_len={window_len}  n_fft={n_fft}  hop={hop}  "
+          f"-> {stft_mag_frame_count(window_len, n_fft, hop)} STFT frames")
 
-    trace_iq = _sample_inputs(batch=2, seed=0)
-    trace_mag = compute_stft_mag(trace_iq, N_FFT, HOP, window)
+    trace_iq = _sample_inputs(batch=2, seed=0, window_len=window_len)
+    trace_mag = compute_stft_mag(trace_iq, n_fft, hop, window)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     torch.onnx.export(
@@ -74,8 +96,8 @@ def export_and_verify(ckpt_path: Path, out_path: Path) -> bool:
 
     ok = True
     for batch, seed in [(1, 1), (8, 2)]:
-        iq = _sample_inputs(batch, seed)
-        mag = compute_stft_mag(iq, N_FFT, HOP, window)
+        iq = _sample_inputs(batch, seed, window_len)
+        mag = compute_stft_mag(iq, n_fft, hop, window)
 
         # Reference attention comes from the SAME forward hook
         # src/timeline.py:classify_capture uses, so this checks the inlined
@@ -107,10 +129,34 @@ def export_and_verify(ckpt_path: Path, out_path: Path) -> bool:
     return ok
 
 
+def export_single_file(ckpt_path: Path, out_path: Path) -> bool:
+    """export_and_verify, then fold the weights into the .onnx itself."""
+    import onnx
+    if not export_and_verify(ckpt_path, out_path):
+        return False
+    onnx.save_model(onnx.load(str(out_path)), str(out_path), save_as_external_data=False)
+    out_path.with_name(out_path.name + ".data").unlink(missing_ok=True)
+    print(f"  saved as one file ({out_path.stat().st_size / 1024:.1f} KB)")
+    return True
+
+
 def main():
-    expected_frames = stft_mag_frame_count(WINDOW_LEN, N_FFT, HOP)
-    print(f"window_len={WINDOW_LEN}  n_fft={N_FFT}  hop={HOP}  "
-          f"-> {expected_frames} STFT frames")
+    p = argparse.ArgumentParser(description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--ckpt", type=Path, help="export just this checkpoint")
+    p.add_argument("--out", type=Path, help="with --ckpt: output .onnx "
+                   "(default: next to the checkpoint, same name)")
+    args = p.parse_args()
+
+    if args.ckpt is not None:
+        out = args.out or args.ckpt.with_suffix(".onnx")
+        if not export_single_file(args.ckpt, out):
+            print()
+            print("The export did not match its source checkpoint.")
+            sys.exit(1)
+        print()
+        print(f"Export matches its source checkpoint: {out}")
+        return
 
     results = {}
 

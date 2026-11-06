@@ -440,6 +440,28 @@ def test_onnx_wrapper_matches_the_model(cumulant_features):
         assert torch.allclose(logits, model(x), atol=1e-5)
 
 
+# Same bug again for the week-1 branches: the wrapper skipped expert features
+# and the SED-39 spectrum branch, so fc1 got fewer inputs than it was trained on.
+@pytest.mark.parametrize("flags", [{"expert_features": True},
+                                   {"full_spectrum": True},
+                                   {"expert_features": True, "full_spectrum": True}])
+def test_onnx_wrapper_matches_week1_branches(flags):
+    from src.models.onnx_export import AMC_CNN_ONNX, compute_stft_mag
+
+    torch.manual_seed(5)
+    model = AMC_CNN(num_classes=60, input_len=512, stft_n_fft=64,
+                    stft_freq_summary=False, stft_keep_rows=True,
+                    cumulant_features=False,
+                    **{"expert_features": False, **flags}).eval()
+    x = torch.from_numpy(
+        np.random.default_rng(1).standard_normal((3, 2, 512)).astype(np.float32))
+    with torch.no_grad():
+        mag = compute_stft_mag(x, n_fft=64, hop_length=model.stft_branch.hop_length,
+                               window=model.stft_branch.window)
+        logits, _attention = AMC_CNN_ONNX(model)(x, mag)
+        assert torch.allclose(logits, model(x), atol=1e-5)
+
+
 # ---------------------------------------------------------------------------
 # Whole-window spectrum branch (SED-39): off by default and invisible to old
 # checkpoints; on, it adds its channels to fc1 and ignores where a tone sits.
