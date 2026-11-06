@@ -37,7 +37,11 @@ VIS_BUCKETS = [(3, 30), (30, 300), (300, 3000), (3000, 1e9)]
 def load(path):
     d = np.load(path)
     n = d["n_boxes"]
-    per = lambda key: [d[key][i, :n[i]] for i in range(len(n))]
+
+    def per(key):                       # read the array once (see train_detector.load)
+        a = d[key]
+        return [a[i, :n[i]].copy() for i in range(len(n))]
+
     return {"images": d["images"].astype(np.float32) / 255, "boxes": per("boxes"),
             "ignore": per("ignore"), "snr_db": per("snr_db"), "group": per("group"),
             "visibility": per("visibility")}

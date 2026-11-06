@@ -37,8 +37,13 @@ def load(path):
     float in [0, 1] on its way into the network (to_input)."""
     d = np.load(path)
     imgs = torch.from_numpy(d["images"]).unsqueeze(1)
-    boxes = [d["boxes"][i, :d["n_boxes"][i]] for i in range(len(imgs))]
-    ignore = [d["ignore"][i, :d["n_boxes"][i]] for i in range(len(imgs))]
+    # Read each array ONCE: d[key] decompresses the whole array on every
+    # access, and a slice of it keeps that whole copy alive. Per scene that
+    # was ~80 GB for 30,000 scenes (killed on Colab); copies of the slices
+    # keep only what each scene needs.
+    n, all_boxes, all_ignore = d["n_boxes"], d["boxes"], d["ignore"]
+    boxes = [all_boxes[i, :n[i]].copy() for i in range(len(imgs))]
+    ignore = [all_ignore[i, :n[i]].copy() for i in range(len(imgs))]
     return imgs, boxes, ignore
 
 

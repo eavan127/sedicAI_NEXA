@@ -28,10 +28,11 @@ from src.detect import scenes  # noqa: E402
 
 def from_split(path, n, start):
     d = np.load(path)
-    for i in range(start, min(start + n, len(d["images"]))):
-        k = d["n_boxes"][i]
-        yield (d["images"][i].astype(np.float32) / 255, d["boxes"][i, :k], d["ignore"][i, :k],
-               d["cls"][i, :k], d["snr_db"][i, :k], f"{Path(path).stem} #{i} (seed {d['seed'][i]})")
+    a = {k: d[k] for k in ("images", "n_boxes", "boxes", "ignore", "cls", "snr_db", "seed")}   # read once
+    for i in range(start, min(start + n, len(a["images"]))):
+        k = a["n_boxes"][i]
+        yield (a["images"][i].astype(np.float32) / 255, a["boxes"][i, :k], a["ignore"][i, :k],
+               a["cls"][i, :k], a["snr_db"][i, :k], f"{Path(path).stem} #{i} (seed {a['seed'][i]})")
 
 
 def fresh(n, seed):
