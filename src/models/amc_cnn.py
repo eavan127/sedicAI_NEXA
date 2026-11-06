@@ -454,11 +454,58 @@ class ExpertFeatures(nn.Module):
         return out.detach()
 
 
+class SpectrumBranch(nn.Module):
+    """Log power spectrum of the whole window (fs / window_len per bin, 6.25
+    kHz at 512 samples), then a small 1D CNN along frequency and max + mean
+    over it. One vector per window, (batch, out_channels).
+
+    EXPERIMENTAL, behind AMC_CNN(full_spectrum=True) (SED-39). The STFT branch
+    needs short frames for FHSS hops, so its bins stay 50 kHz wide (n_fft 64;
+    128 hurt FHSS and partial-band jamming). This branch gives the fine detail
+    those frames can't: subcarrier spacing, sidebands, narrow FM and AM. In
+    Eileen's pilot (60 classes, 25% of shards, 15 epochs, expert features
+    off) it took macro top-1 from 38.2% (n_fft 64, mean of two seeds) to
+    40.5%, mostly on WBFM/NBFM/PM, AM and OFDM. Pooling over frequency makes
+    the output independent of where random placement put the signal.
+
+    Same ONNX rule as ExpertFeatures: the DFT is a matrix product with fixed,
+    non-persistent cos / sin tables whose columns are already in fftshift
+    order (most negative frequency first), so there are no complex tensors.
+    """
+
+    def __init__(self, window_len, channels=64):
+        super().__init__()
+        L = window_len
+        n = torch.arange(L, dtype=torch.float64)
+        k = torch.arange(L, dtype=torch.float64) - L // 2
+        ang = 2 * math.pi * torch.outer(n, k) / L
+        self.register_buffer("cos", torch.cos(ang).float(), persistent=False)
+        self.register_buffer("sin", torch.sin(ang).float(), persistent=False)
+        self.register_buffer("window", torch.hann_window(L, periodic=True), persistent=False)
+        self.net = nn.Sequential(
+            nn.Conv1d(1, 32, kernel_size=7, padding=3), nn.BatchNorm1d(32), nn.ReLU(), nn.MaxPool1d(2),
+            nn.Conv1d(32, channels, kernel_size=7, padding=3), nn.BatchNorm1d(channels), nn.ReLU(),
+            nn.MaxPool1d(2),
+            nn.Conv1d(channels, channels, kernel_size=5, padding=2), nn.BatchNorm1d(channels), nn.ReLU())
+        self.out_channels = 2 * channels
+
+    def forward(self, x):
+        with torch.no_grad():
+            zr, zi = x[:, 0, :].float() * self.window, x[:, 1, :].float() * self.window
+            re, im = zr @ self.cos + zi @ self.sin, zi @ self.cos - zr @ self.sin
+            power = torch.log(re ** 2 + im ** 2 + 1e-6)
+            power = power - power.mean(dim=1, keepdim=True)
+        f = self.net(power.unsqueeze(1))
+        return torch.cat([f.amax(dim=-1), f.mean(dim=-1)], dim=1)
+
+
 class AMC_CNN(nn.Module):
     def __init__(self, num_classes, input_len=1024, stft_freq_summary=None,
                  stft_keep_rows=None, cumulant_features=None, stft_n_fft=16,
-                 expert_features=None):
+                 expert_features=None, full_spectrum=False):
         super().__init__()
+        # full_spectrum: explicit like stft_n_fft, never read from config, so
+        # no existing checkpoint or the deployed 8-class model can pick it up.
         # stft_n_fft: 16 (200 kHz bins) for every checkpoint in results/; the
         # week-1 60-class model uses 64 (50 kHz bins, configs week1.stft_n_fft)
         # after Eileen's test on 2026-11-03 (top-1 35.7% -> 38.5%, classes at 0
@@ -509,6 +556,11 @@ class AMC_CNN(nn.Module):
         self.expert_norm = nn.BatchNorm1d(self.expert_branch.out_channels) if expert_features else None
         if self.expert_branch is not None:
             fc1_in += self.expert_branch.out_channels
+        # EXPERIMENTAL, behind full_spectrum (SED-39): the whole-window spectrum
+        # branch. Off -> None, no parameters, existing checkpoints load unchanged.
+        self.spectrum_branch = SpectrumBranch(input_len) if full_spectrum else None
+        if self.spectrum_branch is not None:
+            fc1_in += self.spectrum_branch.out_channels
 
         # No dummy forward pass needed -- attention pooling always outputs
         # exactly `fused_channels` values regardless of input_len. input_len
@@ -541,6 +593,8 @@ class AMC_CNN(nn.Module):
             pooled = torch.cat([pooled, cum_feats], dim=1)
         if self.expert_branch is not None:
             pooled = torch.cat([pooled, self.expert_norm(self.expert_branch(x))], dim=1)
+        if self.spectrum_branch is not None:
+            pooled = torch.cat([pooled, self.spectrum_branch(x)], dim=1)
 
         out = self.dropout(self.relu(self.fc1(pooled)))
         return self.fc2(out)

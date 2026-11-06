@@ -131,6 +131,8 @@ def main():
     p.add_argument("--fresh", action="store_true", help="ignore an existing last.pt and start over")
     p.add_argument("--expert-features", action="store_true",
                    help="add the amplitude-histogram + delay-correlation branch (overrides week1.expert_features)")
+    p.add_argument("--full-spectrum", action="store_true",
+                   help="add the whole-window spectrum branch (SED-39 experiment)")
     args = p.parse_args()
 
     ckpt_dir = Path(args.ckpt_dir or REPO_ROOT / CFG["paths"]["checkpoints"] / f"week1_seed{args.seed}")
@@ -150,6 +152,9 @@ def main():
     model_flags = {k: CFG.get("model", {}).get(k, False)
                    for k in ("stft_freq_summary", "stft_keep_rows", "cumulant_features")}
     model_flags["expert_features"] = bool(args.expert_features or w.get("expert_features", False))
+    # Only recorded when on, so runs saved before this flag existed still resume.
+    if args.full_spectrum:
+        model_flags["full_spectrum"] = True
     model = AMC_CNN(num_classes=C, input_len=Xtr.shape[-1], stft_n_fft=w["stft_n_fft"], **model_flags).to(DEVICE)
     dampen = {DATASET_CLASSES.index(c): m for c, m in w.get("class_weight_multipliers", {}).items()}
     criterion = nn.BCEWithLogitsLoss(pos_weight=compute_class_weights(ytr, C, dampen=dampen).to(DEVICE))

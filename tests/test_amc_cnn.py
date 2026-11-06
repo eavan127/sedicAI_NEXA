@@ -27,6 +27,7 @@ from src.models.amc_cnn import (
     AMC_CNN,
     CumulantFeatures,
     STFTBranch,
+    SpectrumBranch,
     _frequency_max,
     _peak_freq_delta,
     _spectral_flatness,
@@ -437,3 +438,50 @@ def test_onnx_wrapper_matches_the_model(cumulant_features):
                                window=model.stft_branch.window)
         logits, _attention = AMC_CNN_ONNX(model)(x, mag)
         assert torch.allclose(logits, model(x), atol=1e-5)
+
+
+# ---------------------------------------------------------------------------
+# Whole-window spectrum branch (SED-39): off by default and invisible to old
+# checkpoints; on, it adds its channels to fc1 and ignores where a tone sits.
+# ---------------------------------------------------------------------------
+
+def test_full_spectrum_off_adds_no_state_dict_entries():
+    torch.manual_seed(0)
+    keys = set(AMC_CNN(num_classes=5, input_len=WINDOW_LEN).state_dict())
+    assert AMC_CNN(num_classes=5, input_len=WINDOW_LEN).spectrum_branch is None
+    on = AMC_CNN(num_classes=5, input_len=WINDOW_LEN, full_spectrum=True)
+    assert keys < set(on.state_dict())
+    assert not any("cos" in k or "sin" in k for k in on.state_dict())
+
+
+def test_full_spectrum_on_widens_fc1_and_runs():
+    off = AMC_CNN(num_classes=5, input_len=WINDOW_LEN, expert_features=True)
+    on = AMC_CNN(num_classes=5, input_len=WINDOW_LEN, expert_features=True, full_spectrum=True)
+    assert on.fc1.in_features == off.fc1.in_features + on.spectrum_branch.out_channels
+    assert on.eval()(_random_iq_batch()).shape == (3, 5)
+
+
+def test_spectrum_branch_matches_fft_and_ignores_tone_position():
+    branch = SpectrumBranch(WINDOW_LEN).eval()
+    n = torch.arange(WINDOW_LEN, dtype=torch.float64)
+    # Phase wrapped exactly, so float error leaves the same noise floor for each tone.
+    tones = [torch.exp(1j * 2 * torch.pi * ((k * n) % WINDOW_LEN) / WINDOW_LEN) for k in (100, 300)]
+    x = torch.stack([torch.stack([t.real, t.imag]) for t in tones]).float()
+    z = torch.complex(x[:, 0], x[:, 1]) * branch.window
+    expected = torch.fft.fftshift(torch.fft.fft(z), dim=-1)
+    re, im = (x[:, 0] * branch.window) @ branch.cos + (x[:, 1] * branch.window) @ branch.sin, \
+        (x[:, 1] * branch.window) @ branch.cos - (x[:, 0] * branch.window) @ branch.sin
+    torch.testing.assert_close(re, expected.real, atol=1e-2, rtol=0)
+    torch.testing.assert_close(im, expected.imag, atol=1e-2, rtol=0)
+    out = branch(x)
+    assert out.shape == (2, branch.out_channels)
+    torch.testing.assert_close(out[0], out[1], atol=1e-3, rtol=1e-3)
+
+
+def test_checkpoint_flags_round_trip_through_model_flags():
+    # Loaders build AMC_CNN(**meta["model_flags"]); a full_spectrum run must load that way.
+    flags = {"stft_freq_summary": False, "stft_keep_rows": True, "cumulant_features": False,
+             "expert_features": True, "full_spectrum": True}
+    a = AMC_CNN(num_classes=5, input_len=WINDOW_LEN, stft_n_fft=64, **flags)
+    b = AMC_CNN(num_classes=5, input_len=WINDOW_LEN, stft_n_fft=64, **flags)
+    b.load_state_dict(a.state_dict())
