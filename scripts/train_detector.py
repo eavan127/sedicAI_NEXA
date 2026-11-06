@@ -32,11 +32,18 @@ from src.detect import model as det  # noqa: E402
 
 
 def load(path):
+    """Images stay uint8 (1 byte a pixel): 30,000 scenes are ~1 GB instead of
+    ~4 GB as float32, which a free Colab could not hold. Each batch becomes
+    float in [0, 1] on its way into the network (to_input)."""
     d = np.load(path)
-    imgs = torch.from_numpy(d["images"]).float().div_(255).unsqueeze(1)
+    imgs = torch.from_numpy(d["images"]).unsqueeze(1)
     boxes = [d["boxes"][i, :d["n_boxes"][i]] for i in range(len(imgs))]
     ignore = [d["ignore"][i, :d["n_boxes"][i]] for i in range(len(imgs))]
     return imgs, boxes, ignore
+
+
+def to_input(batch, device):
+    return batch.to(device).float().div_(255)
 
 
 def augment(img, boxes, rng):
@@ -56,7 +63,7 @@ def evaluate(net, imgs, boxes, ignore, score_thr=0.05, batch=64, device="cpu"):
     tps, scores, n_gt = [], [], 0
     with torch.no_grad():
         for s in range(0, len(imgs), batch):
-            preds = det.decode(net(imgs[s:s + batch].to(device)).cpu(), score_thr=score_thr)
+            preds = det.decode(net(to_input(imgs[s:s + batch], device)).cpu(), score_thr=score_thr)
             for (pb, ps), gb, gi in zip(preds, boxes[s:s + batch], ignore[s:s + batch]):
                 tp, sc, _ = det.match(pb, ps, gb, gi)
                 tps.append(tp)
@@ -114,7 +121,7 @@ def main():
                 batch_imgs.append(img)
                 batch_boxes.append(bx)
             obj, box, weight = det.encode(batch_boxes, [tr_ign[i] for i in idx], gh, gw)
-            loss, lp = det.loss(net(torch.stack(batch_imgs).to(device)),
+            loss, lp = det.loss(net(to_input(torch.stack(batch_imgs), device)),
                                 obj.to(device), box.to(device), weight.to(device))
             opt.zero_grad()
             loss.backward()
