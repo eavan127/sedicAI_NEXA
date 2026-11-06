@@ -23,6 +23,10 @@ behaviour features of src/pipeline/extract.py, which can:
                           alone for a long time (cw_min_s) is a CW radar.
                           Otherwise the answer stays "RADAR_CW / JAM_TONE".
   JAM_DRFM + radar        both are true: a radar with a DRFM jammer copying it.
+  constellation size      not settled at all: the classifier's size guess
+                          inside these groups is no better than chance, so
+                          the answer names the group and gives the likeliest
+                          size only as a hint (SIZE_GROUPS below; SED-39).
 
 Each rule only fires when the classifier's own answer points at that pair, and
 every answer carries a plain-language reason for the UI.
@@ -41,7 +45,24 @@ DRFM_RADARS = ("RADAR_PULSE", "LFM_RADAR", "RADAR_BARKER")
 # Carriers that can look like a pure tone in one window when lightly modulated.
 TONE_LIKE = ("NBFM", "PM", "WBFM", "AFSK", "AM_DSB_WC")
 
-SWEPT_MIN_WIDTH_HZ = 700e3      # occupied band: LoRa <= ~0.48 MHz, a full jammer sweep >= ~0.86 MHz
+# Groups whose members differ only in constellation size, where the 60-class
+# model's size guess is at chance level. Measured on the labels-v2 test split
+# (120k windows) with the spectrum seed-4 model, 2026-11-06, windows the model
+# put in the group at >= 10 dB: exact size right / group right / chance.
+#   QAM                    21% / 86% / 20%
+#   APSK                   29% / 71% / 25%
+#   8PSK / 16PSK / 32PSK   27% / 84% / 33%
+#   4ASK / 8ASK            54% / 87% / 50%
+# Not here because the size IS informative: BPSK / QPSK / OQPSK (72% exact)
+# and 2FSK / 4FSK / 8FSK (88% exact).
+SIZE_GROUPS = {
+    "QAM": ("16QAM", "32QAM", "64QAM", "128QAM", "256QAM"),
+    "APSK": ("16APSK", "32APSK", "64APSK", "128APSK"),
+    "8PSK / 16PSK / 32PSK": ("8PSK", "16PSK", "32PSK"),
+    "4ASK / 8ASK": ("4ASK", "8ASK"),
+}
+
+SWEPT_MIN_WIDTH_HZ = 700e3     # occupied band: LoRa <= ~0.48 MHz, a full jammer sweep >= ~0.86 MHz
 LORA_MIN_WRAPS = 2
 NO_WRAP_MIN_S = 1.2e-3          # > 2 of the longest LoRa symbols with no wrap: not LoRa
 SIDEBAND_DB = 15.0              # strongest off-carrier line above the floor
@@ -120,5 +141,11 @@ def resolve(track, others=(), cw_min_s=CW_MIN_S):
 
     if top in TONE_LIKE and sb < SIDEBAND_DB and line >= LINE_DB_FOR_PURITY:
         return _tone(track, probs, feats, others, cw_min_s)
+
+    for group, members in SIZE_GROUPS.items():
+        if top in members:
+            return Answer(group, members, _p(probs, top),
+                          f"{group}: the classifier cannot tell these constellation sizes apart "
+                          f"(likeliest {top}, {_p(probs, top):.0%})")
 
     return _one(probs, top, "classifier answer, averaged over the track")

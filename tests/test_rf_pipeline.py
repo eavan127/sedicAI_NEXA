@@ -151,6 +151,29 @@ def test_fm_classifier_answer_on_a_pure_strong_tone_becomes_a_tone():
     assert weak.label == "NBFM"           # too weak to see sidebands: keep the classifier's answer
 
 
+def test_size_groups_answer_the_group_not_a_size():
+    p = probs_for("256QAM", p=0.6)
+    p[:, IDX["64QAM"]] = 0.5
+    a = resolve.resolve(one(det(0, 32768, 0, 200e3, p)))
+    assert a.label == "QAM" and a.classes == resolve.SIZE_GROUPS["QAM"]
+    assert "256QAM" in a.reason and a.confidence == pytest.approx(0.6, abs=1e-3)
+    assert resolve.resolve(one(det(0, 32768, 0, 200e3, probs_for("16PSK")))).label == "8PSK / 16PSK / 32PSK"
+    assert resolve.resolve(one(det(0, 32768, 0, 200e3, probs_for("8ASK")))).classes == ("4ASK", "8ASK")
+
+
+def test_sizes_the_model_can_tell_apart_stay_exact():
+    for c in ("BPSK", "QPSK", "OQPSK", "OOK", "4FSK"):
+        assert resolve.resolve(one(det(0, 32768, 0, 200e3, probs_for(c)))).label == c
+
+
+def test_size_groups_cover_every_member_once():
+    from src.config import CLASS_GROUPS
+    members = [c for m in resolve.SIZE_GROUPS.values() for c in m]
+    assert len(members) == len(set(members))
+    assert set(CLASS_GROUPS["QAM"]) | set(CLASS_GROUPS["APSK"]) <= set(members)
+    assert set(members) <= set(DATASET_CLASSES)
+
+
 def test_drfm_names_the_copied_radar():
     a = resolve.resolve(one(det(0, 32768, 0, 1e6, probs_for("JAM_DRFM", "RADAR_BARKER"))))
     assert a.label == "JAM_DRFM" and a.classes == ("JAM_DRFM", "RADAR_BARKER")
