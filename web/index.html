@@ -473,6 +473,7 @@
       <div class="menu-label">Menu</div>
       <button class="active" data-page="replay">RF Replay</button>
       <button data-page="signal">Signal Analysis</button>
+      <button data-page="pipeline">Signal Pipeline</button>
       <button data-page="intel">Comms Intel</button>
       <button data-page="history">History</button>
       <button data-page="audit">Audit trail</button>
@@ -666,6 +667,12 @@
           </div>
         </div>
       </div>
+    </section>
+
+    <!-- Whole wideband chain on a recording (web/pipeline.js, /api/pipeline). -->
+    <section id="page-pipeline" hidden>
+      <h3 class="page-title">Signal Pipeline</h3>
+      <div id="pipelineRoot"></div>
     </section>
 
     <!-- Decoded receiver audio + local-LLM reading (web/intel.js, /api/intel). -->

@@ -29,8 +29,12 @@ def active_audio(info: WavInfo, max_minutes=10.0, chunk_s=30.0):
         levels.append(float(np.sqrt(np.mean(x ** 2)))); starts.append(start)
     if not levels:
         return np.zeros(0, np.float32), []
-    floor = np.percentile(levels, 20)
-    keep = [i for i in np.argsort(levels)[::-1] if levels[i] > 2 * floor][: int(max_minutes * 60 / chunk_s)]
+    max_n = max(1, int(max_minutes * 60 / chunk_s))
+    if len(levels) <= max_n:                    # short clip (e.g. one demodulated track): all of it
+        keep = list(range(len(levels)))
+    else:
+        floor = np.percentile(levels, 20)
+        keep = [i for i in np.argsort(levels)[::-1] if levels[i] > 2 * floor][:max_n]
     keep = sorted(keep)
     picked = []
     for i, (start, x) in enumerate(iter_chunks(info, chunk_s=chunk_s)):

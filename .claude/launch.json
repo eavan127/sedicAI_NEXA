@@ -78,6 +78,19 @@
         "C:/Users/User/AppData/Local/Temp/claude/4ceab0f120985116/90328246-1c5d-4a8a-b878-8f15fc2cd241/scratchpad/ci_demo"
       ],
       "port": 8193
+    },
+    {
+      "name": "pipeline-check",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "scripts/serve_local.py",
+        "--port",
+        "8195",
+        "--no-browser",
+        "--db",
+        "C:/Users/User/AppData/Local/Temp/claude/4ceab0f120985116/90328246-1c5d-4a8a-b878-8f15fc2cd241/scratchpad/pipe_db/nexa.db"
+      ],
+      "port": 8195
     }
   ]
 }

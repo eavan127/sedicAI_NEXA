@@ -33,7 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.config import CFG, DATASET_CLASS_TO_IDX, REPO_ROOT  # noqa: E402
 from src.pipeline.capture import make_capture  # noqa: E402
 from src.pipeline.classify import Classifier  # noqa: E402
-from src.pipeline.run import EnergyDetector, NetDetector, process_capture  # noqa: E402
+from src.pipeline.run import EnergyDetector, HybridDetector, NetDetector, process_capture  # noqa: E402
 
 FS = CFG["signal"]["fs"]
 PARTNERS = {"RADAR_CW": {"JAM_TONE"}, "JAM_TONE": {"RADAR_CW"}, "LORA_CSS": {"JAM_SWEPT"},
@@ -58,6 +58,8 @@ def main():
     p.add_argument("--classifier", nargs="+", required=True)
     p.add_argument("--detector", default=str(REPO_ROOT / "results" / "detector" / "emitter_detector.pt"))
     p.add_argument("--energy", action="store_true")
+    p.add_argument("--hybrid", action="store_true", help="YOLO + energy boxes for long narrow signals it missed")
+    p.add_argument("--score-thr", type=float, default=0.3, help="detector confidence threshold")
     p.add_argument("--n-captures", type=int, default=30)
     p.add_argument("--n-chunks", type=int, default=4)
     p.add_argument("--classes", nargs="+", default=None)
@@ -67,7 +69,9 @@ def main():
     p.add_argument("--out", default=str(REPO_ROOT / "results" / "pipeline" / "eval"))
     args = p.parse_args()
 
-    detector = EnergyDetector() if args.energy else NetDetector(args.detector)
+    detector = EnergyDetector() if args.energy else NetDetector(args.detector, score_thr=args.score_thr)
+    if args.hybrid and not args.energy:
+        detector = HybridDetector(detector)
     classifier = Classifier(args.classifier)
     per = defaultdict(lambda: dict(n=0, found=0, win_hit=0, win_n=0, track=0, exact=0))
     t0 = time.time()

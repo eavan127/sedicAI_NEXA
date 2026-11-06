@@ -368,6 +368,28 @@ the three small processed arrays, then train.
 judged class (LFM_RADAR, FHSS, JAMMING) clears the **>80% recall** benchmark
 the rules require.
 
+### Wideband pipeline on a recording (week 1, 60 classes)
+
+```
+IQ recording -> YOLO boxes -> cut out -> 60-class classifier -> tracker (vote) -> resolve pairs
+             -> voice / Morse tracks: zoom, analog kind (FM/AM/SSB/CW), audio, Morse or Whisper, Ollama reading
+```
+
+Put the trained files here (git-ignored): `results/detector/emitter_detector.pt` and one or more
+classifiers as `results/classifier/<name>_best.pt` (several are averaged as an ensemble).
+
+```bash
+python scripts/run_pipeline.py --voice-demo --classifier results/classifier/seed4_best.pt --listen
+```
+```bash
+python scripts/run_pipeline.py --iq recording.wav --max-seconds 1 --classifier results/classifier/seed4_best.pt --listen
+```
+
+Recordings: SDRconnect / SDRuno IQ `.wav` (Recording type = **IQ**, not audio), SigMF, complex
+`.npy` or raw interleaved I/Q (`--dtype`, `--fs`). Other sample rates are resampled to 3.2 MS/s
+(src/pipeline/iqio.py). On a CPU the chain takes about 50 s per second of recording, so analyse
+1-2 s. The same runs from the dashboard: `python scripts/serve_local.py` -> **Signal Pipeline**.
+
 ---
 
 ## Output format

@@ -52,6 +52,13 @@ API (JSON)
     GET    /api/intel                  Comms Intel: decoded receiver-audio recordings
                                        (written by scripts/comms_intel.py into --intel-dir)
     GET    /api/intel/<id>             one recording: transmissions, activity, LLM reading
+    POST   /api/pipeline?source=voice-demo|file&name=f&max_s=1&detector=hybrid|yolo|energy
+                                       &listen=1&whisper=1&llm=1[&fs=2e6&dtype=int16]
+                                       body = the IQ file (source=file). Runs the wideband
+                                       pipeline (scripts/run_pipeline.py) in the background
+    GET    /api/pipeline               pipeline runs, newest first
+    GET    /api/pipeline/<id>          one run: status, log tail, tracks (when done)
+    GET    /api/pipeline/<id>/<file>   tracks.png or track_<n>.wav of a run
 
 Sign-in (--sign-in, or --lan)
   Off by default: the page opens straight into the console, and buttons at
@@ -103,6 +110,11 @@ from src.report_export import _iq_payload, build_export  # noqa: E402
 WEB = ROOT / "web"
 DEFAULT_DB = ROOT / "data" / "local" / "nexa.db"
 DEFAULT_INTEL = ROOT / "results" / "comms_intel"
+PIPELINE_DIR = ROOT / "results" / "pipeline" / "jobs"
+CLASSIFIER_DIR = ROOT / "results" / "classifier"
+DETECTOR_PT = ROOT / "results" / "detector" / "emitter_detector.pt"
+PIPE_FILE = re.compile(r"(tracks\.png|track_\d{1,6}\.wav)")
+PIPE_ID = re.compile(r"\d{8}-\d{6}-[0-9a-f]{4}")
 INTEL_ID = re.compile(r"[A-Za-z0-9_.-]{1,200}")
 APP_ID = "nexa-local"
 MAX_JSON = 1 << 20            # 1 MB: a record is ~2 KB
@@ -344,6 +356,144 @@ class Handler(SimpleHTTPRequestHandler):
             return self._error(HTTPStatus.NOT_FOUND, "no such recording")
         return self._send_json(json.loads(f.read_text(encoding="utf-8")))
 
+    # -- wideband pipeline runs (scripts/run_pipeline.py, results/pipeline/jobs) --
+
+    _pipe_procs: dict = {}
+    _pipe_py: str | None = None
+
+    def pipeline_python(self) -> str:
+        """An interpreter that can run the whole chain, Whisper included: the
+        project venv may have torch but not openai-whisper (or the other way
+        round). First one that imports all of them; else the training one."""
+        if Handler._pipe_py is None:
+            Handler._pipe_py = self.training_python()
+            for py in dict.fromkeys([self.training_python(), sys.executable]):
+                ok = subprocess.run([py, "-c", "import torch, scipy, whisper"], capture_output=True, timeout=180)
+                if ok.returncode == 0:
+                    Handler._pipe_py = py
+                    break
+        return Handler._pipe_py
+
+    def _pipe_status(self, d: Path) -> dict:
+        meta = json.loads((d / "job.json").read_text(encoding="utf-8")) if (d / "job.json").exists() else {}
+        proc = Handler._pipe_procs.get(d.name)
+        if proc is not None and proc.poll() is None:
+            status = "running"
+        elif (d / "tracks.json").exists():
+            status = "done"
+        else:
+            status = "failed"           # exited without results, or started by a server that has stopped
+        meta["status"] = status
+        return meta
+
+    def _pipeline(self, method, rest, query):
+        """Start a pipeline run on an uploaded IQ file (or the voice demo) and
+        read its results. Runs are folders under results/pipeline/jobs/."""
+        PIPELINE_DIR.mkdir(parents=True, exist_ok=True)
+        if method == "GET" and not rest:
+            runs = sorted((d for d in PIPELINE_DIR.iterdir() if d.is_dir() and PIPE_ID.fullmatch(d.name)),
+                          reverse=True)[:30]
+            return self._send_json({"runs": [self._pipe_status(d) for d in runs],
+                                    "classifiers": [c.name for c in sorted(CLASSIFIER_DIR.glob("*best*.pt"))],
+                                    "detector": DETECTOR_PT.exists()})
+        if rest and not PIPE_ID.fullmatch(rest[0]):
+            return self._error(HTTPStatus.NOT_FOUND, "no such run")
+        if method == "GET" and len(rest) == 1:
+            d = PIPELINE_DIR / rest[0]
+            if not d.is_dir():
+                return self._error(HTTPStatus.NOT_FOUND, "no such run")
+            out = self._pipe_status(d)
+            log = d / "run.log"
+            out["log"] = log.read_text(encoding="utf-8", errors="replace")[-3000:] if log.exists() else ""
+            if out["status"] == "done":
+                out["result"] = json.loads((d / "tracks.json").read_text(encoding="utf-8"),
+                                           parse_constant=lambda c: None)     # NaN/Infinity from older runs
+            return self._send_json(out)
+        if method == "GET" and len(rest) == 2:
+            f = PIPELINE_DIR / rest[0] / rest[1]
+            if not PIPE_FILE.fullmatch(rest[1]) or not f.is_file():
+                return self._error(HTTPStatus.NOT_FOUND, "no such file")
+            body = f.read_bytes()
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "image/png" if f.suffix == ".png" else "audio/wav")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+            return None
+        if method == "POST" and not rest:
+            return self._pipeline_start(query)
+        return self._error(HTTPStatus.NOT_FOUND, "unknown pipeline request")
+
+    def _pipeline_start(self, query):
+        def q(k, default=None):
+            return (query.get(k) or [default])[0]
+
+        if any(proc.poll() is None for proc in Handler._pipe_procs.values()):
+            return self._error(HTTPStatus.CONFLICT, "a pipeline run is already going; wait for it to finish")
+        classifiers = sorted(CLASSIFIER_DIR.glob("*best*.pt"))
+        if not classifiers:
+            return self._error(HTTPStatus.CONFLICT, f"no classifier: put a week-1 best.pt into {CLASSIFIER_DIR}")
+        import datetime
+        import secrets
+        rid = datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(2)
+        d = PIPELINE_DIR / rid
+        d.mkdir(parents=True)
+        source = q("source", "file")
+        max_s = min(max(float(q("max_s", "1.0")), 0.05), 10.0)
+        cmd = [self.pipeline_python(), "-u", str(ROOT / "scripts" / "run_pipeline.py"),
+               "--classifier", *map(str, classifiers), "--out", str(d), "--max-seconds", str(max_s)]
+        meta = {"id": rid, "source": source, "max_s": max_s, "status": "running",
+                "classifiers": [c.name for c in classifiers], "who": self._actor().name}
+        if source == "voice-demo":
+            cmd.append("--voice-demo")
+        else:
+            n = int(self.headers.get("Content-Length") or -1)
+            if n <= 0:
+                return self._error(HTTPStatus.BAD_REQUEST, "send the IQ file as the request body")
+            if n > MAX_CAPTURE:
+                return self._error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, f"file is {n} bytes; limit {MAX_CAPTURE}")
+            name = safe_name(q("name", "capture.bin"))
+            dest = d / ("input_" + name)
+            left = n
+            with open(dest, "wb") as f:
+                while left > 0:
+                    chunk = self.rfile.read(min(left, 1 << 20))
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    left -= len(chunk)
+            cmd += ["--iq", str(dest)]
+            if q("fs"):
+                cmd += ["--fs", str(float(q("fs")))]
+            if q("dtype") in ("float32", "int16", "int8", "uint8"):
+                cmd += ["--dtype", q("dtype")]
+            meta["file"] = name
+        mode = q("detector", "hybrid")
+        if mode == "energy" or not DETECTOR_PT.exists():
+            cmd.append("--energy")
+            meta["detector"] = "energy"
+        else:
+            if mode == "hybrid":
+                cmd.append("--hybrid")
+            meta["detector"] = "yolo+narrow" if mode == "hybrid" else "yolo"
+        if q("listen", "1") == "1":
+            cmd.append("--listen")
+            if q("whisper", "1") != "1":
+                cmd.append("--no-whisper")
+            if q("llm", "1") != "1":
+                cmd.append("--no-llm")
+        meta["listen"] = "--listen" in cmd
+        (d / "job.json").write_text(json.dumps(meta, indent=1), encoding="utf-8")
+        log = open(d / "run.log", "w", encoding="utf-8")
+        try:
+            Handler._pipe_procs[rid] = subprocess.Popen(
+                cmd, cwd=str(ROOT), stdout=log, stderr=subprocess.STDOUT,
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+        finally:
+            log.close()
+        return self._send_json(meta, HTTPStatus.CREATED)
+
     # -- routes ---------------------------------------------------------------
 
     def _route(self, method, parts, query):
@@ -359,6 +509,8 @@ class Handler(SimpleHTTPRequestHandler):
 
         if head == "intel" and method == "GET":
             return self._intel(parts[1:])
+        if head == "pipeline":
+            return self._pipeline(method, parts[1:], query)
         if head == "auth":
             return self._auth(method, parts[1:])
         if head == "users":

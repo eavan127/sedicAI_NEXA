@@ -31,6 +31,7 @@ import { applyFilters, barsHtml, canView, flagsHtml, summarise, summaryHtml as h
 import { buildReport, buildSingle } from "./report.js";
 import { installZoom, registerZoom } from "./zoom.js";
 import { renderIntel } from "./intel.js";
+import { renderPipeline } from "./pipeline.js";
 
 installZoom();
 
@@ -1141,6 +1142,7 @@ function showPage(page) {
   if (page === "performance") renderPerformance();
   if (page === "model") renderModel();
   if (page === "users") renderUsers();
+  if (page === "pipeline") renderPipeline(document.getElementById("pipelineRoot"), { server: readConfig().backend === "server" });
   if (page === "intel") renderIntel(document.getElementById("intelRoot"), { server: readConfig().backend === "server" });
   if (page === "replay" && session) render();
 }

@@ -36,6 +36,10 @@ export function filterRows(rows, { filter = "", kind = "", category = "" } = {})
 
 export async function renderIntel(root, { server }) {
   if (!server) {
+    // The page may ask before its own server check has finished: ask the server directly.
+    try { server = (await fetch("/api/health", { credentials: "same-origin" })).ok; } catch { server = false; }
+  }
+  if (!server) {
     root.innerHTML = `<div class="block"><div class="note">Comms Intel needs the local server, because the
       recordings and their decodes stay on this machine. Start it with
       <code>python scripts/serve_local.py</code>, then decode a folder with

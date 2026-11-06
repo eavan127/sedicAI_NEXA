@@ -8,9 +8,16 @@ frequency, top-5 classes, behaviour features) and <out>/tracks.png (the
 capture's spectrogram with every track boxed and named; on a synthetic
 capture the true emitters are drawn dashed).
 
-A recorded capture (complex64 .npy, or raw interleaved I/Q):
-    python scripts/run_pipeline.py --iq capture.npy --classifier best.pt
-    python scripts/run_pipeline.py --iq capture.bin --dtype int16 --classifier best.pt
+A recorded capture (SDRconnect / SDRuno IQ .wav, SigMF, complex .npy, or raw
+interleaved I/Q); other sample rates are resampled to 3.2 MS/s:
+    python scripts/run_pipeline.py --iq rec.wav --classifier best.pt --listen
+    python scripts/run_pipeline.py --iq capture.bin --dtype int16 --fs 2e6 --classifier best.pt
+
+--listen zooms into voice / Morse tracks (src/pipeline/listen.py): analog kind,
+demodulated audio (track_<n>.wav), Morse text or Whisper transcript, and a
+local Ollama reading. --voice-demo makes a capture with made-up walkie-talkie
+speech (NBFM) and Morse (CW) in it, to try that path without a recording:
+    python scripts/run_pipeline.py --voice-demo --classifier best.pt --listen
 
 A synthetic one with known emitters (4 chunks = 41 ms):
     python scripts/run_pipeline.py --synthetic 4 --seed 3 --classifier best.pt
@@ -31,9 +38,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.config import CFG, REPO_ROOT  # noqa: E402
 from src.detect import scenes  # noqa: E402
+from src.pipeline import iqio, listen  # noqa: E402
 from src.pipeline.capture import make_capture  # noqa: E402
 from src.pipeline.classify import Classifier  # noqa: E402
-from src.pipeline.run import EnergyDetector, NetDetector, process_capture  # noqa: E402
+from src.pipeline.run import EnergyDetector, HybridDetector, NetDetector, process_capture  # noqa: E402
 
 FS = CFG["signal"]["fs"]
 DEFAULT_DETECTOR = REPO_ROOT / "results" / "detector" / "emitter_detector.pt"
@@ -45,6 +53,20 @@ def load_iq(path, dtype):
     raw = np.fromfile(path, dtype=dtype).astype(np.float32)
     raw = raw[:len(raw) // 2 * 2]
     return (raw[0::2] + 1j * raw[1::2]).astype(np.complex64)
+
+
+def finite(o):
+    """NaN / inf -> None: browsers refuse them in JSON (a missing measurement
+    is NaN in numpy, e.g. a power ratio without a carrier)."""
+    if isinstance(o, dict):
+        return {k: finite(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return [finite(v) for v in o]
+    if isinstance(o, (float, np.floating)):
+        return float(o) if np.isfinite(o) else None
+    if isinstance(o, np.integer):
+        return int(o)
+    return o
 
 
 def plot(iq, answers, truth, path):
@@ -78,6 +100,14 @@ def main():
     src = p.add_mutually_exclusive_group(required=True)
     src.add_argument("--iq", help="capture file: complex .npy, or raw interleaved I/Q (see --dtype)")
     src.add_argument("--synthetic", type=int, metavar="N_CHUNKS", help="make a synthetic capture this many 10.24 ms chunks long")
+    src.add_argument("--voice-demo", action="store_true", help="synthetic NBFM speech + CW + AM capture (1.2 s)")
+    p.add_argument("--fs", type=float, default=None, help="sample rate of the recording (taken from the file when it says)")
+    p.add_argument("--max-seconds", type=float, default=1.0,
+                   help="analyse at most this much of a recording (CPU: ~50 s of work per second of capture)")
+    p.add_argument("--listen", action="store_true", help="zoom, demodulate and transcribe voice / Morse tracks")
+    p.add_argument("--no-whisper", action="store_true")
+    p.add_argument("--no-llm", action="store_true")
+    p.add_argument("--llm-model", default=None, help="Ollama model for the reading (default llama3.2:3b)")
     p.add_argument("--dtype", default="float32", help="sample type of a raw --iq file (float32, int16, int8)")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--classes", nargs="+", default=None, help="synthetic: only these classes")
@@ -85,29 +115,53 @@ def main():
     p.add_argument("--classifier", nargs="+", required=True, help="week-1 best.pt file(s)")
     p.add_argument("--detector", default=str(DEFAULT_DETECTOR))
     p.add_argument("--energy", action="store_true", help="use the classical energy detector")
+    p.add_argument("--hybrid", action="store_true", help="YOLO + energy boxes for long narrow signals it missed")
     p.add_argument("--score-thr", type=float, default=0.3, help="detector confidence threshold")
     p.add_argument("--out", default=str(REPO_ROOT / "results" / "pipeline" / "run"))
     args = p.parse_args()
 
     rng = np.random.default_rng(args.seed)
     truth = None
+    source = None
     if args.iq:
-        iq = load_iq(args.iq, args.dtype)
+        iq, source = iqio.load(args.iq, fs=args.fs, dtype=args.dtype, max_s=args.max_seconds, rng=rng)
+        print(f"{source['file']}: {source['format']}, {source['fs_in'] / 1e6:.3f} MS/s"
+              + (" (resampled to 3.2)" if source["resampled"] else "")
+              + (f", centre {source['centre_hz'] / 1e6:.4f} MHz" if source["centre_hz"] else "")
+              + f", {source['duration_s']:.2f} s analysed")
+    elif args.voice_demo:
+        from src.pipeline import analog_synth
+        iq, voice_truth = analog_synth.wideband([("NBFM", -600e3, 30), ("CW", 250e3, 30), ("AM", 900e3, 35)],
+                                                seconds=1.2, rng=rng)
+        source = {"file": "voice-demo (synthetic)", "truth": voice_truth}
     else:
         iq, truth = make_capture(rng, n_chunks=args.synthetic, n_emitters=args.n_emitters, classes=args.classes)
     detector = EnergyDetector() if args.energy else NetDetector(args.detector, score_thr=args.score_thr)
+    if args.hybrid and not args.energy:
+        detector = HybridDetector(detector)
     classifier = Classifier(args.classifier)
     answers, _ = process_capture(iq, detector, classifier, rng=rng)
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    (out / "tracks.json").write_text(json.dumps({"n_samples": len(iq), "duration_ms": len(iq) / FS * 1e3,
-                                                 "tracks": answers, "truth": truth}, indent=1, default=float))
+    if args.listen:
+        for old in out.glob("track_*.wav"):              # audio of an earlier run in this folder
+            old.unlink()
+        listen.listen_all(iq, answers, out, rng=rng, use_whisper=not args.no_whisper,
+                          use_llm=not args.no_llm, llm_model=args.llm_model)
+    doc = finite({"n_samples": len(iq), "duration_ms": len(iq) / FS * 1e3,
+                  "source": source, "tracks": answers, "truth": truth})
+    (out / "tracks.json").write_text(json.dumps(doc, indent=1, default=float, allow_nan=False))
     plot(iq, answers, truth, out / "tracks.png")
     print(f"{len(iq) / FS * 1e3:.1f} ms, {len(answers)} track(s)")
     for a in answers:
         print(f"  #{a['track']:<3} {a['t_start_ms']:7.2f}-{a['t_end_ms']:7.2f} ms  "
               f"{a['f_lo_khz']:8.0f}..{a['f_hi_khz']:6.0f} kHz  {a['answer']:<22} {a['confidence']:.2f}  {a['reason']}")
+        if "listen" in a:
+            L = a["listen"]
+            said = L.get("morse") or L.get("transcript") or ""
+            print(f"        zoom: {L['kind']:<8} {L.get('why', '')}"
+                  + (f" | audio {L['audio']}" if L.get("audio") else "") + (f" | \"{said[:80]}\"" if said else ""))
     if truth:
         print("true emitters:")
         for t in truth:

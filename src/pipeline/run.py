@@ -46,6 +46,44 @@ class EnergyDetector:
         return baseline.detect(image, threshold_db=self.threshold_db)
 
 
+class HybridDetector:
+    """The learned detector, plus the energy detector's boxes for LONG, NARROW
+    signals the learned one left uncovered. The YOLO detector learned the
+    generators' emitters; a real walkie-talkie (narrow, steady NBFM speech)
+    or a plain carrier looks different and it can miss them, while a loudness
+    threshold finds such a line easily. Short or wide energy boxes are left
+    out: those are where the energy detector's false alarms live."""
+
+    def __init__(self, net, threshold_db=8.0, min_cols=50, max_rows=12, max_overlap=0.1):
+        self.net, self.energy = net, EnergyDetector(threshold_db)
+        self.min_cols, self.max_rows, self.max_overlap = min_cols, max_rows, max_overlap
+
+    def __call__(self, image):
+        boxes, scores = self.net(image)
+        boxes = np.asarray(boxes, dtype=np.float32).reshape(-1, 4)
+        scores = np.asarray(scores, dtype=np.float32).reshape(-1)
+        eb, es = self.energy(image)
+        extra = []
+        for b, sc in zip(eb, es):
+            if b[2] - b[0] < self.min_cols or b[3] - b[1] > self.max_rows:
+                continue
+            if len(boxes) and max(_overlap(b, n) for n in boxes) > self.max_overlap:
+                continue
+            extra.append((b, min(float(sc), 0.99)))
+        if extra:
+            boxes = np.vstack([boxes, np.array([e[0] for e in extra], dtype=np.float32)])
+            scores = np.concatenate([scores, np.array([e[1] for e in extra], dtype=np.float32)])
+        return boxes, scores
+
+
+def _overlap(a, b):
+    """Intersection over the smaller box's area."""
+    w = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
+    h = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    small = min((a[2] - a[0]) * (a[3] - a[1]), (b[2] - b[0]) * (b[3] - b[1]))
+    return w * h / small if small > 0 else 0.0
+
+
 def box_to_physical(box, chunk_start):
     """[x0, y0, x1, y1] pixels of a chunk -> (t0, t1) samples of the capture,
     (f_lo, f_hi) Hz."""
