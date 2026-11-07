@@ -1,0 +1,32 @@
+<!doctype html>
+<!-- Index of the FOI26 November slides. One file per session; each owner edits only their file.
+     Shared look: assets/deck.css · slide order and keys: assets/deck.js · figures: scripts/make_deck_figures.py -->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NEXA November Slides</title>
+<link rel="stylesheet" href="assets/fonts.css">
+<style>
+  body { margin: 0; font-family: "Montserrat", "Segoe UI", Arial, sans-serif; background: #F4F6F9; color: #1A1A1A; }
+  main { max-width: 980px; margin: 0 auto; padding: 40px 16px; }
+  header { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+  header img { height: 44px; }
+  h1 { font-size: 26px; margin: 0; }
+  p { color: #5E5E5E; line-height: 1.5; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-top: 18px; }
+  a.card { display: block; background: #fff; border: 3px solid var(--c); border-radius: 16px; padding: 16px; text-decoration: none; color: inherit; }
+  a.card b { display: block; font-size: 13px; letter-spacing: 1.4px; color: var(--c); }
+  a.card span { display: block; font-size: 19px; font-weight: 800; margin: 6px 0; }
+  a.card small { color: #5E5E5E; font-size: 13px; line-height: 1.4; display: block; }
+  code { background: #E9EDF2; border-radius: 6px; padding: 1px 6px; }
+</style></head><body><main>
+  <header><img src="assets/nexa-logo.png" alt="NEXA"><h1>November update · 4 sessions</h1></header>
+  <p>Open a session and use the arrow keys (or a clicker) to move between them; <b>F</b> for full screen.
+     Each session is its own file, so each owner edits only theirs. Colours and fonts live in <code>assets/deck.css</code>.</p>
+  <div class="grid">
+    <a class="card" href="01-datasets-classes.html" style="--c:#2E7DB9"><b>SESSION 1</b><span>Datasets and classes</span><small>1.2 M windows, 60 classes in 12 families, SNR range, multi-label rules</small></a>
+    <a class="card" href="02-accuracy.html" style="--c:#457900"><b>SESSION 2</b><span>Accuracy</span><small>families and their members, vote length, confidence bands</small></a>
+    <a class="card" href="03-processing-pipeline.html" style="--c:#C77A00"><b>SESSION 3</b><span>Processing pipeline</span><small>normalise → STFT → branches → attention pooling → sigmoids → multi-label decision</small></a>
+    <a class="card" href="04-system-architecture.html" style="--c:#22306B"><b>SESSION 4</b><span>System architecture</span><small>detector to dashboard, Morse decoder, AI reasoning, human in the loop</small></a>
+  </div>
+  <p style="margin-top:22px">Numbers come from the fixed test set <code>f993d8ebc417</code> and <code>results/accuracy_plan/showcase.json</code>;
+     pictures from <code>python scripts/make_deck_figures.py</code>. Keep the conditions printed under every number.</p>
+</main></body></html>

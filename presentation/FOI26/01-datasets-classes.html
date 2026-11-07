@@ -1,0 +1,95 @@
+<!doctype html>
+<!-- SESSION 1 · Datasets and classes. Owner: edit this file only; shared look is in assets/deck.css.
+     Numbers: docs/DATA_VERSIONS.md (fixed data f993d8ebc417). Pictures: scripts/make_deck_figures.py -->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NEXA Datasets and Classes</title>
+<link rel="stylesheet" href="assets/fonts.css"><link rel="stylesheet" href="assets/deck.css">
+<style>
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .stat { background: var(--soft); border-radius: 14px; padding: 12px 14px; }
+  .stat .big { font-size: 40px; }
+  .stat .k { font-size: 14.5px; margin-top: 5px; }
+  .split { display: flex; height: 30px; border-radius: 8px; overflow: hidden; margin: 8px 0 4px; font-size: 13px; font-weight: 800; color: #fff; }
+  .split div { display: flex; align-items: center; justify-content: center; }
+  .fams { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .fam { border-left: 6px solid var(--c); background: #FAFAFA; border-radius: 10px; padding: 6px 10px; }
+  .fam b { font-size: 16px; font-weight: 800; color: var(--c); }
+  .fam b em { font-style: normal; color: var(--mute); font-weight: 700; font-size: 13px; margin-left: 6px; }
+  .fam div { font-size: 12px; font-weight: 600; color: var(--ink); line-height: 1.45; margin-top: 3px; }
+  .rules { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px; }
+  .rule { background: #F6F2FB; border-radius: 10px; padding: 7px 11px; font-size: 13.5px; font-weight: 600; color: var(--mute); line-height: 1.4; }
+  .rule b { color: var(--purple); }
+</style></head><body>
+<div class="viewport"><div class="stage" id="stage">
+  <div class="abs logo"><img src="assets/nexa-logo.png" alt="NEXA"><small>TRACK I · RF / SIGNAL · SESSION 1 / 4</small></div>
+  <div class="abs title-pill">Datasets and Classes: what NEXA learned from</div>
+  <div class="abs question">1.2 million labelled 160 µs windows, 60 classes, every one impaired like a real receiver would see it</div>
+  <div class="abs event"><img src="assets/sedic-logo.png" alt="SEDIC 26"><span>NOVEMBER 2026 UPDATE</span></div>
+
+  <!-- left: the dataset in numbers -->
+  <section class="panel rv" style="left:40px;top:150px;width:590px;height:560px;--c:var(--blue);--d:.1">
+    <h2><span class="no">A</span>THE DATASET</h2>
+    <div class="pbody">
+      <div class="stats">
+        <div class="stat"><div class="big">60</div><div class="k"><b>classes</b> in 11 families + noise floor</div></div>
+        <div class="stat" style="--c:var(--teal)"><div class="big" style="color:var(--teal)">1.2 M</div><div class="k"><b>windows</b>, 1,000 per class per SNR level</div></div>
+        <div class="stat"><div class="big" style="color:var(--amber)">160 µs</div><div class="k"><b>per window</b>: 512 IQ samples at 3.2 MS/s (±1.6 MHz)</div></div>
+        <div class="stat"><div class="big" style="color:var(--red)">16</div><div class="k"><b>SNR levels</b>, −10 to +20 dB in 2 dB steps</div></div>
+      </div>
+      <div class="split">
+        <div style="width:80%;background:var(--blue)">TRAIN 960,000</div><div style="width:10%;background:var(--teal)">VAL</div><div style="width:10%;background:var(--amber)">TEST</div>
+      </div>
+      <div class="note">80 / 10 / 10 split · val 120k picks the best epoch and the thresholds · test 120k is only for scoring</div>
+      <div class="k" style="margin-top:12px"><b>Where the signals come from</b><br>
+        Our own generators (radar codes, jammers, OFDM / LTE / NR, analog voice, digital modulations) plus public
+        <b>RadioML 2018</b> and <b>HisarMod</b> windows. Real recordings are for <b>testing only</b>.</div>
+      <div class="k" style="margin-top:10px"><b>Fingerprinted:</b> current build <b>f993d8ebc417</b>, FSK / PSK / QAM now placed anywhere in the band.</div>
+    </div>
+  </section>
+
+  <!-- left bottom: SNR ladder -->
+  <section class="panel rv" style="left:40px;top:725px;width:590px;height:335px;--c:var(--red);--d:.3">
+    <h2><span class="no">B</span>SAME SIGNAL, FOUR STRENGTHS</h2>
+    <div class="pbody">
+      <img class="fig" src="assets/img/snr_ladder.png" alt="LFM radar at -10, 0, 10, 20 dB">
+      <div class="note" style="margin-top:8px">One LFM radar chirp from −10 dB (buried) to +20 dB (clear). Training covers the whole range,
+        so the model learns where its own limit is and says “uncertain” below it.</div>
+    </div>
+  </section>
+
+  <!-- right top: families -->
+  <section class="panel rv" style="left:650px;top:150px;width:1230px;height:405px;--c:var(--navy);--d:.2">
+    <h2><span class="no">C</span>60 CLASSES IN 12 FAMILIES</h2>
+    <div class="pbody">
+      <div class="fams">
+        <div class="fam" style="--c:var(--red)"><b>Jammers<em>10</em></b><div>Barrage · Spot · Tone · Multitone · Swept · Chirp · Pulsed · Partial-band · Reactive · DRFM</div></div>
+        <div class="fam" style="--c:var(--amber)"><b>Radar<em>8</em></b><div>Pulse · LFM · Barker · Poly-Barker · Frank · Costas · FMCW · CW</div></div>
+        <div class="fam" style="--c:var(--purple)"><b>Pulse comms<em>3</em></b><div>PPM · AFSK · SSR / IFF</div></div>
+        <div class="fam" style="--c:var(--teal)"><b>Spread spectrum<em>3</em></b><div>FHSS · DSSS · LoRa CSS</div></div>
+        <div class="fam" style="--c:var(--green)"><b>Analog voice<em>7</em></b><div>AM-DSB (WC / SC) · AM-SSB (WC / SC) · WBFM · NBFM · PM</div></div>
+        <div class="fam" style="--c:var(--blue)"><b>ASK<em>3</em></b><div>OOK · 4ASK · 8ASK</div></div>
+        <div class="fam" style="--c:var(--navy)"><b>OFDM / LTE / NR<em>3</em></b><div>OFDM · LTE-like · NR-like</div></div>
+        <div class="fam" style="--c:#8A5A00"><b>APSK<em>4</em></b><div>16 · 32 · 64 · 128 APSK</div></div>
+        <div class="fam" style="--c:var(--blue)"><b>FSK<em>7</em></b><div>2 / 4 / 8FSK · GFSK · GMSK · MSK · CPFSK</div></div>
+        <div class="fam" style="--c:var(--teal)"><b>PSK<em>6</em></b><div>BPSK · QPSK · OQPSK · 8 / 16 / 32PSK</div></div>
+        <div class="fam" style="--c:var(--purple)"><b>QAM<em>5</em></b><div>16 · 32 · 64 · 128 · 256 QAM</div></div>
+        <div class="fam" style="--c:#777"><b>Noise floor<em>1</em></b><div>nothing on the air: the model must be able to say so</div></div>
+      </div>
+      <div class="rules">
+        <div class="rule"><b>Multi-label · two on the air:</b> a DRFM window holds the radar <b>and</b> the jammer copying it, so it carries both labels.</div>
+        <div class="rule"><b>Multi-label · look-alikes:</b> RADAR_CW / JAM_TONE and LoRa / swept jammer carry both labels; the tracker settles them over time.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- right bottom: gallery -->
+  <section class="panel rv" style="left:650px;top:570px;width:1230px;height:490px;--c:var(--amber);--d:.4">
+    <h2><span class="no">D</span>WHAT THE MODEL SEES IN 160 µs: ONE PER FAMILY</h2>
+    <div class="pbody" style="padding:10px 14px">
+      <img class="fig" src="assets/img/gallery_families.png" alt="Spectrogram of one class per family" style="max-height:380px;width:auto;margin:0 auto">
+      <div class="note" style="text-align:center;margin-top:4px">Time across, frequency up (±1.6 MHz), at 20 dB. Each family leaves a different shape: lines, sweeps, hops, bands, pulses.</div>
+    </div>
+  </section>
+</div></div>
+<script src="assets/deck.js"></script>
+</body></html>

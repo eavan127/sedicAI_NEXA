@@ -1,0 +1,44 @@
+{
+ "pipeline": {
+  "example": "JAM_DRFM at 18 dB",
+  "top": [
+   [
+    "LFM_RADAR",
+    0.729
+   ],
+   [
+    "JAM_DRFM",
+    0.533
+   ],
+   [
+    "RADAR_BARKER",
+    0.06
+   ],
+   [
+    "AM_DSB_WC",
+    0.048
+   ],
+   [
+    "RADAR_PULSE",
+    0.048
+   ],
+   [
+    "AM_SSB_SC",
+    0.048
+   ],
+   [
+    "AM_SSB_WC",
+    0.037
+   ],
+   [
+    "RADAR_COSTAS",
+    0.036
+   ]
+  ]
+ },
+ "morse": {
+  "text": "CQ CQ DE NEXA K",
+  "wpm": 18.2,
+  "tone_hz": 699
+ }
+}

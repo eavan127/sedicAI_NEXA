@@ -1,0 +1,116 @@
+<!doctype html>
+<!-- SESSION 3 · Data processing pipeline: normalisation -> STFT -> branches -> attention pooling -> sigmoids -> multi-label decision.
+     Owner: edit this file only. Pictures are made by scripts/make_deck_figures.py from the real model
+     (results/classifier/physics_best.pt) on one real window: a DRFM jammer copying an LFM radar at 18 dB.
+     Code: src/data/merge.py (normalize_batch), src/models/amc_cnn.py, src/pipeline/tracker.py + resolve.py -->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NEXA Processing Pipeline</title>
+<link rel="stylesheet" href="assets/fonts.css"><link rel="stylesheet" href="assets/deck.css">
+<style>
+  .st { position: absolute; width: 445px; height: 445px; }
+  .st > h3 { margin: 0; height: 44px; border-radius: 22px; background: var(--pill); display: flex; align-items: center; gap: 10px;
+    padding: 0 16px; font-size: 17.5px; font-weight: 800; letter-spacing: .6px; }
+  .st > h3 .no { display: inline-flex; flex: none; width: 28px; height: 28px; border-radius: 50%; background: var(--c); color: #fff;
+    align-items: center; justify-content: center; font-size: 15px; }
+  .st .pbody { top: 54px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+  .st .what { font-size: 14.5px; font-weight: 600; color: var(--mute); line-height: 1.4; }
+  .st .what b { color: var(--ink); }
+  .st .formula { font: 700 14px Consolas, "Courier New", monospace; background: #F6F7F9; border-radius: 8px; padding: 6px 9px; color: var(--navy); }
+  .st img.fig { margin-top: auto; }
+  .flowarr { position: absolute; width: 20px; display: flex; align-items: center; justify-content: center; color: #9AA3AB; font-size: 22px; font-weight: 800; }
+  .mini { display: flex; flex-direction: column; gap: 6px; }
+  .mini .step { padding: 6px 10px; border-width: 2.5px; border-radius: 10px; }
+  .mini .step b { font-size: 15px; }
+  .mini .step span { font-size: 12.5px; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .rule { font-size: 13px; font-weight: 600; color: var(--mute); line-height: 1.35; padding: 5px 0; border-bottom: 1px solid var(--line); }
+  .rule:last-child { border-bottom: 0; }
+  .rule b { color: var(--c, var(--purple)); }
+</style></head><body>
+<div class="viewport"><div class="stage" id="stage">
+  <div class="abs logo"><img src="assets/nexa-logo.png" alt="NEXA"><small>TRACK I · RF / SIGNAL · SESSION 3 / 4</small></div>
+  <div class="abs title-pill">Processing pipeline: from IQ samples to a decision</div>
+  <div class="abs question">Every picture is the real model on one real window: a DRFM jammer copying an LFM radar, 18 dB</div>
+  <div class="abs event"><img src="assets/sedic-logo.png" alt="SEDIC 26"><span>NOVEMBER 2026 UPDATE</span></div>
+
+  <!-- row 1 -->
+  <section class="st rv" style="left:40px;top:150px;--c:var(--blue);--d:.1"><h3><span class="no">1</span>CUT ONE EMITTER</h3>
+    <div class="pbody" style="--c:var(--blue)">
+      <div class="what">The detector boxes an emitter on the wideband spectrogram. Its band is <b>shifted to 0 Hz</b>, filtered, and cut into
+        <b>160 µs windows</b>; only windows where it is actually on are kept.</div>
+      <div class="formula">512 complex samples · 3.2 MS/s · ±1.6 MHz</div>
+      <div class="mini">
+        <div class="step" style="--c:var(--blue)"><b>Wideband capture</b><span>seconds of IQ, many emitters</span></div>
+        <div class="step" style="--c:var(--blue)"><b>Box → shift → filter</b><span>one emitter, centred, rest removed</span></div>
+        <div class="step" style="--c:var(--blue)"><b>Active windows</b><span>gaps between pulses skipped</span></div>
+      </div>
+    </div></section>
+  <div class="flowarr" style="left:485px;top:350px">→</div>
+
+  <section class="st rv" style="left:505px;top:150px;--c:var(--teal);--d:.2"><h3><span class="no">2</span>NORMALISE</h3>
+    <div class="pbody" style="--c:var(--teal)">
+      <div class="what">Every window gets <b>zero mean and unit spread</b> over I and Q together, so a weak and a strong
+        signal look the same size: the model judges <b>shape</b>, not loudness.</div>
+      <div class="formula">x ← (x − mean) / std</div>
+      <img class="fig" src="assets/img/pipe_1_iq.png" alt="raw and normalised I and Q">
+    </div></section>
+  <div class="flowarr" style="left:950px;top:350px">→</div>
+
+  <section class="st rv" style="left:970px;top:150px;--c:var(--amber);--d:.3"><h3><span class="no">3</span>TIME–FREQUENCY PICTURE</h3>
+    <div class="pbody" style="--c:var(--amber)">
+      <div class="what">A short-time Fourier transform turns the window into a picture: <b>64 frequency rows</b> (50 kHz each) across time.
+        Here: the radar chirp and its delayed jammer copy.</div>
+      <div class="formula">STFT, n_fft = 64, magnitude</div>
+      <img class="fig" src="assets/img/pipe_2_stft.png" alt="STFT of the window">
+    </div></section>
+  <div class="flowarr" style="left:1415px;top:350px">→</div>
+
+  <section class="st rv" style="left:1435px;top:150px;--c:var(--navy);--d:.4"><h3><span class="no">4</span>TWO LEARNED BRANCHES</h3>
+    <div class="pbody" style="--c:var(--navy)">
+      <div class="two">
+        <div class="step" style="--c:var(--navy)"><b>IQ branch</b><span>1-D conv + two dilated convs (×2, ×4): sees ~43 samples at once, keeps full time detail · 128 features</span></div>
+        <div class="step" style="--c:var(--amber)"><b>STFT branch</b><span>2-D convs on the picture: shapes, sweeps, hops · 64 features, stretched back to full time</span></div>
+      </div>
+      <div class="darr"></div>
+      <div class="step" style="--c:var(--ink)"><b>Fused sequence</b><span>192 features at each of the 512 time steps</span></div>
+      <div class="what">Learned from 960,000 examples; nothing hand-tuned.</div>
+    </div></section>
+
+  <!-- row 2 -->
+  <section class="st rv" style="left:40px;top:610px;--c:var(--red);--d:.5"><h3><span class="no">5</span>ATTENTION POOLING</h3>
+    <div class="pbody" style="--c:var(--red)">
+      <div class="what">A score per time step, from the features <b>and</b> the signal power, then softmax: the model
+        <b>looks where the signal is</b> and ignores empty time. 512 steps → one 192-number summary.</div>
+      <img class="fig" src="assets/img/pipe_3_attention.png" alt="feature map and attention weights following the pulse">
+    </div></section>
+  <div class="flowarr" style="left:485px;top:810px">→</div>
+
+  <section class="st rv" style="left:505px;top:610px;--c:var(--green);--d:.6"><h3><span class="no">6</span>EXPERT + PHYSICS VIEWS</h3>
+    <div class="pbody" style="--c:var(--green)">
+      <div class="what">Measurements a signal analyst would make, added beside the summary:
+        <b>104 expert</b> (amplitude rings, echoes), the <b>whole-window spectrum</b>, and <b>56 physics</b> numbers
+        (power-law lines, symbol clock, frequency wobble, envelope, OFDM echo, on/off timing).</div>
+      <img class="fig" src="assets/img/pipe_4_physics.png" alt="56 physics numbers for this window">
+    </div></section>
+  <div class="flowarr" style="left:950px;top:810px">→</div>
+
+  <section class="st rv" style="left:970px;top:610px;--c:var(--purple);--d:.7"><h3><span class="no">7</span>60 YES / NO ANSWERS</h3>
+    <div class="pbody" style="--c:var(--purple)">
+      <div class="what">Two dense layers (256 → 60), then a <b>separate sigmoid for each class</b>, trained with binary cross-entropy:
+        classes do not compete, so <b>two can be true at once</b>. Every class ≥ 0.5 is present.</div>
+      <img class="fig" src="assets/img/pipe_5_multilabel.png" alt="sigmoid outputs: LFM radar 0.73 and DRFM 0.53 above 0.5">
+    </div></section>
+  <div class="flowarr" style="left:1415px;top:810px">→</div>
+
+  <section class="st rv" style="left:1435px;top:610px;--c:var(--ink);--d:.8"><h3><span class="no">8</span>MULTI-LABEL DECISION</h3>
+    <div class="pbody">
+      <div class="what"><b>Track vote:</b> all windows of one emitter, averaged as log-odds. Then the rules:</div>
+      <div class="rule" style="--c:var(--red)"><b>DRFM + radar</b> → report <b>both</b>: “DRFM jammer copying an LFM radar”.</div>
+      <div class="rule" style="--c:var(--teal)"><b>LoRa vs swept jammer</b> → width and chirp wraps over time decide.</div>
+      <div class="rule" style="--c:var(--amber)"><b>CW radar vs tone jammer</b> → context: did it appear on top of a signal?</div>
+      <div class="rule" style="--c:var(--purple)"><b>QAM / APSK / 8–32PSK size</b> → the group, likeliest size as a hint.</div>
+      <div class="rule" style="--c:var(--green)"><b>Otherwise</b> → the top class, with a band: high / medium / uncertain.</div>
+    </div></section>
+</div></div>
+<script src="assets/deck.js"></script>
+</body></html>

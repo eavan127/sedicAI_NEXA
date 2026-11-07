@@ -1,0 +1,77 @@
+/* Shared look for the FOI26 slides (one HTML file per session).
+   Change colours / fonts here once; each slide file only holds its own content.
+   Stage is 1920x1080 and is scaled to the window by deck.js. */
+:root {
+  --blue: #2E7DB9; --orange: #F0A020; --amber: #C77A00; --red: #B0281A; --green: #457900;
+  --navy: #22306B; --teal: #1D7A68; --purple: #6B3FA0; --ink: #1A1A1A; --mute: #5E5E5E;
+  --pill: #F1F1F1; --line: #E3E3E3; --paper: #FFFFFF; --soft: #EEF4FA;
+  --font: "Montserrat", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: #15161A; color: var(--ink); font-family: var(--font); overflow: hidden; }
+.viewport { position: fixed; inset: 0; }
+.stage { position: absolute; left: 50%; top: 50%; width: 1920px; height: 1080px; transform-origin: center;
+  background: var(--paper); overflow: hidden; }
+.abs { position: absolute; }
+
+/* header: same as the posters */
+.logo { left: 44px; top: 38px; }
+.logo img { display: block; height: 52px; }
+.logo small { display: block; font-size: 14px; font-weight: 700; color: var(--mute); letter-spacing: 2px; margin: 6px 0 0 4px; }
+.title-pill { left: 330px; top: 24px; width: 1200px; height: 72px; border-radius: 36px; background: var(--pill);
+  display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 30px; white-space: nowrap; }
+.question { left: 330px; top: 104px; width: 1200px; text-align: center; font-size: 19px; font-style: italic; color: var(--mute); font-weight: 500; }
+.event { right: 40px; top: 14px; text-align: right; }
+.event img { display: block; height: 96px; margin-left: auto; }
+.event span { display: block; font-size: 14px; color: var(--green); font-weight: 800; letter-spacing: 1px; margin-top: 2px; }
+
+/* panels: pill heading + body, like the posters */
+.panel { position: absolute; }
+.panel > h2 { margin: 0; height: 44px; border-radius: 22px; background: var(--pill); display: flex; align-items: center;
+  justify-content: center; gap: 10px; font-size: 19px; font-weight: 800; letter-spacing: 1.4px; }
+.panel > h2 .no { display: inline-flex; width: 28px; height: 28px; border-radius: 50%; background: var(--c, var(--ink));
+  color: #fff; align-items: center; justify-content: center; font-size: 15px; letter-spacing: 0; }
+.pbody { position: absolute; left: 0; right: 0; top: 56px; bottom: 0; border: 3px solid var(--c, var(--line));
+  border-radius: 18px; padding: 16px 18px; background: #fff; }
+.pbody.soft { background: var(--soft); border-style: dashed; border-color: #9AA3AB; }
+
+/* text bits */
+.k { font-size: 17px; font-weight: 600; color: var(--mute); line-height: 1.4; }
+.k b { color: var(--ink); }
+.big { font-weight: 800; line-height: 1; color: var(--c, var(--blue)); }
+.tag { display: inline-block; font-size: 13px; font-weight: 800; letter-spacing: 1.2px; color: #fff; background: var(--c, var(--blue));
+  border-radius: 9px; padding: 3px 10px; }
+.note { font-size: 14px; color: var(--mute); font-weight: 500; line-height: 1.4; }
+.chip { display: inline-block; font-size: 14px; font-weight: 700; border-radius: 9px; padding: 4px 9px; margin: 0 5px 6px 0;
+  background: #fff; border: 2px solid var(--c, var(--line)); color: var(--ink); }
+.chip i { font-style: normal; font-weight: 800; color: var(--c, var(--green)); margin-left: 5px; }
+img.fig { display: block; width: 100%; height: auto; }
+
+/* step boxes and arrows (pipeline / architecture) */
+.step { background: #fff; border: 3px solid var(--c); border-radius: 14px; padding: 10px 14px; }
+.step b { display: block; font-size: 19px; font-weight: 800; color: var(--c); }
+.step span { display: block; font-size: 15px; font-weight: 600; color: var(--mute); line-height: 1.35; }
+.row { display: flex; align-items: stretch; gap: 0; }
+.arr { width: 34px; flex: none; display: flex; align-items: center; justify-content: center; color: #9AA3AB; font-size: 26px; font-weight: 800; }
+.arr::before { content: "\2192"; }
+.darr { height: 26px; display: flex; justify-content: center; color: #9AA3AB; font-size: 24px; font-weight: 800; line-height: 26px; }
+.darr::before { content: "\2193"; }
+
+/* bars */
+.bar { display: grid; grid-template-columns: var(--nw, 200px) 1fr 58px; align-items: center; gap: 10px; height: 34px; }
+.bar .nm { font-size: 16px; font-weight: 700; text-align: right; }
+.bar .tr { height: 20px; background: var(--pill); border-radius: 10px; overflow: hidden; }
+.bar .fl { height: 100%; border-radius: 10px; background: var(--c, var(--green)); transform-origin: left; animation: grow 1s cubic-bezier(.22,1,.36,1) both; }
+.bar .v { font-size: 17px; font-weight: 800; color: var(--c, var(--green)); }
+@keyframes grow { from { transform: scaleX(0); } }
+
+/* entrance */
+.rv { animation: up .6s cubic-bezier(.22,1,.36,1) both; animation-delay: calc(var(--d, 0) * 1s); }
+@keyframes up { from { opacity: 0; transform: translateY(18px); } }
+
+/* nav (hidden while idle) */
+.nav { position: fixed; right: 16px; bottom: 14px; display: flex; gap: 8px; z-index: 10; transition: opacity .4s; }
+.nav a, .nav button { font: 700 14px var(--font); background: rgba(255,255,255,.12); color: #fff; border: 1px solid rgba(255,255,255,.3);
+  border-radius: 9px; padding: 7px 12px; cursor: pointer; text-decoration: none; }
+body.nav-idle .nav { opacity: 0; }
