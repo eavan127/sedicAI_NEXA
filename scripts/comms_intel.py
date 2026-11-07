@@ -91,7 +91,8 @@ def process(path, args):
         from src.intel import voice
         print("    voice-like: Whisper on the loudest parts ...", flush=True)
         try:
-            rec["transcript"] = voice.transcribe(info, model=args.whisper_model, max_minutes=args.whisper_minutes)
+            rec["transcript"] = voice.transcribe(info, model=args.whisper_model, max_minutes=args.whisper_minutes,
+                                                 language=args.language)
         except Exception as e:                       # noqa: BLE001 -- whisper missing or failed: keep the rest
             rec["transcript"] = {"error": str(e)}
     wpm = [s["wpm"] for s in rec["segments"]]
@@ -176,7 +177,8 @@ def main():
     p.add_argument("--model", default=reason.DEFAULT_MODEL, help="Ollama model (e.g. llama3.2:3b, qwen2.5:7b)")
     p.add_argument("--ollama", default=reason.DEFAULT_URL)
     p.add_argument("--no-whisper", action="store_true")
-    p.add_argument("--whisper-model", default="base")
+    p.add_argument("--whisper-model", default="medium", help="must already be on this machine; base is faster but poor on Malay")
+    p.add_argument("--language", default="auto", help="spoken language for Whisper: ms, en, id or auto")
     p.add_argument("--whisper-minutes", type=float, default=10.0)
     args = p.parse_args()
 

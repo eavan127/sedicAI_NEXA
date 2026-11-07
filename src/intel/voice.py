@@ -2,21 +2,52 @@
 only for formats other than the WAVs read here).
 
 Only the stretches where the audio is loud enough to hold speech are sent,
-up to `max_minutes` per recording: Whisper on a CPU runs at about real time,
+up to `max_minutes` per recording: Whisper on a CPU is slower than real time,
 so hours of receiver hiss would take hours for nothing.
+
+The default is the `medium` model. On the same 17 Common Voice clips it made 11%
+word errors on clean Malay and 10% on Malaysian English, against 48% and 26% for
+`base` (scripts/simulate_voice.py, 2026-11-07), at about 6 s of CPU per second of
+audio. A missing model is an error, never a download: this stays offline.
+
+Whisper's own confidence is a weak warning: `medium` marked nothing as doubtful
+on Malay under light hiss, with 25% of the words wrong. A segment without a doubt
+mark is not known to be right, so show the audio next to the text.
 """
 from __future__ import annotations
+
+import os
+from pathlib import Path
 
 import numpy as np
 from scipy.signal import resample_poly
 
 from .audio import WavInfo, iter_chunks
 
+DEFAULT_MODEL = "medium"
+LANGUAGES = ("auto", "ms", "en", "id")      # what the pipeline and dashboard offer; auto = let Whisper detect
+LOW_LOGPROB, HIGH_NO_SPEECH = -1.0, 0.6     # beyond these a segment counts as doubtful
 _MODELS = {}
 
 
-def load(name="base"):
+def model_dir() -> Path:
+    """Where Whisper keeps its models (its own rule, so the two always agree)."""
+    return Path(os.getenv("XDG_CACHE_HOME", str(Path.home() / ".cache"))) / "whisper"
+
+
+def installed_models():
+    """Names of the models on this machine, e.g. ['base', 'medium']."""
+    d = model_dir()
+    return sorted(p.stem for p in d.glob("*.pt")) if d.is_dir() else []
+
+
+def load(name=DEFAULT_MODEL):
     if name not in _MODELS:
+        path = model_dir() / f"{name}.pt"
+        if not path.exists():
+            raise FileNotFoundError(
+                f"Whisper model '{name}' is not on this machine ({path}), and this never downloads by itself. "
+                f"While online, run once: python -c \"import whisper; whisper.load_model('{name}')\"")
         import whisper                     # imported here: optional, and slow to import
         _MODELS[name] = whisper.load_model(name)
     return _MODELS[name]
@@ -44,14 +75,25 @@ def active_audio(info: WavInfo, max_minutes=10.0, chunk_s=30.0):
     return audio, [starts[i] for i in keep]
 
 
-def transcribe(info: WavInfo, model="base", max_minutes=10.0, language=None):
+def transcribe(info: WavInfo, model=DEFAULT_MODEL, max_minutes=10.0, language=None):
+    """language: 'ms', 'en', ... or None / 'auto' to detect. Setting it is safer on
+    short clips, but a wrong setting gives wrong-language nonsense, not an error."""
+    language = None if language in (None, "", "auto") else language
     audio, starts = active_audio(info, max_minutes)
     if len(audio) == 0:
-        return {"text": "", "language": None, "chunks_s": [], "model": model}
-    res = load(model).transcribe(audio, language=language, fp16=False)
+        return {"text": "", "language": language, "chunks_s": [], "model": model, "segments": [], "doubtful_share": 0.0}
+    # Each segment decoded alone: feeding text forward can repeat one invented phrase.
+    res = load(model).transcribe(audio, language=language, fp16=False, condition_on_previous_text=False)
+    segments, doubtful_words, words = [], 0, 0
+    for s in res.get("segments", []):
+        text = s["text"].strip()
+        doubtful = bool(s.get("avg_logprob", 0.0) < LOW_LOGPROB or s.get("no_speech_prob", 0.0) > HIGH_NO_SPEECH)
+        n = len(text.split())
+        words += n
+        doubtful_words += n if doubtful else 0
+        # times inside the clip of loud chunks (chunks_s gives where each chunk sits in the file)
+        segments.append({"clip_start_s": round(s["start"], 1), "clip_end_s": round(s["end"], 1),
+                         "text": text, "doubtful": doubtful})
     return {"text": res.get("text", "").strip(), "language": res.get("language"),
-            "chunks_s": starts, "model": model,
-            # times inside the clip of loud chunks (chunks_s gives where each chunk sits in the file)
-            "segments": [{"clip_start_s": round(s["start"], 1), "clip_end_s": round(s["end"], 1),
-                          "text": s["text"].strip()}
-                         for s in res.get("segments", [])]}
+            "chunks_s": starts, "model": model, "segments": segments,
+            "doubtful_share": round(doubtful_words / words, 3) if words else 0.0}

@@ -13,6 +13,24 @@ const KIND_TEXT = {
   UNKNOWN: "Too weak to tell", ERROR: "Error",
 };
 const CONF = c => c >= 0.6 ? "#2E7D32" : c >= 0.3 ? "#B7791F" : "#9B2C2C";
+const LANG_TEXT = { auto: "Language: detect", ms: "Malay", en: "English", id: "Indonesian" };
+
+function whisperOptions(info) {
+  const have = info.whisper_models || [];
+  if (!have.length) return `<option value="">no speech model on this PC</option>`;
+  const pick = have.includes(info.whisper_default) ? info.whisper_default : have[0];
+  return have.map(m => `<option value="${esc(m)}"${m === pick ? " selected" : ""}>Whisper ${esc(m)}</option>`).join("");
+}
+
+// The transcript line by line, with the lines Whisper itself doubted marked. A line
+// with no mark is not known to be right: Whisper can be wrong without saying so.
+function speechText(L) {
+  const segs = L.segments || [];
+  if (!segs.length) return L.transcript ? esc(L.transcript) : "<span class='note'>no words recognised</span>";
+  return segs.map(s => s.doubtful
+    ? `<span style="color:#9B2C2C;" title="Whisper was unsure of this part">[? ${esc(s.text)}]</span>`
+    : esc(s.text)).join(" ");
+}
 
 let state = { open: null, timer: null };
 
@@ -59,6 +77,10 @@ export async function renderPipeline(root, { server }) {
       <div class="filters">
         <label class="note" style="margin:0;"><input type="checkbox" id="pipeListen" checked> Listen to voice / Morse</label>
         <label class="note" style="margin:0;"><input type="checkbox" id="pipeWhisper" checked> Whisper</label>
+        <select id="pipeModel" title="Speech model on this PC. medium is far better, especially on Malay, but takes about 6 s per second of speech; base is faster">
+          ${whisperOptions(info)}</select>
+        <select id="pipeLang" title="Language spoken. Setting it is safer on short clips, but a wrong choice gives nonsense">
+          ${(info.languages || ["auto"]).map(l => `<option value="${esc(l)}">${esc(LANG_TEXT[l] || l)}</option>`).join("")}</select>
         <label class="note" style="margin:0;"><input type="checkbox" id="pipeLlm" checked> AI reading (Ollama)</label>
         <button id="pipeRun">Analyse file</button>
         <button class="secondary" id="pipeDemo" title="Made-up walkie-talkie speech, Morse and an AM station in a 1.2 s capture">Run voice demo</button>
@@ -78,7 +100,10 @@ export async function renderPipeline(root, { server }) {
       listen: root.querySelector("#pipeListen").checked ? "1" : "0",
       whisper: root.querySelector("#pipeWhisper").checked ? "1" : "0",
       llm: root.querySelector("#pipeLlm").checked ? "1" : "0",
+      language: root.querySelector("#pipeLang").value,
     });
+    const model = root.querySelector("#pipeModel").value;
+    if (model) p.set("whisper_model", model);
     let body = null;
     if (!demo) {
       const f = root.querySelector("#pipeFile").files[0];
@@ -191,8 +216,9 @@ function drawResult(box, id, r) {
 function listenCard(id, L) {
   const rd = L.reading || {};
   const said = L.morse ? `<div><b>Morse:</b> <code>${esc(L.morse)}</code></div>`
-    : L.transcript !== undefined ? `<div><b>Speech (Whisper${L.language ? `, ${esc(L.language)}` : ""}):</b>
-        ${L.transcript ? esc(L.transcript) : "<span class='note'>no words recognised</span>"}</div>` : "";
+    : L.transcript !== undefined ? `<div><b>Speech (Whisper${L.whisper_model ? ` ${esc(L.whisper_model)}` : ""}${L.language ? `, ${esc(L.language)}` : ""}):</b>
+        ${speechText(L)}</div>
+        <div class="note">Machine transcript: it can be wrong without any mark, so check names and numbers against the audio.</div>` : "";
   return `<div class="block" style="margin:8px 0;padding:10px;">
     <div><b>${esc(KIND_TEXT[L.kind] || L.kind)}</b> · tracks ${esc((L.tracks || []).join(", "))} ·
       ${(L.duration_s || 0).toFixed(1)} s <span class="note">— ${esc(L.why || "")}</span></div>

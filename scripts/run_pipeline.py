@@ -18,6 +18,8 @@ demodulated audio (track_<n>.wav), Morse text or Whisper transcript, and a
 local Ollama reading. --voice-demo makes a capture with made-up walkie-talkie
 speech (NBFM) and Morse (CW) in it, to try that path without a recording:
     python scripts/run_pipeline.py --voice-demo --classifier best.pt --listen
+Choose the speech model and language (the model must already be on this machine):
+    python scripts/run_pipeline.py --iq rec.wav --classifier best.pt --listen --whisper-model medium --language ms
 
 A synthetic one with known emitters (4 chunks = 41 ms):
     python scripts/run_pipeline.py --synthetic 4 --seed 3 --classifier best.pt
@@ -38,6 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.config import CFG, REPO_ROOT  # noqa: E402
 from src.detect import scenes  # noqa: E402
+from src.intel import voice  # noqa: E402
 from src.pipeline import iqio, listen  # noqa: E402
 from src.pipeline.capture import make_capture  # noqa: E402
 from src.pipeline.classify import Classifier  # noqa: E402
@@ -106,6 +109,10 @@ def main():
                    help="analyse at most this much of a recording (CPU: ~50 s of work per second of capture)")
     p.add_argument("--listen", action="store_true", help="zoom, demodulate and transcribe voice / Morse tracks")
     p.add_argument("--no-whisper", action="store_true")
+    p.add_argument("--whisper-model", default=voice.DEFAULT_MODEL,
+                   help="Whisper model already on this machine (it never downloads): base is fast but poor on Malay")
+    p.add_argument("--language", default="auto", choices=voice.LANGUAGES,
+                   help="spoken language; setting it is safer on short clips, a wrong one gives nonsense")
     p.add_argument("--no-llm", action="store_true")
     p.add_argument("--llm-model", default=None, help="Ollama model for the reading (default llama3.2:3b)")
     p.add_argument("--dtype", default="float32", help="sample type of a raw --iq file (float32, int16, int8)")
@@ -148,6 +155,7 @@ def main():
         for old in out.glob("track_*.wav"):              # audio of an earlier run in this folder
             old.unlink()
         listen.listen_all(iq, answers, out, rng=rng, use_whisper=not args.no_whisper,
+                          whisper_model=args.whisper_model, language=args.language,
                           use_llm=not args.no_llm, llm_model=args.llm_model)
     doc = finite({"n_samples": len(iq), "duration_ms": len(iq) / FS * 1e3,
                   "source": source, "tracks": answers, "truth": truth})

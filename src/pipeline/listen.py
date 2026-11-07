@@ -41,7 +41,7 @@ def wanted(ans):
     return any(c in CLASS_GROUPS["ANALOG"] and p >= TOP5_ANALOG_P for c, p in ans.get("top5", []))
 
 
-def listen_track(iq, ans, out_dir, noise_var, rng, whisper_model="base", llm_model=None,
+def listen_track(iq, ans, out_dir, noise_var, rng, whisper_model=None, language=None, llm_model=None,
                  use_whisper=True, use_llm=True):
     t0 = int(ans["t_start_ms"] * FS / 1e3)
     t1 = int(ans["t_end_ms"] * FS / 1e3)
@@ -85,10 +85,16 @@ def listen_track(iq, ans, out_dir, noise_var, rng, whisper_model="base", llm_mod
             text_kind = "morse"
         elif kind in VOICE_KINDS and use_whisper and out["duration_s"] >= MIN_SPEECH_S:
             from src.intel import voice
-            tr = voice.transcribe(info, model=whisper_model, max_minutes=1.0)
+            tr = voice.transcribe(info, model=whisper_model or voice.DEFAULT_MODEL, max_minutes=1.0, language=language)
             out["transcript"] = tr.get("text", "")
             out["language"] = tr.get("language")
-            segments = [{"start_s": s["clip_start_s"], "text": s["text"]} for s in tr.get("segments", [])]
+            out["whisper_model"] = tr.get("model")
+            out["doubtful_share"] = tr.get("doubtful_share", 0.0)
+            out["segments"] = [{"start_s": s["clip_start_s"], "end_s": s["clip_end_s"], "text": s["text"],
+                                "doubtful": s["doubtful"]} for s in tr.get("segments", [])]
+            # The AI reading only gets what Whisper was sure of, so it cannot build
+            # a confident summary on text Whisper itself doubted.
+            segments = [{"start_s": s["start_s"], "text": s["text"]} for s in out["segments"] if not s["doubtful"]]
             text_kind = "voice"
     except Exception as e:                       # noqa: BLE001 -- keep the audio even if decoding fails
         out["text_error"] = f"{type(e).__name__}: {e}"

@@ -391,11 +391,15 @@ class Handler(SimpleHTTPRequestHandler):
         read its results. Runs are folders under results/pipeline/jobs/."""
         PIPELINE_DIR.mkdir(parents=True, exist_ok=True)
         if method == "GET" and not rest:
+            from src.intel import voice
             runs = sorted((d for d in PIPELINE_DIR.iterdir() if d.is_dir() and PIPE_ID.fullmatch(d.name)),
                           reverse=True)[:30]
             return self._send_json({"runs": [self._pipe_status(d) for d in runs],
                                     "classifiers": [c.name for c in sorted(CLASSIFIER_DIR.glob("*best*.pt"))],
-                                    "detector": DETECTOR_PT.exists()})
+                                    "detector": DETECTOR_PT.exists(),
+                                    "whisper_models": voice.installed_models(),
+                                    "whisper_default": voice.DEFAULT_MODEL,
+                                    "languages": list(voice.LANGUAGES)})
         if rest and not PIPE_ID.fullmatch(rest[0]):
             return self._error(HTTPStatus.NOT_FOUND, "no such run")
         if method == "GET" and len(rest) == 1:
@@ -434,6 +438,17 @@ class Handler(SimpleHTTPRequestHandler):
         classifiers = sorted(CLASSIFIER_DIR.glob("*best*.pt"))
         if not classifiers:
             return self._error(HTTPStatus.CONFLICT, f"no classifier: put a week-1 best.pt into {CLASSIFIER_DIR}")
+        from src.intel import voice
+        use_whisper = q("listen", "1") == "1" and q("whisper", "1") == "1"
+        model, language = q("whisper_model", voice.DEFAULT_MODEL), q("language", "auto")
+        if use_whisper:
+            # Checked before anything is created. These reach a command line, and a
+            # model that is not on this machine must never trigger a download.
+            if model not in voice.installed_models():
+                return self._error(HTTPStatus.BAD_REQUEST, f"Whisper model '{model}' is not on this machine; "
+                                   f"it has {voice.installed_models()}")
+            if language not in voice.LANGUAGES:
+                return self._error(HTTPStatus.BAD_REQUEST, f"language must be one of {list(voice.LANGUAGES)}")
         import datetime
         import secrets
         rid = datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(2)
@@ -479,8 +494,11 @@ class Handler(SimpleHTTPRequestHandler):
             meta["detector"] = "yolo+narrow" if mode == "hybrid" else "yolo"
         if q("listen", "1") == "1":
             cmd.append("--listen")
-            if q("whisper", "1") != "1":
+            if not use_whisper:
                 cmd.append("--no-whisper")
+            else:
+                cmd += ["--whisper-model", model, "--language", language]
+                meta["whisper_model"], meta["language"] = model, language
             if q("llm", "1") != "1":
                 cmd.append("--no-llm")
         meta["listen"] = "--listen" in cmd
