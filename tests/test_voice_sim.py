@@ -84,6 +84,65 @@ def test_wer_counts_each_kind_of_error():
     assert vs.wer("alpha 1", "Alpha one.")["wer"] == 0
 
 
+def test_malay_digits_are_scored_as_malay_words():
+    assert vs.normalize("Alfa 12, ganti.", "ms") == ["alfa", "satu", "dua", "ganti"]
+    assert vs.wer("pusat pemeriksaan tujuh", "Pusat pemeriksaan 7.", "ms")["wer"] == 0
+    assert vs.wer("pukul sembilan pagi", "pukul 9 pagi", "ms")["wer"] == 0
+    assert vs.wer("pukul sembilan pagi", "pukul 9 pagi", "en")["wer"] > 0     # the language matters
+    assert vs.wer("terputus-putus", "terputus putus", "ms")["wer"] == 0
+
+
+def test_every_language_has_a_full_script():
+    assert set(vs.SCRIPTS) == {"en", "ms"}
+    assert len(vs.LINES_MS) == len(vs.LINES)
+    assert all(vs.normalize(line, "ms") for line in vs.LINES_MS)
+
+
+def test_recordings_pair_each_file_with_its_line(tmp_path):
+    folder = tmp_path / "jessy_ms"
+    folder.mkdir()
+    x = 0.3 * np.sin(2 * np.pi * 300 * np.arange(vs.FS) / vs.FS)
+    vs.save_wav(folder / "line2.wav", x)
+    vs.save_wav(folder / "line5.wav", x)
+    found = vs.recordings(folder, "ms")
+    assert [label for _, _, label in found] == ["line2_jessy_ms", "line5_jessy_ms"]
+    assert [line for _, line, _ in found] == [vs.LINES_MS[1], vs.LINES_MS[4]]
+    assert vs.recordings(tmp_path / "missing", "ms") == []
+
+
+def _fake_common_voice(root, speakers):
+    """A tiny download in Common Voice's layout. speakers: {id: n clips}."""
+    ms = root / "cv-corpus" / "ms"
+    (ms / "clips").mkdir(parents=True)
+    rows = ["client_id\tpath\tsentence_id\tsentence\tup_votes\tdown_votes"]
+    x = 0.3 * np.sin(2 * np.pi * 300 * np.arange(vs.FS // 2) / vs.FS)
+    for s, n in speakers.items():
+        for i in range(n):
+            vs.save_wav(ms / "clips" / f"{s}_{i}.wav", x)
+            rows.append(f"{s}\t{s}_{i}.wav\t1\tAyat \"{s}\" nombor {i}.\t2\t0")
+    rows.append("zz\tmissing.wav\t1\tFail tiada.\t2\t0")      # listed, but no audio on disk
+    (ms / "validated.tsv").write_text("\n".join(rows) + "\n", encoding="utf-8")
+    return root
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="needs ffmpeg")
+def test_common_voice_spreads_picks_across_speakers(tmp_path):
+    root = _fake_common_voice(tmp_path / "cv", {"a": 5, "b": 1, "c": 1})
+    found = vs.common_voice(root, n=3, seed=0, cache_dir=tmp_path / "wav")
+    assert [label for _, _, label in found] == ["cv01", "cv02", "cv03"]
+    assert {line.split('"')[1] for _, line, _ in found} == {"a", "b", "c"}   # one each before anyone repeats
+    assert all(len(x) == vs.FS // 2 for x, _, _ in found)
+    assert all('"' in line for _, line, _ in found)                          # quotes in sentences survive
+    every = vs.common_voice(root, n=99, seed=0, cache_dir=tmp_path / "wav")
+    assert len(every) == 7                                                    # the listed-but-missing clip is skipped
+    assert not any("zz" in label for _, _, label in every)
+
+
+def test_common_voice_without_the_list_says_so(tmp_path):
+    with pytest.raises(FileNotFoundError, match="validated.tsv"):
+        vs.common_voice(tmp_path, n=1)
+
+
 def test_wer_on_no_speech():
     assert vs.wer("", "")["wer"] == 0
     r = vs.wer("", "thanks for watching")

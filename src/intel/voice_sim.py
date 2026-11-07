@@ -11,12 +11,15 @@ hiss spreads over 8 kHz while speech sits mostly below 4 kHz.
 
 The speech is a Windows text-to-speech voice: clear and evenly paced, easier than
 a person talking on a radio. Scores here are an upper bound for real recordings,
-and scripts/simulate_voice.py --speech takes a real recording instead.
+and scripts/simulate_voice.py --speech / --speech-dir takes real recordings instead.
+Malay has a script (LINES_MS) but no Windows voice on this laptop, so it runs on
+recordings of people reading that script.
 
 numpy and scipy only, so it runs in any of the project's Python environments.
 """
 from __future__ import annotations
 
+import csv
 import hashlib
 import os
 import re
@@ -39,6 +42,17 @@ LINES = (
     "The supply truck will leave the north gate at nine in the morning, carrying food, water and medical equipment.",
     "Please confirm that the generator has been repaired, and tell the team to check the radio batteries tonight.",
 )
+# The same traffic in Malay. No Malay voice ships with Windows here, so these are
+# for reading aloud: scripts/simulate_voice.py --language ms --print-script.
+LINES_MS = (
+    "Alfa satu, ini pangkalan. Bergerak ke pusat pemeriksaan tujuh dan lapor apabila tiba. Ganti.",
+    "Pangkalan, ini Alfa satu. Kami nampak dua kenderaan berhampiran jambatan sungai. Mohon kebenaran untuk teruskan. Ganti.",
+    "Semua stesen, cuaca semakin buruk. Hujan lebat dijangka selepas matahari terbenam, jadi pulang ke kem sebelum gelap.",
+    "Bravo dua, isyarat anda lemah dan terputus-putus. Ulang semula kedudukan anda dan tukar ke saluran empat. Habis.",
+    "Lori bekalan akan bertolak dari pintu utara pada pukul sembilan pagi, membawa makanan, air dan peralatan perubatan.",
+    "Sila sahkan bahawa penjana telah dibaiki, dan beritahu pasukan untuk memeriksa bateri radio malam ini.",
+)
+SCRIPTS = {"en": LINES, "ms": LINES_MS}
 _SAPI = (
     "Add-Type -AssemblyName System.Speech;"
     "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer;"
@@ -49,7 +63,63 @@ _SAPI = (
     "[void]$s.Speak($env:NEXA_TEXT);"
     "$s.Dispose()"
 )
-_DIGITS = "zero one two three four five six seven eight nine".split()
+_DIGITS = {"en": "zero one two three four five six seven eight nine".split(),
+           "ms": "kosong satu dua tiga empat lima enam tujuh lapan sembilan".split()}
+
+
+def recordings(folder, language="en"):
+    """Your own readings of the script: line1.wav, line2.wav ... in `folder`.
+    -> list of (float32 speech, script line, label). Lines without a file are
+    skipped, so you can record only some of them."""
+    script = SCRIPTS[language]
+    folder = Path(folder)
+    found = []
+    for i, line in enumerate(script, 1):
+        path = folder / f"line{i}.wav"
+        if path.exists():
+            found.append((read_wav(path), line, f"line{i}_{folder.name}"))
+    return found
+
+
+def common_voice(folder, n=20, seed=0, cache_dir=None, split="validated"):
+    """Real people from a Mozilla Common Voice download (MP3 clips + <split>.tsv).
+    -> list of (float32 speech, sentence, label cv01, cv02 ...), n clips taken in
+    turn from each speaker, so one talkative person does not dominate. Speaker ids
+    are only used to spread the picks, and never kept: the licence forbids trying
+    to identify speakers, and it forbids re-hosting the data, so keep it local.
+
+    split: "validated" (checked by other volunteers) by default; "other" holds
+    many more clips, but nobody has confirmed their text matches the audio."""
+    folder = Path(folder)
+    tsvs = sorted(folder.rglob(f"{split}.tsv"))
+    if not tsvs:
+        raise FileNotFoundError(f"no {split}.tsv under {folder}; unpack the Common Voice download there")
+    with open(tsvs[0], encoding="utf-8", newline="") as f:
+        rows = [r for r in csv.DictReader(f, delimiter="\t", quoting=csv.QUOTE_NONE)
+                if r.get("path") and (r.get("sentence") or "").strip()]
+    clips_dir = tsvs[0].parent / "clips"
+    by_speaker = {}
+    for r in rows:
+        if (clips_dir / r["path"]).exists():
+            by_speaker.setdefault(r.get("client_id", ""), []).append(r)
+    rng = np.random.default_rng(seed)
+    queues = [list(rng.permutation(np.array(v, dtype=object))) for _, v in sorted(by_speaker.items())]
+    rng.shuffle(queues)
+    picked = []
+    while len(picked) < n and any(queues):
+        for q in queues:
+            if q and len(picked) < n:
+                picked.append(q.pop())
+    cache = Path(cache_dir) if cache_dir else folder / "_wav16k"
+    cache.mkdir(parents=True, exist_ok=True)
+    found = []
+    for i, r in enumerate(picked, 1):
+        wav = cache / (Path(r["path"]).stem + ".wav")
+        if not wav.exists():
+            subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-i", str(clips_dir / r["path"]),
+                            "-ar", str(FS), "-ac", "1", "-c:a", "pcm_s16le", str(wav)], check=True, timeout=120)
+        found.append((read_wav(wav), r["sentence"].strip(), f"cv{i:02d}"))
+    return found
 
 
 def speak(text, path, voice=VOICES[0]):
@@ -197,21 +267,22 @@ def simulate(name, speech, other, rng):
 
 # --- scoring ----------------------------------------------------------------------
 
-def normalize(text):
-    """Lower case, no punctuation, digits spoken one by one ("Alpha 12" and
-    "alpha one two" match)."""
+def normalize(text, language="en"):
+    """Lower case, no punctuation, digits spoken one by one in `language`
+    ("Alpha 12" matches "alpha one two", and in Malay "Alfa satu dua")."""
+    digits = _DIGITS.get(language, _DIGITS["en"])
     words = []
     for w in re.findall(r"[a-z0-9']+", text.lower().replace("-", " ")):
         w = w.replace("'", "")
-        words += [_DIGITS[int(c)] for c in w] if w.isdigit() else [w]
+        words += [digits[int(c)] for c in w] if w.isdigit() else [w]
     return words
 
 
-def wer(truth, hyp):
+def wer(truth, hyp, language="en"):
     """Word error rate: (substitutions + deletions + insertions) / truth words.
     Returns dict(wer, sub, del, ins, truth_words, hyp_words). Can exceed 1 when
     the decoder invents more words than were said."""
-    t, h = normalize(truth), normalize(hyp)
+    t, h = normalize(truth, language), normalize(hyp, language)
     # cell = (cost, subs, dels, ins), row by row
     prev = [(j, 0, 0, j) for j in range(len(h) + 1)]
     for i, tw in enumerate(t, 1):

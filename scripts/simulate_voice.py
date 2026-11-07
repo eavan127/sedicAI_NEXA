@@ -9,6 +9,15 @@ script: how bad can the audio get before the words are wrong?
 Your own clean recording instead of the Windows voices (use a person's real voice):
     py -3.11 scripts/simulate_voice.py --speech me.wav --truth "what I said in it"
 
+Malay (Windows has no Malay voice here, so read the script aloud):
+    py -3.11 scripts/simulate_voice.py --language ms --print-script
+    record each line as line1.wav, line2.wav ... in a folder, then:
+    py -3.11 scripts/simulate_voice.py --language ms --speech-dir recordings/jessy_ms --out results/voice_sim/jessy_ms
+--speech-dir works for English too, with the English script.
+
+Real Malay speakers from Mozilla Common Voice (CC0; do not re-host it):
+    py -3.11 scripts/simulate_voice.py --language ms --common-voice data/raw/common_voice_ms --clips 17 --out results/voice_sim/cv_ms
+
 Decode a noisy file as it is, no simulation or score:
     py -3.11 scripts/simulate_voice.py --decode recording.wav
 
@@ -87,6 +96,27 @@ def clips(args, out):
             sys.exit("--speech needs --truth (the words said in it), otherwise nothing can be scored")
         other = vs.spoken(vs.LINES[3], vs.VOICES[1], out / "speech")
         return [(x, other, args.truth, Path(args.speech).stem)]
+    language = args.language or "en"
+    if args.common_voice:
+        found = vs.common_voice(args.common_voice, args.clips, args.seed, out / "speech", args.cv_split)
+        print(f"{len(found)} Common Voice clip(s) from {args.common_voice} ({args.cv_split})", flush=True)
+        return [(x, found[(i + 1) % len(found)][0], line, label) for i, (x, line, label) in enumerate(found)]
+    if args.speech_dir:
+        if language not in vs.SCRIPTS:
+            sys.exit(f"no script for language '{language}'; scripts exist for {sorted(vs.SCRIPTS)}")
+        found = vs.recordings(args.speech_dir, language)
+        if not found:
+            sys.exit(f"no line1.wav, line2.wav ... in {args.speech_dir}. See the lines with: "
+                     f"py -3.11 scripts/simulate_voice.py --language {language} --print-script")
+        print(f"{len(found)} recording(s) from {args.speech_dir}", flush=True)
+        # The second talker is the next person's line if there is one, else a Windows voice.
+        fallback = vs.spoken(vs.LINES[3], vs.VOICES[1], out / "speech") if len(found) == 1 else None
+        return [(x, fallback if fallback is not None else found[(i + 1) % len(found)][0], line, label)
+                for i, (x, line, label) in enumerate(found)]
+    if language != "en":
+        sys.exit(f"Windows has no '{language}' voice on this laptop, so this needs real recordings. "
+                 f"See the lines to read with: py -3.11 scripts/simulate_voice.py --language {language} --print-script\n"
+                 "Save them as line1.wav, line2.wav ... in a folder and pass it with --speech-dir.")
     made = []
     for i in range(args.clips):
         line = vs.LINES[i % len(vs.LINES)]
@@ -107,6 +137,10 @@ def main():
     p.add_argument("--scenarios", nargs="+", default=list(vs.SCENARIOS))
     p.add_argument("--speech", help="clean WAV of real speech, used instead of the Windows voices")
     p.add_argument("--truth", help="the words said in --speech")
+    p.add_argument("--speech-dir", help="folder of line1.wav, line2.wav ... reading the script in --language")
+    p.add_argument("--print-script", action="store_true", help="print the lines to read in --language and stop")
+    p.add_argument("--common-voice", metavar="DIR", help="unpacked Mozilla Common Voice download: real people, --clips clips")
+    p.add_argument("--cv-split", default="validated", help="Common Voice list to use: validated (checked), other (unchecked)")
     p.add_argument("--decode", metavar="WAV", help="just decode this file and print it")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--resume", action="store_true", help="keep the decodes already in --out/results.json")
@@ -114,6 +148,14 @@ def main():
     args = p.parse_args()
     if args.list:
         print("\n".join(vs.SCENARIOS))
+        return
+    if args.print_script:
+        if args.language not in vs.SCRIPTS:
+            sys.exit(f"no script for language '{args.language}'; scripts exist for {sorted(vs.SCRIPTS)}")
+        print(f"Read each line clearly in a quiet room and save it as line<N>.wav "
+              f"(convert with: ffmpeg -i in.m4a -ar 16000 -ac 1 line1.wav).\n")
+        for i, line in enumerate(vs.SCRIPTS[args.language], 1):
+            print(f"line{i}.wav: {line}")
         return
     unknown = set(args.scenarios) - set(vs.SCENARIOS)
     if unknown:
@@ -151,7 +193,7 @@ def main():
             t1 = time.time()
             text, marked, flagged, segs = decode(model, noisy, language)
             truth = "" if name in vs.NO_SPEECH else script
-            score = vs.wer(truth, text)
+            score = vs.wer(truth, text, args.language or "en")
             rows.append(dict(scenario=name, clip=label, truth=truth, text=text, marked=marked, flagged=flagged,
                              seconds_audio=round(len(noisy) / vs.FS, 1), seconds_decode=round(time.time() - t1, 1),
                              segments=segs, **score))
