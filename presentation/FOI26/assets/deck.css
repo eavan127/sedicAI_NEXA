@@ -64,7 +64,7 @@ img.fig { display: block; width: 100%; height: auto; }
 .bar .tr { height: 20px; background: var(--pill); border-radius: 10px; overflow: hidden; }
 .bar .fl { height: 100%; border-radius: 10px; background: var(--c, var(--green)); transform-origin: left; animation: grow 1s cubic-bezier(.22,1,.36,1) both; }
 .bar .v { font-size: 20.1px; font-weight: 800; color: var(--c, var(--green)); }
-@keyframes grow { from { transform: scaleX(0); } }
+@keyframes grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 
 /* entrance */
 .rv { animation: up .6s cubic-bezier(.22,1,.36,1) both; animation-delay: calc(var(--d, 0) * 1s); }
@@ -106,7 +106,7 @@ body.nav-idle .nav { opacity: 0; }
 .anim.go .pop { animation: pop .6s cubic-bezier(.22,1,.36,1) both; animation-delay: var(--pd, 0s); }
 @keyframes pop { from { opacity: 0; transform: translateY(18px) scale(.97); } to { opacity: 1; transform: none; } }
 .anim .bar .fl { transform: scaleX(0); animation: none; }
-.anim.go .bar .fl { animation: grow 1.1s cubic-bezier(.22,1,.36,1) both; animation-delay: calc(var(--pd, 0s) + .15s); }
+.anim.go .bar .fl { transform: scaleX(1); animation: grow 1.1s cubic-bezier(.22,1,.36,1) both; animation-delay: calc(var(--pd, 0s) + .15s); }
 .anim.go .bar.pop { animation-name: pop; }
 .vdown::before { background: repeating-linear-gradient(#9AA3AB 0 6px, transparent 6px 10px); background-size: 4px 10px;
   animation: drip .8s linear infinite; }
