@@ -127,6 +127,7 @@ jamming, a few APSK rings look like a jammer band.
 | 3 | Confidence bands + "uncertain" in answers and dashboard; coverage/accuracy table in the evaluator | Claude | ✅ done | the 80% operating point did not hold on a second capture set; re-measure on the new model, >= 200 captures (P1, P9) |
 | 4 | Zoom result overrides voice / tone track answers when clear | Claude | ✅ done | voice demo 0/3 -> 3/3; score on SED-38 audio + RSPduo next (P3) |
 | 5 | Find why POLY_BARKER / FRANK fail in the pipeline (wider cut ruled out; check the YOLO boxes) | Eileen / Jessy | 1/2 day | radar group, open (P7) |
+| 5b | Physics branch (built; SEPARABILITY_ANALYSIS 6.1): train with `PHYSICS = True` in the notebook, compare with Part B | Eavan / Eileen | 2 h T4 | fair check +1.1 (+1.4 at >= 10 dB); PSK, spread, ASK, analog |
 | 6 | Re-run this error budget on the new model + labels-v2 test set | Claude | 10 min | confirm what is left |
 
 **Do not spend GPU time on:** a longer-window model (P2, P4), more epochs (Eileen: 15 -> 20 gave +0.2),

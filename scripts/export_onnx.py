@@ -45,6 +45,9 @@ def _load_model(ckpt_path: Path):
     if isinstance(ck, dict) and "meta" in ck and "state_dict" in ck:
         meta = ck["meta"]
         window_len = meta["input_len"]
+        if meta.get("model_flags", {}).get("physics_features"):
+            raise SystemExit("This model has the physics branch (torch.fft, complex numbers), which does not "
+                             "export to ONNX yet; run it in PyTorch (src/pipeline/classify.py does).")
         model = AMC_CNN(num_classes=len(meta["classes"]), input_len=window_len,
                         stft_n_fft=meta["stft_n_fft"], **meta.get("model_flags", {}))
         model.load_state_dict(ck["state_dict"])

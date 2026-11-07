@@ -167,7 +167,7 @@ voice agent...) decides the exact class; an arbiter combines them.
 | Agent | Looks at | Decides | Status |
 |---|---|---|---|
 | Detector | 10 ms spectrogram picture | where / when each transmitter is | ✅ YOLO + narrow-signal energy |
-| Classifier (+ expert + spectrum + physics branches) | 160 µs windows | what it is, per window | ✅ (+ physics branch: to build) |
+| Classifier (+ expert + spectrum + physics branches) | 160 µs windows | what it is, per window | ✅ (physics branch built, behind `--physics-features`; needs a 2 h training run) |
 | Tracker / voter | the whole track | one answer per transmitter; skips empty windows | ✅ |
 | Resolver | behaviour over time | twins, sizes as groups, reactive / pulsed behaviour | ✅ (reactive: to add) |
 | Zoom (analog) | 50 kS/s over the whole track | voice / Morse kind; overrides on clear signals | ✅ |
@@ -197,10 +197,39 @@ the tracker / resolver, not by the classifier:
 | # | Action | Evidence it helps | Cost |
 |---|---|---|---|
 | 1 | Train on the fixed data (Part B), the base for everything below | off-centre FSK/PSK/QAM work (BPSK 2% -> expected ~90% at +300 kHz) | 2 h T4 |
-| 2 | **Physics branch in the model** (power-law lines, symbol-rate line, instantaneous-frequency shape, envelope near-zero share, delay-echo peak, spectral peaks/symmetry, on/off timing) | +6.2 points top-1 at 15 dB, +3.5 at 5 dB, family +7-9 (section 3.1) | 1 day code (torch versions of `probe_specialists.physics`) + 2 h T4 |
+| 2 | **Physics branch in the model**: ✅ **built** (`src/physics_features.py` numpy reference, `PhysicsFeatures` in `src/models/amc_cnn.py`, `--physics-features`); see 6.1 | fair check +1.1 top-1 (+1.4 at >= 10 dB), see 6.1 | 2 h T4 left |
 | 3 | Reactive-jammer onset rule in the resolver | JAM_REACTIVE is 0% in tracks by definition (section 1.8) | 1/2 day |
 | 4 | Score the voice path on real audio scenes (SED-38) and the RSPduo | zoom override 0/3 -> 3/3 on the demo; real speech untested | with SED-38 |
 | — | **Not worth it:** routed per-family agents, a long-window model, more epochs, `n_fft` 128 | sections 3.1 and 4; ACCURACY_PLAN P2 | — |
+
+### 6.1 The physics branch as built, and the fair check
+
+56 numbers per window, computed inside the model on the GPU with no trainable weights, then a
+BatchNorm, joined to the other branches before fc1 (the same pattern as the expert branch). Old
+models load unchanged; the flag is only set by `--physics-features`. It does not export to ONNX yet
+(torch.fft); the pipeline runs PyTorch anyway. `tests/test_physics_features.py` keeps torch and
+numpy in step.
+
+**Fair check before spending GPU time** (`scripts/fair_check_expert.py --features physics`): the
+seed-4 model frozen, two identical small heads trained on its own summary with and without the
+physics numbers, 30,000 val / 30,000 test windows from the local set (3fae376e92d3), CPU:
+
+| | top-1 | at >= 10 dB |
+|---|---|---|
+| A: CNN summary only | 46.0% | 58.9% |
+| B: + physics | **47.1%** | **60.3%** |
+
+Gains at >= 10 dB: PSK +5.8 (32PSK +33, QPSK +10), SPREAD +4.7, ASK +4.1, ANALOG +2.8 (NBFM +16),
+APSK +2.7, RADAR +2.2, NR_LIKE / LTE_LIKE +17 / +10, LORA_CSS +13. Losses: NOISE -6, PULSE_COMMS -3,
+OFDM -22, 8PSK -19, JAM_TONE -10.
+
+**Reading it honestly:** real but smaller than the +6.2 of section 3.1. That test used fresh
+generator windows and a tree model on the CNN's scores, whereas this one uses the real test set
+and a head bolted onto a frozen model. A frozen head is the cautious lower bound: the expert
+features measured the same way were smaller than the +2.6 they gave once trained in. Expect
+roughly +1 to +4 from the trained branch. Worth one 2 h run on the fixed data (notebook
+`colab_fskpsk_fix.ipynb`, `PHYSICS = True`), compared with the Part B run without it. Keep it only
+if it beats that run on the same test set.
 
 ## Sources
 - Our measurements: `results/accuracy_plan/specialists_15dB.json`, `specialists_5dB.json`, `fusion_15dB.json`, `fusion_60class.json`, `window_length.json`.

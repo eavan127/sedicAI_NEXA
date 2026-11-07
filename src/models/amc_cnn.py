@@ -412,6 +412,31 @@ class ExpertFeatures(nn.Module):
     def _idft(self, re, im):
         return (re @ self.cos - im @ self.sin) / self.L, (im @ self.cos + re @ self.sin) / self.L
 
+    def channelize(self, x):
+        """The model's (batch, 2, L) input -> the channelized window (real,
+        imaginary) and the occupied bins, exactly as src/expert_features.
+        channelize does it. Shared with PhysicsFeatures."""
+        ef = self.ef
+        zr, zi = x[:, 0, :].float(), x[:, 1, :].float()
+        Zr, Zi = self._dft(zr, zi)
+        P = Zr ** 2 + Zi ** 2
+        h = ef.SMOOTH // 2
+        Ps = F.avg_pool1d(torch.cat([P[:, -h:], P, P[:, :h]], dim=1).unsqueeze(1),
+                          ef.SMOOTH, stride=1).squeeze(1)
+        srt = torch.sort(Ps, dim=1).values
+        floor = srt[:, self.q_lo] * (1 - self.q_frac) + srt[:, self.q_lo + 1] * self.q_frac
+        mask = (Ps > ef.FLOOR_FACTOR * floor.unsqueeze(1)).float()
+        w = torch.clamp(Ps - floor.unsqueeze(1), min=0) * mask
+        fc = (w * self.k).sum(1) / torch.clamp(w.sum(1), min=1e-12)
+        bins = torch.clamp(mask.sum(1), min=float(ef.MIN_BINS))
+        ph = -2 * math.pi * fc.unsqueeze(1) * self.n / self.L
+        c, s = torch.cos(ph), torch.sin(ph)
+        yr, yi = zr * c - zi * s, zr * s + zi * c
+        Yr, Yi = self._dft(yr, yi)
+        keep = (self.k.abs().unsqueeze(0) <= ef.KEEP * bins.unsqueeze(1)).float()
+        yr, yi = self._idft(Yr * keep, Yi * keep)
+        return yr, yi, bins
+
     def forward(self, x):
         ef = self.ef
         with torch.no_grad():
@@ -499,10 +524,108 @@ class SpectrumBranch(nn.Module):
         return torch.cat([f.amax(dim=-1), f.mean(dim=-1)], dim=1)
 
 
+class PhysicsFeatures(nn.Module):
+    """Batched torch version of src/physics_features.py (56 numbers per
+    window: power-law lines, symbol-rate line, instantaneous-frequency shape,
+    envelope, delay echo, spectral shape, on/off timing). See that module for
+    what each one separates and docs/SEPARABILITY_ANALYSIS.md for the
+    measurements behind it.
+
+    EXPERIMENTAL, behind AMC_CNN(physics_features=True). No trainable
+    parameters, no gradient; AMC_CNN normalises the output with a BatchNorm1d.
+    Uses torch.fft (complex tensors), so unlike ExpertFeatures a model with
+    this branch does not export to ONNX yet; the pipeline runs it in PyTorch.
+    """
+
+    def __init__(self, window_len):
+        super().__init__()
+        from src import physics_features as pf
+        self.pf = pf
+        self.chan = ExpertFeatures(window_len)          # shared channelizer (no parameters)
+        n = window_len
+        self.n = n
+        self.register_buffer("han", torch.hann_window(n, periodic=False), persistent=False)
+        self.register_buffer("han1", torch.hann_window(n - 1, periodic=False), persistent=False)
+        self.register_buffer("if_c", torch.tensor(pf.IF_CENTERS, dtype=torch.float32), persistent=False)
+        self.register_buffer("amp_c", torch.tensor(pf.AMP_CENTERS, dtype=torch.float32), persistent=False)
+        self.out_channels = pf.PHYSICS_DIM
+
+    @staticmethod
+    def _pa_db(a):
+        return 10 * torch.log10((a.amax(1) + 1e-12) / (a.mean(1) + 1e-12))
+
+    def forward(self, x):
+        pf, n = self.pf, self.n
+        with torch.no_grad():
+            yr, yi, bins = self.chan.channelize(x)
+            y = torch.complex(yr, yi)
+            y = y / (torch.sqrt((y.abs() ** 2).mean(1, keepdim=True)) + 1e-12)
+            f = []
+            for p in (1, 2, 4, 8):
+                f.append(self._pa_db(torch.fft.fft(y ** p * self.han).abs()))
+            e = y.abs() ** 2
+            E = torch.fft.rfft((e - e.mean(1, keepdim=True)) * self.han).abs()
+            E[:, :3] = 0
+            k = E.argmax(1)
+            Ek = E.gather(1, k.unsqueeze(1)).squeeze(1)
+            f += [self._pa_db(E), k.float() / n,
+                  10 * torch.log10((Ek + 1e-12) / (torch.quantile(E, 0.5, dim=1) + 1e-12))]
+            d = y[:, 1:] * torch.conj(y[:, :-1])
+            fi = torch.atan2(d.imag, d.real) / math.pi
+            fi_c = fi - fi.median(1, keepdim=True).values
+            sd = fi_c.std(1, unbiased=False) + 1e-12
+            f += [sd, (fi_c ** 4).mean(1) / sd ** 4, (fi_c.diff(dim=1).abs()).mean(1) / sd]
+            u = torch.clamp(fi_c / (3 * sd.unsqueeze(1)), -1, 1)
+            hist_if = torch.exp(-0.5 * ((u.unsqueeze(2) - self.if_c) / pf.IF_WIDTH) ** 2).mean(1)
+            FI = torch.fft.rfft(fi_c * self.han1, n=n).abs()
+            FI = FI / (FI.sum(1, keepdim=True) + 1e-12)
+            f_bands = [FI[:, 1:8].sum(1), FI[:, 8:32].sum(1), FI[:, 32:96].sum(1), FI[:, 96:].sum(1)]
+            a = y.abs()
+            mu = a.mean(1, keepdim=True)
+            var = ((a - mu) ** 2).mean(1)
+            amp = [torch.sqrt(var), ((a - mu) ** 4).mean(1) / (var ** 2 + 1e-12), (a < 0.2).float().mean(1)]
+            hist_a = torch.exp(-0.5 * ((a.unsqueeze(2) - self.amp_c) / pf.AMP_WIDTH) ** 2).mean(1)
+            yc = y - y.mean(1, keepdim=True)
+            R = torch.fft.ifft(torch.fft.fft(yc, n=2 * n).abs() ** 2).abs()[:, :n]
+            R = R / (R[:, :1] + 1e-12)
+            seg = R[:, pf.LAG_MIN:pf.LAG_MAX + 1]
+            j = seg.argmax(1)
+            delay = [seg.amax(1), (pf.LAG_MIN + j).float() / pf.LAG_MAX, seg.topk(3, dim=1).values.mean(1)]
+            z = torch.complex(x[:, 0, :].float(), x[:, 1, :].float())
+            P = torch.fft.fftshift(torch.fft.fft(z * self.han), dim=1).abs() ** 2
+            Ps = F.avg_pool1d(torch.cat([P[:, -2:], P, P[:, :2]], dim=1).unsqueeze(1), 5, stride=1).squeeze(1)
+            floor = torch.quantile(Ps, 0.3, dim=1, keepdim=True)
+            band = Ps > 4 * floor
+            cnt = band.float().sum(1)
+            logm = (torch.log(Ps + 1e-20) * band).sum(1) / torch.clamp(cnt, min=1)
+            mean_in = (Ps * band).sum(1) / torch.clamp(cnt, min=1)
+            flat = torch.where(cnt > 0, torch.exp(logm) / (mean_in + 1e-20), torch.ones_like(cnt))
+            mid = Ps[:, 1:-1]
+            peaks = ((mid > Ps[:, :-2]) & (mid > Ps[:, 2:]) & (mid > 30 * floor)).float().sum(1).clamp(max=20)
+            Y = torch.fft.fftshift(torch.fft.fft(y), dim=1).abs() ** 2
+            m = n // 2
+            up = Y[:, m + 1:m + 64]
+            dn = torch.flip(Y[:, m - 63:m], dims=[1])
+            upc, dnc = up - up.mean(1, keepdim=True), dn - dn.mean(1, keepdim=True)
+            den = torch.sqrt((upc ** 2).sum(1) * (dnc ** 2).sum(1))
+            sym = torch.where(den > 0, (upc * dnc).sum(1) / (den + 1e-30), torch.zeros_like(den))
+            spec = [bins / n, flat, peaks, sym]
+            bp = (z.abs() ** 2).reshape(z.shape[0], pf.N_BLOCKS, -1).mean(2)
+            on = bp > 0.5 * bp.amax(1, keepdim=True)
+            onset = on.float().argmax(1)
+            single = ((onset > 0) & (on.float().sum(1) == pf.N_BLOCKS - onset)).float()
+            flips = (on[:, 1:] != on[:, :-1]).float().sum(1)
+            timing = [10 * torch.log10(bp.amax(1) / (bp.amin(1) + 1e-12)), on.float().mean(1), single, flips]
+            out = torch.cat([torch.stack(f, 1), hist_if, torch.stack(f_bands, 1), torch.stack(amp, 1), hist_a,
+                             torch.stack(delay, 1), torch.stack(spec, 1), torch.stack(timing, 1)], dim=1)
+            out = torch.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
+        return out.detach()
+
+
 class AMC_CNN(nn.Module):
     def __init__(self, num_classes, input_len=1024, stft_freq_summary=None,
                  stft_keep_rows=None, cumulant_features=None, stft_n_fft=16,
-                 expert_features=None, full_spectrum=False):
+                 expert_features=None, full_spectrum=False, physics_features=False):
         super().__init__()
         # full_spectrum: explicit like stft_n_fft, never read from config, so
         # no existing checkpoint or the deployed 8-class model can pick it up.
@@ -561,6 +684,13 @@ class AMC_CNN(nn.Module):
         self.spectrum_branch = SpectrumBranch(input_len) if full_spectrum else None
         if self.spectrum_branch is not None:
             fc1_in += self.spectrum_branch.out_channels
+        # EXPERIMENTAL, behind physics_features (docs/SEPARABILITY_ANALYSIS.md):
+        # 56 physics numbers, batch-normalised, joined before fc1. Explicit
+        # (never from config), so no existing checkpoint can pick it up.
+        self.physics_branch = PhysicsFeatures(input_len) if physics_features else None
+        self.physics_norm = nn.BatchNorm1d(self.physics_branch.out_channels) if physics_features else None
+        if self.physics_branch is not None:
+            fc1_in += self.physics_branch.out_channels
 
         # No dummy forward pass needed -- attention pooling always outputs
         # exactly `fused_channels` values regardless of input_len. input_len
@@ -595,6 +725,8 @@ class AMC_CNN(nn.Module):
             pooled = torch.cat([pooled, self.expert_norm(self.expert_branch(x))], dim=1)
         if self.spectrum_branch is not None:
             pooled = torch.cat([pooled, self.spectrum_branch(x)], dim=1)
+        if self.physics_branch is not None:
+            pooled = torch.cat([pooled, self.physics_norm(self.physics_branch(x))], dim=1)
 
         out = self.dropout(self.relu(self.fc1(pooled)))
         return self.fc2(out)
