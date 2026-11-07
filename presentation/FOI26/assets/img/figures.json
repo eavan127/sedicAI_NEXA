@@ -40,5 +40,10 @@
   "text": "CQ CQ DE NEXA K",
   "wpm": 18.2,
   "tone_hz": 699
+ },
+ "thumbs": {
+  "zoom_kind": "AM",
+  "track_vote_right_after": 1,
+  "track_window_right": 13
  }
 }

@@ -75,3 +75,28 @@ img.fig { display: block; width: 100%; height: auto; }
 .nav a, .nav button { font: 700 14px var(--font); background: rgba(255,255,255,.12); color: #fff; border: 1px solid rgba(255,255,255,.3);
   border-radius: 9px; padding: 7px 12px; cursor: pointer; text-decoration: none; }
 body.nav-idle .nav { opacity: 0; }
+
+/* vertical flow boxes with a small picture (architecture slides 04, 05) */
+.vcol { position: absolute; display: flex; flex-direction: column; }
+.vcol > .lt { font-size: 15px; font-weight: 800; letter-spacing: 1.5px; color: var(--c); margin: 0 0 6px 4px; }
+.vbox { display: grid; grid-template-columns: var(--pw, 250px) 1fr; gap: 16px; align-items: center; background: #fff;
+  border: 3px solid var(--c); border-radius: 16px; padding: 10px 14px; height: var(--h, 170px); }
+.vbox .pic { height: calc(var(--h, 170px) - 26px); border-radius: 10px; background: #fff; overflow: hidden;
+  display: flex; align-items: center; justify-content: center; border: 1px solid var(--line); }
+.vbox .pic img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.vbox .pic.dark { background: #0d0b16; border-color: #0d0b16; }
+.vbox .pic.dark img { object-fit: cover; }
+.vbox .tx b { display: block; font-size: 21px; font-weight: 800; color: var(--c); }
+.vbox .tx span { display: block; font-size: 15px; font-weight: 600; color: var(--mute); line-height: 1.4; margin-top: 4px; }
+.vbox .tx em { display: inline-block; font-style: normal; font-size: 13px; font-weight: 800; color: #fff; background: var(--c);
+  border-radius: 8px; padding: 2px 8px; margin-top: 6px; }
+.vdown { height: 30px; display: flex; justify-content: center; align-items: center; }
+.vdown::before { content: ""; width: 4px; height: 100%; background: repeating-linear-gradient(#9AA3AB 0 6px, transparent 6px 10px); }
+.vdown::after { content: ""; position: absolute; margin-top: 24px; border: 9px solid transparent; border-top: 11px solid #9AA3AB; border-bottom: 0; }
+.link { display: flex; align-items: center; justify-content: center; gap: 10px; border: 3px dashed var(--c); border-radius: 14px;
+  background: #F7F9FB; font-size: 16px; font-weight: 800; color: var(--c); text-decoration: none; padding: 8px 14px; }
+.flowline { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
+.flowline path { fill: none; stroke: #9AA3AB; stroke-width: 4; stroke-dasharray: 8 7; animation: dash 1.6s linear infinite; }
+@keyframes dash { to { stroke-dashoffset: -30; } }
+.tri { display: inline-block; width: 0; height: 0; border: 9px solid transparent; border-top: 12px solid currentColor; border-bottom: 0; }
+.tri.up { border-top: 0; border-bottom: 12px solid currentColor; }

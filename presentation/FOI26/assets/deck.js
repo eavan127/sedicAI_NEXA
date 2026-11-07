@@ -2,7 +2,7 @@
 // window, arrow keys / clicker go to the previous or next session's file,
 // F = full screen. The order of the files is the SLIDES list below.
 (() => {
-  const SLIDES = ["01-datasets-classes.html", "02-accuracy.html", "03-processing-pipeline.html", "04-system-architecture.html"];
+  const SLIDES = ["01-datasets-classes.html", "02-accuracy.html", "03-processing-pipeline.html", "04-system-architecture.html", "05-listen-read-learn.html"];
   const stage = document.getElementById("stage");
   const fit = () => {
     const s = Math.min(innerWidth / 1920, innerHeight / 1080);

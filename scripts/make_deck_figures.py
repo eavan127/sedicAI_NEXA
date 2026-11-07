@@ -196,6 +196,67 @@ def fig_scene(rng):
         ax.text(x0, y0 - 2, cls, color="#7CFC00", fontsize=8, fontweight="bold", va="bottom")
     ax.set_xticks([]); ax.set_yticks([])
     fig.savefig(OUT / "scene_boxes.png", transparent=True); plt.close(fig)
+    return iq, img, boxes
+
+
+def _thumb(name, draw, size=(3.2, 1.8)):
+    fig, ax = plt.subplots(figsize=size)
+    draw(ax)
+    ax.set_xticks([]); ax.set_yticks([])
+    for sp in ax.spines.values():
+        sp.set_visible(False)
+    fig.savefig(OUT / f"t_{name}.png", transparent=True, dpi=130)
+    plt.close(fig)
+
+
+def fig_thumbs(net, rng, scene, pipe_top):
+    """Small pictures for the boxes of the architecture slides (04, 05)."""
+    iq, img, boxes = scene
+    _thumb("capture", lambda ax: (ax.plot(iq[:6000].real, color=BLUE, lw=.4), ax.plot(iq[:6000].imag + 0, color=AMBER, lw=.4, alpha=.7)))
+    _thumb("spectrogram", lambda ax: ax.imshow(img, aspect="auto", cmap="magma"))
+
+    def det(ax):
+        ax.imshow(img, aspect="auto", cmap="magma")
+        for x0, y0, x1, y1 in boxes:
+            ax.add_patch(plt.Rectangle((x0, y0), x1 - x0, y1 - y0, fill=False, ec="#7CFC00", lw=1.4))
+    _thumb("detector", det)
+    _thumb("cut", lambda ax: ax.imshow(spec(make("LFM_RADAR", 18, rng, place=False)), aspect="auto", origin="lower",
+                                       cmap="magma", vmin=-45, vmax=0))
+
+    def cls(ax):
+        names, vals = zip(*pipe_top[:4])
+        ax.barh(range(4)[::-1], vals, color=[GREEN if v >= .5 else "#BBBBBB" for v in vals])
+        for k, (n, v) in enumerate(zip(names, vals)):
+            ax.text(0.01, 3 - k, n, va="center", fontsize=11, fontweight="bold", color=INK)
+        ax.axvline(.5, color=RED, ls="--", lw=1.2); ax.set_xlim(0, 1)
+    _thumb("classifier", cls)
+
+    k = C.index("QPSK")
+    W = np.array([make("QPSK", 6, rng, place=True) for _ in range(16)])
+    with torch.no_grad():
+        P = torch.sigmoid(net(torch.from_numpy(normalize_batch(W)))).numpy()
+    P = np.clip(P, 1e-4, 1 - 1e-4)
+    L = np.log(P / (1 - P))
+    vote = [1 / (1 + np.exp(-L[:i + 1].mean(0)))[k] for i in range(16)]
+    right = [L[:i + 1].mean(0).argmax() == k for i in range(16)]
+
+    def trk(ax):
+        ax.bar(range(16), P[:, k], color=[GREEN if P[i].argmax() == k else "#CCCCCC" for i in range(16)], width=.7)
+        ax.plot(range(16), vote, color=NAVY, lw=2.4)
+        ax.set_ylim(0, max(1e-3, P[:, k].max()) * 1.15)
+    _thumb("track", trk)
+
+    from src.pipeline import analog, analog_synth, demod
+    y, _ = analog_synth.make("AM", seconds=1.5, snr_db=25, rng=np.random.default_rng(0))
+    kind, feats, _ = analog.classify(y, analog.FA)
+    f = np.fft.fftshift(np.fft.fftfreq(len(y), 1 / analog.FA))
+    S = 20 * np.log10(np.abs(np.fft.fftshift(np.fft.fft(y * np.hanning(len(y))))) + 1e-9)
+    m = np.abs(f) < 6000
+    _thumb("zoom", lambda ax: ax.plot(f[m] / 1e3, S[m] - S[m].max(), color=TEAL, lw=.6))
+    a = demod.demodulate(y, analog.FA, kind, feats)
+    _thumb("demod", lambda ax: ax.plot(np.arange(len(a)) / 16000, a, color=TEAL, lw=.3))
+    return {"zoom_kind": kind, "track_vote_right_after": int(np.argmax(right)) + 1 if any(right) else None,
+            "track_window_right": int(sum(P[i].argmax() == k for i in range(16)))}
 
 
 def fig_morse():
@@ -215,6 +276,8 @@ def fig_morse():
     ax[1].fill_between(tt, keyed.astype(float), step="mid", color=NAVY)
     ax[1].set_yticks([]); ax[1].set_ylabel("key"); ax[1].set_xlabel("seconds")
     fig.savefig(OUT / "morse_decode.png", transparent=True); plt.close(fig)
+    _thumb("morse", lambda ax: ax.fill_between(tt[:int(4.5 * morse.ENV_RATE)], keyed[:int(4.5 * morse.ENV_RATE)].astype(float),
+                                               step="mid", color=NAVY), size=(3.2, 1.0))
     return {"text": text, "wpm": segs[0]["wpm"] if segs else None, "tone_hz": round(tone)}
 
 
@@ -226,8 +289,9 @@ def main():
     fig_snr(rng)
     out["pipeline"] = fig_pipeline(net, rng)
     fig_vote()
-    fig_scene(rng)
+    scene = fig_scene(rng)
     out["morse"] = fig_morse()
+    out["thumbs"] = fig_thumbs(net, rng, scene, out["pipeline"]["top"])
     (OUT / "figures.json").write_text(json.dumps(out, indent=1))
     print(json.dumps(out, indent=1))
     print("wrote", sorted(p.name for p in OUT.glob("*.png")))

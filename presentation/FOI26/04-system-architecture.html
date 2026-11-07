@@ -1,119 +1,69 @@
 <!doctype html>
-<!-- SESSION 4 · NEXA system architecture, Morse decoder, AI reasoning, human in the loop. Owner: edit this file only.
-     Code: src/pipeline/ (detect, extract, classify, tracker, resolve, listen), src/intel/morse.py, src/intel/reason.py,
-     src/localdb.py + scripts/serve_local.py (corrections, retrain gate). Pictures: scripts/make_deck_figures.py
-     (the Morse picture is our own test message, not a real recording). -->
+<!-- SESSION 4 · PART 1 of 2 · NEXA system architecture, read top to bottom: see the spectrum (left), then name it (right).
+     Continues in 05-listen-read-learn.html (voice / Morse / AI reasoning / human in the loop).
+     Owner: edit this file only. Small pictures: scripts/make_deck_figures.py (assets/img/t_*.png).
+     Code: src/pipeline/ (capture, detect, extract, classify, tracker, resolve), web/pipeline.js -->
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>NEXA System Architecture</title>
 <link rel="stylesheet" href="assets/fonts.css"><link rel="stylesheet" href="assets/deck.css">
 <style>
-  .lane { margin-bottom: 10px; }
-  .lane .lt { font-size: 14px; font-weight: 800; letter-spacing: 1.4px; color: var(--c); margin: 0 0 6px 2px; }
-  .lane .row .step { flex: 1; }
-  .lane .step b { font-size: 17px; }
-  .lane .step span { font-size: 13.5px; }
-  .fork { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; flex: 1.2; }
-  .fork .step { padding: 6px 10px; }
-  .msteps { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
-  .msteps span { font-size: 12.5px; font-weight: 700; background: #EEF6F4; color: var(--teal); border-radius: 8px; padding: 3px 8px; }
-  .out { display: flex; gap: 14px; align-items: baseline; margin-top: 4px; }
-  .out code { font: 800 24px Consolas, "Courier New", monospace; color: var(--navy); letter-spacing: 2px; }
-   .json { font: 600 14px Consolas, "Courier New", monospace; background: #F6F7F9; border-radius: 10px; padding: 9px 11px; line-height: 1.5; color: var(--ink); white-space: pre; }
-  .json .k { color: var(--purple); font: inherit; }
-  .guard { font-size: 13.5px; font-weight: 600; color: var(--mute); line-height: 1.4; padding-left: 18px; position: relative; margin-top: 5px; }
-  .guard::before { content: "✓"; position: absolute; left: 0; color: var(--green); font-weight: 800; }
-  .loop { display: flex; flex-direction: column; gap: 0; }
-  .loop .step { padding: 7px 12px; }
-  .loop .step b { font-size: 16px; }
-  .loop .step span { font-size: 13px; }
-  .badge { display: inline-flex; align-items: center; gap: 8px; background: var(--green); color: #fff; font-weight: 800; font-size: 14px;
-    letter-spacing: 1px; border-radius: 10px; padding: 6px 12px; }
+  .mock { width: 100%; height: 100%; padding: 8px; display: flex; flex-direction: column; gap: 5px; justify-content: center; background: #F7F9FB; }
+  .mock div { display: flex; justify-content: space-between; align-items: center; background: #fff; border: 1px solid var(--line);
+    border-radius: 7px; padding: 4px 8px; font-size: 12.5px; font-weight: 700; }
+  .mock i { font-style: normal; font-size: 10.5px; font-weight: 800; color: #fff; border-radius: 6px; padding: 1px 6px; }
+  .answer { width: 100%; height: 100%; padding: 10px 12px; display: flex; flex-direction: column; justify-content: center; gap: 4px; background: #FFF8EC; }
+  .answer b { font-size: 15px; color: var(--amber); }
+  .answer span { font-size: 12.5px; font-weight: 600; color: var(--mute); line-height: 1.35; }
 </style></head><body>
 <div class="viewport"><div class="stage" id="stage">
-  <div class="abs logo"><img src="assets/nexa-logo.png" alt="NEXA"><small>TRACK I · RF / SIGNAL · SESSION 4 / 4</small></div>
+  <div class="abs logo"><img src="assets/nexa-logo.png" alt="NEXA"><small>TRACK I · RF / SIGNAL · SESSION 4 · PART 1 / 2</small></div>
   <div class="abs title-pill">Inside NEXA: system architecture</div>
-  <div class="abs question">See the whole spectrum, name every emitter, listen and read it, with a human in charge, fully offline</div>
+  <div class="abs question">Read top to bottom: see the whole spectrum, then name every emitter in it</div>
   <div class="abs event"><img src="assets/sedic-logo.png" alt="SEDIC 26"><span>NOVEMBER 2026 UPDATE</span></div>
 
-  <!-- A: the system -->
-  <section class="panel rv" style="left:40px;top:150px;width:1230px;height:480px;--c:var(--navy);--d:.1">
-    <h2><span class="no">A</span>THE SYSTEM, END TO END</h2>
-    <div class="pbody soft" style="padding:14px 16px">
-      <div class="lane" style="--c:var(--blue)"><div class="lt">1 · SEE THE SPECTRUM</div>
-        <div class="row">
-          <div class="step" style="--c:var(--blue)"><b>Capture</b><span>SDR, IQ file or simulator, any sample rate</span></div><div class="arr"></div>
-          <div class="step" style="--c:var(--blue)"><b>Spectrogram</b><span>the whole band over time</span></div><div class="arr"></div>
-          <div class="step" style="--c:var(--blue)"><b>Detector (YOLO)</b><span>boxes every emitter · AP 0.70</span></div><div class="arr"></div>
-          <div class="step" style="--c:var(--blue)"><b>Cut and clean</b><span>shift to 0 Hz, filter, active windows</span></div>
-        </div></div>
-      <div class="lane" style="--c:var(--amber)"><div class="lt">2 · NAME IT</div>
-        <div class="row">
-          <div class="step" style="--c:var(--amber)"><b>Classifier</b><span>60 classes, 4 views (session 3)</span></div><div class="arr"></div>
-          <div class="step" style="--c:var(--amber)"><b>Tracker + vote</b><span>joins one emitter's windows over time</span></div><div class="arr"></div>
-          <div class="step" style="--c:var(--amber)"><b>Resolver</b><span>pairs, groups, confidence band</span></div><div class="arr"></div>
-          <div class="step" style="--c:var(--red)"><b>Operator dashboard</b><span>boxes, answers, alerts, timeline</span></div>
-        </div></div>
-      <div class="lane" style="--c:var(--teal);margin-bottom:0"><div class="lt">3 · LISTEN AND READ IT (voice and Morse channels)</div>
-        <div class="row">
-          <div class="step" style="--c:var(--teal)"><b>Zoom-in</b><span>AM / FM / SSB / CW recognised by rule</span></div><div class="arr"></div>
-          <div class="step" style="--c:var(--teal)"><b>Demodulate</b><span>audio out of the IQ</span></div><div class="arr"></div>
-          <div class="fork">
-            <div class="step" style="--c:var(--teal)"><b>Speech → text</b><span>Whisper, offline</span></div>
-            <div class="step" style="--c:var(--navy)"><b>Morse → text</b><span>our decoder (C)</span></div>
-          </div><div class="arr"></div>
-          <div class="step" style="--c:var(--purple)"><b>AI reasoning</b><span>local LLM: summary, who, where (D)</span></div>
-        </div></div>
-    </div>
-  </section>
+  <svg class="flowline" viewBox="0 0 1920 1080" aria-hidden="true">
+    <path d="M490 960 L490 985 L960 985 L960 140 L1430 140 L1430 178"/>
+  </svg>
 
-  <!-- B: detection picture -->
-  <section class="panel rv" style="left:1290px;top:150px;width:590px;height:380px;--c:var(--blue);--d:.2">
-    <h2><span class="no">B</span>EVERY EMITTER, BOXED</h2>
-    <div class="pbody" style="padding:10px 12px">
-      <img class="fig" src="assets/img/scene_boxes.png" alt="Wideband spectrogram with detector boxes">
-      <div class="note" style="margin-top:6px">A wideband scene: each box becomes its own track, named and followed over time.</div>
-    </div>
-  </section>
+  <!-- column 1: see the spectrum -->
+  <div class="vcol rv" style="left:40px;top:150px;width:900px;--c:var(--blue);--d:.1">
+    <div class="lt">1 · SEE THE SPECTRUM</div>
+    <div class="vbox" style="--c:var(--blue)"><div class="pic"><img src="assets/img/t_capture.png" alt="raw IQ samples"></div>
+      <div class="tx"><b>Capture</b><span>Raw IQ samples from an SDR, a recorded file or the simulator, any sample rate. Seconds of the whole band at once.</span></div></div>
+    <div class="vdown"></div>
+    <div class="vbox" style="--c:var(--blue)"><div class="pic dark"><img src="assets/img/t_spectrogram.png" alt="wideband spectrogram"></div>
+      <div class="tx"><b>Wideband spectrogram</b><span>The band as a picture: time across, frequency down. Every emitter leaves its own mark.</span></div></div>
+    <div class="vdown"></div>
+    <div class="vbox" style="--c:var(--blue)"><div class="pic dark"><img src="assets/img/t_detector.png" alt="detector boxes"></div>
+      <div class="tx"><b>Detector (YOLO)</b><span>Draws a box around every emitter in time and frequency, many at once.</span><em>AP 0.70</em></div></div>
+    <div class="vdown"></div>
+    <div class="vbox" style="--c:var(--blue)"><div class="pic dark"><img src="assets/img/t_cut.png" alt="one emitter, centred"></div>
+      <div class="tx"><b>Cut and clean</b><span>Each box is shifted to 0 Hz, filtered and cut into 160 µs windows; empty windows between pulses are skipped.</span></div></div>
+  </div>
 
-  <!-- E: human in the loop -->
-  <section class="panel rv" style="left:1290px;top:545px;width:590px;height:515px;--c:var(--green);--d:.5">
-    <h2><span class="no">E</span>HUMAN IN THE LOOP</h2>
-    <div class="pbody">
-      <div class="loop">
-        <div class="step" style="--c:var(--red)"><b>Operator flags or corrects</b><span>any answer on the dashboard, one click</span></div>
-        <div class="darr"></div>
-        <div class="step" style="--c:var(--amber)"><b>Analyst approves</b><span>sees the signal again before it counts</span></div>
-        <div class="darr"></div>
-        <div class="step" style="--c:var(--blue)"><b>Retrain, then a gate</b><span>the new model goes live only if it beats the current one; roll back any time</span></div>
-      </div>
-      <div class="note" style="margin-top:10px">Every capture, decision and correction is kept in a local database with a tamper-evident audit trail.</div>
-      <div style="margin-top:10px"><span class="badge">OFFLINE · ONE WORKSTATION · NO DATA LEAVES</span></div>
-    </div>
-  </section>
+  <!-- column 2: name it -->
+  <div class="vcol rv" style="left:980px;top:150px;width:900px;--c:var(--amber);--d:.4">
+    <div class="lt">2 · NAME IT</div>
+    <div class="vbox" style="--c:var(--amber)"><div class="pic"><img src="assets/img/t_classifier.png" alt="classifier outputs"></div>
+      <div class="tx"><b>Classifier</b><span>60 classes per window, four views of the signal (session 3). Each class is its own yes / no, so two can be true.</span><em>physics model · fixed data</em></div></div>
+    <div class="vdown"></div>
+    <div class="vbox" style="--c:var(--amber)"><div class="pic"><img src="assets/img/t_track.png" alt="per-window scores and the running vote"></div>
+      <div class="tx"><b>Tracker + vote</b><span>Joins the windows of one emitter over time and averages them (line): single misses (grey) stop mattering.</span><em>80.6% per track, ≥ 10 dB</em></div></div>
+    <div class="vdown"></div>
+    <div class="vbox" style="--c:var(--amber)"><div class="pic"><div class="answer"><b>DRFM jammer + LFM radar</b><span>both on the air · confidence HIGH</span><b style="color:var(--purple)">QAM 16–256</b><span>sizes look alike · likeliest 64QAM</span></div></div>
+      <div class="tx"><b>Resolver</b><span>Settles look-alikes from behaviour over time, names groups where sizes cannot be told apart, and gives a confidence band.</span></div></div>
+    <div class="vdown"></div>
+    <div class="vbox" style="--c:var(--red)"><div class="pic"><div class="mock">
+        <div>LFM_RADAR + JAM_DRFM<i style="background:var(--green)">HIGH</i></div>
+        <div>QPSK · track 2<i style="background:var(--green)">HIGH</i></div>
+        <div>QAM 16–256<i style="background:var(--amber)">MEDIUM</i></div>
+        <div>weak burst<i style="background:#888">UNCERTAIN</i></div></div></div>
+      <div class="tx"><b>Operator dashboard</b><span>Boxes on the spectrogram, one row per emitter: answer, band, frequency, time, alerts.</span></div></div>
+  </div>
 
-  <!-- C: Morse -->
-  <section class="panel rv" style="left:40px;top:645px;width:700px;height:415px;--c:var(--navy);--d:.3">
-    <h2><span class="no">C</span>MORSE DECODER</h2>
-    <div class="pbody" style="padding:10px 14px">
-      <img class="fig" src="assets/img/morse_decode.png" alt="Morse audio, envelope and key track">
-      <div class="msteps"><span>find the beep pitch</span><span>loudness track (5 ms)</span><span>key down / up, two thresholds</span><span>dot length per transmission</span><span>dots, dashes, gaps → letters</span></div>
-      <div class="out"><code>CQ CQ DE NEXA K</code><span class="note">decoded · 18 WPM · 699 Hz tone · test message at 12 dB</span></div>
-    </div>
-  </section>
-
-  <!-- D: AI reasoning -->
-  <section class="panel rv" style="left:760px;top:645px;width:510px;height:415px;--c:var(--purple);--d:.4">
-    <h2><span class="no">D</span>AI REASONING, KEPT HONEST</h2>
-    <div class="pbody" style="padding:10px 14px">
-      <div class="json"><span class="k">"summary"</span>:   one or two lines
-<span class="k">"category"</span>:  calling / message / coded groups …
-<span class="k">"call_signs"</span>, <span class="k">"places"</span>, <span class="k">"evidence"</span>: quotes</div>
-      <div class="guard">Local model (Ollama), nothing sent out.</div>
-      <div class="guard">Call signs, places and quotes not in the decoded text are <b>removed</b>.</div>
-      <div class="guard">Category from a fixed list; confidence drops on a poor decode.</div>
-      <div class="guard">The decoded text is shown beside it, so a person can check.</div>
-    </div>
-  </section>
+  <a class="abs link rv" href="05-listen-read-learn.html" style="left:980px;top:1005px;width:900px;height:56px;--c:var(--teal);--d:.8">
+    <span class="tri"></span>continues: voice and Morse channels are listened to and read · Part 2</a>
+  <div class="abs note rv" style="left:44px;top:1018px;--d:.8">Offline · one workstation · no data leaves the machine</div>
 </div></div>
 <script src="assets/deck.js"></script>
 </body></html>
