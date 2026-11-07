@@ -9,28 +9,28 @@
 <style>
   .st { position: absolute; width: 445px; height: 445px; }
   .st > h3 { margin: 0; height: 44px; border-radius: 22px; background: var(--pill); display: flex; align-items: center; gap: 10px;
-    padding: 0 16px; font-size: 17.5px; font-weight: 800; letter-spacing: .6px; }
+    padding: 0 16px; font-size: 20.6px; font-weight: 800; letter-spacing: .6px; }
   .st > h3 .no { display: inline-flex; flex: none; width: 28px; height: 28px; border-radius: 50%; background: var(--c); color: #fff;
-    align-items: center; justify-content: center; font-size: 15px; }
+    align-items: center; justify-content: center; font-size: 17.7px; }
   .st .pbody { top: 54px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
-  .st .what { font-size: 14.5px; font-weight: 600; color: var(--mute); line-height: 1.4; }
+  .st .what { font-size: 19px; font-weight: 600; color: var(--mute); line-height: 1.4; }
   .st .what b { color: var(--ink); }
-  .st .formula { font: 700 14px Consolas, "Courier New", monospace; background: #F6F7F9; border-radius: 8px; padding: 6px 9px; color: var(--navy); }
-  .st img.fig { margin-top: auto; }
-  .flowarr { position: absolute; width: 20px; display: flex; align-items: center; justify-content: center; color: #9AA3AB; font-size: 22px; font-weight: 800; }
+  .st .formula { font: 700 16.5px Consolas, "Courier New", monospace; background: #F6F7F9; border-radius: 8px; padding: 6px 9px; color: var(--navy); }
+  .st img.fig { margin-top: auto; max-height: 200px; object-fit: contain; }
+  .flowarr { position: absolute; width: 20px; display: flex; align-items: center; justify-content: center; color: #9AA3AB; font-size: 26px; font-weight: 800; }
   .mini { display: flex; flex-direction: column; gap: 6px; }
   .mini .step { padding: 6px 10px; border-width: 2.5px; border-radius: 10px; }
-  .mini .step b { font-size: 15px; }
-  .mini .step span { font-size: 12.5px; }
+  .mini .step b { font-size: 17.7px; }
+  .mini .step span { font-size: 14.8px; }
   .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  .rule { font-size: 13px; font-weight: 600; color: var(--mute); line-height: 1.35; padding: 5px 0; border-bottom: 1px solid var(--line); }
+  .rule { font-size: 17px; font-weight: 600; color: var(--mute); line-height: 1.3; padding: 4px 0; border-bottom: 1px solid var(--line); }
   .rule:last-child { border-bottom: 0; }
   .rule b { color: var(--c, var(--purple)); }
 </style></head><body>
 <div class="viewport"><div class="stage" id="stage">
   <div class="abs logo"><img src="assets/nexa-logo.png" alt="NEXA"><small>TRACK I · RF / SIGNAL · SESSION 3 / 4</small></div>
   <div class="abs title-pill">Processing pipeline: from IQ samples to a decision</div>
-  <div class="abs question">Every picture is the real model on one real window: a DRFM jammer copying an LFM radar, 18 dB</div>
+  <div class="abs question">Real model, one real window: a DRFM jammer copying an LFM radar, 18 dB</div>
   <div class="abs event"><img src="assets/sedic-logo.png" alt="SEDIC 26"><span>NOVEMBER 2026 UPDATE</span></div>
 
   <!-- row 1 -->
@@ -49,8 +49,7 @@
 
   <section class="st rv" style="left:505px;top:150px;--c:var(--teal);--d:.2"><h3><span class="no">2</span>NORMALISE</h3>
     <div class="pbody" style="--c:var(--teal)">
-      <div class="what">Every window gets <b>zero mean and unit spread</b> over I and Q together, so a weak and a strong
-        signal look the same size: the model judges <b>shape</b>, not loudness.</div>
+      <div class="what">Every window gets <b>zero mean and unit spread</b>, so weak and strong signals look the same size: the model judges <b>shape</b>, not loudness.</div>
       <div class="formula">x ← (x − mean) / std</div>
       <img class="fig" src="assets/img/pipe_1_iq.png" alt="raw and normalised I and Q">
     </div></section>
@@ -73,7 +72,6 @@
       </div>
       <div class="darr"></div>
       <div class="step" style="--c:var(--ink)"><b>Fused sequence</b><span>192 features at each of the 512 time steps</span></div>
-      <div class="what">Learned from 960,000 examples; nothing hand-tuned.</div>
     </div></section>
 
   <!-- row 2 -->

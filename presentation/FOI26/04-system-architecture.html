@@ -7,22 +7,23 @@
 <title>NEXA System Architecture</title>
 <link rel="stylesheet" href="assets/fonts.css"><link rel="stylesheet" href="assets/deck.css">
 <style>
+  .vbox { --h: 175px; }
   .mock { width: 100%; height: 100%; padding: 8px; display: flex; flex-direction: column; gap: 5px; justify-content: center; background: #F7F9FB; }
   .mock div { display: flex; justify-content: space-between; align-items: center; background: #fff; border: 1px solid var(--line);
-    border-radius: 7px; padding: 4px 8px; font-size: 12.5px; font-weight: 700; }
-  .mock i { font-style: normal; font-size: 10.5px; font-weight: 800; color: #fff; border-radius: 6px; padding: 1px 6px; }
+    border-radius: 7px; padding: 4px 8px; font-size: 14.8px; font-weight: 700; }
+  .mock i { font-style: normal; font-size: 12.4px; font-weight: 800; color: #fff; border-radius: 6px; padding: 1px 6px; }
   .answer { width: 100%; height: 100%; padding: 10px 12px; display: flex; flex-direction: column; justify-content: center; gap: 4px; background: #FFF8EC; }
-  .answer b { font-size: 15px; color: var(--amber); }
-  .answer span { font-size: 12.5px; font-weight: 600; color: var(--mute); line-height: 1.35; }
+  .answer b { font-size: 16px; color: var(--amber); }
+  .answer span { font-size: 13.5px; font-weight: 600; color: var(--mute); line-height: 1.35; }
 </style></head><body>
 <div class="viewport"><div class="stage" id="stage">
-  <div class="abs logo"><img src="assets/nexa-logo.png" alt="NEXA"><small>TRACK I · RF / SIGNAL · SESSION 4 · PART 1 / 2</small></div>
+  <div class="abs logo"><img src="assets/nexa-logo.png" alt="NEXA"><small>TRACK I · RF / SIGNAL · SESSION 4 · 1/2</small></div>
   <div class="abs title-pill">Inside NEXA: system architecture</div>
-  <div class="abs question">Read top to bottom: see the whole spectrum, then name every emitter in it</div>
+  <div class="abs question">Top to bottom: see the whole spectrum, then name every emitter</div>
   <div class="abs event"><img src="assets/sedic-logo.png" alt="SEDIC 26"><span>NOVEMBER 2026 UPDATE</span></div>
 
   <svg class="flowline" viewBox="0 0 1920 1080" aria-hidden="true">
-    <path d="M490 960 L490 985 L960 985 L960 140 L1430 140 L1430 178"/>
+    <path d="M490 968 L490 990 L960 990 L960 140 L1430 140 L1430 178"/>
   </svg>
 
   <!-- column 1: see the spectrum -->
@@ -50,7 +51,7 @@
     <div class="vbox" style="--c:var(--amber)"><div class="pic"><img src="assets/img/t_track.png" alt="per-window scores and the running vote"></div>
       <div class="tx"><b>Tracker + vote</b><span>Joins the windows of one emitter over time and averages them (line): single misses (grey) stop mattering.</span><em>80.6% per track, ≥ 10 dB</em></div></div>
     <div class="vdown"></div>
-    <div class="vbox" style="--c:var(--amber)"><div class="pic"><div class="answer"><b>DRFM jammer + LFM radar</b><span>both on the air · confidence HIGH</span><b style="color:var(--purple)">QAM 16–256</b><span>sizes look alike · likeliest 64QAM</span></div></div>
+    <div class="vbox" style="--c:var(--amber)"><div class="pic"><div class="answer"><b>DRFM + LFM radar</b><span>both on the air · HIGH</span><b style="color:var(--purple)">QAM 16–256</b><span>sizes alike · likeliest 64QAM</span></div></div>
       <div class="tx"><b>Resolver</b><span>Settles look-alikes from behaviour over time, names groups where sizes cannot be told apart, and gives a confidence band.</span></div></div>
     <div class="vdown"></div>
     <div class="vbox" style="--c:var(--red)"><div class="pic"><div class="mock">
