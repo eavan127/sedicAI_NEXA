@@ -116,6 +116,19 @@ def save_atomic(obj, path):
     os.replace(tmp, path)
 
 
+def load_when_visible(path, tries=30, wait_s=2.0):
+    """torch.load, waiting for the file to appear. On the Colab Drive mount a
+    file renamed into place (save_atomic) can be missing for a few seconds;
+    the 2026-11-07 resume finished all 20 epochs, then died here on best.pt."""
+    for k in range(tries):
+        try:
+            return torch.load(path, map_location=DEVICE, weights_only=False)
+        except FileNotFoundError:
+            if k == tries - 1:
+                raise
+            time.sleep(wait_s)
+
+
 def main():
     t = CFG["training"]
     w = CFG["week1"]
@@ -222,7 +235,7 @@ def main():
               f"top1={val['top1']:.3f}  recall@0.5={val['macro_recall_05']:.3f}  lr={lr:g}  "
               f"{time.time() - t0:.0f}s  (~{left:.0f} min left){'  <- best' if improved else ''}", flush=True)
 
-    best = torch.load(ckpt_dir / "best.pt", map_location=DEVICE, weights_only=False)
+    best = load_when_visible(ckpt_dir / "best.pt")
     print(f"Done. Best epoch {best['meta']['epoch']}: {ckpt_dir / 'best.pt'}")
 
     if args.eval_test:

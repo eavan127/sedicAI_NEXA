@@ -12,10 +12,11 @@ Per (class, SNR, split) the windows are:
 
 Impairments: generated windows get the full chain (channel, placement in the
 band, noise at the labelled SNR, receiver effects) via
-impairments.generate_impaired, like every other family; external windows
-already carry their own noise, so they get the chain without noise
-(impairments.apply with snr_db=None), as in make_radar_shards.py.
---no-impair turns both off.
+impairments.generate_impaired, like every other family. External windows stay
+as recorded here: scripts/merge_shards.py already brings them into the same
+SNR and placement conventions (merge.harmonize_external, on by default), and
+placing them here too would shift them twice. --no-impair turns the generated
+windows' chain off.
 
 Why (SED-39, 2026-11-06): these 18 classes used to be generated with no
 impairments, so every window sat exactly at 0 Hz while every other family was
@@ -123,7 +124,6 @@ def main():
                          notes={"script": "scripts/make_fskpsk_shards.py",
                                 "n_per_bin": args.n_per_bin, "ext_frac": args.ext_frac,
                                 "impairments": not args.no_impair}) as w:
-            ext_rng = np.random.default_rng([split_seed[split], 1])
             for cls in args.classes:
                 for snr in snr_bins:
                     n = counts[split]
@@ -131,8 +131,6 @@ def main():
                     if got is not None:
                         (iq, rows), source = got
                         for window, row in zip(iq[:n], rows[:n]):
-                            if not args.no_impair:
-                                window, _ = impairments.apply(window, None, ext_rng)
                             w.add(window, {cls}, snr, source, row)
                         n_ext = min(n, len(iq))
                         n_ext_total += n_ext
