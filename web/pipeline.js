@@ -12,6 +12,7 @@ const KIND_TEXT = {
   USB: "Upper sideband (SSB)", LSB: "Lower sideband (SSB)", CW: "Morse (CW)", CARRIER: "Plain carrier (no modulation)",
   UNKNOWN: "Too weak to tell", ERROR: "Error",
 };
+const BAND_COL = { high: "#2E7D32", medium: "#B7791F", uncertain: "#9B2C2C" };
 const CONF = c => c >= 0.6 ? "#2E7D32" : c >= 0.3 ? "#B7791F" : "#9B2C2C";
 
 let state = { open: null, timer: null };
@@ -175,12 +176,12 @@ function drawResult(box, id, r) {
     ${heard.length ? `<div style="margin-top:14px;font-weight:700;">What it says</div>` + heard.map(L => listenCard(id, L)).join("") : ""}
     <div style="margin-top:14px;font-weight:700;">Every transmitter</div>
     <div class="note">Answer = the 60-class model voted over the whole transmission; when two classes cannot be told apart from
-      the signal (e.g. RADAR_CW / JAM_TONE) both are shown with the reason. Confidence colours: green ≥ 0.6, amber ≥ 0.3, red below.</div>
+      the signal (e.g. RADAR_CW / JAM_TONE) both are shown with the reason. Confidence band from the track probability: high (≥ 0.40), medium (≥ 0.10), uncertain (below: shown as 'uncertain' with the likeliest class). Voice / Morse tracks on a clear signal are named by the zoom-in, which listens to the whole track.</div>
     <div class="table-wrap"><table><thead><tr><th>#</th><th>Time (ms)</th><th>Frequency</th><th>Answer</th>
       <th>Confidence</th><th>Why</th><th>Other candidates</th><th>Zoom</th></tr></thead><tbody>
     ${tracks.map(t => `<tr><td>${t.track}</td><td>${t.t_start_ms.toFixed(1)}–${t.t_end_ms.toFixed(1)}</td>
-      <td style="white-space:nowrap;">${esc(freqText(t, centre))}</td><td><b>${esc(t.answer)}</b></td>
-      <td>${chip(t.confidence.toFixed(2), CONF(t.confidence))}</td><td class="note">${esc(t.reason)}</td>
+      <td style="white-space:nowrap;">${esc(freqText(t, centre))}</td><td>${t.band === 'uncertain' ? `<span class="note">uncertain</span><div class="note">likeliest ${esc(t.answer)}</div>` : `<b>${esc(t.answer)}</b>`}${t.decided_by === 'zoom' ? `<div class="note">by zoom-in (classifier: ${esc(t.classifier_answer)})</div>` : ''}</td>
+      <td>${chip(t.band || t.confidence.toFixed(2), BAND_COL[t.band] || CONF(t.confidence))}<div class="note">${t.confidence.toFixed(2)}</div></td><td class="note">${esc(t.reason)}</td>
       <td class="note">${esc((t.top5 || []).slice(1, 4).map(([c, p]) => `${c} ${p.toFixed(2)}`).join(", "))}</td>
       <td>${t.listen ? esc(KIND_TEXT[t.listen.kind] || t.listen.kind) : ""}</td></tr>`).join("")}
     </tbody></table></div>

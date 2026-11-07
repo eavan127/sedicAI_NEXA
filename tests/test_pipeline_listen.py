@@ -166,3 +166,22 @@ def test_active_windows_skip_the_gaps_between_pulses():
     assert len(all_w) == 32 and len(act) == len(on_windows)
     p = np.mean(np.abs(act) ** 2, axis=1)
     assert p.min() > 5 * np.median(np.mean(np.abs(all_w) ** 2, axis=1))
+
+
+def test_confidence_bands():
+    from src.pipeline.run import confidence_band
+    assert confidence_band(0.55) == "high" and confidence_band(0.2) == "medium" and confidence_band(0.05) == "uncertain"
+
+
+def test_zoom_overrides_a_clear_voice_track_and_keeps_the_classifier_answer():
+    ans = {"answer": "AM_SSB_WC", "classes": ["AM_SSB_WC"], "reason": "classifier", "confidence": 0.2}
+    listen.override(ans, {"kind": "NBFM", "why": "steady loudness: FM", "features": {"snr_db": 25.0, "carrier_frac": 0.9}})
+    assert ans["answer"] == "NBFM" and ans["classes"] == ["NBFM"] and ans["band"] == "high"
+    assert ans["classifier_answer"] == "AM_SSB_WC" and ans["decided_by"] == "zoom"
+
+
+def test_zoom_does_not_override_on_a_weak_signal_or_unknown_kind():
+    for res in ({"kind": "NBFM", "features": {"snr_db": 10.0}}, {"kind": "UNKNOWN", "features": {"snr_db": 30.0}}):
+        ans = {"answer": "JAM_TONE", "classes": ["JAM_TONE"], "reason": "classifier"}
+        listen.override(ans, res)
+        assert ans["answer"] == "JAM_TONE" and "decided_by" not in ans

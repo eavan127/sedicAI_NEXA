@@ -59,7 +59,8 @@ def main():
     p.add_argument("--detector", default=str(REPO_ROOT / "results" / "detector" / "emitter_detector.pt"))
     p.add_argument("--energy", action="store_true")
     p.add_argument("--hybrid", action="store_true", help="YOLO + energy boxes for long narrow signals it missed")
-    p.add_argument("--active-windows", action="store_true", help="vote only with windows where the emitter is on")
+    p.add_argument("--all-windows", action="store_true", help="vote with every window, also those where the emitter is off (old behaviour)")
+    p.add_argument("--cut-margin", type=float, default=None, help="extra band kept around a box, as a share of its width (default: extract.CUT_MARGIN_FRAC)")
     p.add_argument("--score-thr", type=float, default=0.3, help="detector confidence threshold")
     p.add_argument("--n-captures", type=int, default=30)
     p.add_argument("--n-chunks", type=int, default=4)
@@ -74,12 +75,16 @@ def main():
     if args.hybrid and not args.energy:
         detector = HybridDetector(detector)
     classifier = Classifier(args.classifier)
+    if args.cut_margin is not None:
+        from src.pipeline import extract
+        extract.CUT_MARGIN_FRAC = args.cut_margin
     per = defaultdict(lambda: dict(n=0, found=0, win_hit=0, win_n=0, track=0, exact=0))
+    matched = []                       # (track confidence, answer covers the truth, snr) per found emitter
     t0 = time.time()
     for k in range(args.n_captures):
         rng = np.random.default_rng(args.seed + k)
         iq, truth = make_capture(rng, n_chunks=args.n_chunks, classes=args.classes, snr_db=args.snr_db)
-        answers, tracker = process_capture(iq, detector, classifier, rng=rng, active_only=args.active_windows)
+        answers, tracker = process_capture(iq, detector, classifier, rng=rng, active_only=not args.all_windows)
         by_id = {tr.id: tr for tr in tracker.tracks}
         for t in truth:
             s = per[t["cls"]]
@@ -97,7 +102,9 @@ def main():
             wins = by_id[best["track"]].window_top1()
             s["win_hit"] += int(np.isin(wins, list(ok)).sum())
             s["win_n"] += len(wins)
-            s["track"] += int(t["cls"] in best["classes"] or bool(accepted(t["cls"]) & set(best["classes"])))
+            right = int(t["cls"] in best["classes"] or bool(accepted(t["cls"]) & set(best["classes"])))
+            s["track"] += right
+            matched.append((best["confidence"], right, t.get("snr_db", float("nan"))))
             s["exact"] += int(best["answer"] == t["cls"])
         print(f"capture {k + 1}/{args.n_captures}  {time.time() - t0:.0f}s", flush=True)
 
@@ -116,9 +123,21 @@ def main():
                  track=s["track"] / f, track_exact=s["exact"] / f)
         table[cls] = r
         print(f"{cls:>18} {s['n']:>8} {r['found']:>6.0%} {r['window_top1']:>13.0%} {r['track']:>6.0%} {r['track_exact']:>12.0%}")
+    # Operating points: answer only when the track's confidence clears a cut-off.
+    # coverage = share of found emitters that get an answer; accuracy = right among those.
+    conf = np.array([m[0] for m in matched]); right = np.array([m[1] for m in matched])
+    ops = []
+    print(f"\n{'cut-off':>8} {'coverage':>9} {'accuracy':>9}")
+    for thr in (0.0, 0.05, 0.10, 0.20, 0.30, 0.40, 0.50, 0.60):
+        keep = conf >= thr
+        cov = float(keep.mean()) if len(conf) else 0.0
+        acc = float(right[keep].mean()) if keep.any() else float("nan")
+        ops.append(dict(cutoff=thr, coverage=cov, accuracy=acc, n=int(keep.sum())))
+        print(f"{thr:>8.2f} {cov:>9.0%} {acc:>9.0%}")
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    (out / "eval.json").write_text(json.dumps({"args": vars(args), "results": table}, indent=1))
+    (out / "eval.json").write_text(json.dumps({"args": vars(args), "results": table, "operating_points": ops,
+                                               "matched": [list(map(float, m)) for m in matched]}, indent=1))
     print(f"\nWrote {out / 'eval.json'}")
 
 

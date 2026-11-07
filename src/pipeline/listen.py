@@ -138,4 +138,47 @@ def listen_all(iq, answers, out_dir, rng=None, **kw):
         res["t_start_ms"], res["t_end_ms"] = span["t_start_ms"], span["t_end_ms"]
         for a in g:
             a["listen"] = res
+            override(a, res)
     return answers
+
+
+# The zoom looks at the whole track at 50 kS/s; the classifier at 160 us
+# windows, too short to hear a voice cycle, so it calls voice radios tones or
+# spot jammers (error budget, docs/ACCURACY_PLAN.md P3). On a clear signal the
+# zoom's answer wins. Measured on voice-like signals: 70/72 kinds right at
+# 30 dB, 65/72 at 20 dB, 62/72 at 15 dB (src/pipeline/analog.py tests).
+ZOOM_MIN_SNR_DB = 15.0
+ZOOM_HIGH_SNR_DB = 20.0
+
+
+def zoom_answer(kind, feats):
+    """Analog kind -> (answer label, dataset classes it stands for), or None."""
+    carrier = feats.get("carrier_frac", 0) >= analog.CARRIER_FRAC
+    table = {
+        "NBFM": ("NBFM", ["NBFM"]),
+        "WBFM": ("WBFM", ["WBFM"]),
+        "AM": ("AM_DSB_WC", ["AM_DSB_WC"]),
+        "AM_SC": ("AM_DSB_SC", ["AM_DSB_SC"]),
+        "USB": ("AM_SSB_WC (USB)" if carrier else "AM_SSB_SC (USB)", ["AM_SSB_WC" if carrier else "AM_SSB_SC"]),
+        "LSB": ("AM_SSB_WC (LSB)" if carrier else "AM_SSB_SC (LSB)", ["AM_SSB_WC" if carrier else "AM_SSB_SC"]),
+        "CW": ("OOK (Morse CW)", ["OOK"]),
+        "CARRIER": ("RADAR_CW / JAM_TONE", ["RADAR_CW", "JAM_TONE"]),
+    }
+    return table.get(kind)
+
+
+def override(ans, res):
+    """Replace the classifier's answer with the zoom's when the zoom is sure."""
+    z = zoom_answer(res.get("kind"), res.get("features") or {})
+    snr = (res.get("features") or {}).get("snr_db", -99.0)
+    if z is None or snr is None or snr < ZOOM_MIN_SNR_DB:
+        return
+    label, classes = z
+    if label == ans["answer"]:
+        return
+    ans["classifier_answer"] = ans["answer"]
+    ans["answer"], ans["classes"] = label, classes
+    ans["band"] = "high" if snr >= ZOOM_HIGH_SNR_DB else "medium"
+    ans["decided_by"] = "zoom"
+    ans["reason"] = f"zoom-in over the whole track ({snr:.0f} dB): {res.get('why', '')}; " \
+                    f"the 160 us classifier said {ans['classifier_answer']}"

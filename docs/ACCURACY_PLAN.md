@@ -44,7 +44,8 @@ jamming, a few APSK rings look like a jammer band.
 - **Cause:** physics. At -10 dB the pattern is mostly gone (report figure 5).
 - **Fix:** listen longer (the tracker's vote), and say "uncertain" instead of guessing.
 - **Evidence:** vote length on val/test (Eileen, SED-39): 1 window 49.7% -> 8 windows 72.7% -> 32 windows 74.1% (>= 10 dB: 62.9% -> 78.4% -> 80.0%).
-- **Status:** voting is in the pipeline ✅. The "uncertain" operating point (80% accuracy on the answers given) is still to build.
+- **Status:** voting is in the pipeline ✅. Confidence bands are in the answers ✅ (high >= 0.40, medium >= 0.10, below = "uncertain").
+- **80% on confident answers: NOT supported yet.** `eval_pipeline.py` now prints coverage vs accuracy per cut-off. On 2 x 40 captures (seed 4, choose set / check set), at >= 10 dB a 0.40 cut-off gave **80% on one set and 62% on the other** (only ~35-40 strong-signal tracks each). Re-measure with the new model on >= 200 captures before claiming any operating point; Eileen's 400-capture run with the spectrum model found 79% above 0.40.
 
 ### P2. Sizes inside QAM / APSK / PSK / ASK (9.6% of all windows)
 - **Cause:** 10-60 symbols per window; the perfect-receiver ceiling is ~74% (PSK) / ~45% (QAM).
@@ -65,7 +66,7 @@ jamming, a few APSK rings look like a jammer band.
 - **Cause:** a voice cycle (0.3-3 ms) is longer than the window, so AM / SSB / NBFM / PM / AFSK look like an unmodulated or narrow carrier.
 - **Fix 1 ✅ (Eileen):** the spectrum branch raised analog from 30.9% to **43.3%**.
 - **Fix 2 ✅ (pipeline):** the zoom rules already name the kind over the whole track (70 of 72 right at 30 dB) and the dashboard shows it.
-- **Fix 3 (to build):** when the zoom result is confident (strong signal, clear modulation), let it **override** the track answer (NBFM / AM_DSB / AM_SSB / CW) instead of only showing it next to it.
+- **Fix 3 ✅ (this branch):** when the zoom is on a clear signal (>= 15 dB in its own band), its kind **overrides** the track answer: NBFM, WBFM, AM_DSB_WC / SC, AM_SSB_WC / SC (USB/LSB), OOK (Morse CW), or the RADAR_CW / JAM_TONE pair for a plain carrier. The classifier's answer is kept as `classifier_answer`, and the reason says so. **Voice demo: 0 of 3 right -> 3 of 3** (the classifier had called all three AM_SSB).
 - **Caveat:** our analog *generators* carry fast 8-60 kHz test tones, not speech, so the synthetic test set cannot score fix 3 fairly. Check it on SED-38 audio scenes and on the first RSPduo walkie-talkie recording.
 
 ### P4. OFDM / LTE read as barrage noise jamming (87 at >= 10 dB)
@@ -107,7 +108,8 @@ jamming, a few APSK rings look like a jammer band.
   | others (PPM, JAM_PULSED, SSR_IFF) | unchanged | unchanged |
 
 - **Tried, not kept:** centring windows on each pulse. RADAR_PULSE went to 100%, but PPM fell 60% -> 20%; overall 27%, worse than active windows.
-- **Open (cause 2):** POLY_BARKER and FRANK are still ~0% in the pipeline, although windows straight from the signal score 37-90%. So the **cut** (box band / noise refill) changes them. Next check: score those tracks with perfect boxes, then with the box widened to the signal's full band.
+- **Cause 2, checked:** cutting a radar to its exact nominal band costs accuracy in isolation (POLY_BARKER 17% -> 7%, FRANK 66% -> 48%, BARKER 72% -> 51%; a 2x wider cut gives 14 / 55 / 61%). **But a wider cut does not help the real pipeline** (margin 10% -> 50%: pulsed 29% -> 27%, mixed scenes 47% -> 43%, because it pulls in neighbours). The margin stays at 10%; it can be tried with `eval_pipeline.py --cut-margin`.
+- **Still open:** in the full pipeline POLY_BARKER / FRANK windows score only 4-6%, below every isolated test. So the YOLO **boxes** for these radars (time or frequency) are the next suspect: compare their boxes with the truth boxes.
 
 ### P8. Look-alike twins (RADAR_CW / JAM_TONE, LORA_CSS / JAM_SWEPT, DRFM + radar)
 - **Fix ✅:** labels-v2 pairs + resolve rules (behaviour over time, context). Nothing more to gain from the classifier.
@@ -121,10 +123,10 @@ jamming, a few APSK rings look like a jammer band.
 | # | Action | Who | Cost | Expected gain (evidence) |
 |---|---|---|---|---|
 | 1 | Train Part B on the fixed data (spectrum + expert, seed 4) | Eavan / Eileen | 2 h T4 | correct off-centre; same headline (P6) |
-| 2 | Make `--active-windows` the pipeline default | Claude (this branch) | done; switch on after review | radar tracks +6 pts, RADAR_PULSE +34 (P7) |
-| 3 | "Uncertain" operating point: 80% accuracy on answers given, coverage reported | Claude | 1/2 day | honest 80% claim (P1, P9) |
-| 4 | Zoom result overrides analog track answers when confident | Claude | 1/2 day | analog / tone confusions; score on SED-38 audio + RSPduo (P3) |
-| 5 | Find why POLY_BARKER / FRANK fail after the cut | Eileen / Jessy | 1/2 day | radar group, open (P7 cause 2) |
+| 2 | Active-window vote as the pipeline default | Claude | ✅ done (`--all-windows` = old way) | radar tracks +6 pts, RADAR_PULSE +34; mixed scenes unchanged (P7) |
+| 3 | Confidence bands + "uncertain" in answers and dashboard; coverage/accuracy table in the evaluator | Claude | ✅ done | the 80% operating point did not hold on a second capture set; re-measure on the new model, >= 200 captures (P1, P9) |
+| 4 | Zoom result overrides voice / tone track answers when clear | Claude | ✅ done | voice demo 0/3 -> 3/3; score on SED-38 audio + RSPduo next (P3) |
+| 5 | Find why POLY_BARKER / FRANK fail in the pipeline (wider cut ruled out; check the YOLO boxes) | Eileen / Jessy | 1/2 day | radar group, open (P7) |
 | 6 | Re-run this error budget on the new model + labels-v2 test set | Claude | 10 min | confirm what is left |
 
 **Do not spend GPU time on:** a longer-window model (P2, P4), more epochs (Eileen: 15 -> 20 gave +0.2),

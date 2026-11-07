@@ -84,6 +84,17 @@ def _overlap(a, b):
     return w * h / small if small > 0 else 0.0
 
 
+# Track confidence bands (SED-39, 400 synthetic captures): track answers with
+# probability < 0.05 were right 22% of the time, 0.10-0.20 about 50%, > 0.40
+# about 79%. Below LOW the answer is shown as "uncertain" rather than a name.
+BAND_HIGH = 0.40
+BAND_LOW = 0.10
+
+
+def confidence_band(p):
+    return "high" if p >= BAND_HIGH else ("medium" if p >= BAND_LOW else "uncertain")
+
+
 def box_to_physical(box, chunk_start):
     """[x0, y0, x1, y1] pixels of a chunk -> (t0, t1) samples of the capture,
     (f_lo, f_hi) Hz."""
@@ -95,7 +106,7 @@ def box_to_physical(box, chunk_start):
     return t0, t1, f_lo, f_hi
 
 
-def process_capture(iq, detector, classifier, rng=None, tracker=None, cw_min_s=None, active_only=False):
+def process_capture(iq, detector, classifier, rng=None, tracker=None, cw_min_s=None, active_only=True):
     """Run the chain over complex `iq`. Returns (answers, tracker): one dict
     per track, in order of first appearance."""
     rng = rng or np.random.default_rng(0)
@@ -126,6 +137,7 @@ def process_capture(iq, detector, classifier, rng=None, tracker=None, cw_min_s=N
         probs = tr.probs()
         answers.append(dict(
             track=tr.id, answer=a.label, classes=list(a.classes), confidence=round(a.confidence, 3),
+            band=confidence_band(a.confidence),
             reason=a.reason,
             t_start_ms=round(tr.t_first / FS * 1e3, 3), t_end_ms=round(tr.t_last / FS * 1e3, 3),
             f_lo_khz=round(tr.f_lo / 1e3, 1), f_hi_khz=round(tr.f_hi / 1e3, 1),

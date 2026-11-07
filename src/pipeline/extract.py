@@ -34,6 +34,7 @@ from src.detect import scenes
 FS = CFG["signal"]["fs"]
 WINDOW_LEN = CFG["signal"]["window_len"]
 MIN_MARGIN_HZ = 25e3            # extra band kept on each side of the box
+CUT_MARGIN_FRAC = 0.1           # ... or this share of the box width, whichever is larger
 SMOOTH = 32                     # samples averaged in the frequency track
 SIDEBAND_GUARD_HZ = 2e3         # around the main line, not counted as a sideband
 BLOCK = 1024                    # power blocks for power_cv (0.32 ms)
@@ -86,7 +87,7 @@ def cut(iq, t0, t1, f_lo, f_hi, noise_var, rng, margin_hz=None):
         t1 = min(n, t0 + WINDOW_LEN)
     seg = np.asarray(iq[t0:t1], dtype=complex)
     fc = (f_lo + f_hi) / 2
-    half = (f_hi - f_lo) / 2 + (margin_hz if margin_hz is not None else max(MIN_MARGIN_HZ, 0.1 * (f_hi - f_lo)))
+    half = (f_hi - f_lo) / 2 + (margin_hz if margin_hz is not None else max(MIN_MARGIN_HZ, CUT_MARGIN_FRAC * (f_hi - f_lo)))
     seg = seg * np.exp(-2j * np.pi * fc * np.arange(t0, t1) / FS)
     X = np.fft.fft(seg)
     keep = np.abs(np.fft.fftfreq(len(seg), 1 / FS)) <= half

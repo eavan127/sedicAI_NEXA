@@ -116,7 +116,7 @@ def main():
     p.add_argument("--detector", default=str(DEFAULT_DETECTOR))
     p.add_argument("--energy", action="store_true", help="use the classical energy detector")
     p.add_argument("--hybrid", action="store_true", help="YOLO + energy boxes for long narrow signals it missed")
-    p.add_argument("--active-windows", action="store_true", help="vote only with windows where the emitter is on")
+    p.add_argument("--all-windows", action="store_true", help="vote with every window, also those where the emitter is off (old behaviour)")
     p.add_argument("--score-thr", type=float, default=0.3, help="detector confidence threshold")
     p.add_argument("--out", default=str(REPO_ROOT / "results" / "pipeline" / "run"))
     args = p.parse_args()
@@ -141,7 +141,7 @@ def main():
     if args.hybrid and not args.energy:
         detector = HybridDetector(detector)
     classifier = Classifier(args.classifier)
-    answers, _ = process_capture(iq, detector, classifier, rng=rng, active_only=args.active_windows)
+    answers, _ = process_capture(iq, detector, classifier, rng=rng, active_only=not args.all_windows)
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
