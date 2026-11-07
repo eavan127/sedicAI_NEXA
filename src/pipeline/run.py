@@ -95,7 +95,7 @@ def box_to_physical(box, chunk_start):
     return t0, t1, f_lo, f_hi
 
 
-def process_capture(iq, detector, classifier, rng=None, tracker=None, cw_min_s=None):
+def process_capture(iq, detector, classifier, rng=None, tracker=None, cw_min_s=None, active_only=False):
     """Run the chain over complex `iq`. Returns (answers, tracker): one dict
     per track, in order of first appearance."""
     rng = rng or np.random.default_rng(0)
@@ -115,7 +115,7 @@ def process_capture(iq, detector, classifier, rng=None, tracker=None, cw_min_s=N
             if t1 - t0 <= 0:
                 continue
             c = extract.cut(iq, t0, t1, f_lo, f_hi, nv, rng)
-            probs = classifier(extract.windows(c))
+            probs = classifier(extract.active_windows(c) if active_only else extract.windows(c))
             dets.append(Detection(c.t0, c.t1, c.f_lo, c.f_hi, float(score), probs, c.features, chunk=k))
         tracker.update(dets)
     tracks = tracker.finish()

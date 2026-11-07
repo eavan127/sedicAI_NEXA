@@ -149,3 +149,20 @@ def test_pipeline_start_needs_a_classifier(server):
     base, _ = server
     status, data = call(base + "/api/pipeline?source=voice-demo", "POST", b"")
     assert status == 409 and "classifier" in data["error"]
+
+
+def test_active_windows_skip_the_gaps_between_pulses():
+    from src.pipeline import extract
+    rng = np.random.default_rng(4)
+    n = 512 * 32
+    iq = (rng.standard_normal(n) + 1j * rng.standard_normal(n)) * np.sqrt(0.5)
+    on_windows = [3, 11, 20, 27]                       # a 'pulse' fills these windows only
+    t = np.arange(n)
+    for w in on_windows:
+        s = slice(w * 512, (w + 1) * 512)
+        iq[s] += 4 * np.exp(2j * np.pi * 100e3 * t[s] / 3.2e6)
+    c = extract.cut(iq, 0, n, 50e3, 150e3, 1.0, rng)
+    all_w, act = extract.windows(c), extract.active_windows(c)
+    assert len(all_w) == 32 and len(act) == len(on_windows)
+    p = np.mean(np.abs(act) ** 2, axis=1)
+    assert p.min() > 5 * np.median(np.mean(np.abs(all_w) ** 2, axis=1))

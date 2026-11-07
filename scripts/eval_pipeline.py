@@ -59,6 +59,7 @@ def main():
     p.add_argument("--detector", default=str(REPO_ROOT / "results" / "detector" / "emitter_detector.pt"))
     p.add_argument("--energy", action="store_true")
     p.add_argument("--hybrid", action="store_true", help="YOLO + energy boxes for long narrow signals it missed")
+    p.add_argument("--active-windows", action="store_true", help="vote only with windows where the emitter is on")
     p.add_argument("--score-thr", type=float, default=0.3, help="detector confidence threshold")
     p.add_argument("--n-captures", type=int, default=30)
     p.add_argument("--n-chunks", type=int, default=4)
@@ -78,7 +79,7 @@ def main():
     for k in range(args.n_captures):
         rng = np.random.default_rng(args.seed + k)
         iq, truth = make_capture(rng, n_chunks=args.n_chunks, classes=args.classes, snr_db=args.snr_db)
-        answers, tracker = process_capture(iq, detector, classifier, rng=rng)
+        answers, tracker = process_capture(iq, detector, classifier, rng=rng, active_only=args.active_windows)
         by_id = {tr.id: tr for tr in tracker.tracks}
         for t in truth:
             s = per[t["cls"]]

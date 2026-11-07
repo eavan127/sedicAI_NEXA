@@ -109,6 +109,26 @@ def windows(c, max_windows=MAX_WINDOWS):
     return np.stack([c.filled[s:s + WINDOW_LEN] for s in starts])
 
 
+def active_windows(c, max_windows=MAX_WINDOWS, min_snr_db=3.0):
+    """Like windows(), but only windows where the emitter is actually on:
+    in-band power at least min_snr_db above the in-band noise. A pulsed radar
+    or a keyed signal leaves many windows between pulses that hold only noise;
+    voting with them drags the track's answer towards whatever the classifier
+    says about noise. Falls back to windows(c) when fewer than 2 are active."""
+    n = len(c.filled) // WINDOW_LEN
+    if n == 0:
+        return windows(c, max_windows)
+    seg = np.asarray(c.inband[:n * WINDOW_LEN]).reshape(n, WINDOW_LEN)
+    power = np.mean(np.abs(seg) ** 2, axis=1)
+    noise = c.noise_var * c.keep_frac
+    on = np.flatnonzero(power >= noise * (1 + 10 ** (min_snr_db / 10)))
+    if len(on) < 2:
+        return windows(c, max_windows)
+    if len(on) > max_windows:
+        on = on[np.linspace(0, len(on) - 1, max_windows).round().astype(int)]
+    return np.stack([c.filled[s * WINDOW_LEN:(s + 1) * WINDOW_LEN] for s in on])
+
+
 def _smooth(x, k):
     return np.convolve(x, np.ones(k) / k, mode="valid") if len(x) > k else x
 
