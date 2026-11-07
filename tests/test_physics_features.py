@@ -70,10 +70,10 @@ def test_default_model_is_unchanged_by_the_new_flag():
     assert not any("physics" in k for k in a.state_dict())
 
 
-@pytest.mark.skipif(not __import__("pathlib").Path("results/classifier/seed4_best.pt").exists(),
+@pytest.mark.skipif(not __import__("pathlib").Path("results/classifier/old/seed4_best.pt").exists(),
                     reason="seed4 checkpoint not on this machine")
 def test_seed4_checkpoint_still_loads():
     from src.pipeline.classify import Classifier
-    clf = Classifier(["results/classifier/seed4_best.pt"])
+    clf = Classifier(["results/classifier/old/seed4_best.pt"])
     p = clf(_windows(2)[:, 0] + 1j * _windows(2)[:, 1])
     assert p.shape[-1] == 60

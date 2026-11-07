@@ -62,3 +62,17 @@ detector is single-class (one box per transmitter).
 1. Write it in the tables above: version, Drive folder, what changed, status.
 2. Mark what it supersedes, and why.
 3. Point `DATA_ON_DRIVE` in the training notebooks at it, and change `RUN_NAME`, so runs on different data never share a results folder.
+
+## Active classifier (2026-11-07)
+
+`results/classifier/physics_best.pt` (git-ignored; Drive `FOI26/results/2026-11-07_physics_seed4/best.pt`):
+seed 4, expert + spectrum + physics branches, trained on **f993d8ebc417**, best epoch 14.
+
+| Test set | top-1 | >= 10 dB |
+|---|---|---|
+| f993d8ebc417 (fixed) | 48.7% | 61.6% (vote of 16 windows: 80.6%) |
+| Spectrum model (old data) on the same set | 42.5% | 52.9% |
+
+The spectrum model's 52.0% was on **a5cda92d476f**, whose FSK/PSK/QAM sit at 0 Hz like its training
+data: not comparable. Always name the test set next to a number. Seed 4 moved to
+`results/classifier/old/` (the dashboard averages every `*best*.pt` in `results/classifier/`).
