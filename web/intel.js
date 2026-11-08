@@ -32,8 +32,8 @@ const Q_MEANING = {
   QRZ: "Who is calling me?", QTH: "My location is…", QRM: "There is interference", QRN: "There is static noise",
   QSY: "Change frequency", QRT: "Stop sending", QRX: "Wait", QSA: "Your signal strength is…", QRK: "How readable am I?",
 };
-const BIG = "font-size:1.12rem;line-height:1.55;";
-const H = "font-size:1.25rem;font-weight:700;margin:18px 0 6px;";
+const BIG = "font-size:16px;line-height:1.55;";
+const H = "font-size:18px;font-weight:700;margin:26px 0 8px;";
 
 function plainDate(iso) {
   if (!iso) return "";
@@ -183,20 +183,20 @@ async function openRecording(root, id) {
     <div style="${BIG}">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
       <div>
-        <div style="font-size:1.45rem;font-weight:700;">${esc(KIND_LABEL[rec.kind] || rec.kind)} recording · ${esc(plainDate(rec.recorded_at))}</div>
-        <div class="note" style="font-size:0.95rem;">File ${esc(rec.file)}</div>
+        <div style="font-size:20px;font-weight:700;">${esc(KIND_LABEL[rec.kind] || rec.kind)} recording · ${esc(plainDate(rec.recorded_at))}</div>
+        <div class="note">File ${esc(rec.file)}</div>
       </div>
       <button class="mini" id="intelClose">Close</button>
     </div>
 
     <div style="margin-top:12px;padding:14px 16px;border-radius:10px;background:var(--panel);border:1px solid var(--grid);">
-      <div style="font-size:1.25rem;font-weight:700;margin-bottom:6px;">In short</div>
+      <div style="font-size:18px;font-weight:700;margin-bottom:8px;">In short</div>
       ${inShort(rec).map(([k, v]) => `<div style="margin:4px 0;"><b>${esc(k)}:</b> ${v}</div>`).join("")}
     </div>
 
     <div style="${H}">When the station was sending</div>
     <canvas id="intelStrip" height="70" style="width:100%;display:block;background:var(--panel);border:1px solid var(--grid);"></canvas>
-    <div class="note" style="font-size:1rem;">Each bar is a moment in the recording. <b>Taller, darker bar = more sending and a clearer signal.</b>
+    <div class="note">Each bar is a moment in the recording. <b>Taller, darker bar = more sending and a clearer signal.</b>
       Click a bar to see what was sent at that time.</div>
 
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:22px;margin-top:6px;">
@@ -209,14 +209,14 @@ async function openRecording(root, id) {
         ${(r.places || []).length ? `<div style="margin-top:6px;"><b>Places mentioned:</b> ${r.places.map(c => chip(c, "#2B6CB0")).join(" ")}</div>` : ""}
         ${(r.key_points || []).length ? `<ul style="margin:8px 0 0 20px;padding:0;">${r.key_points.map(p => `<li>${esc(p)}</li>`).join("")}</ul>` : ""}
         ${(r.evidence || []).length ? `<div style="margin-top:12px;font-weight:700;">Proof: the exact ${decoded} the AI based this on</div>
-          ${r.evidence.map(e => `<div style="margin-top:6px;"><code style="font-size:1.05rem;">${esc(e.quote)}</code><div class="note" style="font-size:1rem;">${esc(e.why)}</div></div>`).join("")}` : ""}
+          ${r.evidence.map(e => `<div style="margin-top:6px;"><code>${esc(e.quote)}</code><div class="note">${esc(e.why)}</div></div>`).join("")}` : ""}
         ${r.caveats ? `<div style="margin-top:10px;"><b>Be careful:</b> ${esc(r.caveats)}</div>` : ""}
-        <div class="note" style="margin-top:10px;font-size:0.95rem;">Type: ${esc(r.category || "—")}${r.language ? ` · language: ${esc(r.language)}` : ""} · AI model ${esc(r.model || "—")}
+        <div class="note" style="margin-top:10px;">Type: ${esc(r.category || "—")}${r.language ? ` · language: ${esc(r.language)}` : ""} · AI model ${esc(r.model || "—")}
           ${r.removed_ungrounded ? ` · ${r.removed_ungrounded} detail${r.removed_ungrounded > 1 ? "s" : ""} the AI made up (not in the ${decoded}) ${r.removed_ungrounded > 1 ? "were" : "was"} removed` : ""}</div>`}
       </div>
       <div>
         <div style="${H}">Facts measured from the signal <span class="note" style="font-weight:400;">(no AI)</span></div>
-        <table style="font-size:1.05rem;"><tbody>
+        <table><tbody>
           <tr><td>Sending speed</td><td>${f.wpm_range ? `${Math.round(f.wpm_range[0])}–${Math.round(f.wpm_range[1])} words per minute` : rec.wpm_median ? `${Math.round(rec.wpm_median)} words per minute` : "—"}</td></tr>
           <tr><td>Station names heard</td><td>${esc((f.call_sign_like || []).slice(0, 4).map(([c, n]) => `${c} (${n}×)`).join(", ") || "—")}</td></tr>
           <tr><td>Radio short codes</td><td>${qCodes || "none"}</td></tr>
@@ -224,14 +224,14 @@ async function openRecording(root, id) {
           <tr><td>Secret-code groups <span class="note">(blocks of 5 letters/digits)</span></td><td>${pct(f.five_char_groups_share)} of words</td></tr>
           <tr><td>Letters that could not be read</td><td>${pct(f.unreadable_share)}</td></tr>
         </tbody></table>
-        <div class="note" style="margin-top:8px;font-size:0.95rem;">Listened to ${plainHours(rec.analysed_s)} · ${segs.length} messages
+        <div class="note" style="margin-top:8px;">Listened to ${plainHours(rec.analysed_s)} · ${segs.length} messages
           ${rec.dropped_noise_segments ? ` · ${rec.dropped_noise_segments} bursts of noise ignored` : ""} · recording ${rec.sample_rate} Hz, ${rec.bits}-bit</div>
       </div>
     </div>
     ${rec.transcript?.text ? `<div style="${H}">What was said (speech to text, ${esc(rec.transcript.language || "?")})</div>
       <div style="white-space:pre-wrap;">${esc(rec.transcript.text)}</div>` : rec.transcript?.error ? `<div class="note">Speech to text failed: ${esc(rec.transcript.error)}</div>` : rec.note ? `<div style="${H}">What was said</div><div class="note">${esc(rec.note)}</div>` : ""}
     <div style="${H}">Every message, word for word</div>
-    <div class="filters" style="margin-top:4px;"><input id="intelSegSearch" placeholder="Search the messages" style="width:260px;font-size:1rem;">
+    <div class="filters" style="margin-top:4px;"><input id="intelSegSearch" placeholder="Search the messages" style="width:260px;">
       <span class="note" id="intelSegCount"></span></div>
     <div class="table-wrap" id="intelSegs" style="max-height:460px;"></div>
     ${rec.recorder_log ? `<details style="margin-top:10px;"><summary>Technical: recorder log (${esc(rec.file.replace(/\.wav$/i, ".log"))})</summary>
@@ -251,7 +251,7 @@ async function openRecording(root, id) {
     count.textContent = `${Q ? list.length + " found · " : ""}showing ${Math.min(LIMIT, list.length)} of ${list.length}`;
     const hl = t => Q ? esc(t).split(esc(Q)).join(`<mark>${esc(Q)}</mark>`) : esc(t);
     const strength = db => db == null ? "—" : db >= 25 ? "strong" : db >= 15 ? "clear" : db >= 8 ? "weak" : "very weak";
-    segBox.innerHTML = `<table style="font-size:1.02rem;"><thead><tr><th style="white-space:nowrap;">Time in recording</th>
+    segBox.innerHTML = `<table><thead><tr><th style="white-space:nowrap;">Time in recording</th>
       <th>Signal</th><th>Speed</th><th style="width:60%;">What was sent</th></tr></thead><tbody>`
       + list.slice(0, LIMIT).map(s => `<tr style="vertical-align:top;"><td style="white-space:nowrap;"><code>${clock(s.start_s)}</code></td>
         <td style="white-space:nowrap;" title="${s.snr_db != null ? Math.round(s.snr_db) + " dB above the noise" : ""}">${strength(s.snr_db)}</td>
