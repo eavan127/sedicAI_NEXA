@@ -93,6 +93,10 @@ class IqBuffer:
         self.spool = None                  # open file that also receives every sample (whole recordings)
         self.spool_path = None
         self.spool_n = 0
+        self.spool_first = self.spool_last = None   # when this recording's first and newest frames arrived
+        self.spool_gap = 0.0                        # longest pause between two of its frames
+        self.ended = {"span_s": 0.0, "longest_gap_s": 0.0}   # the same for the recording that just ended
+        self.rate_measured = None
 
     def add(self, iq):
         with self.lock:
@@ -110,6 +114,12 @@ class IqBuffer:
                 raw[1::2] = np.clip(np.round(iq.imag * 32768), -32768, 32767)
                 self.spool.write(raw.tobytes())
                 self.spool_n += len(iq)
+                now = time.monotonic()
+                if self.spool_first is None:
+                    self.spool_first = now
+                else:
+                    self.spool_gap = max(self.spool_gap, now - self.spool_last)
+                self.spool_last = now
 
     def rotate_spool(self, next_path=None):
         """End the current recording and start the next, with no sample lost
@@ -120,6 +130,9 @@ class IqBuffer:
                 self.spool.close()
             self.spool = open(next_path, "wb") if next_path else None
             self.spool_path, self.spool_n = next_path, 0
+            self.ended = {"span_s": self.spool_last - self.spool_first if self.spool_first is not None else 0.0,
+                          "longest_gap_s": self.spool_gap}
+            self.spool_first, self.spool_last, self.spool_gap = None, None, 0.0
         return ended
 
     def measured_rate(self):
@@ -322,6 +335,30 @@ def replay_receiver(buf, path, speed=1.0, loop=True):
             return
 
 
+def snap_rate(r, dev=0.0):
+    """Measured samples per second -> the stream's real rate. A stream cannot
+    deliver faster than its rate for long but often delivers slower (a slow
+    start, lost samples), so a common rate up to 20% above the measurement is
+    accepted, and only 10% below it (a burst)."""
+    if dev and abs(r - dev) / dev < 0.1:
+        return dev
+    fits = [c for c in COMMON_RATES if -0.1 < (c - r) / c < 0.2]
+    return min(fits, key=lambda c: abs(c - r)) if fits else round(r, -2)
+
+
+def delivery_problem(n, fs, span_s, longest_gap_s, min_span_s=2.0, max_lost=0.05, max_gap_s=0.5):
+    """What went wrong while this recording arrived, in words, or None. n
+    samples arrived over span_s seconds, and fs of them should arrive per second."""
+    problems = []
+    lost = 1 - n / (fs * span_s) if span_s >= min_span_s else 0.0
+    if lost > max_lost:
+        problems.append(f"about {100 * lost:.0f}% of the samples did not arrive "
+                        f"({n / fs:.1f} s of IQ in {span_s:.1f} s of streaming)")
+    if longest_gap_s > max_gap_s:
+        problems.append(f"the stream paused for {longest_gap_s:.1f} s")
+    return "; ".join(problems) or None
+
+
 def settle_rate(buf, given=None, wait_s=2.0):
     """The stream's sample rate: --fs, else measured over wait_s and snapped
     to the device rate or a common rate."""
@@ -336,11 +373,8 @@ def settle_rate(buf, given=None, wait_s=2.0):
     r = buf.measured_rate()
     if not r:
         return None
-    dev = float(buf.info.get("device_sample_rate") or 0)
-    if dev and abs(r - dev) / dev < 0.1:
-        return dev
-    best = min(COMMON_RATES, key=lambda c: abs(c - r) / c)
-    return best if abs(best - r) / best < 0.1 else round(r, -2)
+    buf.rate_measured = r
+    return snap_rate(r, float(buf.info.get("device_sample_rate") or 0))
 
 
 # ---------- voice path ----------
@@ -691,6 +725,9 @@ def main():
     centre, centre_src = centre_of(buf, fs)
     print(f"IQ stream {fs / 1e3:.1f} kS/s ({buf.info.get('active_device', '?')}, API {buf.info.get('api_version', '?')})"
           + (f", centre {centre / 1e6:.4f} MHz ({centre_src})" if centre else ", centre frequency unknown"), flush=True)
+    if buf.rate_measured and abs(buf.rate_measured - fs) / fs > 0.02:
+        print(f"Measured {buf.rate_measured / 1e3:.1f} kS/s at the start and assumed {fs / 1e3:.1f} kS/s. "
+              "If the recording's real rate is different, set it with --fs.", flush=True)
     if args.tune_only:
         buf.tuned_once = False
         threading.Thread(target=autotune_loop, args=(buf, fs, args.device), kwargs={"once": True}, daemon=True).start()
@@ -720,7 +757,7 @@ def main():
     while (not args.cycles or cycle < args.cycles) and not stopping:
         t_cycle = time.monotonic()
         n = int(snap_s * fs)
-        rec = rec_path = None
+        rec = rec_path = problem = None
         if whole:
             rec_path, rec_n, why, stopping = record_until_stop(buf, fs, args.stop_after_s, args.quiet_stop_s,
                                                                args.exit_when_idle)
@@ -730,6 +767,9 @@ def main():
                 rec_path.unlink(missing_ok=True)
                 continue
             print(f"Recording over ({why}): {rec_n / fs:.1f} s. Analysing all of it ...", flush=True)
+            problem = delivery_problem(rec_n, fs, **buf.ended)
+            if problem:
+                print(f"WARNING: {problem}.", flush=True)
             rec = DiskIq(rec_path)
         # Only NEW samples: once SDRconnect stops sending (playback paused or
         # ended), the buffer still holds the last seconds -- analysing those
@@ -779,8 +819,10 @@ def main():
             dur_ms = len(iq) / fs * 1e3
         else:
             tracks, dur_ms = chain(iq, fs, d, rng, **kw)
-        source = {"file": f"LIVE · {label}", "format": f"SDRconnect IQ stream ({args.mode} mode)", "fs_in": fs,
-                  "centre_hz": centre, "resampled": False, "live": True, "snapshot_at": rid}
+        source = {"file": f"LIVE · {label}",
+                  "format": f"SDRconnect IQ stream ({args.mode} mode)" + (f" · WARNING: {problem}" if problem else ""),
+                  "fs_in": fs, "centre_hz": centre, "resampled": False, "live": True, "snapshot_at": rid,
+                  "delivery_problem": problem}
         doc = finite({"n_samples": len(iq), "duration_ms": dur_ms, "source": source, "tracks": tracks, "truth": None})
         (d / "tracks.tmp").write_text(json.dumps(doc, indent=1, default=float, allow_nan=False), encoding="utf-8")
         (d / "tracks.tmp").replace(d / "tracks.json")       # the dashboard sees a run as done once this exists

@@ -137,7 +137,7 @@ function draw(root, data) {
       <th>Category</th><th>Call signs</th><th style="min-width:200px;">Summary</th></tr></thead><tbody>`
       + shown.map(r => `<tr data-id="${esc(r.id)}" style="cursor:pointer;" title="Open">
         <td style="white-space:nowrap;">${esc(r.recorded_at ? new Date(r.recorded_at).toLocaleString() : "—")}
-          <div class="note" style="font-family:var(--mono);font-size:11.5px;">${esc(r.file)}</div></td>
+          <div class="note" style="font-family:var(--mono);font-size:13px;line-height:1.4;margin:4px 0 0;white-space:normal;overflow-wrap:anywhere;">${esc(r.file)}</div></td>
         <td style="white-space:nowrap;">${hms(r.analysed_s)}${r.analysed_s < r.duration_s - 1 ? ` <span class="note">of ${hms(r.duration_s)}</span>` : ""}
           <div class="note">${esc(Math.round(r.active_minutes || 0))} min with signal</div></td>
         <td style="white-space:nowrap;">${esc(KIND_LABEL[r.kind] || r.kind)}${r.wpm_median ? `<div class="note">${Math.round(r.wpm_median)} WPM</div>` : ""}</td>

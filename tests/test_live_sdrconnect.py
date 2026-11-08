@@ -80,6 +80,39 @@ def test_short_transmission_survives_a_long_recording(tmp_path):
     assert 54e3 <= t["t_start_ms"] <= 60e3 and 63e3 <= t["t_end_ms"] <= 72e3
 
 
+def test_snap_rate_accepts_a_slow_start_but_not_a_stranger():
+    assert live.snap_rate(500_000) == 500e3
+    for slow in (424_600, 434_200, 439_800, 442_500):             # what real 500 kS/s streams measured
+        assert live.snap_rate(slow) == 500e3
+    assert live.snap_rate(520_000) == 500e3                       # a burst
+    assert live.snap_rate(350_000) == 350_000                     # not close to anything: as measured
+    assert live.snap_rate(434_200, dev=440_000) == 440_000        # the device's own rate comes first
+
+
+def test_delivery_problem_names_lost_samples_and_pauses():
+    assert live.delivery_problem(6_000_000, 500e3, 12.0, 0.05) is None
+    lost = live.delivery_problem(3_000_000, 500e3, 12.0, 0.05)
+    assert "50%" in lost and "6.0 s of IQ in 12.0 s" in lost
+    assert "paused for 1.5 s" in live.delivery_problem(6_000_000, 500e3, 12.0, 1.5)
+    assert live.delivery_problem(100_000, 500e3, 0.5, 0.0) is None   # too short to judge
+
+
+def test_buffer_measures_how_a_recording_arrived(tmp_path, monkeypatch):
+    monkeypatch.setattr(live, "SPOOL", tmp_path)
+    buf = live.IqBuffer(keep_s=1)
+    buf.fs = 1000.0
+    buf.rotate_spool(live.new_spool())
+    frame = np.zeros(100, np.complex64)
+    buf.add(frame)
+    time.sleep(0.15)
+    buf.add(frame)
+    path, n = buf.rotate_spool(live.new_spool())
+    assert n == 200 and buf.ended["span_s"] >= 0.1 and buf.ended["longest_gap_s"] >= 0.1
+    buf.add(frame)                                                # the next recording starts clean
+    buf.rotate_spool(None)
+    assert buf.ended["longest_gap_s"] < 0.1
+
+
 def test_recording_keeps_every_sample_until_the_stream_stops(tmp_path, monkeypatch):
     monkeypatch.setattr(live, "SPOOL", tmp_path)
     buf = live.IqBuffer(keep_s=0.5)
