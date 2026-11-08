@@ -114,6 +114,17 @@ python scripts/live_sdrconnect.py --host 192.168.137.5 --whisper-model medium
   page either, *if* their copy is up to date: `git checkout eavan-accuracy-plan` and `git pull`.
   A login page there means an old branch or download (from before 2 Oct).
 
+## Snapshot length and stopping
+
+- Voice: the default 6 s snapshots. A snapshot that lands on a pause between words shows **CARRIER**
+  (a walkie-talkie carrier with no speech on it is exactly that); longer snapshots (`--snapshot-s 10`)
+  catch more speech.
+- Morse: `--snapshot-s 40`, so a whole message lands in one snapshot (short ones chop it into pieces).
+  The text comes from the Morse decoder, which follows fixed rules with no AI. `--llm` adds Ollama's reading of what it means.
+- When SDRconnect stops playing, the bridge analyses what it received, prints "No new IQ … waiting"
+  and makes no more runs; pressing play continues. `--exit-when-idle 10` stops it instead. Ctrl+C always stops.
+- Plain-language demo clips: `morse/iq/cw_sim_001_CW.wav` … `cw_sim_007` (simulated, fictional call signs).
+
 ## What to expect (measured 2026-11-08, Eavan's laptop: 7.3 GB RAM, CPU only)
 
 - **Voice mode, 4 s snapshot of a 3.2 MS/s stream with 3 stations:**
