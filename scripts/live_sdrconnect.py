@@ -356,6 +356,7 @@ def voice_snapshot(iq, fs, out_dir, whisper_model, language, use_whisper, use_ll
                         m = morse.analyse(wavio.wav_info(wav))
                         segments, text_kind = m["segments"], "morse"
                         L["morse"] = " / ".join(s["text"] for s in segments)
+                        L["morse_detail"] = m
                     elif use_whisper and L["duration_s"] >= 1.0:
                         from src.intel import voice
                         tr = voice.transcribe(wavio.wav_info(wav), model=whisper_model,
@@ -371,7 +372,8 @@ def voice_snapshot(iq, fs, out_dir, whisper_model, language, use_whisper, use_ll
                     from src.intel import reason
                     kw = {"model": llm_model} if llm_model else {}
                     L["reading"] = reason.read_recording(f"live track {k}", segments, kind=text_kind,
-                                                         duration=f"{L['duration_s']:.1f} s", **kw)
+                                                         duration=f"{L['duration_s']:.1f} s",
+                                                         active_min=L.get("morse_detail", {}).get("active_minutes", 0), **kw)
         conf = 0.9 if kind not in ("UNKNOWN",) else 0.1
         tracks.append({"track": k, "t_start_ms": t_on_ms, "t_end_ms": t_off_ms, "f_lo_khz": lo / 1e3, "f_hi_khz": hi / 1e3,
                        "answer": KIND_CLASS.get(kind, kind), "confidence": conf,
@@ -676,9 +678,9 @@ def main():
         (d / "tracks.tmp").write_text(json.dumps(doc, indent=1, default=float, allow_nan=False), encoding="utf-8")
         (d / "tracks.tmp").replace(d / "tracks.json")       # the dashboard sees a run as done once this exists
         try:
-            saved = store.save_whisper_tracks(rid, doc["source"], doc["tracks"], d, keep_empty=whole)
+            saved = store.save_decoded_tracks(rid, doc["source"], doc["tracks"], d, keep_empty=whole)
             if saved:
-                print(f"Comms Intel: saved {len(saved)} recording(s) that Whisper analysed.", flush=True)
+                print(f"Comms Intel: saved {len(saved)} decoded recording(s).", flush=True)
         except Exception as e:                              # noqa: BLE001 -- the run itself is already safe
             print(f"Comms Intel: could not save this run: {type(e).__name__}: {e}", flush=True)
         done.set()

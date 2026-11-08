@@ -82,6 +82,7 @@ def listen_track(iq, ans, out_dir, noise_var, rng, whisper_model="base", llm_mod
             m = morse.analyse(info)
             segments = m["segments"]
             out["morse"] = " / ".join(s["text"] for s in segments)
+            out["morse_detail"] = m
             text_kind = "morse"
         elif kind in VOICE_KINDS and use_whisper and out["duration_s"] >= MIN_SPEECH_S:
             from src.intel import voice
@@ -98,7 +99,8 @@ def listen_track(iq, ans, out_dir, noise_var, rng, whisper_model="base", llm_mod
         from src.intel import reason
         kw = {"model": llm_model} if llm_model else {}
         out["reading"] = reason.read_recording(f"track {ans['track']}", segments, kind=text_kind,
-                                               duration=f"{out['duration_s']:.1f} s", **kw)
+                                               duration=f"{out['duration_s']:.1f} s",
+                                               active_min=out.get("morse_detail", {}).get("active_minutes", 0), **kw)
     return out
 
 

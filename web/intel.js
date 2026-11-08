@@ -115,8 +115,8 @@ function draw(root, data) {
       <div class="note">Receiver audio decoded on this machine: Morse by the CW decoder, speech by Whisper, then
         read by a local language model (Ollama). <b>The model's reading is a suggestion.</b> Every quote it gives
         was checked against the decoded text, and anything it could not back up was removed. The decode itself can
-        contain errors (<code>*</code> = unreadable letter). Everything Whisper analyses in Signal Pipeline, live or
-        from a file, is added here by itself.</div>
+        contain errors (<code>*</code> = unreadable letter). Everything Whisper or the Morse decoder analyses in Signal
+        Pipeline, live or from a file, is added here by itself.</div>
       ${rows.length ? `<div class="note" style="margin-top:6px;">${rows.length} recordings · ${totalH.toFixed(1)} h analysed ·
         ${Math.round(sigMin)} min with signal · ${tx} transmissions</div>` : `<div class="note" style="margin-top:6px;">
         Nothing decoded yet in <code>${esc(data.folder)}</code>. ${esc(data.hint || "")}</div>`}

@@ -161,9 +161,9 @@ def main():
     if args.iq and args.listen:                           # real recordings only, not the synthetic demos
         from src.intel import store
         try:
-            saved = store.save_whisper_tracks(out.name, doc["source"], doc["tracks"], out)
+            saved = store.save_decoded_tracks(out.name, doc["source"], doc["tracks"], out)
             if saved:
-                print(f"Comms Intel: saved {len(saved)} recording(s) that Whisper analysed.")
+                print(f"Comms Intel: saved {len(saved)} decoded recording(s).")
         except Exception as e:                            # noqa: BLE001 -- the run itself is already safe
             print(f"Comms Intel: could not save this run: {type(e).__name__}: {e}")
     plot(iq, answers, truth, out / "tracks.png")

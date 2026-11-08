@@ -25,7 +25,7 @@ import {
   analysisIq, correctionIq, listAnalyses, listAudit, listCorrections, logEvent, markReviewed, operatorName,
   readConfig, reviewCorrection,
   saveAnalysis, setOperatorName, submitCorrection, supportsCorrections, usingSupabase, verifyAudit,
-  ROLE_LABEL, createUser, currentAuth, listUsers, loadAuth, signOut, updateUser,
+  ROLE_LABEL, createUser, currentAuth, listUsers, loadAuth, signOut, switchDemoPerson, updateUser,
 } from "./storage.js";
 import { applyFilters, barsHtml, canView, flagsHtml, summarise, summaryHtml as histSummaryHtml, tableHtml } from "./history.js";
 import { buildReport, buildSingle } from "./report.js";
@@ -2327,15 +2327,32 @@ function applyAuth(a) {
   const role = document.createElement("span");
   role.className = "auth-role";
   role.textContent = ROLE_LABEL[a.user.role] || a.user.role;
-  if (!a.demo) {                // with sign-in off there is nobody to show and nothing to log out of
+  if (a.demo) {
+    // No sign-in: one button per role. Reloading after a switch redraws every
+    // role-gated button and name box for the new role.
+    const people = a.people.map(p => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = ROLE_LABEL[p.role] || p.role;
+      b.className = p.username === a.user.username ? "active" : "";
+      b.title = p.username === a.user.username ? "You are acting as this role" : `Act as ${b.textContent}`;
+      b.addEventListener("click", async () => {
+        if (p.username === a.user.username) return;
+        try { await switchDemoPerson(p.username); location.reload(); }
+        catch (e) { statusEl.textContent = `Could not switch person: ${e.message}`; }
+      });
+      return b;
+    });
+    authChip.replaceChildren("Acting as:", ...people);
+  } else {
     const out = document.createElement("button");
     out.type = "button";
     out.textContent = "Log out";
     out.addEventListener("click", logOut);
     authChip.replaceChildren("Signed in as ", who, role, out);
-    authChip.hidden = false;
   }
-  // Accounts only exist with sign-in on.
+  authChip.hidden = false;
+  // Accounts only exist with sign-in on; the demo people are not accounts.
   document.querySelector('nav button[data-page="users"]').hidden = a.demo || a.user.role !== "analyst";
   // Every prompt and message that names "you" reads operatorName(): make it
   // the signed-in account, not whatever name this browser last typed.
@@ -2343,7 +2360,8 @@ function applyAuth(a) {
   for (const input of [operatorInput, corrOperator, rtOperator]) {
     input.value = a.user.username;
     input.readOnly = true;
-    input.title = a.demo ? `Working as ${a.user.username}.` : `Signed in as ${a.user.username}. Log out to change.`;
+    input.title = a.demo ? `Acting as ${a.user.username}. Use the buttons at the top to change.`
+                         : `Signed in as ${a.user.username}. Log out to change.`;
   }
 }
 
