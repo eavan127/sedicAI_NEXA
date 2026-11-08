@@ -16,3 +16,5 @@ gradio        # scripts/inference_ui.py
 onnx          # scripts/export_onnx.py and the Model page's retraining (scripts/retrain_from_feedback.py)
 onnxruntime   # verifies every exported model against PyTorch
 onnxscript    # torch's ONNX exporter needs it
+websockets>=13   # scripts/live_sdrconnect.py: SDRconnect WebSocket API (live demo)
+openai-whisper   # voice transcription (src/intel/voice.py); models cached in ~/.cache/whisper

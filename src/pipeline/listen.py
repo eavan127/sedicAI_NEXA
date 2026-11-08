@@ -42,7 +42,7 @@ def wanted(ans):
 
 
 def listen_track(iq, ans, out_dir, noise_var, rng, whisper_model="base", llm_model=None,
-                 use_whisper=True, use_llm=True):
+                 use_whisper=True, use_llm=True, language=None):
     t0 = int(ans["t_start_ms"] * FS / 1e3)
     t1 = int(ans["t_end_ms"] * FS / 1e3)
     f_lo, f_hi = ans["f_lo_khz"] * 1e3, ans["f_hi_khz"] * 1e3
@@ -85,7 +85,7 @@ def listen_track(iq, ans, out_dir, noise_var, rng, whisper_model="base", llm_mod
             text_kind = "morse"
         elif kind in VOICE_KINDS and use_whisper and out["duration_s"] >= MIN_SPEECH_S:
             from src.intel import voice
-            tr = voice.transcribe(info, model=whisper_model, max_minutes=1.0)
+            tr = voice.transcribe(info, model=whisper_model, max_minutes=1.0, language=language)
             out["transcript"] = tr.get("text", "")
             out["language"] = tr.get("language")
             segments = [{"start_s": s["clip_start_s"], "text": s["text"]} for s in tr.get("segments", [])]

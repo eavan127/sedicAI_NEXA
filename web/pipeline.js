@@ -15,7 +15,7 @@ const KIND_TEXT = {
 const BAND_COL = { high: "#2E7D32", medium: "#B7791F", uncertain: "#9B2C2C" };
 const CONF = c => c >= 0.6 ? "#2E7D32" : c >= 0.3 ? "#B7791F" : "#9B2C2C";
 
-let state = { open: null, timer: null };
+let state = { open: null, timer: null, follow: false, liveTimer: null };
 
 function chip(text, color) {
   return `<span class="chip" style="background:${color}1f;color:${color};">${esc(text)}</span>`;
@@ -68,9 +68,21 @@ export async function renderPipeline(root, { server }) {
     </div>
     <div class="block" id="pipeRunBox" hidden></div>
     <div class="block">
+      <div class="block-label">Live (SDRconnect)</div>
+      <div class="note">Start the bridge on the analysis laptop: <code>python scripts/live_sdrconnect.py --host &lt;SDRconnect laptop&gt;</code>
+        (or <code>--replay file.wav</code>). Every few seconds it analyses the latest snapshot of what SDRconnect receives;
+        with this ticked, the page opens each new snapshot by itself. Everything stays on the local network.</div>
+      <label class="note" style="margin:6px 0 0;"><input type="checkbox" id="pipeFollow"> Follow live snapshots</label>
+      <span class="note" id="pipeLiveMsg" style="margin-left:8px;"></span>
+    </div>
+    <div class="block">
       <div class="block-label">Recent runs</div>
       <div class="table-wrap" id="pipeRuns"></div>
     </div>`;
+  const follow = root.querySelector("#pipeFollow");
+  follow.checked = state.follow || false;
+  follow.addEventListener("change", () => { state.follow = follow.checked; if (follow.checked) followLive(root); });
+  if (state.follow) followLive(root);
   const msg = root.querySelector("#pipeMsg");
   const start = async (demo) => {
     const p = new URLSearchParams({
@@ -108,6 +120,27 @@ export async function renderPipeline(root, { server }) {
   await listRuns(root, info.runs);
   if (state.open) openRun(root, state.open);
   else if (info.runs[0]) openRun(root, info.runs[0].id);
+}
+
+// Poll for live-bridge snapshots (scripts/live_sdrconnect.py) and show the newest finished one.
+async function followLive(root) {
+  clearTimeout(state.liveTimer);
+  if (!state.follow || !root.isConnected) return;
+  const msg = root.querySelector("#pipeLiveMsg");
+  try {
+    const runs = (await (await fetch("/api/pipeline", { credentials: "same-origin" })).json()).runs;
+    const live = runs.filter(r => r.live && r.status === "done");
+    if (!live.length) {
+      if (msg) msg.textContent = "waiting for the first snapshot…";
+    } else {
+      const newest = live[0];
+      if (msg) msg.textContent = `newest snapshot ${newest.id}`;
+      if (state.open !== newest.id) { await openRun(root, newest.id); await listRuns(root, runs); }
+    }
+  } catch (e) {
+    if (msg) msg.textContent = `cannot reach the server: ${e.message}`;
+  }
+  state.liveTimer = setTimeout(() => followLive(root), 2000);
 }
 
 async function listRuns(root, runs) {

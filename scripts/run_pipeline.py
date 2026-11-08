@@ -108,6 +108,10 @@ def main():
     p.add_argument("--no-whisper", action="store_true")
     p.add_argument("--no-llm", action="store_true")
     p.add_argument("--llm-model", default=None, help="Ollama model for the reading (default llama3.2:3b)")
+    p.add_argument("--whisper-model", default="base",
+                   help="Whisper size: base (fast), small (Malay/Chinese much better), medium (~5 GB RAM, slow on CPU)")
+    p.add_argument("--language", default=None,
+                   help="speech language for Whisper, e.g. en, ms, zh (default: Whisper guesses; it often guesses Malay wrong)")
     p.add_argument("--dtype", default="float32", help="sample type of a raw --iq file (float32, int16, int8)")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--classes", nargs="+", default=None, help="synthetic: only these classes")
@@ -149,7 +153,8 @@ def main():
         for old in out.glob("track_*.wav"):              # audio of an earlier run in this folder
             old.unlink()
         listen.listen_all(iq, answers, out, rng=rng, use_whisper=not args.no_whisper,
-                          use_llm=not args.no_llm, llm_model=args.llm_model)
+                          use_llm=not args.no_llm, llm_model=args.llm_model,
+                          whisper_model=args.whisper_model, language=args.language)
     doc = finite({"n_samples": len(iq), "duration_ms": len(iq) / FS * 1e3,
                   "source": source, "tracks": answers, "truth": truth})
     (out / "tracks.json").write_text(json.dumps(doc, indent=1, default=float, allow_nan=False))
