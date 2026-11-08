@@ -46,11 +46,25 @@ SRC = REPO_ROOT / "results" / "comms_intel"
 OUT = Path.home() / "Downloads" / "military_radio_IQ" / "morse"
 TOKEN = re.compile(r"<[A-Z]{2}>|.")
 README_NOTE = """
-morse/    {n} items: real decoded CW traffic from the Indonesia CW archive (results/comms_intel),
-          re-keyed in simulation at each transmission's own speed. iq/<id>_CW.wav, audio/<id>.wav
-          (700 Hz beep), manifest.csv with the source recording, time, WPM and text.
-          Made by scripts/make_morse_dataset.py. Say "real Morse traffic, re-transmitted in simulation".
+morse/    {n} items: cw_001..: real decoded CW traffic from the Indonesia CW archive (results/comms_intel),
+          re-keyed in simulation at each transmission's own speed. cw_sim_001..: {n_sim} SIMULATED
+          plain-language messages (fictional call signs) the audience can read. iq/<id>_CW.wav,
+          audio/<id>.wav (700 Hz beep), manifest.csv with source, WPM and text.
+          Made by scripts/make_morse_dataset.py. Say "real Morse traffic, re-transmitted in simulation"
+          for cw_001.., "simulated message" for cw_sim_...
 """
+# Plain-language messages for the audience (fictional call signs, standard
+# procedure: DE = "this is", K = over, AR = end of message).
+SIM_LINES = [
+    "ALPHA ONE DE BRAVO TWO CONVOY MOVING NORTH GRID 3456 K",
+    "BRAVO TWO DE ALPHA ONE ROGER CONTINUE TO OBSERVE K",
+    "HOTEL SIX DE KILO THREE AT RALLY POINT ALL PRESENT K",
+    "KILO THREE DE HOTEL SIX REQUEST WATER AND BATTERIES K",
+    "SIERRA BASE DE ECHO FIVE TWO BOATS NEAR PIER 7 K",
+    "ECHO FIVE DE SIERRA BASE WILCO REPORT IN 30 MIN AR",
+    "ALL STATIONS DE SIERRA BASE WEATHER BAD HOLD POSITION AR",
+]
+SIM_WPM = 18.0
 
 
 def clean_words(text):
@@ -157,6 +171,7 @@ def main():
     p.add_argument("--per-recording", type=int, default=4)
     p.add_argument("--max-s", type=float, default=12.0, help="excerpt length at most (s)")
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--no-sim", action="store_true", help="archive clips only, no simulated plain-language ones")
     args = p.parse_args()
     rng = np.random.default_rng(args.seed)
     out = Path(args.out)
@@ -165,9 +180,15 @@ def main():
     rows = candidates(Path(args.src), args.max_s, args.per_recording)[:args.n]
     if not rows:
         sys.exit(f"no usable transmissions in {args.src}")
+    n_real = len(rows)
+    if not args.no_sim:                      # after the archive clips: their random draws stay the same
+        for line in SIM_LINES:
+            rows.append({"source_recording": "simulated (plain language)", "recorded_at": None,
+                         "source_start_s": None, "source_end_s": None, "wpm": SIM_WPM, "tone_hz_original": None,
+                         "snr_db_original": None, "text": line, "_words": clean_words(line)})
     for i, r in enumerate(rows, 1):
         words = r.pop("_words")
-        rid = f"cw_{i:03d}"
+        rid = f"cw_{i:03d}" if i <= n_real else f"cw_sim_{i - n_real:03d}"
         gate_a = key_gate(words, r["wpm"], AUDIO_FS, np.random.default_rng(args.seed * 1000 + i))
         lead_a = np.zeros(int(0.3 * AUDIO_FS))
         beep = np.concatenate([lead_a, gate_a, lead_a])
@@ -188,7 +209,8 @@ def main():
         r.update({"id": rid, "iq_file": f"iq/{name}", "modulation": "CW", "offset_khz": offset / 1e3,
                   "snr_db_3khz": snr, "fs": FS_OUT, "tx_start_s": 0.3, "tx_end_s": round((lead + len(w)) / FS_OUT, 3),
                   "duration_s": round(n / FS_OUT, 3),
-                  "note": "real decoded CW traffic, re-keyed in simulation"})
+                  "note": ("real decoded CW traffic, re-keyed in simulation" if i <= n_real
+                           else "simulated plain-language message (fictional call signs)")})
         print(f"{rid}  {r['wpm']:4.1f} wpm  {offset / 1e3:+6.1f} kHz {snr:4.1f} dB  {r['duration_s']:5.1f} s  {r['text'][:60]}")
     keys = ["id", "iq_file", "modulation", "text", "wpm", "offset_khz", "snr_db_3khz", "fs", "tx_start_s", "tx_end_s",
             "duration_s", "source_recording", "recorded_at", "source_start_s", "source_end_s", "tone_hz_original",
@@ -198,8 +220,10 @@ def main():
         w.writeheader()
         w.writerows(rows)
     readme = out.parent / "README.txt"
-    if readme.exists() and "morse/" not in readme.read_text(encoding="utf-8"):
-        readme.write_text(readme.read_text(encoding="utf-8").rstrip() + "\n" + README_NOTE.format(n=len(rows)),
+    if readme.exists():
+        text = readme.read_text(encoding="utf-8")
+        text = text.split("\nmorse/")[0].rstrip()          # replace an older morse paragraph
+        readme.write_text(text + "\n" + README_NOTE.format(n=len(rows), n_sim=len(rows) - n_real),
                           encoding="utf-8")
     size = sum(f.stat().st_size for f in out.rglob("*") if f.is_file()) / 1e6
     print(f"{len(rows)} Morse clips from {len({r['source_recording'] for r in rows})} recordings, {size:.0f} MB in {out}")

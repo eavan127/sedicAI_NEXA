@@ -10,6 +10,8 @@ scripts can read -- nothing is sent anywhere else.
     python scripts/serve_local.py --port 8200 --no-browser
     python scripts/serve_local.py --sign-in       # real accounts: login page, passwords, Users page
     python scripts/serve_local.py --lan           # other machines on this network (sign-in forced on)
+    python scripts/serve_local.py --lan --allow 172.22.80.3   # only that teammate's laptop: no sign-in
+    python scripts/serve_local.py --lan --no-sign-in          # whole network, no sign-in (own hotspot only)
 
 Standard library only, so it runs on any machine with Python and no install.
 
@@ -946,6 +948,9 @@ def main():
     p.add_argument("--allow", nargs="+", metavar="IP", default=[],
                    help="with --lan: only these machines (and this one) may connect, and then no sign-in is "
                         "needed, e.g. --lan --allow 172.22.80.3 (a teammate's laptop)")
+    p.add_argument("--no-sign-in", action="store_true",
+                   help="never show the login page, also with --lan. Without --allow, ANYONE on the same "
+                        "network can then use the system as the analyst: use it only on your own hotspot")
     p.add_argument("--no-browser", action="store_true")
     p.add_argument("--sign-in", action="store_true",
                    help="require real accounts (login page, passwords, Users page). Without it, "
@@ -985,7 +990,12 @@ def main():
     # Without sign-in anyone who can reach the server could act as the analyst,
     # so on the network (--lan) sign-in is on -- unless --allow names the only
     # machines that may connect at all.
-    demo = not a.sign_in and (not a.lan or bool(a.allow))
+    if a.no_sign_in and a.sign_in:
+        raise SystemExit("--no-sign-in and --sign-in contradict each other: pick one.")
+    demo = a.no_sign_in or (not a.sign_in and (not a.lan or bool(a.allow)))
+    if a.no_sign_in and a.lan and not a.allow:
+        print("WARNING: --lan --no-sign-in: anyone on this network can use the system as the analyst. "
+              "Safer: --allow <teammate IP>.")
     server = make_server(a.db, host, port, a.lan, retrain_args, demo=demo,
                          keep_bytes=int(a.keep_gb * 1024 ** 3), intel_dir=a.intel_dir, allow_ips=a.allow)
     url = f"http://localhost:{port}/index.html"          # with sign-in on, redirects to the login page first

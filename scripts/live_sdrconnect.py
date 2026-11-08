@@ -52,6 +52,7 @@ from src.pipeline import analog, demod  # noqa: E402
 
 JOBS = REPO_ROOT / "results" / "pipeline" / "jobs"
 MSG_IQ_PRIMARY, MSG_IQ_SECONDARY = 2, 5
+REPLAY_ONCE = [False]                     # --replay-once: play the file once, like SDRconnect without loop
 COMMON_RATES = [48e3, 62.5e3, 96e3, 125e3, 192e3, 250e3, 500e3, 1e6, 1.536e6, 2e6, 2.048e6, 2.4e6, 3e6, 3.2e6,
                 4e6, 5e6, 6e6, 8e6, 10e6]
 ZOOM_FS = analog.FA                       # 50 kS/s, what the zoom rules and the demodulator expect
@@ -149,6 +150,7 @@ def sdrconnect_receiver(buf, url, device="primary"):
 
 
 def replay_receiver(buf, path, speed=1.0, loop=True):
+    loop = loop and not REPLAY_ONCE[0]
     """An IQ WAV played into the buffer at its own pace, as SDRconnect would."""
     with wave.open(str(path), "rb") as w:
         fs, ch, width = w.getframerate(), w.getnchannels(), w.getsampwidth()
@@ -364,6 +366,7 @@ def main():
     src = p.add_mutually_exclusive_group()
     src.add_argument("--host", default="127.0.0.1", help="laptop running SDRconnect (default: this one)")
     src.add_argument("--replay", help="IQ WAV to play as if live (no SDRconnect needed)")
+    p.add_argument("--replay-once", action="store_true", help="with --replay: play the file once, then stop sending")
     p.add_argument("--port", type=int, default=5454)
     p.add_argument("--device", choices=["primary", "secondary"], default="primary", help="RSPduo tuner")
     p.add_argument("--fs", type=float, default=None, help="IQ stream sample rate (default: measured)")
@@ -371,6 +374,8 @@ def main():
     p.add_argument("--snapshot-s", type=float, default=None, help="seconds per snapshot (voice 4, full 0.5)")
     p.add_argument("--every-s", type=float, default=0.0, help="minimum time between snapshots")
     p.add_argument("--cycles", type=int, default=0, help="stop after this many snapshots (0 = run until Ctrl+C)")
+    p.add_argument("--exit-when-idle", type=float, default=0, metavar="S",
+                   help="stop when SDRconnect has sent no IQ for S seconds (default: wait for play again)")
     p.add_argument("--whisper-model", default="small", help="base (fast) / small / medium (~5 GB RAM)")
     p.add_argument("--language", default=None, help="en / ms / zh (default: Whisper guesses)")
     p.add_argument("--no-whisper", action="store_true")
@@ -380,7 +385,8 @@ def main():
     p.add_argument("--detector", default=str(REPO_ROOT / "results" / "detector" / "emitter_detector.pt"))
     p.add_argument("--keep", type=int, default=40, help="live runs kept in results/pipeline/jobs (oldest deleted)")
     args = p.parse_args()
-    snap_s = args.snapshot_s or (4.0 if args.mode == "voice" else 0.5)
+    snap_s = args.snapshot_s or (6.0 if args.mode == "voice" else 0.5)
+    REPLAY_ONCE[0] = args.replay_once
 
     buf = IqBuffer(keep_s=max(10.0, 2 * snap_s))
     if args.replay:
@@ -412,15 +418,40 @@ def main():
     rng = np.random.default_rng(0)
     JOBS.mkdir(parents=True, exist_ok=True)
     cycle = 0
+    seen = 0                                     # buf.total at the last snapshot
     while not args.cycles or cycle < args.cycles:
         t_cycle = time.monotonic()
         n = int(snap_s * fs)
-        iq = buf.last(n)
-        while iq is None:
+        # Only NEW samples: once SDRconnect stops sending (playback paused or
+        # ended), the buffer still holds the last seconds -- analysing those
+        # again and again would look like endless loading.
+        idle_since, said_idle = None, False
+        while buf.total - seen < n:
             if buf.error:
                 sys.exit(f"stream stopped: {buf.error}")
-            time.sleep(0.1)
-            iq = buf.last(n)
+            before = buf.total
+            time.sleep(0.2)
+            if buf.total == before:
+                idle_since = idle_since or time.monotonic()
+                idle = time.monotonic() - idle_since
+                fresh = buf.total - seen
+                if idle > 1.5 and fresh >= int(1.0 * fs):
+                    n = fresh                        # the transmission ended: analyse what came, do not wait for more
+                    break
+                if idle > 3 and not said_idle:
+                    print("No new IQ from SDRconnect (playback paused or ended?): waiting. "
+                          "Press play again to continue, Ctrl+C to stop.", flush=True)
+                    said_idle = True
+                if args.exit_when_idle and idle > args.exit_when_idle:
+                    print(f"No new IQ for {args.exit_when_idle:.0f} s: stopping.", flush=True)
+                    return
+            else:
+                idle_since = None
+                if said_idle:
+                    print("IQ is flowing again.", flush=True)
+                    said_idle = False
+        iq = buf.last(n)
+        seen = buf.total
         rid = datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(2)
         d = JOBS / rid
         d.mkdir(parents=True)

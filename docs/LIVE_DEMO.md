@@ -9,7 +9,7 @@ Laptop 1 (audience screen)                 Laptop 2 (analysis)
 SDRconnect 1.0.6+                          scripts/live_sdrconnect.py --host <laptop 1>
   RSPduo live, or an IQ file playing   →     every few s: snapshot → find channels →
   waterfall + loudspeaker                    AM/NBFM/SSB/CW → audio → Whisper (→ Ollama)
-  WebSocket API on :5454                   scripts/serve_local.py --lan  (dashboard on :8099)
+  WebSocket API on :5454                   scripts/serve_local.py --lan --allow <laptop 1>  (:8099)
 ```
 
 All commands: Windows PowerShell, in the repository folder.
@@ -93,8 +93,8 @@ Then go to Signal Pipeline and tick **Follow live snapshots**.
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
-# terminal 1: dashboard for the whole network (sign-in is forced on with --lan)
-python scripts/serve_local.py --lan
+# terminal 1: dashboard, open to laptop 1 only, no sign-in
+python scripts/serve_local.py --lan --allow 192.168.137.5
 # terminal 2: the bridge, pointed at laptop 1
 python scripts/live_sdrconnect.py --host 192.168.137.5 --whisper-model medium
 #   only one language on air:  --language ms   (or en / zh)
@@ -102,12 +102,17 @@ python scripts/live_sdrconnect.py --host 192.168.137.5 --whisper-model medium
 #   faster, less accurate:     --whisper-model small   or   --snapshot-s 2
 ```
 
-- **First time with `--lan`:** open `http://localhost:8099` on laptop 2 itself. It asks you to
-  create the first analyst account. Add the teammate on the **Users** page.
+- **No sign-in:** `--allow` lists the only other machines that may open the dashboard (several are
+  fine: `--allow 192.168.137.5 192.168.137.9`). Everyone else on the network is refused.
+  Plain `--lan` (no `--allow`) still asks for sign-in, because then anyone on the Wi-Fi could connect.
+  `--lan --no-sign-in` removes it for everyone: only on your own hotspot.
 - **Firewall:** if Windows asks about Python, allow **Private networks**, so laptop 1 can reach port 8099.
-- **On laptop 1 (or any laptop on the hotspot):** open `http://<laptop 2 IPv4>:8099` in a browser,
-  sign in, go to Signal Pipeline and tick **Follow live snapshots**. Laptop 1 can then switch between
-  SDRconnect and the results without a split screen.
+- **On laptop 1:** open `http://<laptop 2 IPv4>:8099` in a browser (no sign-in), go to Signal Pipeline
+  and tick **Follow live snapshots**. Laptop 1 can then switch between SDRconnect and the results
+  without a split screen.
+- **A teammate running NEXA on their own laptop** (`python scripts/serve_local.py`) gets no sign-in
+  page either, *if* their copy is up to date: `git checkout eavan-accuracy-plan` and `git pull`.
+  A login page there means an old branch or download (from before 2 Oct).
 
 ## What to expect (measured 2026-11-08, Eavan's laptop: 7.3 GB RAM, CPU only)
 
