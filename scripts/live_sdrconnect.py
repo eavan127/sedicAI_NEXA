@@ -249,7 +249,9 @@ def autotune_loop(buf, fs, device="primary", look_s=4.0, restart_after_s=2.0, on
     """Each time the stream starts (or restarts after a pause, e.g. a new file
     or play pressed again), look at its first look_s seconds and tune
     SDRconnect onto the strongest signal. Runs in a thread."""
-    start_total, last_total, last_change = buf.total, buf.total, time.monotonic()
+    # From the start of the stream: a short transmission may be over by the
+    # time this thread starts (the rate is measured first).
+    start_total, last_total, last_change = 0, buf.total, time.monotonic()
     tuned = False
     while not buf.error or (not tuned and buf.total - start_total >= int(0.5 * fs)):
         if buf.error and not tuned:
@@ -260,10 +262,12 @@ def autotune_loop(buf, fs, device="primary", look_s=4.0, restart_after_s=2.0, on
             if now - last_change > restart_after_s:          # data again after a pause: a new start
                 start_total, tuned = last_total, False
             last_total, last_change = buf.total, now
-        if tuned or buf.total - start_total < look_s * fs:
+        got = buf.total - start_total
+        short_and_over = now - last_change > 1.0 and got >= int(0.5 * fs)   # a transmission shorter than look_s ended
+        if tuned or (got < look_s * fs and not short_and_over):
             continue
         tuned = True
-        plan = tune_plan(buf.last(int(look_s * fs)), fs)
+        plan = tune_plan(buf.last(int(min(look_s * fs, got))), fs)
         if plan is None:
             print("Auto-tune: no clear signal in the first seconds, VFO left where it is.", flush=True)
         else:
@@ -693,6 +697,8 @@ def main():
         deadline = time.monotonic() + 30
         while not getattr(buf, "tuned_once", False) and not buf.error and time.monotonic() < deadline:
             time.sleep(0.2)
+        if not getattr(buf, "tuned_once", False):
+            print("Auto-tune: no signal to tune to (is SDRconnect playing?).", flush=True)
         time.sleep(0.5)                                       # let the commands leave before the connection closes
         return
     if args.autotune:
