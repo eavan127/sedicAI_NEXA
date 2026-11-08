@@ -55,9 +55,25 @@ FS_OUT = 250e3
 MAX_S = 10.0
 
 DL = Path.home() / "Downloads"
-CV_EN = DL / "1784486741842-cv26-malaysian-english"
-CV_MS = DL / "1789491044876-cv-corpus-27.0-2026-09-11-ms" / "cv-corpus-27.0-2026-09-11" / "ms"
-SPS_MS = DL / "1789489305782-sps-corpus-5.0-2026-09-11-ms-MY" / "sps-corpus-5.0-2026-09-11-ms-MY"
+
+
+def corpus_dirs(root):
+    """The three Common Voice downloads under root (the extracted folders,
+    found by name so a different download number still works)."""
+    root = Path(root)
+
+    def one(pattern, inner):
+        hits = sorted(p for p in root.glob(pattern) if p.is_dir())       # not the .tar.gz next to it
+        if not hits:
+            sys.exit(f"{root}: no folder matching {pattern} (extract the Common Voice download there, or pass --corpora)")
+        d = hits[-1] / inner
+        return d if d.exists() else hits[-1]
+    return (one("*cv26-malaysian-english*", ""),
+            one("*cv-corpus-27.0-*-ms", "cv-corpus-27.0-2026-09-11/ms"),
+            one("*sps-corpus-5.0-*-ms-MY", "sps-corpus-5.0-2026-09-11-ms-MY"))
+
+
+CV_EN = CV_MS = SPS_MS = None             # set in main() from --corpora
 
 # Hand-checked: keyword hits that are really military (not "mission station", "Hot FM" ...).
 EN_CLIPS = ["common_voice_en_17665991.mp3", "common_voice_en_18978257.mp3", "common_voice_en_18998747.mp3",
@@ -285,8 +301,11 @@ def sources(tmp):
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--corpora", default=str(DL), help="folder holding the 3 extracted Common Voice downloads")
     p.add_argument("--out", default=str(REPO_ROOT / "data" / "local" / "military_voice_v1"))
     args = p.parse_args()
+    global CV_EN, CV_MS, SPS_MS
+    CV_EN, CV_MS, SPS_MS = corpus_dirs(args.corpora)
     rng = np.random.default_rng(args.seed)
     out = Path(args.out)
     rows = []
