@@ -184,6 +184,7 @@ def sdrconnect_receiver(buf, url, device="primary"):
     from websockets.sync.client import connect
     try:
         with connect(url, max_size=None, open_timeout=15) as ws:
+            buf.ws = ws                                   # the auto-tuner sends its commands on this connection
             buf.info["connected"] = "yes"
             for prop in ("api_version", "device_sample_rate", "device_center_frequency", "device_vfo_frequency",
                          "active_device", "demodulator"):
@@ -201,8 +202,94 @@ def sdrconnect_receiver(buf, url, device="primary"):
                         continue
                     if j.get("event_type") in ("get_property_response", "property_changed") and j.get("property"):
                         buf.info[j["property"]] = j.get("value")
+        buf.error = buf.error or "SDRconnect closed the connection"
     except Exception as e:                                 # noqa: BLE001 -- shown by the main loop
         buf.error = f"{type(e).__name__}: {e}"
+
+
+# ---------- auto-tune: put SDRconnect's VFO (the red line) on the signal ----------
+
+# analog kind -> (SDRconnect demodulator, filter bandwidth Hz). API 1.0.3:
+# demodulator AM/USB/LSB/CW/SAM/NFM/WFM, filter_bandwidth Uint32 Hz.
+CW_MAX_HZ = 1200.0                        # wider than this is not Morse
+SDR_MODE = {"NBFM": ("NFM", 12500), "WBFM": ("WFM", 150000), "AM": ("AM", 8000), "AM_SC": ("AM", 8000),
+            "USB": ("USB", 2700), "LSB": ("LSB", 2700), "CW": ("CW", 500), "CARRIER": ("AM", 8000)}
+
+
+def tune_plan(iq, fs):
+    """Strongest transmission in iq -> {kind, mode, bandwidth, offset_hz,
+    peak_db}, or None. offset_hz is where the VFO belongs relative to the
+    stream's centre: the carrier for AM/FM/CW, the suppressed carrier just
+    below (USB) or above (LSB) the voice band for SSB."""
+    ch = find_channels(iq, fs)
+    if not ch:
+        return None
+    lo, hi, peak = ch[0]
+    kind, _, why = analog.classify(zoom_to(iq, fs, (lo + hi) / 2), ZOOM_FS)
+    if kind == "UNKNOWN":
+        return None
+    if kind in ("CW", "CARRIER") and hi - lo > CW_MAX_HZ:
+        # Morse is a few hundred Hz wide; a "keyed line" this wide is SSB
+        # voice whose tones (a roger beep, a held vowel) look like one.
+        kind, why = "USB", f"{(hi - lo) / 1e3:.1f} kHz wide with tone-like parts: single-sideband voice"
+    mode, bw = SDR_MODE.get(kind, ("AM", 8000))
+    off = lo - 300.0 if kind == "USB" else hi + 300.0 if kind == "LSB" else (lo + hi) / 2
+    return {"kind": kind, "mode": mode, "bandwidth": bw, "offset_hz": float(off), "peak_db": peak, "why": why}
+
+
+def tune_commands(plan, centre_hz, device="primary"):
+    """The set_property messages that tune SDRconnect to the plan."""
+    vfo = int(round(centre_hz + plan["offset_hz"]))
+    return vfo, [command("set_property", plan["mode"], "demodulator", device),
+                 command("set_property", plan["bandwidth"], "filter_bandwidth", device),
+                 command("set_property", vfo, "device_vfo_frequency", device)]
+
+
+def autotune_loop(buf, fs, device="primary", look_s=4.0, restart_after_s=2.0, once=False):
+    """Each time the stream starts (or restarts after a pause, e.g. a new file
+    or play pressed again), look at its first look_s seconds and tune
+    SDRconnect onto the strongest signal. Runs in a thread."""
+    start_total, last_total, last_change = buf.total, buf.total, time.monotonic()
+    tuned = False
+    while not buf.error or (not tuned and buf.total - start_total >= int(0.5 * fs)):
+        if buf.error and not tuned:
+            look_s = min(look_s, (buf.total - start_total) / fs)   # stream over: tune on what came
+        time.sleep(0.25)
+        now = time.monotonic()
+        if buf.total != last_total:
+            if now - last_change > restart_after_s:          # data again after a pause: a new start
+                start_total, tuned = last_total, False
+            last_total, last_change = buf.total, now
+        if tuned or buf.total - start_total < look_s * fs:
+            continue
+        tuned = True
+        plan = tune_plan(buf.last(int(look_s * fs)), fs)
+        if plan is None:
+            print("Auto-tune: no clear signal in the first seconds, VFO left where it is.", flush=True)
+        else:
+            centre, src = centre_of(buf, fs)
+            if not centre or centre <= 0:
+                # A played-back IQ file without a stored centre frequency is
+                # shown by SDRconnect as 0 .. fs, centred on fs / 2.
+                centre = fs / 2
+            if True:
+                vfo, cmds = tune_commands(plan, centre, device)
+                ws = getattr(buf, "ws", None)
+                if ws is None:                                 # --replay: nothing to tune, say what it would do
+                    print(f"Auto-tune (replay, not sent): {plan['mode']} {plan['bandwidth'] / 1e3:g} kHz at "
+                          f"{vfo / 1e3:.3f} kHz ({plan['kind']}, {plan['peak_db']:.0f} dB)", flush=True)
+                else:
+                    try:
+                        for c in cmds:
+                            ws.send(c)
+                        print(f"Auto-tune: SDRconnect -> {plan['mode']}, filter {plan['bandwidth'] / 1e3:g} kHz, "
+                              f"VFO {vfo / 1e3:.3f} kHz ({plan['kind']}, {plan['peak_db']:.0f} dB above the noise)",
+                              flush=True)
+                    except Exception as e:                     # noqa: BLE001 -- tuning is a convenience
+                        print(f"Auto-tune: could not send to SDRconnect: {type(e).__name__}: {e}", flush=True)
+        if once:
+            buf.tuned_once = True
+            return
 
 
 def replay_receiver(buf, path, speed=1.0, loop=True):
@@ -557,6 +644,10 @@ def main():
     p.add_argument("--classifier", nargs="+", default=None, help="full mode: best.pt file(s)")
     p.add_argument("--detector", default=str(REPO_ROOT / "results" / "detector" / "emitter_detector.pt"))
     p.add_argument("--keep", type=int, default=40, help="live runs kept in results/pipeline/jobs (oldest deleted)")
+    p.add_argument("--autotune", action="store_true",
+                   help="each time playback starts, tune SDRconnect (VFO, mode, filter) onto the strongest signal")
+    p.add_argument("--tune-only", action="store_true",
+                   help="only tune SDRconnect onto the strongest signal once, then exit (no analysis)")
     args = p.parse_args()
     whole = args.mode == "voice" and not args.snapshot_s      # record until the stream stops, analyse all of it
     snap_s = args.snapshot_s or 0.5
@@ -596,6 +687,16 @@ def main():
     centre, centre_src = centre_of(buf, fs)
     print(f"IQ stream {fs / 1e3:.1f} kS/s ({buf.info.get('active_device', '?')}, API {buf.info.get('api_version', '?')})"
           + (f", centre {centre / 1e6:.4f} MHz ({centre_src})" if centre else ", centre frequency unknown"), flush=True)
+    if args.tune_only:
+        buf.tuned_once = False
+        threading.Thread(target=autotune_loop, args=(buf, fs, args.device), kwargs={"once": True}, daemon=True).start()
+        deadline = time.monotonic() + 30
+        while not getattr(buf, "tuned_once", False) and not buf.error and time.monotonic() < deadline:
+            time.sleep(0.2)
+        time.sleep(0.5)                                       # let the commands leave before the connection closes
+        return
+    if args.autotune:
+        threading.Thread(target=autotune_loop, args=(buf, fs, args.device), daemon=True).start()
 
     chain = None
     if args.mode == "full":
