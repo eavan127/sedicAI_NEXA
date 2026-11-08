@@ -132,12 +132,10 @@ LOGO = ROOT / "assets" / "sedic_logo.png"
 # All a signed-out browser may fetch: the login page and its logo.
 PUBLIC_STATIC = {LOGIN_PAGE, "/brand/logo.png", "/favicon.ico"}
 
-# Default (no --sign-in): no sign-in; the page shows one button per role and whoever was
-# clicked last is "who did it" (a cookie). Each role is its own identity, so the
-# four-eyes rule still holds on stage: the operator submits, the analyst approves.
-DEMO_PEOPLE = {"operator": "operator", "analyst": "analyst"}
-DEMO_DEFAULT = "operator"
-DEMO_COOKIE = "nexa_demo_as"
+# Default (no --sign-in): no sign-in and no choice of person. Everyone who can
+# reach the page works as this one identity, with every function available, so
+# corrections are approved directly. A second person checking them needs --sign-in.
+DEMO_USER = "analyst"
 
 
 def required_role(method: str, parts: list[str]) -> str:
@@ -222,11 +220,9 @@ class Handler(SimpleHTTPRequestHandler):
         return self._cookie_value(SESSION_COOKIE)
 
     def _current_actor(self) -> Actor | None:
-        """The signed-in account, or in --demo the person last picked."""
+        """The signed-in account, or with sign-in off the one local identity."""
         if self.demo:
-            name = self._cookie_value(DEMO_COOKIE)
-            name = name if name in DEMO_PEOPLE else DEMO_DEFAULT
-            return Actor(name, DEMO_PEOPLE[name], self.client_address[0])
+            return Actor(DEMO_USER, TOP_ROLE, self.client_address[0])
         return self.db.session_actor(self._session_token(), self.client_address[0])
 
     @staticmethod
@@ -642,17 +638,8 @@ class Handler(SimpleHTTPRequestHandler):
         if self.demo:
             if method == "GET" and rest == ["me"]:
                 return self._send_json({"auth_enabled": True, "demo": True, "can_setup": False,
-                                        "user": {"username": self.me.name, "role": self.me.role},
-                                        "people": [{"username": n, "role": r} for n, r in DEMO_PEOPLE.items()]})
-            if method == "POST" and rest == ["demo"]:
-                name = str(self._read_json().get("username") or "").lower()
-                if name not in DEMO_PEOPLE:
-                    raise ValueError(f"demo person must be one of {', '.join(DEMO_PEOPLE)}")
-                self.db.log(Actor(name, DEMO_PEOPLE[name], client), "user.demo_switch", "user", name,
-                            {"from": self.me.name})
-                return self._send_json({"user": {"username": name, "role": DEMO_PEOPLE[name]}}, headers={
-                    "Set-Cookie": f"{DEMO_COOKIE}={name}; HttpOnly; SameSite=Strict; Path=/"})
-            return self._error(HTTPStatus.NOT_FOUND, "sign-in is off in --demo; switch person instead")
+                                        "user": {"username": self.me.name, "role": self.me.role}})
+            return self._error(HTTPStatus.NOT_FOUND, "sign-in is off")
         if method == "GET" and rest == ["me"]:
             enabled = self.db.auth_enabled()
             return self._send_json({"auth_enabled": enabled,
@@ -1006,7 +993,7 @@ def main():
     print(f"NEXA local server\n  open      {url}\n  database  {a.db}\n"
           f"  stored    {counts.get('analyses', 0)} analyses, {counts.get('audit_log', 0)} audit entries\n"
           f"  network   {('only this machine + ' + ', '.join(a.allow)) if a.allow else 'LAN (other machines can connect)' if a.lan else 'this machine only'}\n"
-          + ("  sign-in   OFF: switch person with the buttons at the top of the page (--sign-in for accounts)\n"
+          + ("  sign-in   OFF: everyone works as the analyst (--sign-in for accounts)\n"
              if demo else "  sign-in   ON (login page; accounts in the database)\n")
           + "Press Ctrl+C to stop.")
     if not demo and not server.nexa_db.auth_enabled():

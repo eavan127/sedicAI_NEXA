@@ -246,7 +246,6 @@ async function authCall(path, body, method = "POST") {
 
 export const signOut = () => authCall("/api/auth/logout", {});
 /** --demo only: act as another of the server's demo people. */
-export const switchDemoPerson = (username) => authCall("/api/auth/demo", { username });
 export const listUsers = () => authCall("/api/users", undefined, "GET");
 export const createUser = (username, password, role) => authCall("/api/users", { username, password, role });
 /** changes: {role?, disabled?, password?} */

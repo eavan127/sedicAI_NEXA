@@ -25,7 +25,7 @@ import {
   analysisIq, correctionIq, listAnalyses, listAudit, listCorrections, logEvent, markReviewed, operatorName,
   readConfig, reviewCorrection,
   saveAnalysis, setOperatorName, submitCorrection, supportsCorrections, usingSupabase, verifyAudit,
-  ROLE_LABEL, createUser, currentAuth, listUsers, loadAuth, signOut, switchDemoPerson, updateUser,
+  ROLE_LABEL, createUser, currentAuth, listUsers, loadAuth, signOut, updateUser,
 } from "./storage.js";
 import { applyFilters, barsHtml, canView, flagsHtml, summarise, summaryHtml as histSummaryHtml, tableHtml } from "./history.js";
 import { buildReport, buildSingle } from "./report.js";
@@ -156,6 +156,7 @@ function paintTriage(t) {
 }
 
 function render() {
+  document.body.classList.add("has-capture");     // before anything reads the canvas width
   const { capture, result, source, caseNote, truth, snrDb, which,
            snrCapped, requestedSnrDb, mode } = session;
   const smoothed = smoothingChoice === "Smoothed";
@@ -234,6 +235,7 @@ function render() {
     tbody.appendChild(tr);
   });
   session.events = events;
+  if (currentPage === "replay") renderSignal();   // Signal Analysis is on the same page
 }
 
 /** Everything a capture needs that does NOT depend on the model or the
@@ -1018,7 +1020,8 @@ printBtn.addEventListener("click", async () => {
   // A real .pdf when the library is reachable; the print dialog (which also
   // produces a PDF, via the print stylesheet) when it is not, so an offline
   // demo still has a way to export.
-  if (!lastRecord) { window.print(); return; }
+  const printPage = () => { showPage("replay"); window.print(); };   // only a visible page prints
+  if (!lastRecord) { printPage(); return; }
   printBtn.disabled = true;
   try {
     await buildSingle(lastRecord, { classes: CLASSES });
@@ -1027,7 +1030,7 @@ printBtn.addEventListener("click", async () => {
     statusEl.textContent += "  Report downloaded.";
   } catch (e) {
     statusEl.textContent = `PDF library unavailable (${e.message}); using the print dialog instead.`;
-    window.print();
+    printPage();
   } finally {
     printBtn.disabled = false;
   }
@@ -1123,7 +1126,7 @@ async function store(file, sess = session) {
 const winSlider = el("winSlider"), winReadout = el("winReadout");
 const probsBox = el("probsBox"), winMetaBox = el("winMetaBox");
 const attnCanvas = el("attnCanvas"), breakdownCanvas = el("breakdownCanvas");
-let currentPage = "replay";
+let currentPage = "pipeline";
 const chatLogPromise = openChatLog();
 let perfData = null, modelCard = null;
 
@@ -1136,15 +1139,14 @@ function showPage(page) {
     sec.hidden = sec.id !== `page-${page}`;
   }
   // Canvases cannot be sized while hidden, so each page draws on entry.
-  if (page === "signal") renderSignal();
+  if (page === "replay") { if (session) render(); else renderSignal(); }
   if (page === "history") return renderHistory();
   if (page === "audit") renderAudit();
   if (page === "performance") renderPerformance();
   if (page === "model") renderModel();
   if (page === "users") renderUsers();
-  if (page === "pipeline") renderPipeline(document.getElementById("pipelineRoot"), { server: readConfig().backend === "server" });
+  if (page === "pipeline") renderPipeline(el("pipelineRoot"), { server: readConfig().backend === "server" });
   if (page === "intel") renderIntel(document.getElementById("intelRoot"), { server: readConfig().backend === "server" });
-  if (page === "replay" && session) render();
 }
 
 for (const btn of document.querySelectorAll("nav button[data-page]")) {
@@ -1153,7 +1155,7 @@ for (const btn of document.querySelectorAll("nav button[data-page]")) {
 
 function renderSignal() {
   if (!session) {
-    probsBox.innerHTML = `<div class="note">Load a capture on RF Replay first.</div>`;
+    probsBox.innerHTML = `<div class="note">Load a capture above first.</div>`;
     winMetaBox.innerHTML = "";
     return;
   }
@@ -1167,7 +1169,7 @@ function renderSignal() {
   registerZoom(attnCanvas, t => drawAttention(t, session, idx));
 }
 
-winSlider.addEventListener("input", () => { if (currentPage === "signal") renderSignal(); });
+winSlider.addEventListener("input", () => { if (currentPage === "replay") renderSignal(); });
 
 // The CURRENT model's results (web/data/current_model.json, written by
 // scripts/export_current_model.py from the run's scorecard), in plain words.
@@ -1584,6 +1586,7 @@ Promise.all([chatLogPromise, ollamaCheck]).then(([chatLog, hasOllama]) => initAs
 // page load instead of on whoever's first question -- see ollama.js:warmUp.
 ollamaCheck.then(has => { if (has) ollamaWarmUp(); });
 
+showPage("pipeline");
 init();
 
 
@@ -2310,32 +2313,15 @@ function applyAuth(a) {
   const role = document.createElement("span");
   role.className = "auth-role";
   role.textContent = ROLE_LABEL[a.user.role] || a.user.role;
-  if (a.demo) {
-    // No sign-in: one button per role. Reloading after a switch redraws every
-    // role-gated button and name box for the new role.
-    const people = a.people.map(p => {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.textContent = ROLE_LABEL[p.role] || p.role;
-      b.className = p.username === a.user.username ? "active" : "";
-      b.title = p.username === a.user.username ? "You are acting as this role" : `Act as ${b.textContent}`;
-      b.addEventListener("click", async () => {
-        if (p.username === a.user.username) return;
-        try { await switchDemoPerson(p.username); location.reload(); }
-        catch (e) { statusEl.textContent = `Could not switch person: ${e.message}`; }
-      });
-      return b;
-    });
-    authChip.replaceChildren("Acting as:", ...people);
-  } else {
+  if (!a.demo) {                // with sign-in off there is nobody to show and nothing to log out of
     const out = document.createElement("button");
     out.type = "button";
     out.textContent = "Log out";
     out.addEventListener("click", logOut);
     authChip.replaceChildren("Signed in as ", who, role, out);
+    authChip.hidden = false;
   }
-  authChip.hidden = false;
-  // Accounts only exist with sign-in on; the demo people are not accounts.
+  // Accounts only exist with sign-in on.
   document.querySelector('nav button[data-page="users"]').hidden = a.demo || a.user.role !== "analyst";
   // Every prompt and message that names "you" reads operatorName(): make it
   // the signed-in account, not whatever name this browser last typed.
@@ -2343,8 +2329,7 @@ function applyAuth(a) {
   for (const input of [operatorInput, corrOperator, rtOperator]) {
     input.value = a.user.username;
     input.readOnly = true;
-    input.title = a.demo ? `Acting as ${a.user.username}. Use the buttons at the top to change.`
-                         : `Signed in as ${a.user.username}. Log out to change.`;
+    input.title = a.demo ? `Working as ${a.user.username}.` : `Signed in as ${a.user.username}. Log out to change.`;
   }
 }
 

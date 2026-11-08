@@ -267,22 +267,17 @@ def test_demo_serves_the_system_without_sign_in(demo_server):
     status, headers = fetch(base, "/login.html")
     assert status == 302 and headers["Location"] == "/index.html"
     me = call(base + "/api/auth/me")[2]
-    assert me["demo"] and me["user"] == {"username": "operator", "role": "operator"}
-    assert {p["role"] for p in me["people"]} == {"operator", "analyst"}
+    assert me["demo"] and me["user"] == {"username": "analyst", "role": "analyst"}
+    assert "people" not in me
     assert call(base + "/api/auth/login", "POST", {"username": "x", "password": "y"})[0] == 404
 
 
-def test_demo_switch_changes_who_did_it_and_keeps_roles_and_four_eyes(demo_server):
+def test_no_sign_in_is_one_identity_with_every_function(demo_server):
     base, db = demo_server
-    status, headers, _ = call(base + "/api/auth/demo", "POST", {"username": "operator"})
-    assert status == 200
-    op_cookie = headers["Set-Cookie"].split(";")[0]
-    assert call(base + "/api/analyses", "POST", record("d1"), cookie=op_cookie, operator="analyst")[0] == 201
-    assert db.get_analysis("d1")["operator"] == "operator"
-    # still an operator: may not approve or retrain
-    assert call(base + "/api/corrections/x/review", "POST", {"decision": "approve"}, cookie=op_cookie)[0] == 403
-    assert call(base + "/api/retrain/start", "POST", {"reason": "because"}, cookie=op_cookie)[0] == 403
-    an_cookie = call(base + "/api/auth/demo", "POST", {"username": "analyst"})[1]["Set-Cookie"].split(";")[0]
-    assert call(base + "/api/auth/me", cookie=an_cookie)[2]["user"]["role"] == "analyst"
-    assert call(base + "/api/auth/demo", "POST", {"username": "mallory"})[0] == 400
-    assert db.audit(limit=5, action_prefix="user.demo_switch")[0]["actor"] == "analyst"
+    assert call(base + "/api/analyses", "POST", record("d1"), operator="someone else")[0] == 201
+    assert db.get_analysis("d1")["operator"] == "analyst"
+    # A role cookie left by the old Operator / Analyst switch changes nothing, and the switch is gone.
+    assert call(base + "/api/auth/me", cookie="nexa_demo_as=operator")[2]["user"]["role"] == "analyst"
+    assert call(base + "/api/auth/demo", "POST", {"username": "operator"})[0] == 404
+    # Analyst-only actions are allowed through (404: no such correction, not 403: refused).
+    assert call(base + "/api/corrections/x/review", "POST", {"decision": "approve"})[0] != 403
