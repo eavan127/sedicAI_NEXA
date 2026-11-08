@@ -126,7 +126,8 @@ def sdrconnect_receiver(buf, url, device="primary"):
     keep filling buf. Runs in a thread."""
     from websockets.sync.client import connect
     try:
-        with connect(url, max_size=None, open_timeout=10) as ws:
+        with connect(url, max_size=None, open_timeout=15) as ws:
+            buf.info["connected"] = "yes"
             for prop in ("api_version", "device_sample_rate", "device_center_frequency", "device_vfo_frequency",
                          "active_device", "demodulator"):
                 ws.send(command("get_property", prop=prop, device=device))
@@ -177,6 +178,11 @@ def settle_rate(buf, given=None, wait_s=2.0):
     to the device rate or a common rate."""
     if given:
         return float(given)
+    deadline = time.monotonic() + 20                 # connecting over Wi-Fi can take seconds
+    while buf.t_first is None and buf.error is None and time.monotonic() < deadline:
+        time.sleep(0.1)
+    if buf.t_first is None:
+        return None
     time.sleep(wait_s)
     r = buf.measured_rate()
     if not r:
@@ -388,8 +394,10 @@ def main():
     print(f"Listening to {label} ...", flush=True)
     fs = settle_rate(buf, args.fs)
     if buf.error or not fs:
-        sys.exit(f"No IQ from {label}: {buf.error or 'nothing received in 2 s'}. "
-                 "In SDRconnect: start the radio (or playback); SDRconnect 1.0.6+ is needed for the WebSocket API.")
+        why = buf.error or ("connected, but no IQ in 20 s: press play / start the radio in SDRconnect"
+                            if buf.info.get("connected") else "no answer in 20 s")
+        sys.exit(f"No IQ from {label}: {why}. Check: Test-NetConnection <host> -Port 5454 is True, and "
+                 "SDRconnect Settings -> WebSocket interface is on.")
     buf.fs = fs
     centre, centre_src = centre_of(buf, fs)
     print(f"IQ stream {fs / 1e3:.1f} kS/s ({buf.info.get('active_device', '?')}, API {buf.info.get('api_version', '?')})"

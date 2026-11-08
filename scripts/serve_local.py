@@ -186,6 +186,13 @@ class Handler(SimpleHTTPRequestHandler):
 
     # -- request gate ----------------------------------------------------------
 
+    allow_ips: frozenset = frozenset()    # --allow: only these machines (and this one) may connect
+
+    def _client_ok(self) -> bool:
+        if not self.allow_ips:
+            return True
+        return self.client_address[0] in LOOPBACK_CLIENTS or self.client_address[0] in self.allow_ips
+
     def _host_ok(self) -> bool:
         if self.lan:
             return True
@@ -271,6 +278,8 @@ class Handler(SimpleHTTPRequestHandler):
         return json.loads(self.rfile.read(n) or b"{}")
 
     def _dispatch(self, method):
+        if not self._client_ok():
+            return self._error(HTTPStatus.FORBIDDEN, "this machine is not on the --allow list")
         if not self._host_ok():
             return self._error(HTTPStatus.FORBIDDEN, "unexpected Host header")
         url = urlparse(self.path)
@@ -914,11 +923,13 @@ def pick_port(host: str, preferred: int, tries: int = 20) -> int:
 
 def make_server(db_path: Path, host: str, port: int, lan: bool = False,
                 retrain_args: list | None = None, demo: bool = False,
-                keep_bytes: int = ROLLING_IQ_BYTES, intel_dir: Path = DEFAULT_INTEL) -> ThreadingHTTPServer:
+                keep_bytes: int = ROLLING_IQ_BYTES, intel_dir: Path = DEFAULT_INTEL,
+                allow_ips=()) -> ThreadingHTTPServer:
     db = LocalDB(db_path)
     iq_dir = Path(db_path).parent / "iq"
     iq_dir.mkdir(parents=True, exist_ok=True)
     handler = type("NexaHandler", (Handler,), {"db": db, "iq_dir": iq_dir, "lan": lan, "demo": demo, "keep_bytes": keep_bytes,
+                                                "allow_ips": frozenset(allow_ips),
                                                 "retrain_args": list(retrain_args or []),
                                                 "intel_dir": Path(intel_dir)})
     server = ThreadingHTTPServer((host, port), partial(handler, directory=str(WEB)))
@@ -932,6 +943,9 @@ def main():
     p.add_argument("--db", type=Path, default=DEFAULT_DB)
     p.add_argument("--lan", action="store_true",
                    help="listen on all interfaces so other machines on this network can connect")
+    p.add_argument("--allow", nargs="+", metavar="IP", default=[],
+                   help="with --lan: only these machines (and this one) may connect, and then no sign-in is "
+                        "needed, e.g. --lan --allow 172.22.80.3 (a teammate's laptop)")
     p.add_argument("--no-browser", action="store_true")
     p.add_argument("--sign-in", action="store_true",
                    help="require real accounts (login page, passwords, Users page). Without it, "
@@ -960,16 +974,25 @@ def main():
     if a.demo and a.lan:
         raise SystemExit("--demo turns sign-in off, so anyone who can reach the server could act as "
                          "the analyst. It is refused together with --lan.")
+    if a.allow and not a.lan:
+        raise SystemExit("--allow only means something with --lan (without it, only this machine can connect).")
+    import ipaddress
+    for ip in a.allow:
+        try:
+            ipaddress.ip_address(ip)
+        except ValueError:
+            raise SystemExit(f"--allow {ip}: not an IP address (use the number from ipconfig, e.g. 172.22.80.3)")
     # Without sign-in anyone who can reach the server could act as the analyst,
-    # so on the network (--lan) sign-in is always on.
-    demo = not (a.sign_in or a.lan)
+    # so on the network (--lan) sign-in is on -- unless --allow names the only
+    # machines that may connect at all.
+    demo = not a.sign_in and (not a.lan or bool(a.allow))
     server = make_server(a.db, host, port, a.lan, retrain_args, demo=demo,
-                         keep_bytes=int(a.keep_gb * 1024 ** 3), intel_dir=a.intel_dir)
+                         keep_bytes=int(a.keep_gb * 1024 ** 3), intel_dir=a.intel_dir, allow_ips=a.allow)
     url = f"http://localhost:{port}/index.html"          # with sign-in on, redirects to the login page first
     counts = server.nexa_db.counts()
     print(f"NEXA local server\n  open      {url}\n  database  {a.db}\n"
           f"  stored    {counts.get('analyses', 0)} analyses, {counts.get('audit_log', 0)} audit entries\n"
-          f"  network   {'LAN (other machines can connect)' if a.lan else 'this machine only'}\n"
+          f"  network   {('only this machine + ' + ', '.join(a.allow)) if a.allow else 'LAN (other machines can connect)' if a.lan else 'this machine only'}\n"
           + ("  sign-in   OFF: switch person with the buttons at the top of the page (--sign-in for accounts)\n"
              if demo else "  sign-in   ON (login page; accounts in the database)\n")
           + "Press Ctrl+C to stop.")
