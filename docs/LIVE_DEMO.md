@@ -116,13 +116,19 @@ python scripts/live_sdrconnect.py --host 192.168.137.5 --whisper-model medium
 
 ## Snapshot length and stopping
 
-- Voice: the default 6 s snapshots. A snapshot that lands on a pause between words shows **CARRIER**
-  (a walkie-talkie carrier with no speech on it is exactly that); longer snapshots (`--snapshot-s 10`)
-  catch more speech.
-- Morse: `--snapshot-s 40`, so a whole message lands in one snapshot (short ones chop it into pieces).
-  The text comes from the Morse decoder, which follows fixed rules with no AI. `--llm` adds Ollama's reading of what it means.
-- When SDRconnect stops playing, the bridge analyses what it received, prints "No new IQ … waiting"
-  and makes no more runs; pressing play continues. `--exit-when-idle 10` stops it instead. Ctrl+C always stops.
+- Voice and Morse: by default there is no time limit. The bridge records everything from the moment
+  it starts, and when the stream has sent nothing for 3 s (`--stop-after-s`) it analyses the whole
+  recording as one run. Start the bridge **before** pressing play, and turn off looping in SDRconnect.
+  The results appear after the recording ends, and the analysis takes longer the longer the recording is.
+- A live radio never stops sending: Ctrl+C ends the recording and still analyses it, or
+  `--quiet-stop-s 10` ends it when a signal was heard and then nothing for 10 s.
+- While recording, the IQ goes to disk at 4 bytes per sample (`results/pipeline/live_spool`, deleted
+  after analysis): about 1.8 MB/s at 440 kS/s, 13 MB/s at 3.2 MS/s. A recording ends early, and is
+  analysed, if less than 500 MB is free.
+- Fixed slices instead (the newest N seconds, in a loop): `--snapshot-s 6`. A slice that lands on a pause
+  between words shows **CARRIER** (a walkie-talkie carrier with no speech on it is exactly that).
+- Morse text comes from the Morse decoder, which follows fixed rules with no AI. `--llm` adds Ollama's reading of what it means.
+- `--exit-when-idle 10` stops the bridge when no new recording starts for 10 s.
 - Plain-language demo clips: `morse/iq/cw_sim_001_CW.wav` … `cw_sim_007` (simulated, fictional call signs).
 
 ## What to expect (measured 2026-11-08, Eavan's laptop: 7.3 GB RAM, CPU only)

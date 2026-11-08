@@ -70,8 +70,8 @@ export async function renderPipeline(root, { server }) {
     <div class="block">
       <div class="block-label">Live (SDRconnect)</div>
       <div class="note">Start the bridge on the analysis laptop: <code>python scripts/live_sdrconnect.py --host &lt;SDRconnect laptop&gt;</code>
-        (or <code>--replay file.wav</code>). Every few seconds it analyses the latest snapshot of what SDRconnect receives;
-        with this ticked, the page opens each new snapshot by itself. Everything stays on the local network.</div>
+        (or <code>--replay file.wav</code>). It records everything SDRconnect sends until the stream stops, then analyses the whole recording;
+        with this ticked, the page opens each finished run by itself. Everything stays on the local network.</div>
       <label class="note" style="margin:6px 0 0;"><input type="checkbox" id="pipeFollow"> Follow live snapshots</label>
       <span class="note" id="pipeLiveMsg" style="margin-left:8px;"></span>
     </div>

@@ -53,6 +53,56 @@ def test_find_channels_locates_nbfm():
     assert lo < 40e3 < hi and hi - lo < 20e3
 
 
+def test_zoom_in_blocks_matches_zoom_of_the_whole():
+    rate = 440e3
+    rng = np.random.default_rng(3)
+    iq = (rng.standard_normal(5_000_000) + 1j * rng.standard_normal(5_000_000)).astype(np.complex64)
+    r = live.Fraction(live.ZOOM_FS / rate).limit_denominator(1000)
+    whole = resample_poly(iq * np.exp(-2j * np.pi * 12e3 * np.arange(len(iq)) / rate), r.numerator, r.denominator)
+    got = live.zoom_to(iq, rate, 12e3)
+    assert len(got) == len(whole)
+    assert np.max(np.abs(got - whole)) < 1e-3 * np.max(np.abs(whole))
+
+
+def test_short_transmission_survives_a_long_recording(tmp_path):
+    burst = nbfm_at(40e3, seconds=3.0)
+    rng = np.random.default_rng(4)
+    n = int(120 * FS)
+    iq = ((rng.standard_normal(n) + 1j * rng.standard_normal(n)) / np.sqrt(2)).astype(np.complex64)
+    at = int(60 * FS)
+    iq[at:at + len(burst)] = burst
+    tracks = live.voice_snapshot(iq, FS, tmp_path, "base", None, use_whisper=False, use_llm=False, llm_model=None)
+    assert tracks, "a 3 s transmission was lost in 120 s of noise"
+    t = tracks[0]
+    assert t["f_lo_khz"] < 40 < t["f_hi_khz"]
+    assert t["listen"]["kind"] == "NBFM"
+    assert t["listen"]["duration_s"] == pytest.approx(120, abs=0.01)       # the audio is the whole recording
+    assert 54e3 <= t["t_start_ms"] <= 60e3 and 63e3 <= t["t_end_ms"] <= 72e3
+
+
+def test_recording_keeps_every_sample_until_the_stream_stops(tmp_path, monkeypatch):
+    monkeypatch.setattr(live, "SPOOL", tmp_path)
+    buf = live.IqBuffer(keep_s=0.5)
+    buf.fs = 1000.0
+    buf.rotate_spool(live.new_spool())
+    sent = np.arange(50_000, dtype=np.float32) / 100_000 * (1 + 0.5j)
+
+    def stream():
+        for s in range(0, len(sent), 500):
+            buf.add(sent[s:s + 500].astype(np.complex64))
+
+    stream()                                                     # far more than the ring buffer keeps
+    path, n, why, last = live.record_until_stop(buf, 1000.0, stop_after_s=0.4)
+    assert (n, last) == (len(sent), False) and "stopped" in why
+    rec = live.DiskIq(path)
+    assert len(rec) == len(sent)
+    assert np.max(np.abs(rec[0:len(rec)] - sent)) < 1e-4
+    assert np.max(np.abs(rec[100:103] - sent[100:103])) < 1e-4   # slices read like an array
+    rec.close()
+    assert buf.spool_path != path and buf.spool_n == 0           # the next recording is already open
+    buf.rotate_spool(None)
+
+
 def test_websocket_stream_to_snapshot(tmp_path):
     from websockets.sync.server import serve
     sig = nbfm_at(-30e3, seconds=4.0)

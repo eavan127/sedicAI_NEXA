@@ -6,19 +6,26 @@ this machine.
 
     SDRconnect (laptop 1, RSPduo or an IQ file playing)
         --  ws://<laptop1>:5454, IQ stream (int16 I/Q)  -->
-    this script (laptop 2): keeps the last few seconds, and every cycle takes a
-    snapshot, finds the transmissions in it, names the analog kind (NBFM / AM /
-    SSB / CW), demodulates, transcribes (Whisper) and optionally reads it
-    (Ollama). Each snapshot is saved as an ordinary pipeline run in
+    this script (laptop 2): records everything the stream sends, with no time
+    limit, until the stream stops (the file ended or was paused), then finds
+    the transmissions in the whole recording, names the analog kind (NBFM / AM
+    / SSB / CW), demodulates, transcribes (Whisper) and optionally reads it
+    (Ollama). Each recording is saved as an ordinary pipeline run in
     results/pipeline/jobs/, so the dashboard's Signal Pipeline page shows it
-    (tick "Follow live" there: it opens every new snapshot by itself).
+    (tick "Follow live" there: it opens every new run by itself).
+
+    A live radio never stops sending: end a recording with Ctrl+C (it is still
+    analysed), or use --quiet-stop-s to end it when the air goes quiet. While
+    recording, the IQ goes to disk, not RAM; the recording ends early only if
+    the disk is nearly full.
 
 Modes
-  voice (default)  fast path, seconds per snapshot: channel finder + zoom rules
-                   + demodulator + Whisper. Names analog voice / Morse only.
+  voice (default)  channel finder + zoom rules + demodulator + Whisper. Names
+                   analog voice / Morse only. --snapshot-s N analyses the newest
+                   N seconds in a loop instead of whole recordings.
   full             the whole wideband chain (YOLO + 60-class model + tracker +
-                   listen) on the snapshot. ~50 s of CPU per second of IQ on a
-                   laptop without a GPU: use short snapshots (--snapshot-s 0.5).
+                   listen) on short snapshots only: ~50 s of CPU per second of
+                   IQ on a laptop without a GPU (--snapshot-s 0.5).
 
     # SDRconnect on this laptop
     python scripts/live_sdrconnect.py --language en
@@ -32,10 +39,12 @@ whether the IQ stream is the whole device band or a narrower channel, so the
 sample rate is MEASURED from the stream (override with --fs).
 """
 import argparse
+import atexit
 import collections
 import datetime
 import json
 import secrets
+import shutil
 import sys
 import threading
 import time
@@ -51,6 +60,11 @@ from src.config import REPO_ROOT  # noqa: E402
 from src.pipeline import analog, demod  # noqa: E402
 
 JOBS = REPO_ROOT / "results" / "pipeline" / "jobs"
+SPOOL = REPO_ROOT / "results" / "pipeline" / "live_spool"   # recordings on their way to analysis, deleted after
+MIN_FREE_BYTES = 500_000_000              # a recording ends here rather than fill the disk
+BLOCK_S = 6.0                             # a long recording is searched this many seconds at a time
+MAX_CLASSIFY_BLOCKS = 20                  # blocks of a channel measured to name its kind
+MAX_PLOT_COLS = 1600                      # about the picture's width in pixels
 MSG_IQ_PRIMARY, MSG_IQ_SECONDARY = 2, 5
 REPLAY_ONCE = [False]                     # --replay-once: play the file once, like SDRconnect without loop
 COMMON_RATES = [48e3, 62.5e3, 96e3, 125e3, 192e3, 250e3, 500e3, 1e6, 1.536e6, 2e6, 2.048e6, 2.4e6, 3e6, 3.2e6,
@@ -75,6 +89,9 @@ class IqBuffer:
         self.fs = None
         self.info = {}
         self.error = None
+        self.spool = None                  # open file that also receives every sample (whole recordings)
+        self.spool_path = None
+        self.spool_n = 0
 
     def add(self, iq):
         with self.lock:
@@ -86,6 +103,23 @@ class IqBuffer:
             limit = int(self.keep_s * (self.fs or 3.2e6))
             while self.n - len(self.chunks[0]) > limit:
                 self.n -= len(self.chunks.popleft())
+            if self.spool is not None:
+                raw = np.empty(2 * len(iq), "<i2")
+                raw[0::2] = np.clip(np.round(iq.real * 32768), -32768, 32767)
+                raw[1::2] = np.clip(np.round(iq.imag * 32768), -32768, 32767)
+                self.spool.write(raw.tobytes())
+                self.spool_n += len(iq)
+
+    def rotate_spool(self, next_path=None):
+        """End the current recording and start the next, with no sample lost
+        between them. -> (path, samples) of the recording that ended."""
+        with self.lock:
+            ended = self.spool_path, self.spool_n
+            if self.spool is not None:
+                self.spool.close()
+            self.spool = open(next_path, "wb") if next_path else None
+            self.spool_path, self.spool_n = next_path, 0
+        return ended
 
     def measured_rate(self):
         with self.lock:
@@ -100,6 +134,27 @@ class IqBuffer:
                 return None
             out = np.concatenate(list(self.chunks))
         return out[-n:]
+
+
+class DiskIq:
+    """A finished recording, read one slice at a time so that its length is
+    not limited by RAM. iq[a:b] and len(iq) work as on an array."""
+
+    def __init__(self, path):
+        self.file = open(path, "rb")
+        self.n = Path(path).stat().st_size // 4
+
+    def __len__(self):
+        return self.n
+
+    def __getitem__(self, s):
+        a, b, _ = s.indices(self.n)
+        self.file.seek(4 * a)
+        raw = np.fromfile(self.file, dtype="<i2", count=2 * max(b - a, 0)).astype(np.float32) / 32768
+        return (raw[0::2] + 1j * raw[1::2]).astype(np.complex64)
+
+    def close(self):
+        self.file.close()
 
 
 def parse_binary(msg, device="primary"):
@@ -198,14 +253,36 @@ def settle_rate(buf, given=None, wait_s=2.0):
 
 # ---------- voice path ----------
 
-def find_channels(iq, fs, thr_db=8.0, merge_hz=3e3, min_hz=200.0, max_hz=300e3, max_n=8):
-    """Transmissions in a snapshot: frequency spans whose average power sits
-    thr_db above the median (noise) level. -> [(lo_hz, hi_hz, peak_db)]."""
+def spectrum_blocks(iq, fs, block_s=BLOCK_S):
+    """Power spectrum of each block_s of iq (the last block takes the
+    remainder). -> (freqs, dB[block, bin], block edges in samples)."""
     nfft = int(min(max(256, 2 ** np.ceil(np.log2(fs / 250))), 1 << 16))
-    f, p = welch(iq, fs=fs, nperseg=nfft, return_onesided=False, scaling="density")
+    step = int(block_s * fs)
+    edges = [i * step for i in range(max(1, len(iq) // step))] + [len(iq)]
+    rows = []
+    for a, b in zip(edges, edges[1:]):
+        f, p = welch(iq[a:b], fs=fs, nperseg=nfft, return_onesided=False, scaling="density")
+        rows.append(p)
     order = np.argsort(f)
-    f, p = f[order], p[order]
-    db = 10 * np.log10(p + 1e-20)
+    return f[order], 10 * np.log10(np.array(rows)[:, order] + 1e-20), edges
+
+
+def when_on(f, blocks, lo, hi, thr_db=8.0):
+    """The blocks in which the channel lo..hi is on air (at least its strongest one)."""
+    i0 = min(int(np.searchsorted(f, lo)), len(f) - 1)
+    i1 = max(int(np.searchsorted(f, hi)), i0 + 1)
+    level = blocks[:, i0:i1].max(axis=1) - np.median(blocks, axis=1)
+    on = np.flatnonzero(level > thr_db)
+    return on if len(on) else np.array([int(np.argmax(level))])
+
+
+def find_channels(iq, fs, thr_db=8.0, merge_hz=3e3, min_hz=200.0, max_hz=300e3, max_n=8, spectra=None):
+    """Transmissions in a recording: frequency spans whose power sits thr_db
+    above the median (noise) level in at least one block, so that a short
+    transmission is not averaged away by a long recording.
+    -> [(lo_hz, hi_hz, peak_db)]."""
+    f, blocks, _ = spectra or spectrum_blocks(iq, fs)
+    db = blocks.max(axis=0)
     floor = np.median(db)
     hot = db > floor + thr_db
     df = f[1] - f[0]
@@ -231,21 +308,39 @@ def find_channels(iq, fs, thr_db=8.0, merge_hz=3e3, min_hz=200.0, max_hz=300e3, 
 
 
 def zoom_to(iq, fs, centre_hz):
-    """Shift centre_hz to 0 and resample to the 50 kS/s zoom rate."""
-    y = iq * np.exp(-2j * np.pi * centre_hz * np.arange(len(iq)) / fs)
+    """Shift centre_hz to 0 and resample to the 50 kS/s zoom rate, in
+    overlapping blocks so that a long recording fits in memory."""
     r = Fraction(ZOOM_FS / fs).limit_denominator(1000)
-    return resample_poly(y, r.numerator, r.denominator)
+    up, down = r.numerator, r.denominator
+    step = (2 ** 21 // down + 1) * down                     # block starts on a multiple of down: seamless output
+    margin = (20 * max(up, down) // up // down + 1) * down  # past the resampling filter's reach
+    out = []
+    for a in range(0, len(iq), step):
+        s0, s1 = max(0, a - margin), min(len(iq), a + step + margin)
+        x = iq[s0:s1] * np.exp(-2j * np.pi * centre_hz * np.arange(s0, s1) / fs)
+        y = resample_poly(x, up, down)
+        head = (a - s0) * up // down
+        out.append(y[head:head + step * up // down].astype(np.complex64))
+    return np.concatenate(out)
 
 
 def voice_snapshot(iq, fs, out_dir, whisper_model, language, use_whisper, use_llm, llm_model):
-    """-> tracks (dashboard schema) for one snapshot, audio files written."""
+    """-> tracks (dashboard schema) for one recording, audio files written."""
     tracks = []
-    dur_ms = len(iq) / fs * 1e3
-    for k, (lo, hi, peak) in enumerate(find_channels(iq, fs), 1):
+    spectra = spectrum_blocks(iq, fs)
+    f, blocks, edges = spectra
+    for k, (lo, hi, peak) in enumerate(find_channels(iq, fs, spectra=spectra), 1):
         y = zoom_to(iq, fs, (lo + hi) / 2)
-        kind, feats, why = analog.classify(y, ZOOM_FS)
+        on = when_on(f, blocks, lo, hi)
+        t_on_ms, t_off_ms = edges[on[0]] / fs * 1e3, edges[on[-1] + 1] / fs * 1e3
+        # The kind is measured while the channel is on air: a long stretch of
+        # silence would make any signal look too weak. The audio stays whole.
+        picks = on[np.unique(np.linspace(0, len(on) - 1, MAX_CLASSIFY_BLOCKS).astype(int))]
+        scale = ZOOM_FS / fs
+        kind, feats, why = analog.classify(np.concatenate([y[int(edges[b] * scale):int(edges[b + 1] * scale)]
+                                                           for b in picks]), ZOOM_FS)
         L = {"kind": kind, "why": why, "duration_s": round(len(y) / ZOOM_FS, 3), "tracks": [k],
-             "t_start_ms": 0.0, "t_end_ms": dur_ms}
+             "t_start_ms": t_on_ms, "t_end_ms": t_off_ms}
         if kind not in ("UNKNOWN", "CARRIER"):
             sound = demod.demodulate(y, ZOOM_FS, kind, feats)
             if sound is not None:
@@ -262,8 +357,8 @@ def voice_snapshot(iq, fs, out_dir, whisper_model, language, use_whisper, use_ll
                         L["morse"] = " / ".join(s["text"] for s in segments)
                     elif use_whisper and L["duration_s"] >= 1.0:
                         from src.intel import voice
-                        tr = voice.transcribe(wavio.wav_info(wav), model=whisper_model, max_minutes=1.0,
-                                              language=language)
+                        tr = voice.transcribe(wavio.wav_info(wav), model=whisper_model,
+                                              max_minutes=L["duration_s"] / 60 + 1, language=language)
                         L["transcript"], L["language"] = tr.get("text", ""), tr.get("language")
                         segments = [{"start_s": s["clip_start_s"], "text": s["text"]} for s in tr.get("segments", [])]
                         text_kind = "voice"
@@ -275,7 +370,7 @@ def voice_snapshot(iq, fs, out_dir, whisper_model, language, use_whisper, use_ll
                     L["reading"] = reason.read_recording(f"live track {k}", segments, kind=text_kind,
                                                          duration=f"{L['duration_s']:.1f} s", **kw)
         conf = 0.9 if kind not in ("UNKNOWN",) else 0.1
-        tracks.append({"track": k, "t_start_ms": 0.0, "t_end_ms": dur_ms, "f_lo_khz": lo / 1e3, "f_hi_khz": hi / 1e3,
+        tracks.append({"track": k, "t_start_ms": t_on_ms, "t_end_ms": t_off_ms, "f_lo_khz": lo / 1e3, "f_hi_khz": hi / 1e3,
                        "answer": KIND_CLASS.get(kind, kind), "confidence": conf,
                        "band": "high" if kind != "UNKNOWN" else "uncertain",
                        "reason": f"live zoom-in, {peak:.0f} dB above the noise: {why}",
@@ -289,11 +384,20 @@ def plot_snapshot(iq, fs, tracks, path, centre_hz=None):
     import matplotlib.pyplot as plt
     from scipy.signal import spectrogram
     nfft = int(min(max(256, 2 ** np.ceil(np.log2(fs / 500))), 8192))
-    f, t, s = spectrogram(iq, fs=fs, nperseg=nfft, noverlap=nfft // 2, return_onesided=False)
+    if len(iq) <= MAX_PLOT_COLS * nfft // 2:
+        f, t, s = spectrogram(iq[0:len(iq)], fs=fs, nperseg=nfft, noverlap=nfft // 2, return_onesided=False)
+        t_end = t[-1]
+    else:                                                  # long recording: one averaged column per pixel
+        cuts = np.linspace(0, len(iq), MAX_PLOT_COLS + 1).astype(int)
+        cols = []
+        for a, b in zip(cuts, cuts[1:]):
+            f, p = welch(iq[int(a):int(b)], fs=fs, nperseg=nfft, noverlap=0, return_onesided=False)
+            cols.append(p)
+        s, t_end = np.array(cols).T, len(iq) / fs
     order = np.argsort(f)
     img = 10 * np.log10(s[order] + 1e-20)
     fig, ax = plt.subplots(figsize=(12, 4.5))
-    ax.imshow(img, aspect="auto", origin="lower", cmap="magma", extent=[0, t[-1] * 1e3, f[order][0] / 1e3, f[order][-1] / 1e3],
+    ax.imshow(img, aspect="auto", origin="lower", cmap="magma", extent=[0, t_end * 1e3, f[order][0] / 1e3, f[order][-1] / 1e3],
               vmin=np.percentile(img, 20), vmax=np.percentile(img, 99.8))
     for a in tracks:
         ax.add_patch(plt.Rectangle((a["t_start_ms"], a["f_lo_khz"]), a["t_end_ms"] - a["t_start_ms"],
@@ -301,9 +405,9 @@ def plot_snapshot(iq, fs, tracks, path, centre_hz=None):
         said = a.get("listen", {}).get("transcript") or a.get("listen", {}).get("morse") or ""
         ax.text(a["t_start_ms"] + 20, a["f_hi_khz"], f"#{a['track']} {a['listen']['kind']} {said[:40]}",
                 color="#4cd4ff", fontsize=8, va="bottom")
-    ax.set_xlabel("time in snapshot (ms)")
+    ax.set_xlabel("time in recording (ms)")
     ax.set_ylabel("offset (kHz)" + (f" from {centre_hz / 1e6:.4f} MHz" if centre_hz else ""))
-    ax.set_title("Live snapshot: transmissions found (boxes) and what they are")
+    ax.set_title("Live recording: transmissions found (boxes) and what they are")
     fig.tight_layout()
     fig.savefig(path, dpi=110)
     plt.close(fig)
@@ -361,6 +465,63 @@ def centre_of(buf, fs):
     return None, "unknown"
 
 
+def new_spool():
+    SPOOL.mkdir(parents=True, exist_ok=True)
+    return SPOOL / f"{secrets.token_hex(6)}.iq"
+
+
+def record_until_stop(buf, fs, stop_after_s=3.0, quiet_stop_s=0.0, exit_when_idle=0.0):
+    """Wait, with no time limit, for the current recording to end: the stream
+    sends nothing for stop_after_s (file ended or paused), or a signal was
+    heard and then nothing for quiet_stop_s, or Ctrl+C, or the disk is nearly
+    full. -> (path, samples, why, last): last = no more recordings after this."""
+    why, last = None, False
+    before, checked, heard_at = buf.total, buf.total, None
+    t_new = t_print = time.monotonic()
+    said_wait = False
+    try:
+        while why is None:
+            time.sleep(0.2)
+            now = time.monotonic()
+            if buf.total != before:
+                before, t_new, said_wait = buf.total, now, False
+            idle = now - t_new
+            have = buf.spool_n
+            free = shutil.disk_usage(SPOOL).free
+            if buf.error:
+                why, last = f"stream lost: {buf.error}", True
+            elif have == 0:
+                if idle > 3 and not said_wait:
+                    print("Waiting for IQ (press play in SDRconnect). Ctrl+C to stop.", flush=True)
+                    said_wait = True
+                if exit_when_idle and idle > exit_when_idle:
+                    why, last = f"no new IQ for {exit_when_idle:.0f} s", True
+            elif idle > stop_after_s:
+                why = "the stream stopped"
+            elif free < MIN_FREE_BYTES:
+                why = f"the disk is nearly full ({free / 1e6:.0f} MB free)"
+            elif quiet_stop_s and buf.total - checked >= fs:
+                checked = buf.total
+                if find_channels(buf.last(int(fs)), fs):
+                    heard_at = now
+                elif heard_at and now - heard_at > quiet_stop_s:
+                    why = f"no signal for {quiet_stop_s:.0f} s"
+            if have and now - t_print >= 10:
+                t_print = now
+                print(f"Recording: {have / fs:.0f} s so far, {4 * have / 1e6:.0f} MB, {free / 1e9:.1f} GB free", flush=True)
+    except KeyboardInterrupt:
+        why, last = "Ctrl+C", True
+    path, n = buf.rotate_spool(None if last else new_spool())
+    return path, n, why, last
+
+
+def touch_until(path, stop):
+    """Tells the dashboard this run is still being worked on."""
+    path.touch()
+    while not stop.wait(5):
+        path.touch()
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     src = p.add_mutually_exclusive_group()
@@ -371,7 +532,14 @@ def main():
     p.add_argument("--device", choices=["primary", "secondary"], default="primary", help="RSPduo tuner")
     p.add_argument("--fs", type=float, default=None, help="IQ stream sample rate (default: measured)")
     p.add_argument("--mode", choices=["voice", "full"], default="voice")
-    p.add_argument("--snapshot-s", type=float, default=None, help="seconds per snapshot (voice 4, full 0.5)")
+    p.add_argument("--snapshot-s", type=float, default=None,
+                   help="analyse the newest N seconds in a loop (full mode default 0.5); "
+                        "voice mode without it records until the stream stops and analyses all of it")
+    p.add_argument("--stop-after-s", type=float, default=3.0,
+                   help="a recording ends when the stream has sent nothing for this long (default 3)")
+    p.add_argument("--quiet-stop-s", type=float, default=0.0, metavar="S",
+                   help="live radio: also end a recording when a signal was heard and then nothing for S seconds "
+                        "(default off: pauses inside a recording do not split it)")
     p.add_argument("--every-s", type=float, default=0.0, help="minimum time between snapshots")
     p.add_argument("--cycles", type=int, default=0, help="stop after this many snapshots (0 = run until Ctrl+C)")
     p.add_argument("--exit-when-idle", type=float, default=0, metavar="S",
@@ -385,10 +553,25 @@ def main():
     p.add_argument("--detector", default=str(REPO_ROOT / "results" / "detector" / "emitter_detector.pt"))
     p.add_argument("--keep", type=int, default=40, help="live runs kept in results/pipeline/jobs (oldest deleted)")
     args = p.parse_args()
-    snap_s = args.snapshot_s or (6.0 if args.mode == "voice" else 0.5)
-    REPLAY_ONCE[0] = args.replay_once
+    whole = args.mode == "voice" and not args.snapshot_s      # record until the stream stops, analyse all of it
+    snap_s = args.snapshot_s or 0.5
+    REPLAY_ONCE[0] = args.replay_once or whole                # a looping replay would never stop
 
     buf = IqBuffer(keep_s=max(10.0, 2 * snap_s))
+    if whole:
+        first = new_spool()                                   # from the first sample, before the rate is known
+        for old in SPOOL.glob("*.iq"):                        # left by a run that was killed
+            try:
+                old.unlink()
+            except OSError:
+                pass                                          # in use by another bridge
+        buf.rotate_spool(first)
+
+        def drop_spool():
+            path, _ = buf.rotate_spool(None)
+            if path:
+                path.unlink(missing_ok=True)
+        atexit.register(drop_spool)
     if args.replay:
         label = f"replay {Path(args.replay).name}"
         th = threading.Thread(target=replay_receiver, args=(buf, args.replay), daemon=True)
@@ -419,14 +602,28 @@ def main():
     JOBS.mkdir(parents=True, exist_ok=True)
     cycle = 0
     seen = 0                                     # buf.total at the last snapshot
-    while not args.cycles or cycle < args.cycles:
+    stopping = False
+    if whole:
+        print("Recording until the stream stops, then analysing all of it (Ctrl+C: stop and analyse).", flush=True)
+    while (not args.cycles or cycle < args.cycles) and not stopping:
         t_cycle = time.monotonic()
         n = int(snap_s * fs)
+        rec = rec_path = None
+        if whole:
+            rec_path, rec_n, why, stopping = record_until_stop(buf, fs, args.stop_after_s, args.quiet_stop_s,
+                                                               args.exit_when_idle)
+            if rec_n < fs:                       # nothing, or a fragment between stop and play
+                if rec_n:
+                    print(f"Recording of {rec_n / fs:.2f} s ({why}): too short, skipped.", flush=True)
+                rec_path.unlink(missing_ok=True)
+                continue
+            print(f"Recording over ({why}): {rec_n / fs:.1f} s. Analysing all of it ...", flush=True)
+            rec = DiskIq(rec_path)
         # Only NEW samples: once SDRconnect stops sending (playback paused or
         # ended), the buffer still holds the last seconds -- analysing those
         # again and again would look like endless loading.
         idle_since, said_idle = None, False
-        while buf.total - seen < n:
+        while not whole and buf.total - seen < n:
             if buf.error:
                 sys.exit(f"stream stopped: {buf.error}")
             before = buf.total
@@ -450,15 +647,17 @@ def main():
                 if said_idle:
                     print("IQ is flowing again.", flush=True)
                     said_idle = False
-        iq = buf.last(n)
+        iq = rec if whole else buf.last(n)
         seen = buf.total
         rid = datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(2)
         d = JOBS / rid
         d.mkdir(parents=True)
-        meta = {"id": rid, "source": "live", "file": f"LIVE · {label}", "max_s": snap_s,
+        meta = {"id": rid, "source": "live", "file": f"LIVE · {label}", "max_s": round(len(iq) / fs, 1),
                 "detector": "live voice path" if args.mode == "voice" else "live full chain", "status": "running",
                 "live": True, "who": "live bridge"}
         (d / "job.json").write_text(json.dumps(meta, indent=1), encoding="utf-8")
+        done = threading.Event()
+        threading.Thread(target=touch_until, args=(d / "alive", done), daemon=True).start()
         t0 = time.monotonic()
         kw = dict(whisper_model=args.whisper_model, language=args.language, use_whisper=not args.no_whisper,
                   use_llm=args.llm, llm_model=args.llm_model)
@@ -473,9 +672,13 @@ def main():
         doc = finite({"n_samples": len(iq), "duration_ms": dur_ms, "source": source, "tracks": tracks, "truth": None})
         (d / "tracks.tmp").write_text(json.dumps(doc, indent=1, default=float, allow_nan=False), encoding="utf-8")
         (d / "tracks.tmp").replace(d / "tracks.json")       # the dashboard sees a run as done once this exists
+        done.set()
+        if rec is not None:
+            rec.close()
+            rec_path.unlink(missing_ok=True)
         took = time.monotonic() - t0
-        (d / "run.log").write_text(f"live snapshot {snap_s} s at {fs / 1e3:.1f} kS/s, analysed in {took:.1f} s\n",
-                                   encoding="utf-8")
+        (d / "run.log").write_text(f"live {'recording' if whole else 'snapshot'} {len(iq) / fs:.1f} s at {fs / 1e3:.1f} kS/s, "
+                                   f"analysed in {took:.1f} s\n", encoding="utf-8")
         heard = "; ".join(f"{t['listen']['kind']} {t['f_lo_khz']:+.1f}..{t['f_hi_khz']:+.1f} kHz"
                           + (f" \"{(t['listen'].get('transcript') or t['listen'].get('morse') or '')[:60]}\"")
                           for t in tracks) or "nothing above the noise"

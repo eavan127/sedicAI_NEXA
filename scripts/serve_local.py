@@ -96,6 +96,7 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 import webbrowser
 from functools import partial
 from http import HTTPStatus
@@ -392,6 +393,8 @@ class Handler(SimpleHTTPRequestHandler):
             status = "running"
         elif (d / "tracks.json").exists():
             status = "done"
+        elif meta.get("live") and (d / "alive").exists() and time.time() - (d / "alive").stat().st_mtime < 60:
+            status = "running"          # the live bridge is its own process, and it keeps this file fresh
         else:
             status = "failed"           # exited without results, or started by a server that has stopped
         meta["status"] = status
