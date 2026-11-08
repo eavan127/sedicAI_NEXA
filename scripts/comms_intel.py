@@ -18,7 +18,6 @@ llama3.2:3b`); openai-whisper only if a recording turns out to be voice.
 """
 import argparse
 import json
-import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -30,14 +29,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.config import REPO_ROOT  # noqa: E402
 from src.intel import audio, morse, reason  # noqa: E402
+from src.intel.store import VERSION, safe_id, write_index  # noqa: E402
 
 OUT_DEFAULT = REPO_ROOT / "results" / "comms_intel"
 MORSE_PURITY = 0.25        # share of audio-band power in the beep; speech spreads far wider
-VERSION = 1
-
-
-def safe_id(stem):
-    return re.sub(r"[^A-Za-z0-9_.-]+", "_", stem).strip("_") or "recording"
 
 
 def recorded_at(stem):
@@ -117,32 +112,6 @@ def add_reading(rec, args):
     print(f"    LLM: {r.get('error') or (r.get('category'), r.get('confidence'))}  ({time.time() - t0:.0f}s)",
           flush=True)
     return rec
-
-
-def summary_row(rec):
-    r = rec.get("reading") or {}
-    return {k: rec.get(k) for k in ("id", "file", "recorded_at", "duration_s", "analysed_s", "kind",
-                                    "active_minutes", "wpm_median", "processed_at")} | {
-        "transmissions": len(rec["segments"]),
-        "category": r.get("category"), "confidence": r.get("confidence"),
-        "summary": r.get("summary"), "call_signs": r.get("call_signs", []),
-        "error": r.get("error"), "model": r.get("model"),
-    }
-
-
-def write_index(out):
-    rows = []
-    for p in sorted(out.glob("*.json")):
-        if p.name == "index.json":
-            continue
-        try:
-            rows.append(summary_row(json.loads(p.read_text(encoding="utf-8"))))
-        except (json.JSONDecodeError, KeyError):
-            continue
-    rows.sort(key=lambda r: (r.get("recorded_at") or "", r["file"]))
-    (out / "index.json").write_text(json.dumps({"generated_at": datetime.now(timezone.utc).isoformat(
-        timespec="seconds"), "recordings": rows}, indent=1), encoding="utf-8")
-    return rows
 
 
 def demo_folder(out_dir):

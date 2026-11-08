@@ -43,6 +43,7 @@ function plainDate(iso) {
 
 function plainHours(sec) {
   sec = Math.round(sec || 0);
+  if (sec < 60) return `${sec} seconds`;
   const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60);
   return h ? `${h} hour${h > 1 ? "s" : ""} ${m} minutes` : `${m} minutes`;
 }
@@ -114,7 +115,8 @@ function draw(root, data) {
       <div class="note">Receiver audio decoded on this machine: Morse by the CW decoder, speech by Whisper, then
         read by a local language model (Ollama). <b>The model's reading is a suggestion.</b> Every quote it gives
         was checked against the decoded text, and anything it could not back up was removed. The decode itself can
-        contain errors (<code>*</code> = unreadable letter).</div>
+        contain errors (<code>*</code> = unreadable letter). Everything Whisper analyses in Signal Pipeline, live or
+        from a file, is added here by itself.</div>
       ${rows.length ? `<div class="note" style="margin-top:6px;">${rows.length} recordings · ${totalH.toFixed(1)} h analysed ·
         ${Math.round(sigMin)} min with signal · ${tx} transmissions</div>` : `<div class="note" style="margin-top:6px;">
         Nothing decoded yet in <code>${esc(data.folder)}</code>. ${esc(data.hint || "")}</div>`}
@@ -174,6 +176,7 @@ async function openRecording(root, id) {
   const segs = rec.segments || [];
   const LIMIT = 400;
   const pct = v => v != null ? Math.round(v * 100) + "%" : "—";
+  const decoded = rec.kind === "voice" ? "transcribed speech" : "Morse text";
   const qCodes = (f.q_codes || []).map(([c, n]) =>
     `<div><b>${esc(c)}</b> = “${esc(Q_MEANING[c] || "a standard radio short code")}” <span class="note">(${n}×)</span></div>`).join("");
   box.innerHTML = `
@@ -205,11 +208,11 @@ async function openRecording(root, id) {
         ${(r.call_signs || []).length ? `<div style="margin-top:8px;"><b>Station names (call signs):</b> ${r.call_signs.map(c => chip(c, "#4A552F")).join(" ")}</div>` : ""}
         ${(r.places || []).length ? `<div style="margin-top:6px;"><b>Places mentioned:</b> ${r.places.map(c => chip(c, "#2B6CB0")).join(" ")}</div>` : ""}
         ${(r.key_points || []).length ? `<ul style="margin:8px 0 0 20px;padding:0;">${r.key_points.map(p => `<li>${esc(p)}</li>`).join("")}</ul>` : ""}
-        ${(r.evidence || []).length ? `<div style="margin-top:12px;font-weight:700;">Proof: the exact Morse text the AI based this on</div>
+        ${(r.evidence || []).length ? `<div style="margin-top:12px;font-weight:700;">Proof: the exact ${decoded} the AI based this on</div>
           ${r.evidence.map(e => `<div style="margin-top:6px;"><code style="font-size:1.05rem;">${esc(e.quote)}</code><div class="note" style="font-size:1rem;">${esc(e.why)}</div></div>`).join("")}` : ""}
         ${r.caveats ? `<div style="margin-top:10px;"><b>Be careful:</b> ${esc(r.caveats)}</div>` : ""}
         <div class="note" style="margin-top:10px;font-size:0.95rem;">Type: ${esc(r.category || "—")}${r.language ? ` · language: ${esc(r.language)}` : ""} · AI model ${esc(r.model || "—")}
-          ${r.removed_ungrounded ? ` · ${r.removed_ungrounded} detail${r.removed_ungrounded > 1 ? "s" : ""} the AI made up (not in the Morse text) ${r.removed_ungrounded > 1 ? "were" : "was"} removed` : ""}</div>`}
+          ${r.removed_ungrounded ? ` · ${r.removed_ungrounded} detail${r.removed_ungrounded > 1 ? "s" : ""} the AI made up (not in the ${decoded}) ${r.removed_ungrounded > 1 ? "were" : "was"} removed` : ""}</div>`}
       </div>
       <div>
         <div style="${H}">Facts measured from the signal <span class="note" style="font-weight:400;">(no AI)</span></div>
@@ -226,7 +229,7 @@ async function openRecording(root, id) {
       </div>
     </div>
     ${rec.transcript?.text ? `<div style="${H}">What was said (speech to text, ${esc(rec.transcript.language || "?")})</div>
-      <div style="white-space:pre-wrap;">${esc(rec.transcript.text)}</div>` : rec.transcript?.error ? `<div class="note">Speech to text failed: ${esc(rec.transcript.error)}</div>` : ""}
+      <div style="white-space:pre-wrap;">${esc(rec.transcript.text)}</div>` : rec.transcript?.error ? `<div class="note">Speech to text failed: ${esc(rec.transcript.error)}</div>` : rec.note ? `<div style="${H}">What was said</div><div class="note">${esc(rec.note)}</div>` : ""}
     <div style="${H}">Every message, word for word</div>
     <div class="filters" style="margin-top:4px;"><input id="intelSegSearch" placeholder="Search the messages" style="width:260px;font-size:1rem;">
       <span class="note" id="intelSegCount"></span></div>
@@ -252,7 +255,7 @@ async function openRecording(root, id) {
       <th>Signal</th><th>Speed</th><th style="width:60%;">What was sent</th></tr></thead><tbody>`
       + list.slice(0, LIMIT).map(s => `<tr style="vertical-align:top;"><td style="white-space:nowrap;"><code>${clock(s.start_s)}</code></td>
         <td style="white-space:nowrap;" title="${s.snr_db != null ? Math.round(s.snr_db) + " dB above the noise" : ""}">${strength(s.snr_db)}</td>
-        <td style="white-space:nowrap;">${Math.round(s.wpm)} wpm</td>
+        <td style="white-space:nowrap;">${s.wpm ? `${Math.round(s.wpm)} wpm` : "—"}</td>
         <td style="font-family:var(--mono);word-break:break-word;">${hl(s.text)}</td></tr>`).join("") + `</tbody></table>`;
   };
   box.querySelector("#intelSegSearch").addEventListener("input", e => paintSegs(e.target.value));

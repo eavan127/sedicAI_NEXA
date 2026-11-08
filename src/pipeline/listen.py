@@ -88,7 +88,9 @@ def listen_track(iq, ans, out_dir, noise_var, rng, whisper_model="base", llm_mod
             tr = voice.transcribe(info, model=whisper_model, max_minutes=1.0, language=language)
             out["transcript"] = tr.get("text", "")
             out["language"] = tr.get("language")
-            segments = [{"start_s": s["clip_start_s"], "text": s["text"]} for s in tr.get("segments", [])]
+            segments = [{"start_s": s["clip_start_s"], "end_s": s["clip_end_s"], "text": s["text"]}
+                        for s in tr.get("segments", [])]
+            out["speech_segments"] = segments
             text_kind = "voice"
     except Exception as e:                       # noqa: BLE001 -- keep the audio even if decoding fails
         out["text_error"] = f"{type(e).__name__}: {e}"

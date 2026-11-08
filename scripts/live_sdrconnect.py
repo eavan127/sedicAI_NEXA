@@ -57,6 +57,7 @@ from scipy.signal import resample_poly, welch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.config import REPO_ROOT  # noqa: E402
+from src.intel import store  # noqa: E402
 from src.pipeline import analog, demod  # noqa: E402
 
 JOBS = REPO_ROOT / "results" / "pipeline" / "jobs"
@@ -360,7 +361,9 @@ def voice_snapshot(iq, fs, out_dir, whisper_model, language, use_whisper, use_ll
                         tr = voice.transcribe(wavio.wav_info(wav), model=whisper_model,
                                               max_minutes=L["duration_s"] / 60 + 1, language=language)
                         L["transcript"], L["language"] = tr.get("text", ""), tr.get("language")
-                        segments = [{"start_s": s["clip_start_s"], "text": s["text"]} for s in tr.get("segments", [])]
+                        segments = [{"start_s": s["clip_start_s"], "end_s": s["clip_end_s"], "text": s["text"]}
+                                    for s in tr.get("segments", [])]
+                        L["speech_segments"], L["snr_db"] = segments, peak
                         text_kind = "voice"
                 except Exception as e:                     # noqa: BLE001 -- keep the audio
                     L["text_error"] = f"{type(e).__name__}: {e}"
@@ -672,6 +675,12 @@ def main():
         doc = finite({"n_samples": len(iq), "duration_ms": dur_ms, "source": source, "tracks": tracks, "truth": None})
         (d / "tracks.tmp").write_text(json.dumps(doc, indent=1, default=float, allow_nan=False), encoding="utf-8")
         (d / "tracks.tmp").replace(d / "tracks.json")       # the dashboard sees a run as done once this exists
+        try:
+            saved = store.save_whisper_tracks(rid, doc["source"], doc["tracks"], d, keep_empty=whole)
+            if saved:
+                print(f"Comms Intel: saved {len(saved)} recording(s) that Whisper analysed.", flush=True)
+        except Exception as e:                              # noqa: BLE001 -- the run itself is already safe
+            print(f"Comms Intel: could not save this run: {type(e).__name__}: {e}", flush=True)
         done.set()
         if rec is not None:
             rec.close()
