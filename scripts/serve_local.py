@@ -398,6 +398,8 @@ class Handler(SimpleHTTPRequestHandler):
         else:
             status = "failed"           # exited without results, or started by a server that has stopped
         meta["status"] = status
+        if status == "done" and (d / "job.json").exists():   # job.json is written at the start, tracks.json at the end
+            meta["took_s"] = round(max((d / "tracks.json").stat().st_mtime - (d / "job.json").stat().st_mtime, 0.0), 1)
         return meta
 
     def _pipeline(self, method, rest, query):

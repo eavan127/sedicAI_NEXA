@@ -143,12 +143,28 @@ async function followLive(root) {
   state.liveTimer = setTimeout(() => followLive(root), 2000);
 }
 
+// Run ids start with the local time: 20261108-222233-ff1d.
+function runTime(id) {
+  const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/.exec(id);
+  if (!m) return "—";
+  return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6])
+    .toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function runTook(r) {
+  if (r.status === "running") return "running…";
+  if (r.took_s == null) return "—";
+  if (r.took_s < 60) return `${r.took_s.toFixed(1)} s`;
+  const total = Math.round(r.took_s);
+  return `${Math.floor(total / 60)} min ${total % 60} s`;
+}
+
 async function listRuns(root, runs) {
   const box = root.querySelector("#pipeRuns");
   if (!runs) runs = (await (await fetch("/api/pipeline", { credentials: "same-origin" })).json()).runs;
-  box.innerHTML = runs.length ? `<table><thead><tr><th>Run</th><th>Source</th><th>Seconds</th><th>Detector</th><th>Status</th></tr></thead><tbody>`
+  box.innerHTML = runs.length ? `<table><thead><tr><th>Run</th><th>Time</th><th>Source</th><th>Seconds</th><th>Analysis took</th><th>Detector</th><th>Status</th></tr></thead><tbody>`
     + runs.map(r => `<tr data-id="${esc(r.id)}" style="cursor:pointer;"><td><code>${esc(r.id)}</code></td>
-      <td>${esc(r.file || r.source)}</td><td>${esc(r.max_s)}</td><td>${esc(r.detector)}</td>
+      <td>${esc(runTime(r.id))}</td><td>${esc(r.file || r.source)}</td><td>${esc(r.max_s)}</td><td>${esc(runTook(r))}</td><td>${esc(r.detector)}</td>
       <td>${chip(r.status, r.status === "done" ? "#2E7D32" : r.status === "running" ? "#2B6CB0" : "#9B2C2C")}</td></tr>`).join("")
     + `</tbody></table>` : `<div class="note">No runs yet.</div>`;
   for (const tr of box.querySelectorAll("tr[data-id]")) tr.addEventListener("click", () => openRun(root, tr.dataset.id));
