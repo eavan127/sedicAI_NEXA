@@ -1174,42 +1174,56 @@ winSlider.addEventListener("input", () => { if (currentPage === "signal") render
 let currentModel = null;
 function currentModelHtml(d) {
   const pct = v => v == null ? "—" : `${(100 * v).toFixed(1)}%`;
-  const colour = v => v >= 0.6 ? "#2E7D32" : v >= 0.35 ? "#B7791F" : "#9B2C2C";
+  const colour = v => v >= 0.6 ? "#4A6B3A" : v >= 0.35 ? "#A47A2C" : "#8E3B35";   // muted: olive / ochre / brick
   const esc = t => String(t ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-  const tile = (big, text) => `<div style="flex:1 1 200px;padding:14px 16px;border:1px solid var(--grid);border-radius:10px;background:var(--panel);">
-      <div style="font-size:2rem;font-weight:700;line-height:1.1;">${big}</div><div style="font-size:1.02rem;margin-top:4px;">${text}</div></div>`;
-  const bar = (v, h = 16) => `<div style="flex:1;background:var(--grid);border-radius:6px;height:${h}px;min-width:80px;">
-      <div style="width:${Math.max(1, 100 * v)}%;height:100%;border-radius:6px;background:${colour(v)};"></div></div>`;
+  const bar = (v, h) => `<div class="cm-track" style="height:${h}px;"><div style="width:${Math.max(1, 100 * v)}%;background:${colour(v)};"></div></div>`;
   return `
-    <div style="font-size:1.12rem;line-height:1.5;">
-    <div style="font-size:1.35rem;font-weight:700;">Current model: <code>${esc(d.model)}</code></div>
-    <div class="note" style="font-size:0.98rem;">Run ${esc(d.run)} · trained on data version <code>${esc(d.data_version)}</code> (with the FSK/PSK fix)
-      · seed ${esc(d.seed)}, best epoch ${esc(d.epoch)} · ${esc(d.n_classes)} signal types</div>
-    <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:12px;">
-      ${tile(pct(d.top1), `names the <b>exact</b> signal type, out of ${esc(d.n_classes)} (one short look, any signal strength)`)}
-      ${tile(pct(d.top1_clear), "the same on <b>clear</b> signals (10 dB or more above the noise)")}
-      ${d.vote_clear != null ? tile(pct(d.vote_clear), "clear signals, when it <b>listens a little longer</b> (votes over 16 looks)") : ""}
-    </div>
-    <div style="font-size:1.25rem;font-weight:700;margin:20px 0 4px;">How well it does per family</div>
-    <div class="note" style="font-size:1rem;">For every test signal of a family: how often the model named the exact type.
-      Guessing would get under 2%. Green = good (60%+), amber = fair, red = weak. Click a family to see each type.</div>
-    ${d.families.map(f => `
-      <details style="margin-top:8px;">
-        <summary style="cursor:pointer;list-style:none;">
-          <div style="display:flex;align-items:center;gap:12px;">
-            <div style="width:290px;flex:none;">${esc(f.plain)}</div>${bar(f.right)}
-            <div style="width:64px;text-align:right;font-weight:700;color:${colour(f.right)};">${pct(f.right)}</div>
+    <style>
+      #currentModelBox .cm { font-size:0.92rem; line-height:1.45; }
+      #currentModelBox .cm-head { display:flex; justify-content:space-between; align-items:baseline; gap:12px; flex-wrap:wrap;
+        padding-bottom:8px; border-bottom:1px solid var(--grid); }
+      #currentModelBox .cm-title { font-size:1.02rem; font-weight:600; letter-spacing:0.01em; }
+      #currentModelBox .cm-meta { font-size:0.8rem; opacity:0.7; }
+      #currentModelBox details { border-bottom:1px solid var(--grid); }
+      #currentModelBox summary { list-style:none; cursor:pointer; padding:8px 4px; display:grid;
+        grid-template-columns:16px minmax(160px,250px) 1fr 58px; align-items:center; gap:12px; }
+      #currentModelBox summary::-webkit-details-marker { display:none; }
+      #currentModelBox summary:hover { background:var(--panel); }
+      #currentModelBox .cm-chev { font-size:0.7rem; opacity:0.6; transition:transform 0.15s; }
+      #currentModelBox details[open] .cm-chev { transform:rotate(90deg); }
+      #currentModelBox .cm-track { background:var(--grid); border-radius:3px; overflow:hidden; }
+      #currentModelBox .cm-track > div { height:100%; border-radius:3px; }
+      #currentModelBox .cm-pct { text-align:right; font-variant-numeric:tabular-nums; font-weight:600; }
+      #currentModelBox .cm-sub { display:grid; grid-template-columns:minmax(150px,226px) 1fr 58px; align-items:center;
+        gap:12px; padding:3px 4px 3px 32px; font-size:0.82rem; }
+      #currentModelBox .cm-sub code { font-size:0.8rem; }
+      #currentModelBox .cm-list { padding-bottom:8px; }
+    </style>
+    <div class="cm">
+      <div class="cm-head">
+        <div class="cm-title">Classification accuracy by signal family</div>
+        <div class="cm-meta">Model ${esc(d.model)} · run ${esc(d.run)} · data ${esc(d.data_version)} · ${esc(d.n_classes)} classes</div>
+      </div>
+      ${d.vote_clear != null ? `
+      <div style="display:flex;align-items:baseline;gap:10px;margin:10px 0 0;">
+        <span style="font-size:1.5rem;font-weight:600;font-variant-numeric:tabular-nums;">${pct(d.vote_clear)}</span>
+        <span>exact-class accuracy on clear signals (10 dB or more), voting over 16 consecutive windows</span>
+      </div>` : ""}
+      <div class="cm-meta" style="margin:2px 0 10px;">Single window on clear signals: ${pct(d.top1_clear)}.
+        Breakdown below: single window, all signal strengths.</div>
+      <div class="cm-meta" style="margin:2px 0 2px;">Share of test signals in each family identified as their exact class. Select a family to view its classes.</div>
+      ${d.families.map(f => `
+        <details>
+          <summary>
+            <span class="cm-chev">&#9654;</span>
+            <span>${esc(f.plain)}</span>
+            ${bar(f.right, 8)}
+            <span class="cm-pct" style="color:${colour(f.right)};">${pct(f.right)}</span>
+          </summary>
+          <div class="cm-list">
+            ${f.classes.map(c => `<div class="cm-sub"><code>${esc(c.name)}</code>${bar(c.right, 5)}<span class="cm-pct" style="font-weight:500;">${pct(c.right)}</span></div>`).join("")}
           </div>
-        </summary>
-        <div style="margin:6px 0 10px 24px;">
-          ${f.classes.map(c => `<div style="display:flex;align-items:center;gap:10px;font-size:0.98rem;margin:3px 0;">
-            <code style="width:170px;flex:none;">${esc(c.name)}</code>${bar(c.right, 10)}
-            <div style="width:56px;text-align:right;">${pct(c.right)}</div></div>`).join("")}
-        </div>
-      </details>`).join("")}
-    <div class="note" style="margin-top:12px;font-size:0.95rem;">Strong: jammers, spread spectrum, radars, FSK. Weak: QAM and APSK
-      (dense data whose types look alike in one short look) and the empty band. The live system adds the zoom-in rules
-      and voting on top of these single-look numbers.</div>
+        </details>`).join("")}
     </div>`;
 }
 
