@@ -195,9 +195,10 @@ async function openRecording(root, id) {
     </div>
 
     <div style="${H}">When the station was sending</div>
-    <canvas id="intelStrip" height="70" style="width:100%;display:block;background:var(--panel);border:1px solid var(--grid);"></canvas>
-    <div class="note">Each bar is a moment in the recording. <b>Taller, darker bar = more sending and a clearer signal.</b>
-      Click a bar to see what was sent at that time.</div>
+    <div style="margin-bottom:10px;">${activitySummary(rec)}</div>
+    <canvas id="intelStrip" height="104" style="width:100%;display:block;background:var(--panel);border:1px solid var(--grid);border-radius:6px;"></canvas>
+    <div class="note" style="margin-top:8px;">Time runs left to right. Dark bars: ${rec.kind === "voice" ? "someone speaking" : "the Morse key pressed"}; a darker
+      bar is a clearer signal. Light bands mark each message. Click anywhere to jump to that moment in the messages below.</div>
 
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:22px;margin-top:6px;">
       <div>
@@ -264,26 +265,73 @@ async function openRecording(root, id) {
   box.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+/** One plain sentence above the timeline (exported for tests). */
+export function activitySummary(rec) {
+  const ch = rec.chunks || {}, down = ch.key_down || [], step = rec.chunk_s || 15;
+  const total = rec.analysed_s || down.length * step;
+  const on = Math.min(total, down.reduce((a, d) => a + d * step, 0));
+  const n = (rec.segments || []).length;
+  const parts = [`<b>${rec.kind === "voice" ? "Speech" : "Key pressed"}</b> for ${plainHours(on)} of ${plainHours(total)}`
+    + (total ? ` (${Math.round(100 * on / total)}%)` : "")];
+  parts.push(`${n} message${n === 1 ? "" : "s"}`);
+  const heard = (ch.snr_db || []).filter((s, i) => s >= 8 && down[i] > 0).sort((p, q) => p - q);
+  if (heard.length) {
+    const db = heard[Math.floor(heard.length / 2)];
+    parts.push(`${db >= 25 ? "strong" : db >= 15 ? "clear" : "weak"} signal, ${Math.round(db)} dB above the noise`);
+  } else {
+    parts.push("no clear signal");
+  }
+  return parts.join(" · ");
+}
+
+function tickEvery(total, most = 8) {
+  for (const s of [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200]) if (total / s <= most) return s;
+  return 14400;
+}
+
+function timeLabel(sec, total) {
+  sec = Math.round(sec);
+  const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = String(sec % 60).padStart(2, "0");
+  return total >= 3600 ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`;
+}
+
 function drawStrip(canvas, rec, onPick) {
-  const ch = rec.chunks || {};
-  const down = ch.key_down || [], snr = ch.snr_db || [];
-  const W = canvas.clientWidth || 800, H = canvas.height;
+  const ch = rec.chunks || {}, down = ch.key_down || [], snr = ch.snr_db || [], step = rec.chunk_s || 15;
+  const total = rec.analysed_s || down.length * step;
+  const W = canvas.clientWidth || 800, H = canvas.height, base = H - 26, top = 8;
   canvas.width = W;
   const g = canvas.getContext("2d");
   g.clearRect(0, 0, W, H);
-  const n = down.length;
-  if (!n) return;
-  const bw = W / n;
-  for (let i = 0; i < n; i++) {
+  if (!total) return;
+  const x = t => Math.min(W, t / total * W);
+  g.fillStyle = "#EFF1EA";                                  // each message, behind the bars
+  for (const s of rec.segments || []) g.fillRect(x(s.start_s), top, Math.max(2, x(s.end_s) - x(s.start_s)), base - top);
+  down.forEach((d, i) => {
     const s = snr[i] ?? 0;
-    const k = Math.min(1, Math.max(0, (s - 8) / 22));
-    g.fillStyle = s < 8 ? "#C9CEC4" : `rgb(${Math.round(220 - 146 * k)},${Math.round(226 - 141 * k)},${Math.round(205 - 158 * k)})`;
-    const h = s < 8 ? 2 : Math.max(3, Math.min(1, down[i] * 2) * (H - 4));
-    g.fillRect(i * bw, H - h, Math.max(1, bw - (bw > 3 ? 1 : 0)), h);
+    if (s < 8 || d <= 0) return;
+    const k = Math.min(1, (s - 8) / 22);
+    g.fillStyle = `rgb(${Math.round(160 - 86 * k)},${Math.round(172 - 87 * k)},${Math.round(130 - 83 * k)})`;
+    const h = Math.max(3, Math.min(1, d * 2) * (base - top));
+    const x0 = x(i * step), w = x((i + 1) * step) - x0;
+    g.fillRect(x0, base - h, Math.max(1, w > 4 ? w - 1 : w), h);
+  });
+  g.strokeStyle = "#DFE3D9";
+  g.beginPath(); g.moveTo(0, base + 0.5); g.lineTo(W, base + 0.5); g.stroke();
+  g.fillStyle = "#5F6B72";
+  g.font = '13px "Inter", "Segoe UI", Arial, sans-serif';
+  g.textBaseline = "top";
+  const every = tickEvery(total);
+  for (let t = 0; t <= total + 1e-6; t += every) {
+    const px = x(t);
+    g.fillRect(Math.min(W - 1, Math.round(px)), base, 1, 5);
+    g.textAlign = px < 20 ? "left" : px > W - 24 ? "right" : "center";
+    g.fillText(timeLabel(t, total), Math.max(0, Math.min(W, px)), base + 8);
   }
-  canvas.onclick = e => {
-    const i = Math.floor(e.offsetX / bw);
-    onPick(i * (rec.chunk_s || 15));
+  const at = e => Math.max(0, Math.min(total, e.offsetX / (canvas.clientWidth || W) * total));
+  canvas.style.cursor = "pointer";
+  canvas.onclick = e => onPick(at(e));
+  canvas.onmousemove = e => {
+    const t = at(e), d = down[Math.min(down.length - 1, Math.floor(t / step))] ?? 0;
+    canvas.title = `${timeLabel(t, total)} · ${d > 0 ? (rec.kind === "voice" ? "speech" : "key pressed") : "nothing sent"}`;
   };
-  canvas.title = "Click to jump to this time";
 }

@@ -199,6 +199,15 @@ def noise_like(text, wpm):
     return len(chars) >= 6 and sum(c in "ETI" for c in chars) / len(chars) > 0.5
 
 
+def activity(keyed, max_bins=300, min_bin_s=0.1):
+    """Key track -> how much of each short moment the key was down, for a timeline."""
+    if len(keyed) == 0:
+        return {"bin_s": min_bin_s, "key_down": []}
+    step = max(int(round(min_bin_s * ENV_RATE)), int(np.ceil(len(keyed) / max_bins)))
+    return {"bin_s": step / ENV_RATE,
+            "key_down": [round(float(keyed[i:i + step].mean()), 3) for i in range(0, len(keyed), step)]}
+
+
 def analyse(info: WavInfo, max_s=None, progress=None):
     """Whole recording -> activity every CHUNK_S + decoded transmissions."""
     tones, purity, snrs, active, keyed = [], [], [], [], []
@@ -225,6 +234,7 @@ def analyse(info: WavInfo, max_s=None, progress=None):
         "tone_purity": round(float(np.median(np.asarray(purity)[on])) if on.any() else 0.0, 3),
         "segments": kept,
         "dropped": len(segments) - len(kept),
+        "activity": activity(keyed),
     }
 
 

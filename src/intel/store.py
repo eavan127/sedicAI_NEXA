@@ -82,6 +82,14 @@ def _activity(segments, duration_s, level_db):
     return chunk_s, {"key_down": speech, "snr_db": [level_db if v > 0 else 0.0 for v in speech]}
 
 
+def fine_activity(morse):
+    """The decoder's short-moment key track, in the page's timeline form. -> (chunk_s, chunks)"""
+    fine = morse["activity"]
+    heard = [s for s, d in zip(morse["chunks"]["snr_db"], morse["chunks"]["key_down"]) if d > 0]
+    level = float(statistics.median(heard)) if heard else 0.0
+    return fine["bin_s"], {"key_down": fine["key_down"], "snr_db": [level if d > 0 else 0.0 for d in fine["key_down"]]}
+
+
 def save_decoded_tracks(run_id, source, tracks, run_dir, out=INTEL_DIR, keep_empty=True):
     """Every track of this run that Whisper or the Morse decoder worked on
     becomes one Comms Intel recording. keep_empty=False leaves out tracks with
@@ -102,6 +110,8 @@ def save_decoded_tracks(run_id, source, tracks, run_dir, out=INTEL_DIR, keep_emp
         if morse:
             segments, chunk_s, chunks = morse["segments"], morse["chunk_s"], morse["chunks"]
             active_minutes, dropped = morse["active_minutes"], morse["dropped"]
+            if morse.get("activity"):
+                chunk_s, chunks = fine_activity(morse)
         else:
             level = L.get("snr_db", (L.get("features") or {}).get("snr_db")) or 0.0
             segments = [dict(s, snr_db=level) for s in L.get("speech_segments", [])]
