@@ -114,6 +114,22 @@ python scripts/live_sdrconnect.py --host 192.168.137.5 --whisper-model medium
   page either, *if* their copy is up to date: `git checkout eavan-accuracy-plan` and `git pull`.
   A login page there means an old branch or download (from before 2 Oct).
 
+## Auto-tune: the red line jumps onto the signal
+
+SDRconnect opens a file wherever it was last tuned. The bridge can tune it through the API:
+
+```powershell
+# while analysing: re-tunes every time playback starts (a new file, or play pressed again)
+python scripts/live_sdrconnect.py --host 172.22.80.3 --autotune
+# only tune once, no analysis (e.g. right after pressing play)
+python scripts/live_sdrconnect.py --host 172.22.80.3 --tune-only
+```
+
+About 4 s after play it sets **mode** (NFM / AM / USB / CW), **filter** (12.5 / 8 / 2.7 / 0.5 kHz) and the
+**VFO** (for USB just below the voice band, where the suppressed carrier is). On all 91 dataset files it chose
+the right mode and placed the VFO within 1.5 kHz of the signal. Not yet tried against the real SDRconnect: if the
+red line does not move, check that SDRconnect allows control over the WebSocket interface.
+
 ## Snapshot length and stopping
 
 - Voice and Morse: by default there is no time limit. The bridge records everything from the moment
