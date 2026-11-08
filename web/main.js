@@ -1169,7 +1169,60 @@ function renderSignal() {
 
 winSlider.addEventListener("input", () => { if (currentPage === "signal") renderSignal(); });
 
+// The CURRENT model's results (web/data/current_model.json, written by
+// scripts/export_current_model.py from the run's scorecard), in plain words.
+let currentModel = null;
+function currentModelHtml(d) {
+  const pct = v => v == null ? "—" : `${(100 * v).toFixed(1)}%`;
+  const colour = v => v >= 0.6 ? "#2E7D32" : v >= 0.35 ? "#B7791F" : "#9B2C2C";
+  const esc = t => String(t ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const tile = (big, text) => `<div style="flex:1 1 200px;padding:14px 16px;border:1px solid var(--grid);border-radius:10px;background:var(--panel);">
+      <div style="font-size:2rem;font-weight:700;line-height:1.1;">${big}</div><div style="font-size:1.02rem;margin-top:4px;">${text}</div></div>`;
+  const bar = (v, h = 16) => `<div style="flex:1;background:var(--grid);border-radius:6px;height:${h}px;min-width:80px;">
+      <div style="width:${Math.max(1, 100 * v)}%;height:100%;border-radius:6px;background:${colour(v)};"></div></div>`;
+  return `
+    <div style="font-size:1.12rem;line-height:1.5;">
+    <div style="font-size:1.35rem;font-weight:700;">Current model: <code>${esc(d.model)}</code></div>
+    <div class="note" style="font-size:0.98rem;">Run ${esc(d.run)} · trained on data version <code>${esc(d.data_version)}</code> (with the FSK/PSK fix)
+      · seed ${esc(d.seed)}, best epoch ${esc(d.epoch)} · ${esc(d.n_classes)} signal types</div>
+    <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:12px;">
+      ${tile(pct(d.top1), `names the <b>exact</b> signal type, out of ${esc(d.n_classes)} (one short look, any signal strength)`)}
+      ${tile(pct(d.top1_clear), "the same on <b>clear</b> signals (10 dB or more above the noise)")}
+      ${d.vote_clear != null ? tile(pct(d.vote_clear), "clear signals, when it <b>listens a little longer</b> (votes over 16 looks)") : ""}
+    </div>
+    <div style="font-size:1.25rem;font-weight:700;margin:20px 0 4px;">How well it does per family</div>
+    <div class="note" style="font-size:1rem;">For every test signal of a family: how often the model named the exact type.
+      Guessing would get under 2%. Green = good (60%+), amber = fair, red = weak. Click a family to see each type.</div>
+    ${d.families.map(f => `
+      <details style="margin-top:8px;">
+        <summary style="cursor:pointer;list-style:none;">
+          <div style="display:flex;align-items:center;gap:12px;">
+            <div style="width:290px;flex:none;">${esc(f.plain)}</div>${bar(f.right)}
+            <div style="width:64px;text-align:right;font-weight:700;color:${colour(f.right)};">${pct(f.right)}</div>
+          </div>
+        </summary>
+        <div style="margin:6px 0 10px 24px;">
+          ${f.classes.map(c => `<div style="display:flex;align-items:center;gap:10px;font-size:0.98rem;margin:3px 0;">
+            <code style="width:170px;flex:none;">${esc(c.name)}</code>${bar(c.right, 10)}
+            <div style="width:56px;text-align:right;">${pct(c.right)}</div></div>`).join("")}
+        </div>
+      </details>`).join("")}
+    <div class="note" style="margin-top:12px;font-size:0.95rem;">Strong: jammers, spread spectrum, radars, FSK. Weak: QAM and APSK
+      (dense data whose types look alike in one short look) and the empty band. The live system adds the zoom-in rules
+      and voting on top of these single-look numbers.</div>
+    </div>`;
+}
+
 async function renderPerformance() {
+  const cm = el("currentModelBox");
+  if (cm) {
+    try {
+      currentModel = currentModel || await (await fetch("./data/current_model.json")).json();
+      cm.innerHTML = currentModelHtml(currentModel);
+    } catch (e) {
+      cm.innerHTML = `<div class="note">Could not load the current model's results (web/data/current_model.json): ${e.message}</div>`;
+    }
+  }
   const box = el("scorecardBox"), prov = el("perfProvenance");
   if (!perfData) {
     prov.innerHTML = `<div class="note">Loading…</div>`;
