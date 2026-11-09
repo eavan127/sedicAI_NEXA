@@ -110,6 +110,15 @@ def test_two_boxes_for_one_emitter_make_one_track_but_a_tone_on_top_stays_apart(
     assert sorted(len(t.dets) for t in tracks) == [1, 2]
 
 
+def test_tracker_starts_a_new_track_when_a_different_emitter_takes_the_band():
+    def run(tr):
+        for k, c in enumerate(("BPSK", "BPSK", "JAM_BARRAGE")):    # the third chunk is a jammer in the same band
+            tr.update([det(k * 32768, (k + 1) * 32768, 100e3, 200e3, probs_for(c))])
+        return sorted(len(t.dets) for t in tr.finish())
+    assert run(Tracker()) == [1, 2]
+    assert run(Tracker(min_class_overlap=None)) == [3]                 # frequency only: all joined
+
+
 def test_tracker_closes_a_track_after_a_gap():
     tr = Tracker(max_gap_s=1e-3)
     tr.update([det(0, 1000, 0, 100e3)])
