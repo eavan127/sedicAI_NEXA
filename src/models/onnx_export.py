@@ -15,6 +15,8 @@ is computed, not what it computes. compute_stft_mag() below is the reference
 implementation both the export verification and (ported 1:1) the browser
 side must match.
 """
+import math
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -79,6 +81,164 @@ class STFTBranchONNX(nn.Module):
         return torch.cat([f, extra], dim=1)
 
 
+def _sorted_quantile(x, q):
+    """torch.quantile(x, q, dim=1) (linear interpolation) as a sort plus two
+    picks: torch.quantile itself does not export."""
+    n = x.shape[1]
+    pos = q * (n - 1)
+    lo = int(math.floor(pos))
+    frac = pos - lo
+    srt = torch.sort(x, dim=1).values
+    if frac == 0 or lo + 1 >= n:
+        return srt[:, lo]
+    return srt[:, lo] * (1 - frac) + srt[:, lo + 1] * frac
+
+
+class PhysicsFeaturesONNX(nn.Module):
+    """PhysicsFeatures (amc_cnn.py) in real arithmetic, so it exports.
+
+    The trained branch uses torch.fft and complex tensors; ONNX has neither
+    (and onnxruntime-web's op set is smaller still). This computes the same
+    56 numbers the same way ExpertFeatures and SpectrumBranch already do: a
+    complex value is a (real, imaginary) pair, a DFT is a matrix product with
+    fixed cos / sin tables, a quantile or median is a sort, and the
+    autocorrelation is summed lag by lag instead of through a 2n-point FFT.
+    No parameters (the branch has none); the channelizer and the DFT tables
+    are borrowed from an ExpertFeatures of the same window length, so the
+    exported file carries one copy of each table, not three.
+
+    Checked against PhysicsFeatures in tests/test_onnx_physics.py and by
+    scripts/export_onnx.py on real windows. Not bit-identical: a DFT as a
+    matmul rounds differently from an FFT (~1e-6 relative), which matters
+    only where a feature is an argmax or a hard threshold and two candidates
+    are within that rounding of each other.
+    """
+
+    def __init__(self, physics, chan):
+        super().__init__()
+        from src import physics_features as pf
+        self.pf = pf
+        self.chan = chan                 # ExpertFeatures: channelize() + cos / sin (unshifted DFT)
+        self.n = physics.n
+        self.han = physics.han
+        self.han1 = physics.han1
+        self.if_c = physics.if_c
+        self.amp_c = physics.amp_c
+
+    def _dft(self, re, im):
+        return self.chan._dft(re, im)
+
+    @staticmethod
+    def _pa_db(a):
+        return 10 * torch.log10((a.amax(1) + 1e-12) / (a.mean(1) + 1e-12))
+
+    def _mag(self, re, im):
+        Re, Im = self._dft(re, im)
+        return torch.sqrt(Re ** 2 + Im ** 2)
+
+    def forward(self, x):
+        pf, n = self.pf, self.n
+        han = self.han
+        yr, yi, bins = self.chan.channelize(x)
+        rms = torch.sqrt((yr ** 2 + yi ** 2).mean(1, keepdim=True)) + 1e-12
+        yr, yi = yr / rms, yi / rms
+
+        # [0:4] power-law lines, y^p by repeated squaring
+        f = []
+        pr, pi = yr, yi
+        for p in (1, 2, 4, 8):
+            if p > 1:
+                pr, pi = pr * pr - pi * pi, 2 * pr * pi
+            f.append(self._pa_db(self._mag(pr * han, pi * han)))
+
+        # [4:7] symbol-rate line: one-sided spectrum of the envelope
+        m1 = n // 2 + 1
+        e = yr ** 2 + yi ** 2
+        E = self._mag((e - e.mean(1, keepdim=True)) * han, torch.zeros_like(e))[:, :m1]
+        keep = torch.ones(m1, dtype=E.dtype, device=E.device)
+        keep[:3] = 0
+        E = E * keep
+        k = E.argmax(1)
+        Ek = E.gather(1, k.unsqueeze(1)).squeeze(1)
+        f += [self._pa_db(E), k.float() / n,
+              10 * torch.log10((Ek + 1e-12) / (_sorted_quantile(E, 0.5) + 1e-12))]
+
+        # [7:30] instantaneous frequency
+        dr = yr[:, 1:] * yr[:, :-1] + yi[:, 1:] * yi[:, :-1]
+        di = yi[:, 1:] * yr[:, :-1] - yr[:, 1:] * yi[:, :-1]
+        fi = torch.atan2(di, dr) / math.pi
+        # torch.median: the lower middle value (n - 1 is odd here, so the middle)
+        med = torch.sort(fi, dim=1).values[:, (fi.shape[1] - 1) // 2]
+        fi_c = fi - med.unsqueeze(1)
+        sd = fi_c.std(1, unbiased=False) + 1e-12
+        f += [sd, (fi_c ** 4).mean(1) / sd ** 4,
+              (fi_c[:, 1:] - fi_c[:, :-1]).abs().mean(1) / sd]
+        u = torch.clamp(fi_c / (3 * sd.unsqueeze(1)), -1, 1)
+        hist_if = torch.exp(-0.5 * ((u.unsqueeze(2) - self.if_c) / pf.IF_WIDTH) ** 2).mean(1)
+        g = fi_c * self.han1
+        g = torch.cat([g, torch.zeros_like(g[:, :1])], dim=1)       # rfft(..., n=n): one zero
+        FI = self._mag(g, torch.zeros_like(g))[:, :m1]
+        FI = FI / (FI.sum(1, keepdim=True) + 1e-12)
+        f_bands = [FI[:, 1:8].sum(1), FI[:, 8:32].sum(1), FI[:, 32:96].sum(1), FI[:, 96:].sum(1)]
+
+        # [30:45] envelope
+        a = torch.sqrt(yr ** 2 + yi ** 2)
+        mu = a.mean(1, keepdim=True)
+        var = ((a - mu) ** 2).mean(1)
+        amp = [torch.sqrt(var), ((a - mu) ** 4).mean(1) / (var ** 2 + 1e-12), (a < 0.2).float().mean(1)]
+        hist_a = torch.exp(-0.5 * ((a.unsqueeze(2) - self.amp_c) / pf.AMP_WIDTH) ** 2).mean(1)
+
+        # [45:48] delay echo: |sum_t yc[t+lag] conj(yc[t])| / r0, lags 16..320
+        cr, ci = yr - yr.mean(1, keepdim=True), yi - yi.mean(1, keepdim=True)
+        r0 = (cr ** 2 + ci ** 2).sum(1)
+        seg = []
+        for lag in range(pf.LAG_MIN, pf.LAG_MAX + 1):
+            re = (cr[:, lag:] * cr[:, :-lag] + ci[:, lag:] * ci[:, :-lag]).sum(1)
+            im = (ci[:, lag:] * cr[:, :-lag] - cr[:, lag:] * ci[:, :-lag]).sum(1)
+            seg.append(torch.sqrt(re ** 2 + im ** 2))
+        seg = torch.stack(seg, dim=1) / (r0.unsqueeze(1) + 1e-12)
+        j = seg.argmax(1)
+        delay = [seg.amax(1), (pf.LAG_MIN + j).float() / pf.LAG_MAX,
+                 torch.topk(seg, 3, dim=1).values.mean(1)]
+
+        # [48:52] spectral shape of the raw window
+        zr, zi = x[:, 0, :].float(), x[:, 1, :].float()
+        Zr, Zi = self._dft(zr * han, zi * han)
+        P = torch.roll(Zr ** 2 + Zi ** 2, shifts=n // 2, dims=1)    # fftshift (even n)
+        Ps = F.avg_pool1d(torch.cat([P[:, -2:], P, P[:, :2]], dim=1).unsqueeze(1), 5, stride=1).squeeze(1)
+        floor = _sorted_quantile(Ps, 0.3).unsqueeze(1)
+        band = (Ps > 4 * floor).float()
+        cnt = band.sum(1)
+        logm = (torch.log(Ps + 1e-20) * band).sum(1) / torch.clamp(cnt, min=1)
+        mean_in = (Ps * band).sum(1) / torch.clamp(cnt, min=1)
+        flat = torch.where(cnt > 0, torch.exp(logm) / (mean_in + 1e-20), torch.ones_like(cnt))
+        mid = Ps[:, 1:-1]
+        peaks = ((mid > Ps[:, :-2]) & (mid > Ps[:, 2:]) & (mid > 30 * floor)).float().sum(1).clamp(max=20)
+        Yr, Yi = self._dft(yr, yi)
+        Y = torch.roll(Yr ** 2 + Yi ** 2, shifts=n // 2, dims=1)
+        m = n // 2
+        up = Y[:, m + 1:m + 64]
+        dn = torch.flip(Y[:, m - 63:m], dims=[1])
+        upc, dnc = up - up.mean(1, keepdim=True), dn - dn.mean(1, keepdim=True)
+        den = torch.sqrt((upc ** 2).sum(1) * (dnc ** 2).sum(1))
+        sym = torch.where(den > 0, (upc * dnc).sum(1) / (den + 1e-30), torch.zeros_like(den))
+        spec = [bins / n, flat, peaks, sym]
+
+        # [52:56] on/off timing of the raw window
+        bp = (zr ** 2 + zi ** 2).reshape(zr.shape[0], pf.N_BLOCKS, -1).mean(2)
+        on = (bp > 0.5 * bp.amax(1, keepdim=True)).float()
+        onset = on.argmax(1)
+        n_on = on.sum(1)
+        single = ((onset > 0) & (n_on == pf.N_BLOCKS - onset.float())).float()
+        flips = (on[:, 1:] - on[:, :-1]).abs().sum(1)
+        timing = [10 * torch.log10(bp.amax(1) / (bp.amin(1) + 1e-12)), on.mean(1), single, flips]
+
+        out = torch.cat([torch.stack(f, 1), hist_if, torch.stack(f_bands, 1), torch.stack(amp, 1), hist_a,
+                         torch.stack(delay, 1), torch.stack(spec, 1), torch.stack(timing, 1)], dim=1)
+        bad = torch.isnan(out) | torch.isinf(out)
+        return torch.where(bad, torch.zeros_like(out), out)
+
+
 class AMC_CNN_ONNX(nn.Module):
     """AMC_CNN with the STFT magnitude taken as a second input.
 
@@ -114,6 +274,16 @@ class AMC_CNN_ONNX(nn.Module):
         self.expert_branch = model.expert_branch
         self.expert_norm = model.expert_norm
         self.spectrum_branch = model.spectrum_branch
+        # PhysicsFeatures uses torch.fft, so it is MIRRORED in real arithmetic
+        # (PhysicsFeaturesONNX above), not shared. Its channelizer and DFT
+        # tables come from the expert branch when there is one (same window
+        # length, same tables), so the file holds them once.
+        self.physics_branch = None
+        self.physics_norm = None
+        if model.physics_branch is not None:
+            chan = model.expert_branch if model.expert_branch is not None else model.physics_branch.chan
+            self.physics_branch = PhysicsFeaturesONNX(model.physics_branch, chan)
+            self.physics_norm = model.physics_norm
         self.attn_pool = model.attn_pool
         self.relu = model.relu
         self.dropout = model.dropout
@@ -145,6 +315,8 @@ class AMC_CNN_ONNX(nn.Module):
             pooled = torch.cat([pooled, self.expert_norm(self.expert_branch(iq))], dim=1)
         if self.spectrum_branch is not None:
             pooled = torch.cat([pooled, self.spectrum_branch(iq)], dim=1)
+        if self.physics_branch is not None:
+            pooled = torch.cat([pooled, self.physics_norm(self.physics_branch(iq))], dim=1)
 
         x = self.dropout(self.relu(self.fc1(pooled)))
         return self.fc2(x), weights[:, 0, :]

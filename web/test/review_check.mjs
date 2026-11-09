@@ -73,7 +73,7 @@ check("slivers shorter than minS are dropped",
   const n = spanAt(0.0495, { suggestions: [], events: [], durationS: 0.05 });
   check("click on empty time opens a 1 ms span, clipped to the capture",
     n.from === "empty" && near(n.startS, 0.049) && near(n.endS, 0.05) && n.predicted.length === 0);
-  check("detectedIn unions classes over a dragged span", detectedIn(events, 0.025, 0.031).join() === "BPSK,FHSS,JAMMING");
+  check("detectedIn unions classes over a dragged span", detectedIn(events, 0.025, 0.031).join() === "FHSS,BPSK,JAMMING");   // model order; family names last
 }
 
 // --- coveredBy: a correction made anywhere marks the rows it answers --------------

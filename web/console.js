@@ -17,6 +17,7 @@
 
 import { TIER_COLOR, tierOfClasses } from "./analysis.js";
 import { CLASSES } from "./model.js";
+import { ORDER, answers } from "./taxonomy.js";
 
 const PANEL = "#FFFFFF";
 const BG = "#F7F8F5";
@@ -89,9 +90,15 @@ export function drawConsole(canvas, {
   // the redraw is cheap next to the inference that produced the data.
   const cssW = canvas.clientWidth || canvas.parentElement?.clientWidth || 1100;
 
-  const truthClasses = new Set((truth || []).map(s => s.className));
-  const lanes = CLASSES.filter(c =>
-    c !== "NOISE_FLOOR" && (events.some(e => e.classes.includes(c)) || truthClasses.has(c)));
+  // A lane per detected class (model order), then one per truth name no lane
+  // answers -- a truth of "JAMMING" (a family) is drawn on every jammer lane,
+  // and gets its own lane only when no jammer was detected.
+  const truthClasses = [...new Set((truth || []).map(s => s.className))];
+  const lanes = CLASSES.filter(c => c !== "NOISE_FLOOR" && events.some(e => e.classes.includes(c)));
+  for (const t of truthClasses) {
+    if (t !== "NOISE_FLOOR" && !lanes.some(c => answers(c, t))) lanes.push(t);
+  }
+  lanes.sort((a, b) => ORDER.indexOf(a) - ORDER.indexOf(b));
 
   // Mirrors the Python gridspec: height_ratios [6.0, lanes*0.52, 0.5] on a
   // figure declared figsize=(13, sum(heights) + 1.2). Deriving the unit from
@@ -253,7 +260,7 @@ export function drawConsole(canvas, {
     }
     // TRUTH into the SAME lane, dashed outline over the filled bar
     for (const seg of (truth || [])) {
-      if (seg.className !== cls) continue;
+      if (!answers(cls, seg.className)) continue;
       const x0 = tToX(seg.startS * 1000), x1 = tToX(seg.endS * 1000);
       dashedRect(ctx, x0, laneTop + laneH * 0.04, Math.max(x1 - x0, 1), laneH * 0.92,
                  TRUTH_COLOR, 1.3);

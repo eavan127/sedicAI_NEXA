@@ -264,7 +264,7 @@ def correction(analysis_id, **over):
 
 
 def test_classes_match_the_model_config():
-    from src.config import CLASSES as cfg_classes
+    from src.config import DATASET_CLASSES as cfg_classes
     from src.localdb import CLASSES
     assert list(CLASSES) == list(cfg_classes)
 

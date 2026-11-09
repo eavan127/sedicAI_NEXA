@@ -1,6 +1,9 @@
 """Retraining from human feedback, end to end: job rules, the real training
-script (small synthetic settings), four-eyes model approval, activation, the
-served model file, and roll back."""
+script (small synthetic settings) on the 60-class model, four-eyes model
+approval, activation, the served model file, and roll back.
+
+The end-to-end tests need results/classifier/physics_best.pt, which is
+git-ignored (docs/DATA_VERSIONS.md); they skip without it."""
 import json
 import subprocess
 import sys
@@ -19,6 +22,7 @@ from src.localdb import Actor, LocalDB, now_iso  # noqa: E402
 import serve_local  # noqa: E402
 
 EAVAN, JESSY, CHUA = Actor("eavan"), Actor("jessy"), Actor("chua")
+SHIPPED = ROOT / "results" / "classifier" / "physics_best.pt"
 
 
 @pytest.fixture
@@ -41,8 +45,14 @@ def seed_feedback(db, tmp_path):
                       "duration_s": len(iq) / 3.2e6, "classes_detected": ["FHSS"],
                       "file_path": "iq/cap1/cap.f32", "file_sha256": "ab" * 32}, EAVAN)
     c = db.create_correction({"analysis_id": "cap1", "start_s": 0.0, "end_s": 0.003,
-                              "predicted_labels": ["FHSS"], "corrected_labels": ["JAMMING"],
+                              "predicted_labels": ["FHSS"], "corrected_labels": ["JAM_BARRAGE"],
                               "reason": "wideband energy, jammer"}, EAVAN)
+    db.review_correction(c["id"], "approve", "", JESSY)
+    # A family-only label (what corrections said before the switch to 60
+    # classes): stays valid, but there is no class to learn it as.
+    c = db.create_correction({"analysis_id": "cap1", "start_s": 0.001, "end_s": 0.002,
+                              "predicted_labels": [], "corrected_labels": ["JAMMING"],
+                              "reason": "a jammer, type not known"}, EAVAN)
     db.review_correction(c["id"], "approve", "", JESSY)
 
 
@@ -73,6 +83,8 @@ def test_rollback_with_nothing_active(db):
 
 @pytest.fixture(scope="module")
 def trained(tmp_path_factory):
+    if not SHIPPED.exists():
+        pytest.skip("results/classifier/physics_best.pt not here (git-ignored)")
     tmp = tmp_path_factory.mktemp("retrain")
     db = LocalDB(tmp / "nexa.db")
     seed_feedback(db, tmp)
@@ -80,7 +92,7 @@ def trained(tmp_path_factory):
     proc = subprocess.run(
         [sys.executable, str(ROOT / "scripts" / "retrain_from_feedback.py"), "--db", str(db.path),
          "--job", job["id"], "--epochs", "1", "--replay", "200", "--gate", "synthetic",
-         "--synthetic-per-class", "15"],
+         "--synthetic-per-class", "20"],
         cwd=ROOT, capture_output=True, text=True, timeout=900)
     return db, tmp, job, proc
 
@@ -101,6 +113,13 @@ def test_script_registers_a_candidate(trained):
     g = m["metrics"]["gate"]
     assert g["kind"] == "synthetic" and "SYNTHETIC" in g["set"] and g["rules"]
     assert m["metrics"]["corrections_fit"]["windows"] > 0
+    assert m["metrics"]["n_classes"] == 60                     # serve_local only serves 60-class versions
+    assert len(m["metrics"]["train"]["corrections_family_only"]) == 1
+    assert "labelled only 'JAMMING'" in proc.stdout
+    assert sess.get_outputs()[0].shape[1] == 60
+    import torch
+    ck = torch.load(tmp / Path(m["path"]).with_suffix(".pt"), weights_only=False)
+    assert ck["meta"]["fine_tuned"]["from"].endswith("physics_best.pt") and len(ck["meta"]["classes"]) == 60
     assert "Single model GATE" in proc.stdout and "Done in" in proc.stdout
     assert db.audit(limit=1)[0]["action"] == "retrain.finish"
 
@@ -148,7 +167,7 @@ def test_server_swaps_in_the_active_model_and_rollback_restores(trained):
     assert db.audit(limit=1)[0]["action"] == "model.rollback"
 
 
-# --- single + 5-model ensemble in one retrain -------------------------------------------
+# --- scope: only the single model since the switch to 60 classes ----------------------
 
 def test_scope_is_validated_and_logged(db):
     with pytest.raises(ValueError, match="scope"):
@@ -157,81 +176,41 @@ def test_scope_is_validated_and_logged(db):
     assert job["scope"] == "both" and db.audit(limit=1)[0]["details"]["scope"] == "both"
 
 
-@pytest.fixture(scope="module")
-def trained_both(tmp_path_factory):
-    tmp = tmp_path_factory.mktemp("retrain_both")
-    db = LocalDB(tmp / "nexa.db")
-    seed_feedback(db, tmp)
+def test_both_scope_is_refused_cleanly(tmp_path):
+    """There is no 60-class ensemble: the job fails with a reason, before any training."""
+    db = LocalDB(tmp_path / "nexa.db")
     job = db.start_retrain("ensemble test run", True, EAVAN, scope="both")
     proc = subprocess.run(
         [sys.executable, str(ROOT / "scripts" / "retrain_from_feedback.py"), "--db", str(db.path),
-         "--job", job["id"], "--epochs", "1", "--replay", "100", "--gate", "synthetic",
-         "--synthetic-per-class", "10"],
-        cwd=ROOT, capture_output=True, text=True, timeout=1800)
-    return db, tmp, job, proc
-
-
-def test_both_scope_registers_single_and_ensemble(trained_both):
-    db, tmp, job, proc = trained_both
-    assert proc.returncode == 0, proc.stdout[-3000:] + proc.stderr[-3000:]
+         "--job", job["id"]], cwd=ROOT, capture_output=True, text=True, timeout=300)
+    assert proc.returncode == 1
     done = db.get_job(job["id"])
-    versions = done["model_version"].split(",")
-    assert done["status"] == "succeeded" and len(versions) == 2
-    single, ens = (db.get_model(v) for v in versions)
-    assert single["kind"] == "single" and single["version"].startswith("ft-")
-    assert ens["kind"] == "ensemble" and ens["version"].startswith("ens-")
-    folder = tmp / ens["path"]
-    for i in range(5):
-        assert (folder / f"ensemble_{i}.onnx").exists() and (folder / f"ensemble_{i}.pt").exists()
-        assert not (folder / f"ensemble_{i}.onnx.data").exists()      # browser-loadable
-    assert ens["metrics"]["train"]["members"] == 5 and ens["metrics"]["gate"]["rules"]
-    assert "member 5/5" in proc.stdout and "Ensemble GATE" in proc.stdout
-    # the five members were fine-tuned on DIFFERENT replay samples, so they differ
-    import torch
-    w = [torch.load(folder / f"ensemble_{i}.pt")["fc2.weight"] for i in range(2)]
-    assert not torch.equal(w[0], w[1])
-    finish = db.audit(limit=1)[0]
-    assert finish["action"] == "retrain.finish" and set(finish["details"]["candidates"]) == set(versions)
+    assert done["status"] == "failed" and "no 60-class ensemble" in proc.stdout
 
 
-def test_single_and_ensemble_activate_and_roll_back_independently(trained_both):
-    db, tmp, job, _ = trained_both
-    single_v, ens_v = db.get_job(job["id"])["model_version"].split(",")
-    import sqlite3
-    with sqlite3.connect(db.path) as con:          # gate outcome is random on tiny data: force a pass
-        for v in (single_v, ens_v):
-            m = db.get_model(v)
-            m["metrics"]["gate"]["passed"] = True
-            con.execute("UPDATE models SET metrics = ? WHERE version = ?", (json.dumps(m["metrics"]), v))
-    db.review_model(ens_v, "approve", "ok", JESSY)
-    assert db.active_model("ensemble")["version"] == ens_v and db.active_model("single") is None
-    db.review_model(single_v, "approve", "ok", JESSY)
-    assert db.active_model("ensemble")["version"] == ens_v          # activating single left it alone
-
-    srv = serve_local.make_server(db.path, "127.0.0.1", 0)
-    db.setup_admin("chua", "chua-pass-12")                  # sign-in on: an analyst rolls back
+def test_an_8_class_version_is_never_served(tmp_path):
+    """A version retrained before the switch (no n_classes in its metrics)
+    stays active in the database but the server hands out the shipped file:
+    the page would read its 8 scores against 60 class names."""
+    db = LocalDB(tmp_path / "nexa.db")
+    (tmp_path / "models" / "x0").mkdir(parents=True)
+    (tmp_path / "models" / "x0" / "best_model.onnx").write_bytes(b"old 8-class model")
+    _, (v,) = _fake_run(db, EAVAN, [True])
+    db.review_model(v, "approve", "", JESSY)
+    db.setup_admin("chua", "chua-pass-12")
     cookie = {"Cookie": f"nexa_session={db.login('chua', 'chua-pass-12')[0]}"}
+    srv = serve_local.make_server(db.path, "127.0.0.1", 0)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{srv.server_address[1]}"
     get = lambda path: urllib.request.urlopen(urllib.request.Request(base + path, headers=cookie))  # noqa: E731
     try:
-        with get("/models/ensemble_2.onnx") as r:
-            assert r.headers["X-NEXA-Model"] == ens_v
-            assert r.read() == (tmp / db.get_model(ens_v)["path"] / "ensemble_2.onnx").read_bytes()
-        health = json.loads(get("/api/health").read())
-        assert health["active_ensemble"] == ens_v and health["active_model"] == single_v
-        req = urllib.request.Request(base + "/api/models/rollback", method="POST",
-                                     data=b'{"note":"back to the submission","kind":"ensemble"}',
-                                     headers={"X-NEXA-Client": "1", **cookie})
-        assert json.loads(urllib.request.urlopen(req).read())["retired"] == ens_v
-        with get("/models/ensemble_2.onnx") as r:
-            assert r.headers.get("X-NEXA-Model") is None                # the shipped submission again
-            assert r.read() == (ROOT / "web" / "models" / "ensemble_2.onnx").read_bytes()
+        with get("/models/best_model.onnx") as r:
+            assert r.headers.get("X-NEXA-Model") is None
+            assert r.read() == (ROOT / "web" / "models" / "best_model.onnx").read_bytes()
+        assert json.loads(get("/api/health").read())["active_model"] is None
     finally:
         srv.shutdown()
         srv.server_close()
-    assert db.active_model("single")["version"] == single_v             # rolling back the ensemble left single alone
-    assert db.audit(limit=1)[0]["details"]["kind"] == "ensemble"
 
 
 # --- every version kept; activate / restore / override; history ----------------------

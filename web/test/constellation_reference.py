@@ -16,10 +16,12 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import numpy as np
 
-from src.config import CFG, CLASSES, resolve_multilabel_thresholds
+from src.config import CFG
+from reference_model import CLASSES, THRESHOLDS, load_model, use_page_classes
 from src.measure import constellation_order, noise_floor_power
 from src.scenarios import CASES
 from src.ui.plots import (CONSTELLATION_ORDER, cluster_score,
@@ -27,12 +29,13 @@ from src.ui.plots import (CONSTELLATION_ORDER, cluster_score,
                            _symbols_per_window, recover_symbols, rrc_taps)
 from src.ui.session import (CLEANEST_LIBRARY_SNR_DB, civilian_library,
                              load_scenario)
-from src.ui.app_models import EnsembleModel, _load_one, ensemble_paths
 
 WINDOW_LEN = CFG["signal"]["window_len"]
 
 # A civilian-bearing capture, so the panel has real windows to work on.
-model = EnsembleModel([_load_one(p) for p in ensemble_paths()]).eval()
+# The 60-class model the page runs (reference_model.py).
+use_page_classes()
+model = load_model()
 session = load_scenario(model, total_duration=0.02, hop=512, snr_db=10,
                          seed=11, case="Civilian only")
 
@@ -80,7 +83,7 @@ out = {
     "rrc_taps": taps.tolist(),
     "symbols_per_window": int(_symbols_per_window(WINDOW_LEN)),
     "noise_power": float(session.noise_power),
-    "thresholds": dict(zip(CLASSES, [float(v) for v in resolve_multilabel_thresholds()])),
+    "thresholds": THRESHOLDS,
     "n_windows": int(session.result.n_windows),
     "n_classes": len(CLASSES),
     # civilian_windows(smoothed=True) selects on the RESOLVED (smoothed)

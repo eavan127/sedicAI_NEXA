@@ -15,6 +15,7 @@
 // web/test/sigmf_check.mjs runs it in node.
 
 import { CLASSES, FS } from "./model.js";
+import { FAMILY_NAMES } from "./taxonomy.js";
 
 // core:datatype grammar from the SigMF spec: c = complex, r = real; then the
 // sample type; then byte order (omitted for 8-bit types, where it is moot).
@@ -97,7 +98,8 @@ export function decodeSamples(buffer, fmt) {
  */
 export function annotationsToTruth(annotations, sampleRate) {
   const key = s => String(s).toUpperCase().replace(/[^A-Z0-9]/g, "");
-  const byKey = new Map(CLASSES.map(c => [key(c), c]));
+  // Family names too ("jamming"): taxonomy.js matches them by any class of the family.
+  const byKey = new Map([...CLASSES, ...FAMILY_NAMES].map(c => [key(c), c]));
   const out = [];
   for (const a of annotations) {
     const cls = byKey.get(key(a["core:label"] ?? ""));

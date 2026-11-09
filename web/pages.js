@@ -49,12 +49,18 @@ export function lighten(hex, amount = 0.45) {
 // Signal Analysis (signal_analysis.py)
 // ---------------------------------------------------------------------------
 
-/** All 8 classes as bars, each marked against its OWN threshold.
+/** The strongest classes as bars, each marked against its OWN threshold.
+ *
+ * The 60-class model would need 60 bars; the TOP_BARS highest scores (plus
+ * any other class over its threshold) carry everything an operator reads
+ * off this panel, and the note says how many are left out.
  *
  * Bars, not a ranked list: the length carries the magnitude at a glance and
  * makes it visible that the values do NOT sum to 100%. This model is
  * multi-label sigmoid, so QPSK + JAMMING together is a legitimate answer,
  * and a softmax-style ranked list would quietly imply otherwise. */
+const TOP_BARS = 10;
+
 export function probabilityHtml(result, windowIndex) {
   const base = windowIndex * result.nClasses;
 
@@ -74,7 +80,11 @@ export function probabilityHtml(result, windowIndex) {
       `<span style="width:42px;text-align:right;font-family:${MONO};font-size:14px;color:${text};">${p.toFixed(2)}</span></div>`;
   };
 
-  const bars = CLASSES.filter(c => c !== "NOISE_FLOOR").map(row).join("");
+  const ranked = CLASSES.filter(c => c !== "NOISE_FLOOR")
+    .map(c => [c, result.probs[base + CLASSES.indexOf(c)]])
+    .sort((a, b) => b[1] - a[1]);
+  const shown = ranked.filter(([c, p], i) => i < TOP_BARS || p > THRESHOLDS[c]).map(([c]) => c);
+  const bars = shown.map(row).join("");
   const noiseP = result.probs[base + CLASSES.indexOf("NOISE_FLOOR")];
   const quiet = noiseP > THRESHOLDS.NOISE_FLOOR;
   // NOISE_FLOOR separated below the rule as a channel STATE, not an eighth
@@ -86,7 +96,8 @@ export function probabilityHtml(result, windowIndex) {
 
   return `<div style="background:${PANEL};padding:16px;border-radius:6px;">` +
     `<div style="color:${TEXT_DIM};font-size:12.5px;margin-bottom:10px;">` +
-    `independent probabilities &middot; multi-label &middot; these do not sum to 100%</div>` +
+    `independent probabilities &middot; multi-label &middot; these do not sum to 100% &middot; ` +
+    `top ${shown.length} of ${CLASSES.length - 1} classes</div>` +
     bars + noiseBlock + `</div>`;
 }
 
@@ -245,8 +256,13 @@ export function modelCardHtml(card, which) {
     + `<div class="bartrack"><div class="barfill" style="width:${(frac * 100).toFixed(1)}%"></div></div><div class="barvalue">${value}</div></div>`;
   const head = t => `<div class="kpi-label mc-head">${t}</div>`;
 
+  const th = Object.values(card.thresholds || {});
+  const oneLine = th.length && th.every(v => v === th[0]);
   return `<div class="kpi-row">`
-    + kpi("Architecture", arch, ens ? `5 × ${card.member_architecture}, scores averaged` : "dual-branch CNN")
+    + kpi("Model", card.name || arch, card.data_version
+      ? `data ${card.data_version} · seed ${card.seed} · epoch ${card.epoch}` : "")
+    + kpi("Architecture", arch, ens ? `5 × ${card.member_architecture}, scores averaged`
+      : "CNN + expert, spectrum and physics features")
     + kpi("Parameters", fmt(total), ens ? `5 × ${fmt(card.parameters)}` : "")
     + kpi("Classes", card.classes.length, `${judged.size} judged`)
     + kpi("Window", `${(card.window_len / card.fs * 1e6).toFixed(0)} µs`, `${card.window_len} samples at ${(card.fs / 1e6).toFixed(1)} MHz`)
@@ -272,9 +288,13 @@ export function modelCardHtml(card, which) {
     }).join("")}</div>`
 
     + head("Decision thresholds")
-    + `<div class="note" style="margin-bottom:6px;">A class is reported once its score crosses its own line. `
-    + `Judged classes (bold) are tuned for at least ${Math.round((card.benchmark_recall || 0.8) * 100)}% recall.</div>`
-    + `<div class="barlist">${Object.entries(card.thresholds).map(([c, v]) => bar(c, v, v.toFixed(2), judged.has(c))).join("")}</div>`
+    + (oneLine
+      ? `<div class="note" style="margin-bottom:6px;">Every class is reported once its score crosses `
+        + `<strong>${th[0].toFixed(2)}</strong>. This model has no per-class calibration yet `
+        + `(configs/default.yaml web_threshold).</div>`
+      : `<div class="note" style="margin-bottom:6px;">A class is reported once its score crosses its own line. `
+        + `Judged classes (bold) are tuned for at least ${Math.round((card.benchmark_recall || 0.8) * 100)}% recall.</div>`
+        + `<div class="barlist">${Object.entries(card.thresholds).map(([c, v]) => bar(c, v, v.toFixed(2), judged.has(c))).join("")}</div>`)
 
     + `<div class="note" style="margin-top:12px;">Read from the checkpoint at build time, not hardcoded. `
     + `Describes what is running; not a claim that this architecture is the best performing.</div>`;

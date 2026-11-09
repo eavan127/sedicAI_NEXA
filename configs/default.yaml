@@ -211,6 +211,17 @@ multilabel_threshold: 0.5 # fallback for any class not listed below
 # classes.
 # Re-run calibrate_thresholds.py --ensemble after any retrain -- these are
 # tied to this specific set of 5 checkpoints' calibration.
+# The dashboard's decision line for the 60-class model (web/build.py writes it
+# into web/thresholds.js; scripts/retrain_from_feedback.py judges retrained
+# models at it). One value for every class: the 60-class model has no
+# per-class calibration yet -- add web_thresholds_per_class: {CLASS: value}
+# to override single classes. Its sigmoid scores run low (median top-1 score
+# 0.30 on 4096 data/combined test windows, all SNRs): at 0.5 two thirds of
+# windows report nothing (precision 79%, recall 24% per class); at 0.3,
+# precision 63%, recall 34%. The multilabel_thresholds_per_class below are the
+# 8-class model's and do not apply to it.
+web_threshold: 0.3
+
 multilabel_thresholds_per_class:
   LFM_RADAR: 0.24
   FHSS: 0.24
