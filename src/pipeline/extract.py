@@ -43,6 +43,12 @@ OCC_SEG = 1024                  # averaged-spectrum segment for the occupied ban
 WRAP_MIN_SNR_DB = 6.0           # in-band SNR below which noise hides real wraps and fakes others
 MIN_WRAP_HZ = 20e3              # never call a jump smaller than this a wrap
 LN2 = float(np.log(2))
+# Since the FSK/PSK data fix (f993d8ebc417) every training window sits anywhere
+# in the band and none at exactly 0 Hz, so the classifier gets the box back at
+# its own frequency. Moving it to 0 Hz turns a pure tone into a DC offset the
+# model never saw (RADAR_CW / JAM_TONE 80% -> 0% at 15 dB). The features still
+# use the centred copy.
+KEEP_POSITION = True
 
 
 def noise_variance(chunk_iq):
@@ -100,6 +106,15 @@ def cut(iq, t0, t1, f_lo, f_hi, noise_var, rng, margin_hz=None):
     return c
 
 
+def _window(c, s):
+    """Classifier window starting at sample s of the cut: the noise-filled cut,
+    moved back to the box's own frequency when KEEP_POSITION is on."""
+    w = c.filled[s:s + WINDOW_LEN]
+    if KEEP_POSITION:
+        w = w * np.exp(2j * np.pi * c.centre_hz * np.arange(c.t0 + s, c.t0 + s + len(w)) / FS)
+    return w.astype(np.complex64)
+
+
 def windows(c, max_windows=MAX_WINDOWS):
     """The cut's classifier windows: complex (k, WINDOW_LEN), back to back,
     at most max_windows of them spread evenly over the box."""
@@ -107,7 +122,7 @@ def windows(c, max_windows=MAX_WINDOWS):
     starts = np.arange(n) * WINDOW_LEN
     if n > max_windows:
         starts = starts[np.linspace(0, n - 1, max_windows).round().astype(int)]
-    return np.stack([c.filled[s:s + WINDOW_LEN] for s in starts])
+    return np.stack([_window(c, s) for s in starts])
 
 
 def active_windows(c, max_windows=MAX_WINDOWS, min_snr_db=3.0):
@@ -127,7 +142,7 @@ def active_windows(c, max_windows=MAX_WINDOWS, min_snr_db=3.0):
         return windows(c, max_windows)
     if len(on) > max_windows:
         on = on[np.linspace(0, len(on) - 1, max_windows).round().astype(int)]
-    return np.stack([c.filled[s * WINDOW_LEN:(s + 1) * WINDOW_LEN] for s in on])
+    return np.stack([_window(c, s * WINDOW_LEN) for s in on])
 
 
 def _smooth(x, k):

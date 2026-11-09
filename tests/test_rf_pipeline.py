@@ -53,6 +53,17 @@ def test_cut_centres_the_box_and_refills_flat_noise():
     assert w.shape == (len(iq) // 512, 512)
 
 
+def test_classifier_windows_keep_the_box_at_its_own_frequency():
+    """Training windows sit anywhere in the band, never at exactly 0 Hz, so the
+    classifier gets the tone back at ~300 kHz (the cut itself stays centred)."""
+    rng = np.random.default_rng(1)
+    iq = _tone_capture(rng)
+    c = extract.cut(iq, 0, len(iq), 280e3, 320e3, 1.0, rng)
+    f = np.fft.fftfreq(512, 1 / FS)
+    for w in extract.windows(c)[:4]:
+        assert abs(f[np.argmax(np.abs(np.fft.fft(w)))] - 300e3) < 12.5e3
+
+
 def test_short_box_grows_to_one_window():
     rng = np.random.default_rng(2)
     iq = _tone_capture(rng)
