@@ -63,7 +63,23 @@ detector is single-class (one box per transmitter).
 2. Mark what it supersedes, and why.
 3. Point `DATA_ON_DRIVE` in the training notebooks at it, and change `RUN_NAME`, so runs on different data never share a results folder.
 
-## Active classifier (2026-11-07)
+## Active classifier (2026-11-09)
+
+`results/classifier/physics_aug_best.pt` (git-ignored; Drive `FOI26/results/2026-11-09_physics_augment_seed4/best.pt`):
+the same physics model retrained with rotation/flip augmentation (`--augment`), trained on **f993d8ebc417**, best epoch 15.
+`physics_best.pt` (below) moved to `results/classifier/old/`. Only one `*best*.pt` stays in
+`results/classifier/`, because the dashboard averages every one it finds and the average scored lower in the pipeline.
+
+| Test | physics_best | physics_aug_best | average of both |
+|---|---|---|---|
+| f993d8ebc417, one window, top-1 | 48.7% | **49.8%** | 50.5% |
+| f993d8ebc417, one window, >= 10 dB | 61.6% | **62.4%** | 63.3% |
+| Pipeline, 200 captures (seed 9000), track right | 46% | **50%** | 47% |
+| Pipeline, same, track exact | 37% | **38%** | 38% |
+
+The average wins on single windows but loses once the pipeline votes over a track, and costs twice the compute.
+
+## Previous classifier (2026-11-07)
 
 `results/classifier/physics_best.pt` (git-ignored; Drive `FOI26/results/2026-11-07_physics_seed4/best.pt`):
 seed 4, expert + spectrum + physics branches, trained on **f993d8ebc417**, best epoch 14.

@@ -33,7 +33,7 @@ def main():
     p.add_argument("--n", type=int, default=64, help="windows per class and SNR (multiple of --vote)")
     p.add_argument("--vote", type=int, default=8)
     p.add_argument("--snr", type=float, nargs="+", default=[10.0, 15.0, 20.0])
-    p.add_argument("--classifier", default="results/classifier/physics_best.pt")
+    p.add_argument("--classifier", default="results/classifier/physics_aug_best.pt")
     p.add_argument("--out", default="results/accuracy_plan/showcase.json")
     a = p.parse_args()
     from src.pipeline.classify import Classifier

@@ -35,7 +35,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--n", type=int, default=200)
     p.add_argument("--snr", type=float, default=15.0)
-    p.add_argument("--classifier", default="results/classifier/physics_best.pt")
+    p.add_argument("--classifier", default="results/classifier/physics_aug_best.pt")
     a = p.parse_args()
     from src.pipeline.classify import Classifier
     clf = Classifier([a.classifier])
