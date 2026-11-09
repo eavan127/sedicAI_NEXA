@@ -58,7 +58,7 @@ from scipy.signal import resample_poly, welch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.config import REPO_ROOT  # noqa: E402
 from src.intel import store  # noqa: E402
-from src.pipeline import analog, demod  # noqa: E402
+from src.pipeline import analog, demod, narrowband  # noqa: E402
 
 JOBS = REPO_ROOT / "results" / "pipeline" / "jobs"
 SPOOL = REPO_ROOT / "results" / "pipeline" / "live_spool"   # recordings on their way to analysis, deleted after
@@ -72,7 +72,8 @@ COMMON_RATES = [48e3, 62.5e3, 96e3, 125e3, 192e3, 250e3, 500e3, 1e6, 1.536e6, 2e
                 4e6, 5e6, 6e6, 8e6, 10e6]
 ZOOM_FS = analog.FA                       # 50 kS/s, what the zoom rules and the demodulator expect
 KIND_CLASS = {"NBFM": "NBFM", "WBFM": "WBFM", "AM": "AM_DSB_WC", "AM_SC": "AM_DSB_SC",
-              "USB": "AM_SSB_SC", "LSB": "AM_SSB_SC", "CW": "CW", "CARRIER": "CARRIER"}
+              "USB": "AM_SSB_SC", "LSB": "AM_SSB_SC", "CW": "CW", "CARRIER": "CARRIER",
+              "RTTY": "2FSK (RTTY)", "PSK31": "BPSK (PSK31-type)", "AFSK": "AFSK"}
 
 
 # ---------- IQ sources ----------
@@ -226,7 +227,8 @@ def sdrconnect_receiver(buf, url, device="primary"):
 # demodulator AM/USB/LSB/CW/SAM/NFM/WFM, filter_bandwidth Uint32 Hz.
 CW_MAX_HZ = 1200.0                        # wider than this is not Morse
 SDR_MODE = {"NBFM": ("NFM", 12500), "WBFM": ("WFM", 150000), "AM": ("AM", 8000), "AM_SC": ("AM", 8000),
-            "USB": ("USB", 2700), "LSB": ("LSB", 2700), "CW": ("CW", 500), "CARRIER": ("AM", 8000)}
+            "USB": ("USB", 2700), "LSB": ("LSB", 2700), "CW": ("CW", 500), "CARRIER": ("AM", 8000),
+            "RTTY": ("USB", 2700), "PSK31": ("USB", 2700), "AFSK": ("USB", 2700)}
 
 
 def tune_plan(iq, fs):
@@ -238,7 +240,9 @@ def tune_plan(iq, fs):
     if not ch:
         return None
     lo, hi, peak = ch[0]
-    kind, _, why = analog.classify(zoom_to(iq, fs, (lo + hi) / 2), ZOOM_FS)
+    yz = zoom_to(iq, fs, (lo + hi) / 2)
+    kind, _, why = analog.classify(yz, ZOOM_FS)
+    kind, why, _, _ = narrowband.refine(kind, why, yz, ZOOM_FS)
     if kind == "UNKNOWN":
         return None
     if kind in ("CW", "CARRIER") and hi - lo > CW_MAX_HZ:
@@ -463,12 +467,15 @@ def voice_snapshot(iq, fs, out_dir, whisper_model, language, use_whisper, use_ll
         # silence would make any signal look too weak. The audio stays whole.
         picks = on[np.unique(np.linspace(0, len(on) - 1, MAX_CLASSIFY_BLOCKS).astype(int))]
         scale = ZOOM_FS / fs
-        kind, feats, why = analog.classify(np.concatenate([y[int(edges[b] * scale):int(edges[b + 1] * scale)]
-                                                           for b in picks]), ZOOM_FS)
+        y_on = np.concatenate([y[int(edges[b] * scale):int(edges[b + 1] * scale)] for b in picks])
+        kind, feats, why = analog.classify(y_on, ZOOM_FS)
+        kind, why, demod_kind, slow = narrowband.refine(kind, why, y_on, ZOOM_FS)
         L = {"kind": kind, "why": why, "duration_s": round(len(y) / ZOOM_FS, 3), "tracks": [k],
              "t_start_ms": t_on_ms, "t_end_ms": t_off_ms}
+        if slow:
+            L["slow_path"] = slow
         if kind not in ("UNKNOWN", "CARRIER"):
-            sound = demod.demodulate(y, ZOOM_FS, kind, feats)
+            sound = demod.demodulate(y, ZOOM_FS, demod_kind, feats)
             if sound is not None:
                 from src.intel import audio as wavio
                 wav = out_dir / f"track_{k}.wav"

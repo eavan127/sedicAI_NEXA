@@ -61,12 +61,18 @@ def listen_track(iq, ans, out_dir, noise_var, rng, whisper_model="base", llm_mod
         y1 = y1 * np.exp(-2j * np.pi * centre * np.arange(len(y1)) / fa1)
         fa, y = FS / analog.DECIM, analog.zoom(y1, analog.DECIM // WIDE_DECIM)
     kind, feats, why = analog.classify(y, fa, wide_hint=wide)
+    demod_kind, slow = kind, None
+    if not wide:                                    # second opinion from the slow-path model (src/pipeline/narrowband.py)
+        from src.pipeline import narrowband
+        kind, why, demod_kind, slow = narrowband.refine(kind, why, y, fa)
     out = {"kind": kind, "why": why, "duration_s": round(len(y) / fa, 3),
            "features": {k: (round(float(v), 3) if isinstance(v, (float, np.floating)) else v)
                         for k, v in feats.items() if k != "band"}}
+    if slow:
+        out["slow_path"] = slow
     if kind == "UNKNOWN":
         return out
-    sound = demod.demodulate(y, fa, kind, feats)
+    sound = demod.demodulate(y, fa, demod_kind, feats)
     if sound is None:
         return out
     out_dir = Path(out_dir)
@@ -167,6 +173,10 @@ def zoom_answer(kind, feats):
         "LSB": ("AM_SSB_WC (LSB)" if carrier else "AM_SSB_SC (LSB)", ["AM_SSB_WC" if carrier else "AM_SSB_SC"]),
         "CW": ("OOK (Morse CW)", ["OOK"]),
         "CARRIER": ("RADAR_CW / JAM_TONE", ["RADAR_CW", "JAM_TONE"]),
+        # Named by the slow-path model (src/pipeline/narrowband.py): slow HF data modes.
+        "RTTY": ("2FSK (RTTY)", ["2FSK"]),
+        "PSK31": ("BPSK (PSK31-type)", ["BPSK"]),
+        "AFSK": ("AFSK", ["AFSK"]),
     }
     return table.get(kind)
 
