@@ -5,7 +5,7 @@ files a Colab run leaves in its results folder (e.g.
 FOI26/results/2026-11-07_physics_seed4/): scorecard.json and compare.json.
 
     python scripts/export_current_model.py --run-dir path/to/2026-11-07_physics_seed4 \
-        --name physics_best.pt --vote-high 0.806
+        --name physics_aug_best.pt --vote-high 0.794
 
 Numbers are copied, never recomputed: per class = "of the test windows of this
 class, the share the model named exactly right" (top1_standalone); per family =
@@ -32,7 +32,7 @@ FAMILY_PLAIN = {
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--run-dir", required=True, help="folder with scorecard.json and compare.json")
-    p.add_argument("--name", default="physics_best.pt", help="model file name shown on the page")
+    p.add_argument("--name", default="physics_aug_best.pt", help="model file name shown on the page")
     p.add_argument("--run-label", default=None, help="run name shown on the page (default: the folder name)")
     p.add_argument("--vote-high", type=float, default=None,
                    help="share right when voting over 16 windows at >= 10 dB (from the run notes), optional")

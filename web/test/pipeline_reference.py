@@ -1,44 +1,56 @@
 """End-to-end reference: a fixed IQ capture and the per-window probabilities
-the REAL Python pipeline produces for it (sliding_windows -> preprocess_window
--> 5-model ensemble -> sigmoid -> average).
+the REAL Python pipeline produces for it with the 60-class model the
+dashboard runs (configs/default.yaml browser_model, the checkpoint
+src/pipeline/classify.py loads): sliding_windows -> preprocess_window ->
+AMC_CNN -> sigmoid.
 
 web/test/pipeline_check.mjs feeds the same capture through the JS pipeline
-(preprocessWindow -> stftMag -> onnxruntime-web -> average) and must match.
+(preprocessWindow -> stftMag -> web/models/best_model.onnx) and must match.
 This is the check that catches preprocessing/normalization mistakes, which a
-STFT-only or ONNX-only test cannot see.
+STFT-only or ONNX-only test cannot see. web/test/analysis_check.mjs checks the
+display layer (smoothing, gate, hold, events, tiers) against the Python
+CaptureSession on the same probabilities.
 """
 import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
 
 import numpy as np
-import torch
 
-from src.config import CFG, CLASSES
+from src.config import CFG
+from src.pipeline.classify import Classifier
 from src.scenarios import CASES, build_scenario
-from src.ui.app_models import EnsembleModel, _load_one, ensemble_paths
 from src.timeline import classify_capture
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from reference_model import CKPT, CLASSES, THRESHOLDS, load_model, use_page_classes  # noqa: E402
+
 HOP = 512
+use_page_classes()
 
 # Short capture -- 62 windows is plenty to catch a systematic error, and
 # keeps the JSON small enough to hand to Node.
 iq, segments = build_scenario(total_duration=0.01, snr_db=2, seed=7,
                                script=CASES["All three"])
 
-model = EnsembleModel([_load_one(p) for p in ensemble_paths()]).eval()
+model = load_model()
 result = classify_capture(iq, model, hop=HOP)
+
+# Same numbers the Signal Pipeline's Classifier gives for these windows.
+iq_arr = np.asarray(iq)
+cuts = np.stack([iq_arr[s:s + 512] for s in result.starts])
+assert np.allclose(Classifier([CKPT], device="cpu")(cuts), result.probs, atol=1e-5)
 
 from src.measure import noise_floor_power, occupancy
 from src.ui.session import CaptureSession
-from src.config import resolve_multilabel_thresholds
 
 session = CaptureSession(
     iq=np.asarray(iq), result=result, source="scenario", truth=segments,
     snr_known=True, true_snr_db=2, noise_power=noise_floor_power(iq),
-    thresholds=dict(zip(CLASSES, resolve_multilabel_thresholds())),
+    thresholds=THRESHOLDS,
 )
 
 

@@ -14,8 +14,9 @@
 //
 // Pure functions, no DOM: web/test/review_check.mjs runs them in node.
 
+import { FAMILY_OF, ORDER, inTruthTerms } from "./taxonomy.js";
+
 const NOTHING = "NOISE_FLOOR";
-const ORDER = ["BPSK", "QPSK", "16QAM", "64QAM", "LFM_RADAR", "FHSS", "JAMMING", NOTHING];
 const sortClasses = cs => [...new Set(cs)].sort((a, b) => ORDER.indexOf(a) - ORDER.indexOf(b));
 
 /** Classes the model reported at time t (seconds), NOISE_FLOOR excluded. */
@@ -71,7 +72,9 @@ export function compareWithTruth({ events, truth, durationS, minS = 0.0003 }) {
     const a = edges[i], b = edges[i + 1];
     if (b - a <= 1e-12) continue;
     const mid = (a + b) / 2;
-    const pred = detectedAt(events, mid), tru = truthAt(truth, mid);
+    // A truth may name a family ("JAMMING", from the scenario generator):
+    // any class of it answers, so the detections are compared in its terms.
+    const tru = truthAt(truth, mid), pred = sortClasses(inTruthTerms(detectedAt(events, mid), tru));
     const key = `${pred.join(",")}|${tru.join(",")}`;
     if (pred.join() === tru.join()) continue;
     const last = runs[runs.length - 1];
@@ -113,9 +116,10 @@ export function lowConfidence(events, { below = 0.4 } = {}) {
     }));
 }
 
-// The classes the competition judges. A disagreement about one of them is
-// what an operator should look at first.
+// The classes the competition judges (JAMMING = every jammer type). A
+// disagreement about one of them is what an operator should look at first.
 const JUDGED = ["LFM_RADAR", "FHSS", "JAMMING"];
+const isJudged = c => JUDGED.includes(c) || JUDGED.includes(FAMILY_OF[c]);
 const KIND_RANK = { missed: 0, wrong_class: 1, false_alarm: 2 };
 
 /** Most important first: involves a judged class, then misses before false
@@ -124,7 +128,7 @@ export function rankSuggestions(items) {
   const judged = s => {
     const diff = [...s.predicted.filter(c => !s.suggested.includes(c)),
                   ...s.suggested.filter(c => !s.predicted.includes(c))];
-    return diff.some(c => JUDGED.includes(c)) ? 0 : 1;
+    return diff.some(isJudged) ? 0 : 1;
   };
   return [...items].sort((a, b) => judged(a) - judged(b)
     || KIND_RANK[a.kind] - KIND_RANK[b.kind]

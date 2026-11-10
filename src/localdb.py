@@ -38,10 +38,27 @@ from pathlib import Path
 SCHEMA_VERSION = 3
 GENESIS_HASH = "0" * 64
 
-# The model's classes, in its output order. Duplicated from configs/default.yaml
-# (via src.config) so this module stays standard-library only;
-# tests/test_localdb.py fails if the two ever disagree.
-CLASSES = ("BPSK", "QPSK", "16QAM", "64QAM", "LFM_RADAR", "FHSS", "JAMMING", "NOISE_FLOOR")
+# The model's classes, in its output order: the 60-class model the dashboard
+# and the Signal Pipeline run (configs/default.yaml browser_model). Duplicated
+# from configs/default.yaml's dataset_classes (via src.config) so this module
+# stays standard-library only; tests/test_localdb.py fails if the two ever
+# disagree.
+CLASSES = (
+    "JAM_BARRAGE", "JAM_SPOT", "JAM_TONE", "JAM_MULTITONE", "JAM_SWEPT", "JAM_CHIRP", "JAM_PULSED",
+    "JAM_PARTIAL_BAND", "JAM_REACTIVE", "JAM_DRFM", "NOISE_FLOOR", "PPM", "AFSK", "SSR_IFF", "FHSS",
+    "DSSS", "LORA_CSS", "RADAR_PULSE", "LFM_RADAR", "RADAR_BARKER", "RADAR_POLY_BARKER", "RADAR_FRANK",
+    "RADAR_COSTAS", "RADAR_FMCW", "RADAR_CW", "AM_DSB_WC", "AM_DSB_SC", "AM_SSB_WC", "AM_SSB_SC", "WBFM",
+    "NBFM", "PM", "OOK", "4ASK", "8ASK", "OFDM", "LTE_LIKE", "NR_LIKE", "16APSK", "32APSK", "64APSK",
+    "128APSK", "2FSK", "4FSK", "8FSK", "GFSK", "GMSK", "MSK", "CPFSK", "BPSK", "QPSK", "OQPSK", "8PSK",
+    "16PSK", "32PSK", "16QAM", "32QAM", "64QAM", "128QAM", "256QAM")
+# The jammer classes, and the family name that stands for "a jammer, type not
+# known": what the 8-class model called every jammer, what the scenario
+# generator still labels its truth, and what corrections stored before the
+# switch to 60 classes say. Accepted as a label so those rows stay valid;
+# retraining cannot learn a type from it and skips it (and says so).
+JAMMERS = tuple(c for c in CLASSES if c.startswith("JAM_"))
+FAMILY_LABELS = ("JAMMING",)
+LABELS = CLASSES + FAMILY_LABELS
 REVIEW_DECISIONS = {"approve": "approved", "reject": "rejected"}
 
 # When to retrain (decided 2026-09-26, see the team's HITL plan). The TRIGGER
@@ -274,6 +291,8 @@ ROLLING_IQ_BYTES = 2 * 1024 ** 3
 THREAT_VERDICTS = ("Hostile", "Military")
 
 MODEL_KINDS = ("single", "ensemble")
+# "both" (single + the 5-member ensemble) belonged to the 8-class model; there
+# is no 60-class ensemble, so scripts/retrain_from_feedback.py refuses it.
 RETRAIN_SCOPES = ("single", "both")
 SHIPPED = {"single": "shipped best_model.pt", "ensemble": "shipped 5-model ensemble (the submission)"}
 
@@ -596,10 +615,10 @@ class LocalDB:
     def _labels(value, what) -> list[str]:
         if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
             raise ValueError(f"{what} must be a list of class names")
-        unknown = [v for v in value if v not in CLASSES]
+        unknown = [v for v in value if v not in LABELS]
         if unknown:
             raise ValueError(f"{what}: unknown class {', '.join(unknown)}")
-        return sorted(set(value), key=CLASSES.index)
+        return sorted(set(value), key=LABELS.index)
 
     @staticmethod
     def _correction_row(row) -> dict:
@@ -739,7 +758,7 @@ class LocalDB:
     def correction_stats(self) -> dict:
         with closing(self._connect()) as con:
             by_status = dict(con.execute("SELECT status, COUNT(*) FROM corrections GROUP BY status").fetchall())
-            per_class = {c: 0 for c in CLASSES}
+            per_class = {c: 0 for c in LABELS}
             for (labels,) in con.execute("SELECT corrected_labels FROM corrections WHERE status = 'approved'"):
                 for c in json.loads(labels):
                     per_class[c] += 1
@@ -767,7 +786,7 @@ class LocalDB:
             if last:                       # labels not yet used by a retrain
                 q += " AND reviewed_at > ?"
                 args = (last,)
-            per_class = {c: 0 for c in CLASSES}
+            per_class = {c: 0 for c in LABELS}
             for (labels,) in con.execute(q, args):
                 for c in json.loads(labels):
                     per_class[c] += 1

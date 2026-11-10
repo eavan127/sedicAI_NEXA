@@ -301,7 +301,11 @@ export async function buildReport({ records, summary, corrections = [], audit = 
     const rows = Object.entries(modelCard || {}).filter(([, v]) => v == null || typeof v !== "object")
       .map(([k, v]) => [k, String(v)]);
     const th = modelCard?.thresholds || modelCard?.multilabel_thresholds;
-    if (th && typeof th === "object") rows.push(["thresholds", JSON.stringify(th)]);
+    if (th && typeof th === "object") {
+      const v = Object.values(th);
+      rows.push(["thresholds", v.length && v.every(x => x === v[0])
+        ? `${v[0]} for all ${v.length} classes` : JSON.stringify(th)]);
+    }
     s.table(["Field", "Value"], rows.length ? rows : [["model card", "not available"]], [0.3, 0.7]);
   }
   if (has("iq")) {

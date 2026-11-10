@@ -30,9 +30,11 @@ function check(name, ok, detail = "") {
 
 {
   const ev = (cls, peak) => ({ classes: [cls], peak: { [cls]: peak }, startUs: 0, endUs: 100 });
+  // 60-class model: one line (configs/default.yaml web_threshold 0.3) for every class
   check("clear line is 1.5x the threshold, capped below 100%",
-    Math.abs(clearLine("LFM_RADAR") - 0.36) < 1e-9 && Math.abs(clearLine("JAMMING") - 0.945) < 1e-9);
-  const sure = triage([ev("JAMMING", 0.97)]);
+    Math.abs(clearLine("LFM_RADAR") - 0.45) < 1e-9 && Math.abs(clearLine("JAM_BARRAGE") - 0.45) < 1e-9
+    && clearLine("NOT_A_CLASS") <= 0.75);
+  const sure = triage([ev("JAM_BARRAGE", 0.97)]);
   check("clear jamming: confirmed alert, no review", sure.alertLevel === "confirmed" && !sure.needsReview);
   const close = triage([ev("FHSS", 0.30)]);
   check("FHSS just past its threshold: possible alert AND review", close.alertLevel === "possible" && close.needsReview);

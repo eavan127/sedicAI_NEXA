@@ -174,7 +174,11 @@ export function printHeaderHtml({ source, caseNote, snrDb, snrKnown, hop, nWindo
   const truthLine = (truth && truth.length)
     ? truth.map(s => `${s.className} ${(s.startS * 1000).toFixed(2)} to ${(s.endS * 1000).toFixed(2)} ms`).join("; ")
     : "Not applicable. Uploaded capture carries no ground truth";
-  const thrLine = Object.entries(thresholds).map(([c, v]) => `${c} ${v}`).join("; ");
+  // The 60-class model has one line for every class: say it once, not 60 times.
+  const thrValues = Object.values(thresholds);
+  const thrLine = thrValues.length && thrValues.every(v => v === thrValues[0])
+    ? `${thrValues[0]} for all ${thrValues.length} classes`
+    : Object.entries(thresholds).map(([c, v]) => `${c} ${v}`).join("; ");
 
   // A ruled two-column parameter block: fixed-width label, value takes the
   // rest. An earlier version used a three-column dot leader, which the

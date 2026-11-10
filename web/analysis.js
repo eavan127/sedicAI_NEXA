@@ -28,13 +28,12 @@ import { THRESHOLDS } from "./thresholds.js";
 
 export { THRESHOLDS };
 
-// src/config.py:TIERS
-export const TIER_OF = {
-  BPSK: "Civilian", QPSK: "Civilian", "16QAM": "Civilian", "64QAM": "Civilian",
-  LFM_RADAR: "Military", FHSS: "Military",
-  JAMMING: "Hostile",
-  NOISE_FLOOR: "Empty",
-};
+// Tier per class of the 60-class model (generated into model_meta.js by
+// web/build.py from configs/default.yaml's class_groups), plus the family
+// names a truth may use ("JAMMING") -- see taxonomy.js.
+import { TIER_OF } from "./taxonomy.js";
+
+export { TIER_OF };
 // src/timeline.py:TIER_PRIORITY -- worst first.
 export const TIER_PRIORITY = ["Hostile", "Military", "Civilian", "Empty"];
 

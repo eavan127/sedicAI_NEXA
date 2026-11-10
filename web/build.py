@@ -6,10 +6,22 @@ folder with no build step of its own:
   1. assets/sedic_logo.png is inlined as a data: URI. The asset is
      gitignored (see src/ui/app.py:_logo_path for the same problem on the
      Gradio side), so it cannot be fetched as a file by a static host.
-  2. The ONNX checkpoints are copied into web/models/ as SINGLE files --
-     torch's exporter writes weights to a sidecar .onnx.data, which
-     onnxruntime-web's WASM backend cannot load ("Module.MountedFiles is
-     not available").
+  2. The browser model is copied into web/models/best_model.onnx as a
+     SINGLE file -- torch's exporter writes weights to a sidecar .onnx.data,
+     which onnxruntime-web's WASM backend cannot load ("Module.MountedFiles
+     is not available").
+  3. web/model_meta.js, web/thresholds.js and web/data/model_card.json are
+     generated from that model's checkpoint, so the page's class list,
+     window length and STFT size can never disagree with the file it runs.
+
+The browser runs the SAME model as the Python Signal Pipeline: the
+checkpoint configs/default.yaml names as browser_model (60 classes),
+exported with
+
+    python scripts/export_onnx.py --ckpt <browser_model>
+
+which writes the .onnx next to it. The old 8-class
+files (best_model.onnx + ensemble_0..4.onnx, 26 Sept 2026) are in git history.
 
 Usage:
     python web/build.py
@@ -25,9 +37,27 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 REPO = Path(__file__).resolve().parents[1]
 WEB = REPO / "web"
 MODELS_OUT = WEB / "models"
-ONNX_SRC = REPO / "results" / "onnx"
-CHECKPOINTS = ["best_model", "ensemble_0", "ensemble_1", "ensemble_2",
-                "ensemble_3", "ensemble_4"]
+# The model the browser runs: the same checkpoint src/pipeline/classify.py
+# loads. Its ONNX export sits next to it (scripts/export_onnx.py --ckpt).
+def _browser_ckpt():
+    from src.config import CFG
+    return REPO / CFG.get("browser_model", "results/classifier/physics_aug_best.pt")
+
+
+BROWSER_CKPT = _browser_ckpt()
+BROWSER_ONNX = BROWSER_CKPT.with_suffix(".onnx")
+WEB_MODEL = "best_model"          # served as /models/best_model.onnx (serve_local swaps in retrained ones)
+# Files from the 8-class era that must not linger next to the 60-class model.
+STALE_MODELS = [f"ensemble_{i}" for i in range(5)]
+# The browser model's decision line: configs/default.yaml web_threshold (one
+# value for every class; see the comment there), used when the config does
+# not set it.
+WEB_THRESHOLD = 0.3
+# Operational tier of each family (configs/default.yaml class_groups), for the
+# page's colours, ribbon and alerts. Classes named here override their family.
+FAMILY_TIER = {"JAMMING": "Hostile", "RADAR": "Military", "SPREAD": "Military",
+               "PULSE_COMMS": "Military"}
+CLASS_TIER = {"NOISE_FLOOR": "Empty", "LORA_CSS": "Civilian", "AFSK": "Civilian"}
 
 
 def build_html():
@@ -40,6 +70,7 @@ def build_html():
         print(f"  warning: {logo} not found — header will show a broken image")
         src = ""
     out = template.replace("__LOGO_BASE64__", src)
+    out = out.replace("__BROWSER_MODEL__", BROWSER_CKPT.name)
 
     # Supabase credentials. Only the DEPLOYED site gets a key: analyses from
     # the live app go to the shared table, while a development run stays in
@@ -60,43 +91,149 @@ def build_html():
     print(f"  index.html  ({len(out) / 1024:.0f} KB)")
 
 
-def build_thresholds():
-    """Generate web/thresholds.js from the config.
+def _browser_meta():
+    """The browser model's checkpoint meta (classes, window, STFT, flags,
+    provenance) and its parameter counts. None when torch or the
+    checkpoint is missing on this machine."""
+    try:
+        import torch
+    except ImportError:
+        print("  torch not installed -- model_meta.js / thresholds.js / model_card.json left as they are")
+        return None
+    if not BROWSER_CKPT.is_file():
+        print(f"  warning: {BROWSER_CKPT.relative_to(REPO)} missing -- model_meta.js / thresholds.js / "
+              "model_card.json left as they are")
+        return None
+    from src.models.amc_cnn import AMC_CNN
+    ck = torch.load(BROWSER_CKPT, map_location="cpu", weights_only=False)
+    meta = ck["meta"]
+    model = AMC_CNN(num_classes=len(meta["classes"]), input_len=meta["input_len"],
+                    stft_n_fft=meta["stft_n_fft"], **meta.get("model_flags", {}))
+    model.load_state_dict(ck["state_dict"])
 
-    These used to be a hand-maintained literal in web/analysis.js carrying a
-    "keep these in sync" comment, and they drifted: after the C2 ensemble was
-    calibrated to 0.24/0.24/0.89 the page was still deciding at 0.22/0.25/0.87,
-    so the deployed app ran the new checkpoints at the old operating point
-    while the Performance tab reported numbers measured at the new one.
+    def count(m):
+        return int(sum(p.numel() for p in m.parameters())) if m is not None else 0
 
-    Generated rather than fetched so the values stay a synchronous ES import --
-    analysis.js re-exports them and main.js/pages.js are unchanged. Committed
-    like index.html and web/models/*.onnx, so a clone that never runs this
-    script still has a working page.
+    branches = {name: count(getattr(model, name)) for name in
+                ("iq_branch", "stft_branch", "expert_norm", "spectrum_branch", "physics_norm")
+                if getattr(model, name, None) is not None}
+    return {"meta": meta, "parameters": count(model), "branches": branches,
+            "hop": model.stft_branch.hop_length}
+
+
+def build_model_meta():
+    """web/model_meta.js, web/thresholds.js and web/data/model_card.json from
+    the browser model's checkpoint.
+
+    Generated rather than hand-written for the reason thresholds.js already
+    was: a hand-maintained copy drifts. The page used to hardcode 8 classes
+    and a 16-point STFT; the 60-class model needs a 64-point STFT and a
+    different class order, and one stale constant would feed it
+    out-of-distribution input without any error. Committed like index.html
+    and web/models/*.onnx, so a clone that never runs this script still has
+    a working page.
     """
-    # Imported here, not at module level: this file keeps the HTML path free of
-    # heavy imports so a machine with no dataset can still rebuild the page.
+    import datetime
+    import hashlib
     import json
 
-    from src.config import CFG, CLASSES
+    from src.config import CFG, CLASS_GROUPS
 
-    thresholds = CFG.get("multilabel_thresholds_per_class", {})
-    fallback = CFG.get("multilabel_threshold", 0.5)
-    values = {c: float(thresholds.get(c, fallback)) for c in CLASSES}
+    info = _browser_meta()
+    if info is None:
+        return
+    meta = info["meta"]
+    classes = list(meta["classes"])
+    groups = {g: [c for c in cs if c in classes] for g, cs in CLASS_GROUPS.items()}
+    groups["NOISE"] = ["NOISE_FLOOR"]
+    family = {c: g for g, cs in groups.items() for c in cs}
+    missing = [c for c in classes if c not in family]
+    if missing:
+        raise SystemExit(f"classes with no family in configs/default.yaml class_groups: {missing}")
+    tier = {c: CLASS_TIER.get(c, FAMILY_TIER.get(family[c], "Civilian")) for c in classes}
+    onnx_sha = (hashlib.sha256(BROWSER_ONNX.read_bytes()).hexdigest()[:12]
+                if BROWSER_ONNX.is_file() else None)
+    model = {
+        "checkpoint": BROWSER_CKPT.relative_to(REPO).as_posix(),
+        "name": BROWSER_CKPT.name,
+        "onnx_sha256_12": onnx_sha,
+        "data_version": meta.get("combined_version"),
+        "seed": meta.get("seed"), "epoch": meta.get("epoch"),
+        "val_top1": (meta.get("val") or {}).get("top1"),
+        "flags": meta.get("model_flags", {}),
+        "git_commit": meta.get("git_commit"),
+    }
 
-    body = ",\n".join(f'  {json.dumps(c)}: {v:g}' for c, v in values.items())
+    def js(v):
+        return json.dumps(v, indent=1)
+
     src = (
-        "// GENERATED by web/build.py from configs/default.yaml's\n"
-        "// multilabel_thresholds_per_class. Do not edit by hand -- re-run\n"
-        "// `python web/build.py` after scripts/calibrate_thresholds.py.\n"
+        "// GENERATED by web/build.py from " + model["checkpoint"] + " (its own meta)\n"
+        "// and configs/default.yaml's class_groups. Do not edit by hand -- re-run\n"
+        "// `python web/build.py` after exporting a new model (scripts/export_onnx.py --ckpt).\n"
         "//\n"
-        "// These are the decision points the deployed page actually uses, so\n"
-        "// they must match the checkpoints in web/models/. They are generated\n"
-        "// because the hand-maintained copy in analysis.js drifted once.\n"
-        "export const THRESHOLDS = {\n" + body + ",\n};\n"
+        "// The browser model (models/best_model.onnx) is the same checkpoint the\n"
+        "// Python Signal Pipeline runs (src/pipeline/classify.py).\n"
+        f"export const MODEL = {js(model)};\n"
+        f"export const CLASSES = {json.dumps(classes)};\n"
+        f"export const WINDOW_LEN = {int(meta['input_len'])};\n"
+        f"export const STFT_N_FFT = {int(meta['stft_n_fft'])};\n"
+        f"export const STFT_HOP = {int(info['hop'])};\n"
+        f"export const FS = {int(CFG['signal']['fs'])};\n"
+        "// family -> its classes (configs/default.yaml class_groups, plus NOISE)\n"
+        f"export const GROUPS = {js(groups)};\n"
+        f"export const FAMILY_OF = {json.dumps(family)};\n"
+        "// operational tier per class: web/build.py FAMILY_TIER / CLASS_TIER\n"
+        f"export const TIER_OF = {json.dumps(tier)};\n"
     )
-    (WEB / "thresholds.js").write_text(src, encoding="utf-8")
-    print("  thresholds.js  " + "; ".join(f"{c} {v:g}" for c, v in values.items()))
+    (WEB / "model_meta.js").write_text(src, encoding="utf-8")
+    print(f"  model_meta.js  {len(classes)} classes, window {meta['input_len']}, "
+          f"STFT {meta['stft_n_fft']}/{info['hop']}, from {model['name']}")
+
+    per_class = CFG.get("web_thresholds_per_class") or {}
+    line = float(CFG.get("web_threshold", WEB_THRESHOLD))
+    values = {c: float(per_class.get(c, line)) for c in classes}
+    body = ",\n".join(f"  {json.dumps(c)}: {v:g}" for c, v in values.items())
+    (WEB / "thresholds.js").write_text(
+        "// GENERATED by web/build.py. Do not edit by hand.\n"
+        "//\n"
+        "// The decision line per class for the browser model. The 60-class model\n"
+        "// has no calibrated per-class thresholds yet: every class is reported\n"
+        f"// once its sigmoid score passes {line:g} (configs/default.yaml web_threshold),\n"
+        "// unless configs/default.yaml lists one under web_thresholds_per_class.\n"
+        "export const THRESHOLDS = {\n" + body + ",\n};\n", encoding="utf-8")
+    print(f"  thresholds.js  {len(per_class)} set per class, the rest {line:g}")
+
+    from src.measure import (C42_BOUNDARY, C42_MIN_SNR_DB, C42_POOLED_ACCURACY,
+                              MIN_WINDOWS_FOR_C42_DECISION)
+    card = {
+        "architecture": "AMC_CNN",
+        "member_architecture": "AMC_CNN",
+        "name": model["name"],
+        "data_version": model["data_version"], "seed": model["seed"], "epoch": model["epoch"],
+        "val_top1": model["val_top1"],
+        "flags": model["flags"],
+        "parameters": info["parameters"],
+        "branches": info["branches"],
+        "classes": classes,
+        "families": groups,
+        "tiers": tier,
+        "window_len": int(meta["input_len"]),
+        "fs": CFG["signal"]["fs"],
+        "thresholds": values,
+        "benchmark_recall": CFG["benchmark_recall"],
+        "judged_classes": CFG["judged_classes"],
+        "c42": {
+            "boundary": C42_BOUNDARY,
+            "min_windows": MIN_WINDOWS_FOR_C42_DECISION,
+            "min_snr_db": C42_MIN_SNR_DB,
+            "pooled_accuracy": {str(k): v for k, v in C42_POOLED_ACCURACY.items()},
+        },
+        "generated": datetime.datetime.now().isoformat(timespec="seconds"),
+    }
+    (WEB / "data").mkdir(parents=True, exist_ok=True)
+    (WEB / "data" / "model_card.json").write_text(json.dumps(card, indent=1))
+    print(f"  data/model_card.json  ({card['parameters']:,} params)")
 
 
 def build_models():
@@ -112,15 +249,21 @@ def build_models():
         return
 
     MODELS_OUT.mkdir(parents=True, exist_ok=True)
-    for name in CHECKPOINTS:
-        src = ONNX_SRC / f"{name}.onnx"
-        if not src.is_file():
-            print(f"  warning: {src} missing — run scripts/export_onnx.py first")
-            continue
-        model = onnx.load(str(src))          # pulls in the sidecar .data
-        dst = MODELS_OUT / f"{name}.onnx"
-        onnx.save_model(model, str(dst), save_as_external_data=False)
-        print(f"  models/{name}.onnx  ({dst.stat().st_size / 1024:.0f} KB)")
+    if not BROWSER_ONNX.is_file():
+        print(f"  warning: {BROWSER_ONNX.relative_to(REPO)} missing -- run "
+              f"python scripts/export_onnx.py --ckpt {BROWSER_CKPT.relative_to(REPO).as_posix()} first")
+        return
+    model = onnx.load(str(BROWSER_ONNX))          # pulls in a sidecar .data if there is one
+    n_out = model.graph.output[0].type.tensor_type.shape.dim[1].dim_value
+    dst = MODELS_OUT / f"{WEB_MODEL}.onnx"
+    onnx.save_model(model, str(dst), save_as_external_data=False)
+    print(f"  models/{WEB_MODEL}.onnx  ({dst.stat().st_size / 1024:.0f} KB, {n_out} classes, "
+          f"from {BROWSER_ONNX.relative_to(REPO).as_posix()})")
+    for name in STALE_MODELS:
+        old = MODELS_OUT / f"{name}.onnx"
+        if old.exists():
+            old.unlink()
+            print(f"  models/{name}.onnx  removed (8-class era; in git history)")
 
 
 def _f32(path, arr):
@@ -353,32 +496,7 @@ def build_data():
     # team circulates. src/ui/pages/performance.py embeds them as-is for the
     # same reason and says restyling them is not that package's call.
 
-    # --- constants + model card -------------------------------------------
-    from src.models.amc_cnn import AMC_CNN
-    import torch
-    model = AMC_CNN(num_classes=len(CLASSES), input_len=CFG["signal"]["window_len"])
-    model.load_state_dict(torch.load(REPO / "results" / "best_model.pt", map_location="cpu"))
-    card = {
-        "architecture": "EnsembleModel",
-        "member_architecture": type(model).__name__,
-        "parameters": int(sum(p.numel() for p in model.parameters())),
-        "branches": {name: int(sum(p.numel() for p in getattr(model, name).parameters()))
-                      for name in ("iq_branch", "stft_branch")},
-        "classes": list(CLASSES),
-        "window_len": CFG["signal"]["window_len"],
-        "fs": CFG["signal"]["fs"],
-        "thresholds": CFG.get("multilabel_thresholds_per_class", {}),
-        "benchmark_recall": CFG["benchmark_recall"],
-        "judged_classes": CFG["judged_classes"],
-        "c42": {
-            "boundary": C42_BOUNDARY,
-            "min_windows": MIN_WINDOWS_FOR_C42_DECISION,
-            "min_snr_db": C42_MIN_SNR_DB,
-            "pooled_accuracy": {str(k): v for k, v in C42_POOLED_ACCURACY.items()},
-        },
-    }
-    (data_out / "model_card.json").write_text(json.dumps(card, indent=1))
-    print(f"  data/model_card.json  ({card['parameters']:,} params)")
+    # The model card is written by build_model_meta(), from the browser model.
 
 
 if __name__ == "__main__":
@@ -401,11 +519,11 @@ if __name__ == "__main__":
 
     print("building web/")
     build_html()
-    # Before the data steps: thresholds come from the config alone, so they
-    # must refresh even on a machine without the dataset or checkpoints --
-    # the page decides with these whether or not build_data() can run.
-    build_thresholds()
+    # Before the data steps: the model, its class list and thresholds must
+    # refresh even on a machine without the dataset -- the page decides with
+    # these whether or not build_data() can run.
     build_models()
+    build_model_meta()
     # The page is always rebuilt; the data steps need things a machine editing
     # the HTML may simply not have -- the 330 MB dataset (untracked), or
     # checkpoints matching the config's current experiment flags. Missing

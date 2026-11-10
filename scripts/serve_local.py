@@ -108,7 +108,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from src.localdb import ROLLING_IQ_BYTES, SESSION_HOURS, SYSTEM, TOP_ROLE, Actor, LocalDB, role_at_least  # noqa: E402
+from src.localdb import CLASSES, ROLLING_IQ_BYTES, SESSION_HOURS, SYSTEM, TOP_ROLE, Actor, LocalDB, role_at_least  # noqa: E402
 from src.report_export import _iq_payload, build_export  # noqa: E402
 
 WEB = ROOT / "web"
@@ -592,7 +592,7 @@ class Handler(SimpleHTTPRequestHandler):
         head = parts[0] if parts else ""
 
         if head == "health" and method == "GET":
-            single, ens = self.db.active_model("single"), self.db.active_model("ensemble")
+            single, ens = self._active_single(), self.db.active_model("ensemble")
             return self._send_json({"app": APP_ID, "ok": True, "db": self.db.path.name,
                                     "counts": self.db.counts(),
                                     "active_model": single["version"] if single else None,
@@ -833,6 +833,17 @@ class Handler(SimpleHTTPRequestHandler):
         self.db.update_job(job["id"], log_path=log_rel, pid=proc.pid)
         return self.db.get_job(job["id"])
 
+    def _active_single(self):
+        """The active retrained single model, if the page can run it: one with
+        the 60-class model's outputs. A version retrained before the switch to
+        60 classes (8 outputs, no n_classes in its metrics) is never served --
+        the page would read its scores against the wrong class names -- so the
+        shipped web/models/best_model.onnx is served instead."""
+        active = self.db.active_model("single")
+        if active and (active.get("metrics") or {}).get("n_classes") == len(CLASSES):
+            return active
+        return None
+
     def _serve_active_model(self, path: str) -> bool:
         """/models/best_model.onnx and /models/ensemble_<i>.onnx: the ACTIVE
         approved retrained version when there is one, else the shipped file
@@ -840,7 +851,7 @@ class Handler(SimpleHTTPRequestHandler):
         web/models/ are never overwritten, so roll back is exact."""
         name = path.rsplit("/", 1)[-1]
         if name == "best_model.onnx":
-            active = self.db.active_model("single")
+            active = self._active_single()
             file = (self.db.path.parent / active["path"]) if active else None
         else:
             active = self.db.active_model("ensemble")

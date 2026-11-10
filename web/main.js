@@ -1,5 +1,6 @@
 import { CASE_NAMES, buildScenario, caseNeedsLibrary, loadCivilianLibrary, resolveCase } from "./generators.js";
-import { classifyCapture, loadModel, CLASSES, FS, WINDOW_LEN } from "./model.js";
+import { classifyCapture, loadModel, CLASSES, FS, MODEL, WINDOW_LEN } from "./model.js";
+import { FAMILY_OF, GROUPS, JAMMERS } from "./taxonomy.js";
 import {
   noiseFloorPower, occupancy, powerSpectrumDb, resolveSession, scipyStft,
 } from "./analysis.js";
@@ -102,7 +103,7 @@ async function init() {
     // The constellation panel needs the C42 calibration constants, so the
     // card is loaded up front rather than lazily on the Model page.
     modelCard = await (await fetch("./data/model_card.json")).json();
-    await getModel("ensemble");
+    await getModel("single");
     detectServer().then(info => labelModelOptions(
       info?.active_model ? { version: info.active_model } : null,
       info?.active_ensemble ? { version: info.active_ensemble } : null));
@@ -120,10 +121,9 @@ let activeSingleVersion = null;
 let activeEnsembleVersion = null;
 
 function modelLabel(which) {
-  if (which === "ensemble") {
-    return activeEnsembleVersion ? `5-model ensemble, retrained ${activeEnsembleVersion}` : "5-model ensemble average";
-  }
-  return activeSingleVersion ? `single checkpoint, retrained ${activeSingleVersion}` : "single checkpoint, best_model.pt";
+  return activeSingleVersion
+    ? `${CLASSES.length}-class model, retrained ${activeSingleVersion}`
+    : `${CLASSES.length}-class model, ${MODEL.name}`;
 }
 
 /** Re-derives every panel from the cached raw result. Smoothing is a display
@@ -140,7 +140,7 @@ function paintTriage(t) {
   const pct = x => `${Math.round(x * 100)}%`;
   const parts = [];
   if (t.alertLevel) {
-    const what = t.threats.map(x => `${x.cls} ${pct(x.peak)}${x.unreported ? " (under its 89% reporting threshold)" : ""}`).join(", ");
+    const what = t.threats.map(x => `${x.cls} ${pct(x.peak)}${x.unreported ? " (no jammer type over its reporting threshold)" : ""}`).join(", ");
     parts.push(t.alertLevel === "confirmed"
       ? `<div class="tri alert"><strong>THREAT DETECTED</strong> ${what}</div>`
       : `<div class="tri possible"><strong>POSSIBLE THREAT</strong> ${what}. The model only just reported it: check the waterfall.</div>`);
@@ -163,7 +163,7 @@ function render() {
   const resolved = resolveSession(result, smoothed);
   const events = resolved.emitterEvents;
   const tiers = resolved.tiers;
-  session.triage = triage(events, peakScore(result, CLASSES.indexOf("JAMMING")));
+  session.triage = triage(events, peakScore(result, JAMMERS.map(c => CLASSES.indexOf(c))));
   paintTriage(session.triage);
   const emptyPct = tiers.length ? tiers.filter(t => t === "Empty").length / tiers.length * 100 : 0;
   const durationMs = capture.re.length / FS * 1000;
@@ -394,12 +394,19 @@ const corrModelSaid = el("corrModelSaid"), corrClasses = el("corrClasses");
 const corrStart = el("corrStart"), corrEnd = el("corrEnd"), corrReason = el("corrReason");
 const corrOperator = el("corrOperator"), corrError = el("corrError"), corrSubmit = el("corrSubmit");
 
+// One fieldset per family of the 60-class model (configs/default.yaml
+// class_groups, via model_meta.js), threats first, "nothing here" last.
+const FAMILY_LABEL = {
+  JAMMING: "Jammers", RADAR: "Radars", SPREAD: "Spread spectrum", PULSE_COMMS: "Pulse links",
+  ANALOG: "Analog voice", ASK: "ASK", MULTICARRIER: "Multicarrier", APSK: "APSK", FSK: "FSK",
+  PSK: "PSK", QAM: "QAM", NOISE: "Nothing",
+};
+const FAMILY_FIRST = ["JAMMING", "RADAR", "SPREAD", "PULSE_COMMS"];
 const CLASS_GROUPS = [
-  ["Civilian", ["BPSK", "QPSK", "16QAM", "64QAM"]],
-  ["Military", ["LFM_RADAR", "FHSS"]],
-  ["Hostile", ["JAMMING"]],
-  ["Nothing", ["NOISE_FLOOR"]],
-];
+  ...FAMILY_FIRST.filter(g => GROUPS[g]),
+  ...Object.keys(GROUPS).filter(g => !FAMILY_FIRST.includes(g) && g !== "NOISE"),
+  "NOISE",
+].map(g => [FAMILY_LABEL[g] || g, GROUPS[g]]);
 corrClasses.innerHTML = CLASS_GROUPS.map(([group, classes]) =>
   `<fieldset><legend>${group}</legend>` + classes.map(c =>
     `<label><input type="checkbox" value="${c}"> ${c === "NOISE_FLOOR" ? "Nothing here (noise only)" : c}</label>`).join("")
@@ -421,7 +428,11 @@ function openCorrection({ predicted, startS, endS, missed, suggested = null, rea
   corrStart.max = corrEnd.max = (durS * 1000).toFixed(2);
   // Pre-ticked: the recommended answer when there is one, else what the
   // model said (so the operator only changes what is wrong).
-  const ticks = suggested || predicted;
+  // A suggestion from a scenario's truth may name a family ("JAMMING": the
+  // generator does not say which jammer type): tick the detected classes of
+  // that family, and the operator picks the type when none was detected.
+  const ticks = (suggested || predicted).flatMap(c =>
+    GROUPS[c] ? predicted.filter(p => FAMILY_OF[p] === c) : [c]);
   for (const box of corrClasses.querySelectorAll("input")) box.checked = ticks.includes(box.value);
   corrReason.value = reason;
   corrOperator.value = operatorName();
@@ -1211,8 +1222,11 @@ function currentModelHtml(d) {
         <span style="font-size:1.5rem;font-weight:600;font-variant-numeric:tabular-nums;">${pct(d.vote_clear)}</span>
         <span>exact-class accuracy on clear signals (10 dB or more), voting over 16 consecutive windows</span>
       </div>` : ""}
-      <div class="cm-meta" style="margin:2px 0 10px;">Single window on clear signals: ${pct(d.top1_clear)}.
-        Breakdown below: single window, all signal strengths.</div>
+      <div class="cm-meta" style="margin:2px 0 10px;">Single window on clear signals: ${pct(d.top1_clear)};
+        single window, all signal strengths: ${pct(d.top1)}.
+        Breakdown below: single window, all signal strengths${d.families_from ? `, from the previous model
+        (${esc(d.families_from.model)}, run ${esc(d.families_from.run)}, ${pct(d.families_from.top1)} overall): this
+        model's own breakdown is not exported yet` : ""}.</div>
       <div class="cm-meta" style="margin:2px 0 2px;">Share of test signals in each family identified as their exact class. Select a family to view its classes.</div>
       ${d.families.map(f => `
         <details>
@@ -1324,7 +1338,7 @@ function labelModelOptions(single, ensemble) {
   activeSingleVersion = single ? single.version : null;
   activeEnsembleVersion = ensemble ? ensemble.version : null;
   const s = modelSel.querySelector('option[value="single"]');
-  if (s) s.textContent = single ? `Single, retrained ${single.version}` : "Single, best_model.pt";
+  if (s) s.textContent = single ? `${CLASSES.length}-class, retrained ${single.version}` : `${CLASSES.length}-class, ${MODEL.name}`;
   const e = modelSel.querySelector('option[value="ensemble"]');
   if (e) e.textContent = ensemble ? `Ensemble (5 models), retrained ${ensemble.version}` : "Ensemble (5 models)";
 }
@@ -1337,7 +1351,7 @@ function recallCell(m, cls) {
   return `${(b * 100).toFixed(1)} → <strong>${(a * 100).toFixed(1)}</strong> <span class="${d < -0.05 ? "down" : d > 0.05 ? "up" : ""}">(${d >= 0 ? "+" : ""}${d.toFixed(1)})</span>`;
 }
 
-const MODEL_KIND_LABEL = { single: "Single", ensemble: "Ensemble ×5" };
+const MODEL_KIND_LABEL = { single: "Single", ensemble: "Ensemble ×5 (8-class)" };
 const STATUS_TEXT = { active: "in use", candidate: "waiting for approval", retired: "saved (used before)", rejected: "saved (rejected)" };
 
 /** What can be done with a saved version, and how it is labelled. Every
@@ -1346,8 +1360,15 @@ const STATUS_TEXT = { active: "in use", candidate: "waiting for approval", retir
 const isOperator = () => currentAuth().user?.role === "operator";
 const isAnalyst = () => currentAuth().user?.role === "analyst";
 
+/** A saved version this page can run: a single model with the page's class
+ *  count. Versions retrained before the switch to 60 classes (8 outputs, or a
+ *  5-member ensemble) stay saved but cannot be put back into use here;
+ *  serve_local.py refuses to serve them for the same reason. */
+const runsHere = m => m.kind === "single" && m.metrics?.n_classes === CLASSES.length;
+
 function versionActions(m) {
   const v = escH(m.version), passed = !!m.metrics?.gate?.passed;
+  if (!runsHere(m)) return `<span class="note">${m.kind === "ensemble" ? "8-class ensemble" : "8-class model"} from before the switch to ${CLASSES.length} classes: kept, cannot run on this page</span>`;
   if (m.status === "active" || isOperator()) return "";
   if (m.status === "candidate") {
     return (passed ? `<button class="mini" data-act="approve" data-v="${v}">Approve &amp; activate</button> `
@@ -1371,14 +1392,12 @@ async function renderRetrain() {
   el("rtOverrideRow").hidden = !!st?.recommended;
   try {
     const [models, jobs] = await Promise.all([listModels(), listJobs()]);
-    const single = models.find(m => m.status === "active" && m.kind === "single") || null;
-    const ensemble = models.find(m => m.status === "active" && m.kind === "ensemble") || null;
-    labelModelOptions(single, ensemble);
+    const single = models.find(m => m.status === "active" && runsHere(m)) || null;
+    labelModelOptions(single, null);
     const inUse = (m, shipped) => m
       ? `<strong>${escH(m.version)}</strong> (retrained, activated by ${escH(m.approved_by)})`
       : `<strong>${shipped}</strong>`;
-    rtActive.innerHTML = `In use now: single model ${inUse(single, "shipped best_model.pt")} · `
-      + `ensemble ${inUse(ensemble, "shipped 5-model submission")}.`;
+    rtActive.innerHTML = `In use now: the ${CLASSES.length}-class model ${inUse(single, `shipped ${MODEL.name}`)}.`;
 
     // The two shipped baselines head the table: they are versions too, and
     // "use shipped" is always one click away.
@@ -1390,7 +1409,7 @@ async function renderRetrain() {
 
     rtModels.innerHTML = `<table><thead><tr><th>Version</th><th>Type</th><th>Fine-tuned from · data</th><th>Exam</th>`
       + `<th>LFM_RADAR</th><th>FHSS</th><th>JAMMING</th><th>Gate</th><th>Status</th><th></th></tr></thead><tbody>`
-      + shippedRow("ensemble", "Submission ensemble", !ensemble) + shippedRow("single", "best_model.pt", !single)
+      + shippedRow("single", `${MODEL.name} (${CLASSES.length} classes)`, !single)
       + models.map(m => {
         const g = m.metrics?.gate || {}, tr = m.metrics?.train || {};
         const rules = (g.rules || []).map(r => `<li class="${r.met ? "met" : "unmet"}"><span>${r.met ? "" : ""}</span> ${escH(r.text)}</li>`).join("");
@@ -1516,9 +1535,7 @@ el("rtStart").addEventListener("click", async () => {
   el("rtStart").disabled = true;
   try {
     const job = await startRetrain(rtReason.value, rtOverride.checked, scope);
-    rtMsg.textContent = scope === "both"
-      ? "Retraining the single model and all 5 ensemble members (about 20 min). This panel follows it; you can keep using the app."
-      : "Retraining the single model (about 4 min). This panel follows it.";
+    rtMsg.textContent = `Retraining the ${CLASSES.length}-class model. This panel follows it; you can keep using the app.`;
     rtReason.value = "";
     rtOverride.checked = false;
     pollJob(job.id);
@@ -1542,7 +1559,7 @@ el("retrainBlock").addEventListener("click", async (ev) => {
       const note = window.prompt(`Switch the ${kind === "ensemble" ? "ensemble" : "single model"} back to the shipped version as ${me}? Reason:`, "");
       if (note === null) return;
       await rollbackModel(note, kind);
-      rtMsg.textContent = `The shipped ${kind === "ensemble" ? "5-model submission" : "best_model.pt"} is in use again. The retrained versions stay saved.`;
+      rtMsg.textContent = `The shipped ${kind === "ensemble" ? "5-model submission" : MODEL.name} is in use again. The retrained versions stay saved.`;
     } else if (act === "reject") {
       const note = window.prompt(`Reject ${v} as ${me}. Why? (required; the version stays saved)`, "");
       if (note === null) return;

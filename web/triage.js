@@ -18,10 +18,11 @@
 // the score above which test-set detections are right 90% of the time.
 
 import { THRESHOLDS } from "./thresholds.js";
+import { JAMMERS, THREAT_CLASSES } from "./taxonomy.js";
 
+export { THREAT_CLASSES };
 export const CLOSE_CALL = 1.5;          // under 1.5x the class threshold = close call
 export const POSSIBLE_JAMMING = 0.5;    // unreported jamming score that still alerts
-export const THREAT_CLASSES = ["LFM_RADAR", "FHSS", "JAMMING"];
 
 /** The score a detection must reach to be "clear", never above halfway
  *  between the threshold and 100% (JAMMING's 0.89 x 1.5 would exceed 1). */
@@ -32,7 +33,7 @@ export function clearLine(cls) {
 
 /**
  * events:      resolveSession(...).emitterEvents ({classes, peak, startUs, endUs})
- * jammingPeak: the highest raw JAMMING score anywhere in the capture
+ * jammingPeak: the highest raw score of any jammer class anywhere in the capture
  * Returns { alertLevel: "confirmed"|"possible"|null, threats: [{cls, peak, sure}],
  *           needsReview, closeCalls: [{cls, peak, line, startUs, endUs}] }.
  */
@@ -50,7 +51,7 @@ export function triage(events, jammingPeak = 0) {
       }
     }
   }
-  if (!threats.has("JAMMING") && jammingPeak >= POSSIBLE_JAMMING) {
+  if (!JAMMERS.some(c => threats.has(c)) && jammingPeak >= POSSIBLE_JAMMING) {
     threats.set("JAMMING", { cls: "JAMMING", peak: jammingPeak, sure: false, unreported: true });
   }
   const list = [...threats.values()].sort((a, b) => b.peak - a.peak);
@@ -61,9 +62,13 @@ export function triage(events, jammingPeak = 0) {
   };
 }
 
-/** Highest raw score of one class over every window of a classifier result. */
+/** Highest raw score of one class (an index) or of any of several (an array
+ *  of indices) over every window of a classifier result. */
 export function peakScore(result, classIndex) {
+  const idx = Array.isArray(classIndex) ? classIndex : [classIndex];
   let m = 0;
-  for (let w = 0; w < result.nWindows; w++) m = Math.max(m, result.probs[w * result.nClasses + classIndex]);
+  for (let w = 0; w < result.nWindows; w++) {
+    for (const j of idx) if (j >= 0) m = Math.max(m, result.probs[w * result.nClasses + j]);
+  }
   return m;
 }

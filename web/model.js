@@ -1,32 +1,41 @@
-// onnxruntime-web wiring: loads a checkpoint (single or the 5-member
-// ensemble), runs batched sliding-window inference, and averages sigmoid
-// probabilities -- the same averaging EnsembleModel.forward
-// (src/ui/app_models.py) does, on probabilities rather than logits.
+// onnxruntime-web wiring: loads the classifier, runs batched sliding-window
+// inference and returns sigmoid probabilities -- the same numbers
+// src/pipeline/classify.py:Classifier returns in Python.
+//
+// The model is the 60-class one the Python Signal Pipeline runs
+// (configs/default.yaml browser_model, exported by scripts/export_onnx.py and
+// copied here by web/build.py). Its class list, window length and STFT size
+// come from model_meta.js, which web/build.py generates from the same
+// checkpoint, so they cannot drift from the file. The 8-class model and the
+// 5-member ensemble (26 Sept 2026) are in git history.
 //
 // Requires the global `ort` (onnxruntime-web UMD build) to be loaded before
 // this module runs -- see index.html.
 
 import { hannWindow, stftMag } from "./dsp.js";
+import { CLASSES, FS, MODEL, STFT_HOP, STFT_N_FFT, WINDOW_LEN } from "./model_meta.js";
 
-export const CLASSES = ["BPSK", "QPSK", "16QAM", "64QAM", "LFM_RADAR", "FHSS", "JAMMING", "NOISE_FLOOR"];
+export { CLASSES, FS, MODEL, WINDOW_LEN };
 
-export const WINDOW_LEN = 512;
-export const FS = 3200000;
-const N_FFT = 16, STFT_HOP = 4;
+const N_FFT = STFT_N_FFT;
 const STFT_WINDOW = hannWindow(N_FFT);
 const N_STFT_FRAMES = 1 + Math.floor((WINDOW_LEN - N_FFT) / STFT_HOP);
 
-export async function loadModel(which = "ensemble", baseUrl = "./models", onProgress = null) {
-  const names = which === "ensemble"
-    ? ["ensemble_0", "ensemble_1", "ensemble_2", "ensemble_3", "ensemble_4"]
-    : ["best_model"];
-  const sessions = [];
-  for (let i = 0; i < names.length; i++) {
-    sessions.push(await ort.InferenceSession.create(
-      `${baseUrl}/${names[i]}.onnx`, { executionProviders: ["wasm"] }));
-    if (onProgress) onProgress(i + 1, names.length);
+/** One session in a list (classifyCapture averages over the list, so a
+ * future ensemble needs no change there). `which` is kept for callers that
+ * still pass it; there is only one model now. */
+export async function loadModel(which = "single", baseUrl = "./models", onProgress = null) {
+  const session = await ort.InferenceSession.create(
+    `${baseUrl}/best_model.onnx`, { executionProviders: ["wasm"] });
+  const nOut = session.outputMetadata?.[0]?.shape?.[1] ?? null;
+  if (typeof nOut === "number" && nOut !== CLASSES.length) {
+    // e.g. an 8-class retrained version from before the switch, served by
+    // serve_local as the active model: its scores would be read against the
+    // wrong class names.
+    throw new Error(`models/best_model.onnx has ${nOut} outputs but the page expects ${CLASSES.length} classes`);
   }
-  return sessions;
+  if (onProgress) onProgress(1, 1);
+  return [session];
 }
 
 function sigmoid(x) { return 1 / (1 + Math.exp(-x)); }
@@ -67,6 +76,13 @@ export function preprocessWindow(wRe, wIm, outRe, outIm) {
 }
 
 /** Runs the model over every sliding window of a capture.
+ *
+ * Windows are cut from the capture as it is: a signal stays at its own
+ * frequency, never moved to 0 Hz. That is how the 60-class training windows
+ * were made (since f993d8ebc417 every one sits somewhere in the band, none at
+ * exactly 0 Hz), and the Python pipeline does the same since KEEP_POSITION
+ * (src/pipeline/extract.py): centring a tone turns it into a DC offset the
+ * model never saw (RADAR_CW / JAM_TONE went from 80% to 0% at 15 dB).
  *
  * Returns { starts, probs, nWindows, nClasses } with probs a Float32Array
  * laid out [window][class], already sigmoided and (for the ensemble)

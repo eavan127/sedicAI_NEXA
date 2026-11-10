@@ -179,7 +179,7 @@ def test_nothing_of_the_system_is_served_before_sign_in(server):
     status, headers = fetch(base, "/index.html")
     assert status == 302 and headers["Location"] == "/login.html"
     assert fetch(base, "/")[0] == 302
-    for path in ("/main.js", "/models/ensemble_0.onnx", "/data/model_card.json"):
+    for path in ("/main.js", "/models/best_model.onnx", "/data/model_card.json"):
         assert fetch(base, path)[0] == 401, path
     assert fetch(base, "/login.html")[0] == 200
     status, headers = fetch(base, "/brand/logo.png")
