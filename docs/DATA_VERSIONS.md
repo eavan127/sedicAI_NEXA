@@ -74,10 +74,15 @@ the same physics model retrained with rotation/flip augmentation (`--augment`), 
 |---|---|---|---|
 | f993d8ebc417, one window, top-1 | 48.7% | **49.8%** | 50.5% |
 | f993d8ebc417, one window, >= 10 dB | 61.6% | **62.4%** | 63.3% |
+| f993d8ebc417, vote of 16 windows, all SNR | 72.8% | 73.0% | 74.2% |
+| f993d8ebc417, vote of 16 windows, >= 10 dB | 80.6% | 79.4% | 80.7% |
 | Pipeline, 200 captures (seed 9000), track right | 46% | **50%** | 47% |
 | Pipeline, same, track exact | 37% | **38%** | 38% |
 
 The average wins on single windows but loses once the pipeline votes over a track, and costs twice the compute.
+The vote rows use calibrate_week1's proxy (mean log-odds of 16 random test windows of the same class and SNR, from
+different bursts); on it the augmented model gains less from voting at >= 10 dB. Quote 79.4% for the current model.
+The pipeline, where a vote is one real emitter, is the deciding test.
 
 ## Previous classifier (2026-11-07)
 
