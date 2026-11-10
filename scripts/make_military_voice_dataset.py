@@ -22,7 +22,7 @@ and resamples to 3.2 MS/s (band edges filled with noise).
 
     python scripts/make_military_voice_dataset.py
     python scripts/run_pipeline.py --iq data/local/military_voice_v1/iq/zh_tts_001.wav \
-        --max-seconds 8 --hybrid --classifier results/classifier/physics_best.pt --listen
+        --max-seconds 8 --hybrid --classifier results/classifier/physics_aug_best.pt --listen
 
 Output (--out, default data/local/military_voice_v1/, git-ignored), one folder
 per language (english/, malay/, chinese/), each with:
@@ -130,7 +130,7 @@ In every language folder:
                              One transmission: NBFM (ground walkie-talkie), AM (air band) or
                              USB (HF), at offset_khz from the centre, snr_db_3khz in white noise.
                              Run:  python scripts/run_pipeline.py --iq <file> --max-seconds 12
-                                   --hybrid --classifier results/classifier/physics_best.pt --listen
+                                   --hybrid --classifier results/classifier/physics_aug_best.pt --listen
   radio_audio/<id>.wav       the sound the receiver should give back (16 kHz mono)
   clean_audio/<id>.wav       the original speech (16 kHz mono)
   manifest.csv               text, English meaning, source clip, licence, modulation, offset, SNR, timing

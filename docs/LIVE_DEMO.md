@@ -29,7 +29,7 @@ Also needed:
 
 - **ffmpeg on PATH**, to decode the Common Voice MP3s. Check with `ffmpeg -version`.
 - **The model files**, which git does not carry. Copy them from Eavan's PC or the Drive:
-  `results/classifier/physics_best.pt` and `results/detector/emitter_detector.pt`.
+  `results/classifier/physics_aug_best.pt` and `results/detector/emitter_detector.pt`.
   Only `--mode full` and file analysis need them; the live voice mode does not.
 - **Ollama**, optional, for the AI reading: install it, then run `ollama pull llama3.2:3b`.
 - **The Chinese text-to-speech voice** (Windows "Microsoft Huihui"), only for regenerating the
@@ -61,7 +61,7 @@ Nobody else needs to regenerate it.
 
 ```powershell
 python scripts/run_pipeline.py --iq "$env:USERPROFILE\Downloads\military_radio_IQ\malay\iq\ms_cv_009_NBFM.wav" `
-    --max-seconds 10 --hybrid --classifier results/classifier/physics_best.pt --listen `
+    --max-seconds 10 --hybrid --classifier results/classifier/physics_aug_best.pt --listen `
     --whisper-model medium --language ms
 ```
 

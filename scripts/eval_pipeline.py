@@ -67,6 +67,8 @@ def main():
     p.add_argument("--classes", nargs="+", default=None)
     p.add_argument("--snr-db", type=float, default=None, help="fix every emitter's SNR (default: -10..20 dB)")
     p.add_argument("--match-iou", type=float, default=0.3)
+    p.add_argument("--min-truth-hz", type=float, default=80e3,
+                   help="truth boxes narrower than this are widened to it before matching (0 = old behaviour)")
     p.add_argument("--seed", type=int, default=7000)
     p.add_argument("--out", default=str(REPO_ROOT / "results" / "pipeline" / "eval"))
     args = p.parse_args()
@@ -89,7 +91,12 @@ def main():
         for t in truth:
             s = per[t["cls"]]
             s["n"] += 1
-            box = (t["t_start"] / FS, t["t_end"] / FS, t["f_lo"], t["f_hi"])
+            # A tone's true band is a few kHz wide, while the detector never
+            # draws a box narrower than about 80 kHz, so its IoU stayed below
+            # 0.3 even for a box squarely on it and tones scored "not found".
+            # Narrow truth boxes are widened to --min-truth-hz around their centre.
+            fc, half = (t["f_lo"] + t["f_hi"]) / 2, max(t["f_hi"] - t["f_lo"], args.min_truth_hz) / 2
+            box = (t["t_start"] / FS, t["t_end"] / FS, fc - half, fc + half)
             best, best_iou = None, args.match_iou
             for a in answers:
                 ov = iou_tf(box, (a["t_start_ms"] / 1e3, a["t_end_ms"] / 1e3, a["f_lo_khz"] * 1e3, a["f_hi_khz"] * 1e3))

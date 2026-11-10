@@ -53,6 +53,42 @@ def test_cut_centres_the_box_and_refills_flat_noise():
     assert w.shape == (len(iq) // 512, 512)
 
 
+def test_classifier_windows_keep_the_box_at_its_own_frequency():
+    """Training windows sit anywhere in the band, never at exactly 0 Hz, so the
+    classifier gets the tone back at ~300 kHz (the cut itself stays centred)."""
+    rng = np.random.default_rng(1)
+    iq = _tone_capture(rng)
+    c = extract.cut(iq, 0, len(iq), 280e3, 320e3, 1.0, rng)
+    f = np.fft.fftfreq(512, 1 / FS)
+    for w in extract.windows(c)[:4]:
+        assert abs(f[np.argmax(np.abs(np.fft.fft(w)))] - 300e3) < 12.5e3
+
+
+def test_pulsed_emitter_gets_one_window_centred_on_each_pulse():
+    """A 20 us pulse every 2 ms: back-to-back windows would be mostly empty or
+    cut a pulse in half; every training window holds one whole pulse."""
+    rng = np.random.default_rng(4)
+    n, pw, pri = 4 * 6400, 64, 6400
+    x = np.zeros(n, dtype=complex)
+    starts = np.arange(1000, n - pw, pri)
+    for s in starts:
+        x[s:s + pw] = np.exp(2j * np.pi * 200e3 * np.arange(s, s + pw) / FS) * np.sqrt(10 ** 1.5)
+    c = extract.cut(x + impairments.noise(n, 1.0, rng), 0, n, 100e3, 300e3, 1.0, rng)
+    got = extract.pulse_starts(c)
+    assert got is not None and len(got) == len(starts)
+    for s, w0 in zip(starts, got):
+        assert w0 <= s and s + pw <= w0 + extract.WINDOW_LEN       # the whole pulse is inside
+    assert len(extract.active_windows(c)) == len(starts)
+
+
+def test_continuous_emitter_is_not_treated_as_pulsed():
+    rng = np.random.default_rng(5)
+    iq = _tone_capture(rng, 300e3, 10, 16384)
+    c = extract.cut(iq, 0, len(iq), 280e3, 320e3, 1.0, rng)
+    assert extract.pulse_starts(c) is None
+    assert len(extract.active_windows(c)) == len(iq) // 512
+
+
 def test_short_box_grows_to_one_window():
     rng = np.random.default_rng(2)
     iq = _tone_capture(rng)
@@ -97,6 +133,15 @@ def test_two_boxes_for_one_emitter_make_one_track_but_a_tone_on_top_stays_apart(
                det(5000, 30000, 100e3, 175e3)])                                    # narrow tone on top
     tracks = tr.finish()
     assert sorted(len(t.dets) for t in tracks) == [1, 2]
+
+
+def test_tracker_starts_a_new_track_when_a_different_emitter_takes_the_band():
+    def run(tr):
+        for k, c in enumerate(("BPSK", "BPSK", "JAM_BARRAGE")):    # the third chunk is a jammer in the same band
+            tr.update([det(k * 32768, (k + 1) * 32768, 100e3, 200e3, probs_for(c))])
+        return sorted(len(t.dets) for t in tr.finish())
+    assert run(Tracker()) == [1, 2]
+    assert run(Tracker(min_class_overlap=None)) == [3]                 # frequency only: all joined
 
 
 def test_tracker_closes_a_track_after_a_gap():
@@ -227,6 +272,27 @@ DETECTOR = REPO_ROOT / "results" / "detector" / "emitter_detector.pt"
 
 
 @pytest.mark.skipif(not DETECTOR.exists(), reason="no trained detector in results/detector/")
+def _jam_track(tid, t0, t1, cls, m4=2.0):
+    t = Track(tid, [det(t0, t1, 100e3, 400e3, probs_for(cls), envelope_m4=m4, snr_db=15.0)])
+    return t
+
+
+def test_noise_jammer_switching_on_over_a_signal_is_reactive():
+    sig = Track(1, [det(0, 20000, 150e3, 350e3, probs_for("QPSK"))])
+    lead = int(2e-3 * FS)
+    jam_on = _jam_track(2, lead, 30000, "JAM_PARTIAL_BAND")
+    assert resolve.resolve(jam_on, [sig, jam_on]).label == "JAM_REACTIVE"
+    # band noise the classifier calls a dense constellation, recognised by its envelope
+    dense = _jam_track(3, lead, 30000, "64APSK")
+    assert resolve.resolve(dense, [sig, dense]).label == "JAM_REACTIVE"
+    real_qam = _jam_track(4, lead, 30000, "64APSK", m4=1.55)
+    assert resolve.resolve(real_qam, [sig, real_qam]).label == "APSK"
+    # on from the start with the signal, or alone: not reactive
+    both = _jam_track(5, 0, 30000, "JAM_PARTIAL_BAND")
+    assert resolve.resolve(both, [sig, both]).label == "JAM_PARTIAL_BAND"
+    assert resolve.resolve(jam_on, [jam_on]).label == "JAM_PARTIAL_BAND"
+
+
 def test_trained_detector_runs_in_the_chain():
     rng = np.random.default_rng(7)
     iq, _ = make_capture(rng, n_chunks=2, n_emitters=2, snr_db=15)

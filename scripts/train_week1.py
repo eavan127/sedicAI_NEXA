@@ -75,6 +75,25 @@ def batch_to_device(X, y, idx):
     return xb, yb
 
 
+def augment(xb, gen=None):
+    """Rotation + flip augmentation (Huang et al. 2019, "Data Augmentation for
+    Deep Learning-based Radio Modulation Classification"): each window is
+    multiplied by j^k for a random k in 0..3 (a 0/90/180/270 degree carrier
+    phase) and, with probability 1/2, conjugated (Q -> -Q, the spectrum
+    mirrored). Neither changes any of our 60 labels: no class depends on the
+    absolute phase or on which way a spectrum or sweep runs (USB/LSB, up/down
+    chirps share a class). xb: (B, 2, L) float, I and Q rows."""
+    B = xb.shape[0]
+    k = torch.randint(0, 4, (B, 1), device=xb.device, generator=gen)
+    i, q = xb[:, 0], xb[:, 1]
+    # (i + jq) * j^k:  k=1 -> (-q, i), k=2 -> (-i, -q), k=3 -> (q, -i)
+    ri = torch.where(k == 0, i, torch.where(k == 1, -q, torch.where(k == 2, -i, q)))
+    rq = torch.where(k == 0, q, torch.where(k == 1, i, torch.where(k == 2, -q, -i)))
+    flip = torch.rand(B, device=xb.device, generator=gen) < 0.5
+    rq = torch.where(flip[:, None], -rq, rq)
+    return torch.stack([ri, rq], dim=1)
+
+
 def evaluate(model, criterion, X, y):
     """Loss, plus the two numbers the team has been comparing runs on:
     top-1 (argmax lands on one of the true classes) and macro recall at 0.5,
@@ -146,6 +165,8 @@ def main():
                    help="add the amplitude-histogram + delay-correlation branch (overrides week1.expert_features)")
     p.add_argument("--full-spectrum", action="store_true",
                    help="add the whole-window spectrum branch (SED-39 experiment)")
+    p.add_argument("--augment", action="store_true",
+                   help="random 0/90/180/270 degree rotation + spectrum flip of every training window")
     p.add_argument("--physics-features", action="store_true",
                    help="add the physics branch (src/physics_features.py; docs/SEPARABILITY_ANALYSIS.md)")
     args = p.parse_args()
@@ -184,6 +205,8 @@ def main():
             "model_flags": model_flags,
             "combined_version": combined_version, "git_commit": commit, "git_dirty": dirty,
             "batch_size": args.batch_size, "limit": args.limit}
+    if args.augment:
+        meta["augment"] = "rot90+flip"   # only recorded when on, so older runs still resume
 
     start, best_loss, best_epoch, history = 0, float("inf"), None, []
     last = ckpt_dir / "last.pt"
@@ -209,6 +232,8 @@ def main():
         tloss = 0.0
         for s in range(0, len(order), args.batch_size):
             xb, yb = batch_to_device(Xtr, ytr, order[s:s + args.batch_size])
+            if args.augment:
+                xb = augment(xb)
             opt.zero_grad()
             loss = criterion(model(xb), yb)
             loss.backward()

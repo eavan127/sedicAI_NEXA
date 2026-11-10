@@ -15,7 +15,7 @@ validation only -- never training data, see the synthetic-only training rule).
     python scripts/make_military_radio.py
     python scripts/make_military_radio.py --extra-clip path/to/clip.mp3 --seconds 4
     python scripts/run_pipeline.py --iq data/local/military_radio/military_net.wav \
-        --max-seconds 4 --hybrid --classifier results/classifier/physics_best.pt --listen
+        --max-seconds 4 --hybrid --classifier results/classifier/physics_aug_best.pt --listen
 
 Outputs in --out (default data/local/military_radio/, git-ignored):
   <station>_clean.wav, <station>_radio.wav   16 kHz mono, to listen to
