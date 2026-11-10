@@ -49,6 +49,16 @@ LN2 = float(np.log(2))
 # model never saw (RADAR_CW / JAM_TONE 80% -> 0% at 15 dB). The features still
 # use the centred copy.
 KEEP_POSITION = True
+# Pulsed emitters (active_windows / pulse_starts): a sample is "on" when the
+# power averaged over PULSE_SMOOTH independent noise samples (more raw samples
+# for a narrow box) is PULSE_ON_DB above the in-band
+# noise; an emitter counts as pulsed when at most PULSE_MAX_DUTY of the box is
+# on, in at least 2 runs of PULSE_MIN_SAMPLES or more.
+PULSE_WINDOWS = True
+PULSE_SMOOTH = 8
+PULSE_ON_DB = 6.0
+PULSE_MAX_DUTY = 0.3
+PULSE_MIN_SAMPLES = 3
 
 
 def noise_variance(chunk_iq):
@@ -125,15 +135,53 @@ def windows(c, max_windows=MAX_WINDOWS):
     return np.stack([_window(c, s) for s in starts])
 
 
+def pulse_starts(c, max_windows=MAX_WINDOWS):
+    """Window starts centred on the pulses of a pulsed emitter, or None when
+    the emitter is not pulsed.
+
+    Every pulsed training window holds at least one whole pulse
+    (src/generators/radar.py), and its SNR is the SNR while the pulse is on.
+    A low-duty radar in a capture leaves most back-to-back windows empty or
+    cuts its pulse at a window edge, and a 1 us pulse averaged over a 160 us
+    window never clears the active-window power bar. So pulses are found on a
+    short power envelope instead, and one window is centred on each."""
+    x = np.abs(np.asarray(c.inband)) ** 2
+    if len(x) < WINDOW_LEN:
+        return None
+    # In-band noise only changes every ~1 / keep_frac samples, so average over
+    # PULSE_SMOOTH independent samples of it, not PULSE_SMOOTH raw ones (a
+    # narrow band holds only long pulses anyway: bandwidth ~ 1 / pulse width).
+    k = int(min(WINDOW_LEN // 4, np.ceil(PULSE_SMOOTH / max(c.keep_frac, 1e-3))))
+    env = np.convolve(x, np.ones(k) / k, mode="same")
+    on = env > c.noise_var * c.keep_frac * 10 ** (PULSE_ON_DB / 10)
+    if not on.any() or on.mean() > PULSE_MAX_DUTY:
+        return None
+    edges = np.flatnonzero(np.diff(np.concatenate([[0], on.astype(np.int8), [0]])))
+    runs = [(a, b) for a, b in zip(edges[::2], edges[1::2]) if b - a >= PULSE_MIN_SAMPLES]
+    if len(runs) < 2:
+        return None
+    centres = np.array([(a + b) // 2 for a, b in runs])
+    starts = np.clip(centres - WINDOW_LEN // 2, 0, len(x) - WINDOW_LEN)
+    starts = np.unique(starts)
+    if len(starts) > max_windows:
+        starts = starts[np.linspace(0, len(starts) - 1, max_windows).round().astype(int)]
+    return starts
+
+
 def active_windows(c, max_windows=MAX_WINDOWS, min_snr_db=3.0):
     """Like windows(), but only windows where the emitter is actually on:
     in-band power at least min_snr_db above the in-band noise. A pulsed radar
     or a keyed signal leaves many windows between pulses that hold only noise;
     voting with them drags the track's answer towards whatever the classifier
-    says about noise. Falls back to windows(c) when fewer than 2 are active."""
+    says about noise. A pulsed emitter gets one window centred on each pulse
+    (pulse_starts). Falls back to windows(c) when fewer than 2 are active."""
     n = len(c.filled) // WINDOW_LEN
     if n == 0:
         return windows(c, max_windows)
+    if PULSE_WINDOWS:
+        ps = pulse_starts(c, max_windows)
+        if ps is not None:
+            return np.stack([_window(c, int(s)) for s in ps])
     seg = np.asarray(c.inband[:n * WINDOW_LEN]).reshape(n, WINDOW_LEN)
     power = np.mean(np.abs(seg) ** 2, axis=1)
     noise = c.noise_var * c.keep_frac

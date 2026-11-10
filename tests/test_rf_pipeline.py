@@ -64,6 +64,31 @@ def test_classifier_windows_keep_the_box_at_its_own_frequency():
         assert abs(f[np.argmax(np.abs(np.fft.fft(w)))] - 300e3) < 12.5e3
 
 
+def test_pulsed_emitter_gets_one_window_centred_on_each_pulse():
+    """A 20 us pulse every 2 ms: back-to-back windows would be mostly empty or
+    cut a pulse in half; every training window holds one whole pulse."""
+    rng = np.random.default_rng(4)
+    n, pw, pri = 4 * 6400, 64, 6400
+    x = np.zeros(n, dtype=complex)
+    starts = np.arange(1000, n - pw, pri)
+    for s in starts:
+        x[s:s + pw] = np.exp(2j * np.pi * 200e3 * np.arange(s, s + pw) / FS) * np.sqrt(10 ** 1.5)
+    c = extract.cut(x + impairments.noise(n, 1.0, rng), 0, n, 100e3, 300e3, 1.0, rng)
+    got = extract.pulse_starts(c)
+    assert got is not None and len(got) == len(starts)
+    for s, w0 in zip(starts, got):
+        assert w0 <= s and s + pw <= w0 + extract.WINDOW_LEN       # the whole pulse is inside
+    assert len(extract.active_windows(c)) == len(starts)
+
+
+def test_continuous_emitter_is_not_treated_as_pulsed():
+    rng = np.random.default_rng(5)
+    iq = _tone_capture(rng, 300e3, 10, 16384)
+    c = extract.cut(iq, 0, len(iq), 280e3, 320e3, 1.0, rng)
+    assert extract.pulse_starts(c) is None
+    assert len(extract.active_windows(c)) == len(iq) // 512
+
+
 def test_short_box_grows_to_one_window():
     rng = np.random.default_rng(2)
     iq = _tone_capture(rng)
