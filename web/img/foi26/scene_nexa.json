@@ -1,0 +1,74 @@
+{
+ "seed": 20,
+ "snr_db": 15.0,
+ "classifier": "physics_aug_best.pt",
+ "truth": [
+  "JAM_REACTIVE",
+  "64QAM",
+  "64QAM",
+  "RADAR_FMCW",
+  "BPSK"
+ ],
+ "answers": [
+  {
+   "answer": "RADAR_FMCW",
+   "classes": [
+    "RADAR_FMCW"
+   ],
+   "band": "high",
+   "confidence": 0.999,
+   "truth": "RADAR_FMCW",
+   "right": true,
+   "t_start_ms": 0.0,
+   "t_end_ms": 10.24,
+   "f_lo_khz": -30.3,
+   "f_hi_khz": 1336.6
+  },
+  {
+   "answer": "QAM",
+   "classes": [
+    "16QAM",
+    "32QAM",
+    "64QAM",
+    "128QAM",
+    "256QAM"
+   ],
+   "band": "uncertain",
+   "confidence": 0.099,
+   "truth": "64QAM",
+   "right": true,
+   "t_start_ms": 0.691,
+   "t_end_ms": 3.818,
+   "f_lo_khz": -1110.7,
+   "f_hi_khz": -546.5
+  },
+  {
+   "answer": "BPSK",
+   "classes": [
+    "BPSK"
+   ],
+   "band": "medium",
+   "confidence": 0.373,
+   "truth": "BPSK",
+   "right": true,
+   "t_start_ms": 1.15,
+   "t_end_ms": 9.546,
+   "f_lo_khz": -330.3,
+   "f_hi_khz": 275.9
+  },
+  {
+   "answer": "JAM_PARTIAL_BAND",
+   "classes": [
+    "JAM_PARTIAL_BAND"
+   ],
+   "band": "medium",
+   "confidence": 0.169,
+   "truth": "64QAM",
+   "right": false,
+   "t_start_ms": 3.065,
+   "t_end_ms": 8.654,
+   "f_lo_khz": -1287.4,
+   "f_hi_khz": -946.9
+  }
+ ]
+}

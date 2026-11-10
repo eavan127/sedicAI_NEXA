@@ -1,0 +1,73 @@
+{
+ "seed": 1406,
+ "snr_db": 20.0,
+ "classifier": "physics_aug_best.pt",
+ "truth": [
+  "JAM_PARTIAL_BAND",
+  "CPFSK",
+  "JAM_PULSED",
+  "BPSK"
+ ],
+ "answers": [
+  {
+   "answer": "JAM_PULSED",
+   "classes": [
+    "JAM_PULSED"
+   ],
+   "band": "high",
+   "confidence": 0.87,
+   "truth": "JAM_PULSED",
+   "right": true,
+   "iou": 0.71,
+   "t_start_ms": 0.062,
+   "t_end_ms": 10.077,
+   "f_lo_khz": -1056.7,
+   "f_hi_khz": 846.5
+  },
+  {
+   "answer": "JAM_PARTIAL_BAND",
+   "classes": [
+    "JAM_PARTIAL_BAND"
+   ],
+   "band": "high",
+   "confidence": 0.821,
+   "truth": "JAM_PARTIAL_BAND",
+   "right": true,
+   "iou": 0.66,
+   "t_start_ms": 0.821,
+   "t_end_ms": 1.823,
+   "f_lo_khz": 327.9,
+   "f_hi_khz": 672.4
+  },
+  {
+   "answer": "CPFSK",
+   "classes": [
+    "CPFSK"
+   ],
+   "band": "high",
+   "confidence": 0.493,
+   "truth": "CPFSK",
+   "right": true,
+   "iou": 0.79,
+   "t_start_ms": 2.561,
+   "t_end_ms": 4.916,
+   "f_lo_khz": -939.8,
+   "f_hi_khz": -448.3
+  },
+  {
+   "answer": "BPSK",
+   "classes": [
+    "BPSK"
+   ],
+   "band": "medium",
+   "confidence": 0.377,
+   "truth": "BPSK",
+   "right": true,
+   "iou": 0.81,
+   "t_start_ms": 7.388,
+   "t_end_ms": 8.691,
+   "f_lo_khz": 85.4,
+   "f_hi_khz": 475.1
+  }
+ ]
+}

@@ -7,7 +7,9 @@ Writes PNGs to presentation/FOI26/assets/img/ and the numbers they show to
 presentation/FOI26/assets/img/figures.json.
 
     python scripts/make_deck_figures.py
+    python scripts/make_deck_figures.py --ckpt results/classifier/physics_aug_best.pt --out web/img/foi26
 """
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -29,7 +31,6 @@ from src.data.merge import normalize_batch  # noqa: E402
 from src.models.amc_cnn import AMC_CNN  # noqa: E402
 
 OUT = ROOT / "presentation" / "FOI26" / "assets" / "img"
-OUT.mkdir(parents=True, exist_ok=True)
 CKPT = ROOT / "results" / "classifier" / "physics_best.pt"
 INK, MUTE, BLUE, AMBER, GREEN, RED, TEAL, NAVY = ("#1A1A1A", "#5E5E5E", "#2E7DB9", "#C77A00", "#457900",
                                                    "#B0281A", "#1D7A68", "#22306B")
@@ -282,6 +283,13 @@ def fig_morse():
 
 
 def main():
+    global OUT, CKPT
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--ckpt", default=str(CKPT), help="classifier checkpoint")
+    p.add_argument("--out", default=str(OUT), help="folder for the PNGs and figures.json")
+    a = p.parse_args()
+    CKPT, OUT = Path(a.ckpt), Path(a.out)
+    OUT.mkdir(parents=True, exist_ok=True)
     rng = np.random.default_rng(5)
     net = load_model()
     out = {}

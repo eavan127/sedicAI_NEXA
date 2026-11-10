@@ -1,0 +1,736 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NEXA Brochure · SEDIC@FOI2026</title>
+<meta name="description" content="NEXA: AI-powered RF spectrum intelligence. 60 signal classes, offline, with a human in the loop. SEDIC@FOI2026.">
+<!--
+  Brochure for the SEDIC@FOI2026 exhibition (the 60-class system).
+  The SEDIC finale brochure for the old 8-class system is web/brochure.html.
+
+  Eight A5 portrait pages (148 x 210 mm). Two outputs from this one file:
+    e-reading   this page on screen, and docs/NEXA_FOI26_eBrochure.pdf (one A5 page per PDF page)
+    flat 2-up   docs/NEXA_FOI26_eBrochure_2up.pdf, two pages side by side per A4 landscape
+                sheet in reading order (1|2, 3|4, 5|6, 7|8), single-sided, no fold
+  Both PDFs are made by scripts/make_brochure_foi26.py.
+
+  Numbers: active classifier physics_aug_best.pt on the fixed test set f993d8ebc417
+  (docs/DATA_VERSIONS.md, "Active classifier"). Keep the conditions printed under
+  every number, and re-copy them if the classifier changes.
+  Per-class and per-family scores: results/accuracy_plan/showcase_aug.json
+  (scripts/measure_showcase.py --n 256 --vote 8 --snr 15, physics_aug_best).
+  Pictures in img/foi26:
+    scene_cover.png, scene_nexa.png, t_capture/spectrogram/detector.png
+        NEXA's real pipeline output, scripts/make_scene_figure.py
+        (cover: --pick 1406 --emitters 4 --snr 20 --name scene_cover --no-thumbs;
+         page 6: --pick 20). The .json beside each says what was true and what NEXA answered.
+    t_classifier.png, t_track.png
+        scripts/make_deck_figures.py --ckpt results/classifier/physics_aug_best.pt
+    the rest: copied from presentation/FOI26/assets/img (no model involved).
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  /* Palette and type shared with web/brochure.html and the finale poster. */
+  :root {
+    --blue: #2E7DB9; --orange: #F0A020; --amber: #C77A00; --red: #B0281A; --green: #457900;
+    --navy: #22306B; --navy-dark: #172152;
+    --ink: #1A1A1A; --mute: #5E5E5E; --pill: #F1F1F1; --line: #E3E3E3;
+    --paper: #FFFFFF; --paper-2: #F5F7FA;
+    --slate: #0E1622; --slate-2: #172233; --slate-3: #26344A;
+    --on-dark: #EEF2F7; --on-dark-dim: #9AA6B4;
+    --font: "Montserrat", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    --mono: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+    --z: 1;
+    color-scheme: light;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: #DDE1E8; color: var(--ink);
+    font-family: var(--font); font-size: 8.4pt; line-height: 1.42;
+    overflow-x: hidden;
+  }
+  h1, h2, h3, h4, p, ul, figure { margin: 0; padding: 0; }
+  h1, h2, h3, h4 { line-height: 1.14; letter-spacing: -0.01em; }
+  ul { list-style: none; }
+  img { display: block; max-width: 100%; height: auto; }
+  .mono { font-family: var(--mono); }
+
+  /* ---------- screen: a column of pages, scaled to the window ---------- */
+  .bar {
+    position: sticky; top: 0; z-index: 5; display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; padding: 8px 16px; background: rgba(255,255,255,.95); border-bottom: 1px solid var(--line);
+    font-size: 13px;
+  }
+  .bar img { height: 22px; width: auto; }
+  @media (max-width: 520px) { .bar span { display: none; } }
+  .bar span { color: var(--mute); font-weight: 600; }
+  .bar a {
+    font-weight: 700; color: #fff; background: var(--navy); text-decoration: none;
+    padding: 7px 14px; border-radius: 999px; white-space: nowrap;
+  }
+  .book { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 16px 0 32px; }
+  .page {
+    position: relative; width: 148mm; height: 210mm; overflow: hidden; flex: none;
+    background: var(--paper); padding: 10mm 10mm 9mm;
+    display: flex; flex-direction: column;
+    zoom: var(--z);
+    box-shadow: 0 2px 14px rgba(14, 22, 34, .18);
+  }
+  .page > * { flex-shrink: 0; }
+  .page.tint { background: var(--paper-2); }
+  .page.dark { background: var(--slate); color: var(--on-dark); }
+
+  /* ---------- page furniture ---------- */
+  .brand { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5mm; }
+  .brand img { height: 5.2mm; width: auto; }
+  .brand img.sedic { height: 6.4mm; }
+  .folio {
+    display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
+    background: var(--pill); border-radius: 999px; padding: 2px 9px 2px 3px;
+    font-size: 6.6pt; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--mute);
+  }
+  .tint .folio { background: #E6EAF1; }
+  .folio b {
+    background: var(--navy); color: #fff; border-radius: 999px; padding: 1px 6px; letter-spacing: 0;
+    font-family: var(--mono); font-weight: 600;
+  }
+  h2 { font-size: 17pt; font-weight: 800; color: var(--navy); margin-top: 3mm; }
+  .lead { font-size: 9pt; color: #333; margin-top: 2.2mm; }
+  .foot {
+    margin-top: auto; padding-top: 2.5mm; flex-shrink: 0; display: flex; justify-content: space-between;
+    font-size: 6pt; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: #8A8F98;
+    border-top: 1px solid var(--line);
+  }
+  .cond { font-size: 6.4pt; color: var(--mute); line-height: 1.35; }
+  .cap { font-size: 6.6pt; color: var(--mute); margin-top: 1.4mm; line-height: 1.35; }
+  .kicker { font-size: 6.6pt; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: var(--blue); }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 3mm; padding: 3mm 3.4mm; }
+  .fig { border-radius: 2mm; overflow: hidden; border: 1px solid var(--line); background: #fff; }
+  .fig img { width: 100%; }
+  .band {
+    display: inline-block; font-family: var(--mono); font-size: 6pt; font-weight: 600; letter-spacing: .04em;
+    padding: 1px 6px; border-radius: 999px; color: #fff; white-space: nowrap;
+  }
+  .band.high { background: var(--green); } .band.med { background: var(--amber); } .band.unsure { background: #6B7280; }
+
+  /* ---------- 1 cover ---------- */
+  .cover { padding: 0; }
+  .cover .top { display: flex; justify-content: space-between; align-items: center; padding: 10mm 10mm 0; }
+  .cover .top img { height: 8mm; width: auto; }
+  .event {
+    font-family: var(--mono); font-size: 7.4pt; font-weight: 600; letter-spacing: .06em;
+    color: var(--slate); background: var(--orange); border-radius: 999px; padding: 2px 10px;
+  }
+  .cover .hero { margin: 8mm 10mm 0; border-radius: 3mm; overflow: hidden; border: 1px solid var(--slate-3); position: relative; }
+  .cover .hero img { width: 100%; height: auto; }
+  .cover .hero-cap { margin: 1.6mm 10mm 0; font-size: 6.4pt; color: var(--on-dark-dim); }
+  .cover .words { padding: 7mm 10mm 0; }
+  .cover .track { font-size: 6.8pt; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--orange); }
+  .cover h1 { font-size: 27pt; font-weight: 800; line-height: 1.04; margin-top: 3mm; color: #fff; }
+  .cover h1 em { font-style: normal; color: var(--orange); }
+  .cover .sub { font-size: 9.6pt; color: #C9D2DE; margin-top: 4mm; max-width: 112mm; }
+  .facts {
+    margin-top: auto; display: grid; grid-template-columns: repeat(4, 1fr);
+    border-top: 1px solid var(--slate-3); background: var(--slate-2);
+  }
+  .facts div { padding: 5mm 3mm 6mm 4mm; border-left: 1px solid var(--slate-3); }
+  .facts div:first-child { border-left: 0; padding-left: 10mm; }
+  .facts b { display: block; font-size: 17pt; font-weight: 800; line-height: 1; color: #fff; }
+  .facts span { display: block; font-size: 6.3pt; color: var(--on-dark-dim); margin-top: 1.6mm; line-height: 1.3; }
+
+  /* ---------- 2 the problem ---------- */
+  .tells { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2.4mm; margin-top: 4.5mm; }
+  .tells .card { padding: 2.6mm 3mm; }
+  .tells h4 { font-size: 8.6pt; color: var(--navy); margin-top: .6mm; }
+  .tells p { font-size: 7pt; color: #444; margin-top: 1mm; }
+  .rows { margin-top: 4mm; border: 1px solid var(--line); border-radius: 3mm; overflow: hidden; }
+  .rows .hd {
+    background: var(--slate); color: var(--on-dark-dim); font-size: 6pt; font-weight: 700;
+    letter-spacing: .1em; text-transform: uppercase; padding: 1.6mm 3mm;
+  }
+  .rows li { display: grid; grid-template-columns: 37mm 1fr auto; gap: 2mm; align-items: center; padding: 1.9mm 3mm; border-top: 1px solid var(--line); }
+  .rows li b { font-family: var(--mono); font-size: 7pt; font-weight: 600; color: var(--navy); }
+  .rows li span { font-size: 7pt; color: #444; }
+  .callout {
+    margin-top: 4mm; background: var(--navy); color: #fff; border-radius: 3mm; padding: 3mm 4mm;
+    font-size: 8pt; line-height: 1.4;
+  }
+  .callout b { color: var(--orange); }
+
+  /* ---------- 3 classes ---------- */
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2mm; margin-top: 4mm; }
+  .stats div { background: #fff; border: 1px solid var(--line); border-radius: 2.4mm; padding: 2.2mm 2.6mm; }
+  .stats b { display: block; font-size: 12.5pt; font-weight: 800; color: var(--navy); line-height: 1.05; }
+  .stats span { display: block; font-size: 6.2pt; color: var(--mute); margin-top: .8mm; line-height: 1.3; }
+  .fams { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2mm; margin-top: 3.4mm; }
+  .fam { background: #fff; border: 1px solid var(--line); border-left: 1.2mm solid var(--blue); border-radius: 2mm; padding: 1.8mm 2.2mm 2mm; }
+  .fam.hos { border-left-color: var(--red); } .fam.mil { border-left-color: var(--orange); } .fam.emp { border-left-color: var(--green); }
+  .fam h4 { font-size: 7.6pt; display: flex; justify-content: space-between; align-items: baseline; gap: 4px; }
+  .fam h4 i { font-style: normal; font-family: var(--mono); font-size: 7.6pt; font-weight: 600; color: var(--mute); }
+  .fam p { font-size: 6.2pt; color: #555; margin-top: .8mm; line-height: 1.32; }
+  .legend { display: flex; gap: 4mm; margin-top: 2.2mm; font-size: 6.2pt; color: var(--mute); font-weight: 600; }
+  .legend i { display: inline-block; width: 2.4mm; height: 2.4mm; border-radius: .6mm; margin-right: 1.2mm; vertical-align: -0.3mm; }
+
+  /* ---------- 4 architecture ---------- */
+  .stage { margin-top: 3.6mm; }
+  .stage > h3 {
+    font-size: 7pt; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: #fff;
+    background: var(--navy); display: inline-block; padding: 1px 9px; border-radius: 999px;
+  }
+  .stage.b > h3 { background: var(--amber); }
+  .steps { display: grid; grid-template-columns: 1fr 1fr; gap: 2.2mm; margin-top: 2mm; }
+  .step { display: grid; grid-template-columns: 25mm 1fr; gap: 2.4mm; align-items: center; background: #fff; border: 1px solid var(--line); border-radius: 2.4mm; padding: 1.8mm; }
+  .step img, .step .mini { width: 25mm; height: 14.4mm; object-fit: cover; border-radius: 1.4mm; border: 1px solid var(--line); background: #fff; }
+  .step h4 { font-size: 7.8pt; color: var(--navy); }
+  .step h4 i { font-style: normal; font-family: var(--mono); font-weight: 600; color: var(--orange); margin-right: 3px; }
+  .step p { font-size: 6.3pt; color: #444; margin-top: .7mm; line-height: 1.32; }
+  .mini { display: flex; flex-direction: column; justify-content: center; gap: 1mm; padding: 1.2mm; }
+  .mini span { font-family: var(--mono); font-size: 4.6pt; font-weight: 600; color: var(--navy); display: flex; justify-content: space-between; align-items: center; gap: 2px; white-space: nowrap; }
+  .mini .band { font-size: 4.2pt; padding: 0 3px; }
+  .strip {
+    margin-top: 3.4mm; background: var(--slate); color: var(--on-dark); border-radius: 2.4mm; padding: 2.2mm 3mm;
+    font-size: 7pt; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; text-align: center;
+  }
+  .strip em { font-style: normal; color: var(--orange); }
+
+  /* ---------- 5 accuracy ---------- */
+  .headline { display: grid; grid-template-columns: auto 1fr; gap: 5mm; align-items: center; margin-top: 4.5mm; background: var(--navy); color: #fff; border-radius: 3mm; padding: 4mm 5mm; }
+  .headline b { font-size: 33pt; font-weight: 800; line-height: 1; color: #fff; }
+  .headline b small { font-size: 16pt; color: var(--orange); }
+  .headline h3 { font-size: 10.4pt; }
+  .headline p { font-size: 6.8pt; color: #C5CBE0; margin-top: 1.2mm; line-height: 1.38; }
+  .look { margin-top: 5mm; }
+  .look h3, .sure h3, .honest h3 { font-size: 9.4pt; color: var(--navy); }
+  .look > p { font-size: 7.2pt; color: #444; margin-top: 1mm; }
+  .bars { margin-top: 3mm; display: grid; gap: 2mm; }
+  .bar-row { display: grid; grid-template-columns: 31mm 1fr; gap: 2mm; align-items: center; font-size: 6.8pt; }
+  .bar-row.gap { margin-top: 2.4mm; }
+  .bar-row label { color: #333; font-weight: 600; line-height: 1.2; }
+  .bar-row label small { display: block; font-size: 6pt; font-weight: 500; color: var(--mute); }
+  .track-bar { position: relative; height: 6.6mm; background: #ECEFF4; border-radius: 1.2mm; }
+  .track-bar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 1.2mm; background: #9DB9D3; }
+  .track-bar i.vote { background: var(--green); }
+  .track-bar i.vote2 { background: var(--blue); }
+  .track-bar b { position: absolute; top: 50%; transform: translateY(-50%); font-family: var(--mono); font-size: 7pt; font-weight: 600; color: #fff; }
+  .sure { display: grid; grid-template-columns: 1fr 1fr; gap: 3mm; margin-top: 5mm; }
+  .sure .card h3 { font-size: 8.4pt; }
+  .sure .card p, .sure .card li { font-size: 6.8pt; color: #444; margin-top: 1.1mm; line-height: 1.36; }
+  .famacc { margin-top: 4.4mm; }
+  .famacc h3 { font-size: 9.4pt; color: var(--navy); }
+  .fgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.4mm 4mm; margin-top: 2.2mm; }
+  .fgrid div { display: grid; grid-template-columns: 24mm 1fr 9mm; align-items: center; gap: 1.6mm; font-size: 6.8pt; }
+  .fgrid span { color: #333; font-weight: 600; white-space: nowrap; }
+  .fgrid i { display: block; height: 3.2mm; border-radius: 1mm; background: var(--navy); }
+  .fgrid b { font-family: var(--mono); font-size: 6.6pt; font-weight: 600; color: var(--navy); text-align: right; }
+  .famacc .cond { margin-top: 1.8mm; }
+  .honest { margin-top: 5mm; border: 1px solid #E8D5A8; background: #FFF8E8; border-radius: 3mm; padding: 2.8mm 3.4mm; }
+  .honest h3 { font-size: 8.4pt; color: #6B4A00; }
+  .honest p { font-size: 6.8pt; color: #4A3A12; margin-top: 1mm; line-height: 1.38; }
+
+  /* ---------- 6 listen and read ---------- */
+  .chain { display: grid; gap: 2mm; margin-top: 3.6mm; }
+  .chain .step { grid-template-columns: 31mm 1fr; padding: 2mm; }
+  .chain .step img { width: 31mm; height: 17.8mm; }
+  .chain .step h4 { font-size: 8.6pt; }
+  .chain .step p { font-size: 6.9pt; }
+  .morse { margin-top: 3.4mm; }
+  .morse { display: grid; grid-template-columns: 76mm 1fr; gap: 3.4mm; align-items: center; }
+  .morse .out { display: grid; gap: 1.8mm; justify-items: start; }
+  .morse .out code { font-family: var(--mono); font-size: 9pt; font-weight: 600; color: var(--navy); background: #fff; border: 1px solid var(--line); border-radius: 1.6mm; padding: 1px 8px; white-space: nowrap; }
+  .morse .out span { font-size: 6.6pt; color: var(--mute); line-height: 1.35; }
+  .ai { margin-top: 3.6mm; display: grid; grid-template-columns: 1fr 44mm; gap: 3mm; align-items: center; background: var(--navy); color: #fff; border-radius: 3mm; padding: 3mm 3.6mm; }
+  .ai h3 { font-size: 9pt; }
+  .ai p { font-size: 6.9pt; color: #D5DAEA; margin-top: 1.1mm; line-height: 1.38; }
+  .ai pre { margin: 0; font-family: var(--mono); font-size: 5.6pt; line-height: 1.55; color: #D8E6F4; background: var(--navy-dark); border-radius: 1.8mm; padding: 2mm 2.4mm; white-space: pre-wrap; }
+  .ai pre b { color: var(--orange); font-weight: 600; }
+
+  /* ---------- 7 human in the loop ---------- */
+  .loop { display: grid; gap: 1.5mm; margin-top: 3.6mm; }
+  .loop li { display: grid; grid-template-columns: 9mm 1fr; gap: 3mm; align-items: center; background: #fff; border: 1px solid var(--line); border-radius: 2.6mm; padding: 2mm 3mm; position: relative; }
+  .loop li > i { width: 9mm; height: 9mm; border-radius: 50%; background: var(--navy); color: #fff; font-style: normal; font-family: var(--mono); font-size: 10pt; font-weight: 600; display: grid; place-items: center; }
+  .loop h4 { font-size: 8.8pt; color: var(--navy); }
+  .loop h4 small { font-size: 6.2pt; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--amber); margin-left: 4px; }
+  .loop p { font-size: 7pt; color: #444; margin-top: .7mm; }
+  .gate { display: grid; grid-template-columns: 1fr 1fr; gap: 2.4mm; margin-top: 2.4mm; }
+  .gate div { border-radius: 2.6mm; padding: 2.4mm 3mm; font-size: 7pt; line-height: 1.36; }
+  .gate .yes { background: #EEF5E2; border: 1px solid #C9DDA8; color: #2F4D07; }
+  .gate .no { background: #F3F4F6; border: 1px solid #D9DCE2; color: #3D4350; }
+  .gate b { display: block; font-size: 8pt; }
+  .trust { display: grid; grid-template-columns: 1fr 1fr; gap: 2.2mm; margin-top: 3.2mm; }
+  .trust .card { padding: 2.2mm 3mm; }
+  .trust h4 { font-size: 8.2pt; color: var(--navy); }
+  .trust p { font-size: 6.8pt; color: #444; margin-top: .9mm; line-height: 1.36; }
+
+  /* ---------- 8 back cover ---------- */
+  .back { align-items: center; text-align: center; padding: 11mm 10mm 9mm; }
+  .back .logo { height: 10mm; width: auto; }
+  .back .title { font-size: 11pt; font-weight: 800; color: #fff; margin-top: 4mm; }
+  .back .subt { font-size: 7.6pt; color: var(--on-dark-dim); margin-top: 1.4mm; }
+  .back .photo { margin-top: 5.5mm; width: 100%; height: 50mm; border-radius: 3mm; overflow: hidden; border: 1px solid var(--slate-3); }
+  .back .photo img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 38%; }
+  .people { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1.6mm; margin-top: 3mm; width: 100%; }
+  .people div { background: var(--slate-2); border: 1px solid var(--slate-3); border-radius: 2mm; padding: 1.8mm 1mm; }
+  .people b { display: block; font-size: 6.6pt; font-weight: 700; color: #fff; line-height: 1.2; }
+  .people span { display: block; font-size: 5.6pt; color: var(--orange); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; margin-top: .8mm; }
+  .back .rule { width: 18mm; height: .8mm; background: var(--orange); border-radius: 1mm; margin-top: 6mm; }
+  .back .scan { font-size: 7pt; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; color: var(--orange); margin-top: 4mm; }
+  .qrs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5mm; margin-top: 3.4mm; width: 100%; }
+  .qr .code { width: 27mm; height: 27mm; margin: 0 auto; background: #fff; border-radius: 2mm; padding: 1.8mm; display: grid; place-items: center; }
+  .qr .code img, .qr .code canvas { width: 100% !important; height: 100% !important; }
+  .qr .code .fallback { font-size: 5.6pt; color: var(--mute); word-break: break-all; }
+  .qr b { display: block; font-size: 7.6pt; color: #fff; margin-top: 2mm; }
+  .qr span { display: block; font-size: 6.2pt; color: var(--on-dark-dim); margin-top: .5mm; }
+  .back .url { font-family: var(--mono); font-size: 8pt; color: #fff; margin-top: auto; }
+  .back .org { font-size: 6.8pt; color: var(--on-dark-dim); margin-top: 1.6mm; line-height: 1.45; }
+
+
+  /* ---------- cover decoration ---------- */
+  .cover { isolation: isolate; }
+  .cover .deco { position: absolute; inset: 0; z-index: -1; pointer-events: none; }
+  .cover .deco svg { position: absolute; }
+  .cover .rings { right: -38mm; top: 92mm; width: 120mm; height: 120mm; opacity: .5; }
+  .cover .dots { left: 0; top: 0; width: 100%; height: 100%; opacity: .5; }
+  .cover .trace { left: 0; right: 0; bottom: 27mm; width: 100%; height: 16mm; opacity: .9; }
+  .cover .glow {
+    position: absolute; left: -20mm; top: 40mm; width: 110mm; height: 70mm; border-radius: 50%;
+    background: radial-gradient(closest-side, rgba(46,125,185,.32), transparent); filter: blur(4px);
+  }
+  .cover .glow.o { left: 70mm; top: 128mm; width: 90mm; height: 60mm; background: radial-gradient(closest-side, rgba(240,160,32,.20), transparent); }
+  .cover .hero { border: 0; overflow: visible; background: #05080D; }
+  .cover .hero img { border-radius: 2mm; }
+  .cover .hero .corner { position: absolute; width: 5mm; height: 5mm; border: 0 solid var(--orange); }
+  .cover .hero .corner.tl { left: -1.6mm; top: -1.6mm; border-left-width: .6mm; border-top-width: .6mm; }
+  .cover .hero .corner.tr { right: -1.6mm; top: -1.6mm; border-right-width: .6mm; border-top-width: .6mm; }
+  .cover .hero .corner.bl { left: -1.6mm; bottom: -1.6mm; border-left-width: .6mm; border-bottom-width: .6mm; }
+  .cover .hero .corner.br { right: -1.6mm; bottom: -1.6mm; border-right-width: .6mm; border-bottom-width: .6mm; }
+  .cover .hero .live {
+    position: absolute; right: 2.4mm; bottom: 2.2mm; display: flex; align-items: center; gap: 1.4mm;
+    font-family: var(--mono); font-size: 5.6pt; font-weight: 600; letter-spacing: .1em; color: #fff;
+    background: rgba(14,22,34,.78); border-radius: 999px; padding: .6mm 2.2mm;
+  }
+  .cover .hero .live i { width: 1.6mm; height: 1.6mm; border-radius: 50%; background: #FF5A4E; box-shadow: 0 0 0 .6mm rgba(255,90,78,.3); }
+  .cover .scale {
+    display: flex; justify-content: space-between; margin: 1.4mm 10mm 0; font-family: var(--mono);
+    font-size: 5.4pt; color: var(--on-dark-dim); letter-spacing: .04em;
+    border-top: 1px solid var(--slate-3); padding-top: 1mm;
+  }
+  .cover .scale span { position: relative; }
+  .cover .scale span::before { content: ""; position: absolute; left: 50%; top: -1.9mm; width: 1px; height: 1.4mm; background: var(--on-dark-dim); }
+  .cover .scale span:first-child::before { left: 0; } .cover .scale span:last-child::before { left: auto; right: 0; }
+  .cover h1 { position: relative; }
+  .cover .track { display: flex; align-items: center; gap: 2mm; }
+  .cover .track::before { content: ""; width: 8mm; height: .6mm; background: var(--orange); border-radius: 1mm; }
+  .facts { position: relative; }
+  .facts::before { content: ""; position: absolute; left: 0; top: -1px; width: 38%; height: .8mm; background: linear-gradient(90deg, var(--orange), transparent); }
+
+  /* ---------- class-by-class ---------- */
+  .cgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.8mm; margin-top: 2mm; }
+  /* tier colours: threat red, military orange, civilian blue, empty slate. Not used for scores or confidence. */
+  .cfam { background: #fff; border: 1px solid var(--line); border-left: 1.1mm solid var(--blue); border-radius: 2mm; padding: 1.6mm 2.2mm 1.8mm; }
+  .cfam.thr { border-left-color: var(--red); } .cfam.mil { border-left-color: var(--orange); } .cfam.emp { border-left-color: #5B6472; }
+  .cfam h4 span { display: inline-flex; align-items: center; gap: 1.4mm; }
+  .tier { text-decoration: none; font-size: 4.9pt; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: #fff; border-radius: 999px; padding: .1mm 1.5mm; }
+  .tier.thr { background: var(--red); } .tier.mil { background: var(--orange); color: var(--slate); } .tier.civ { background: var(--blue); } .tier.emp { background: #5B6472; }
+  .tiers { display: flex; gap: 3mm; margin-top: 2.4mm; font-size: 6.2pt; color: var(--mute); font-weight: 600; align-items: center; }
+  .cfam h4 { font-size: 7.4pt; display: flex; justify-content: space-between; align-items: baseline; color: var(--ink); }
+  .cfam h4 i { font-style: normal; font-family: var(--mono); font-size: 6pt; font-weight: 600; color: var(--navy); }
+  .chips { display: flex; flex-wrap: wrap; gap: .9mm; margin-top: 1.1mm; }
+  .chip { display: inline-flex; align-items: center; gap: 1mm; font-size: 5.9pt; font-weight: 600; border-radius: 999px; padding: .2mm .4mm .2mm 1.8mm; white-space: nowrap; }
+  .chip b { font-family: var(--mono); font-size: 5.6pt; font-weight: 600; color: #fff; border-radius: 999px; padding: 0 1.4mm; }
+  /* score scale: one navy ramp, so it never reads as a confidence band (green / amber / grey) */
+  .chip.hi { background: #E2E7F3; color: var(--navy-dark); } .chip.hi b { background: var(--navy); }
+  .chip.mid { background: #EDEFF5; color: #3D4A6B; } .chip.mid b { background: #7584A8; }
+  .chip.lo { background: #F5F5F7; color: #80848C; } .chip.lo b { background: #C3C7CF; color: #4A4E57; }
+  .cfam em { display: block; font-style: normal; font-size: 5.6pt; color: var(--mute); margin-top: .9mm; }
+  .bigs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2mm; margin-top: 3.4mm; }
+  .bigs div { background: var(--navy); color: #fff; border-radius: 2.4mm; padding: 2.4mm 3mm; }
+  .bigs b { display: block; font-size: 15pt; font-weight: 800; line-height: 1; }
+  .bigs b small { font-size: 9pt; color: var(--orange); }
+  .bigs span { display: block; font-size: 6.2pt; color: #C5CBE0; margin-top: 1mm; line-height: 1.3; }
+
+  /* ---------- market comparison ---------- */
+  .cmp { width: 100%; border-collapse: separate; border-spacing: 0; margin-top: 3.6mm; font-size: 6.3pt; line-height: 1.32; }
+  .cmp th, .cmp td { padding: 1.5mm 1.6mm; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+  .cmp thead th { font-size: 6.6pt; font-weight: 800; color: var(--navy); border-bottom: 1.4px solid var(--navy); vertical-align: bottom; }
+  .cmp thead th small { display: block; font-size: 5.4pt; font-weight: 600; color: var(--mute); margin-top: .4mm; }
+  .cmp tbody th { font-size: 6.3pt; font-weight: 700; color: #333; width: 21mm; }
+  .cmp .nx { background: #EEF2FA; color: var(--navy); font-weight: 600; }
+  .cmp thead .nx { background: var(--navy); color: #fff; border-radius: 2mm 2mm 0 0; }
+  .cmp thead .nx small { color: var(--orange); }
+  .cmp td.ns { color: #9AA0A8; font-style: italic; }
+  .cmp tr:last-child .nx { border-radius: 0 0 2mm 2mm; }
+  .edge { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2mm; margin-top: 3.4mm; }
+  .edge div { border: 1px solid var(--line); border-top: .9mm solid var(--orange); border-radius: 2mm; padding: 2mm 2.4mm; background: #fff; }
+  .edge h4 { font-size: 7.6pt; color: var(--navy); }
+  .edge p { font-size: 6.4pt; color: #444; margin-top: .8mm; line-height: 1.34; }
+  .fair { margin-top: 2.6mm; font-size: 6pt; color: var(--mute); line-height: 1.38; }
+  .src { margin-top: 1.4mm; font-size: 5.3pt; color: #9AA0A8; line-height: 1.4; word-break: break-all; }
+
+  /* ---------- listen + loop on one page ---------- */
+  .row3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2mm; margin-top: 3mm; }
+  .row3 .card { padding: 1.8mm; }
+  .row3 img, .row3 .mini { width: 100%; height: 19mm; object-fit: cover; border-radius: 1.4mm; border: 1px solid var(--line); }
+  .row3 h4 { font-size: 7.6pt; color: var(--navy); margin-top: 1.4mm; }
+  .row3 h4 i { font-style: normal; font-family: var(--mono); color: var(--orange); margin-right: 3px; }
+  .row3 p { font-size: 6.2pt; color: #444; margin-top: .6mm; line-height: 1.32; }
+  .loop4 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.8mm; margin-top: 2.6mm; }
+  .loop4 div { display: grid; grid-template-columns: 7mm 1fr; gap: 2mm; align-items: start; background: #fff; border: 1px solid var(--line); border-radius: 2.2mm; padding: 1.8mm 2.2mm; }
+  .loop4 div > i { width: 7mm; height: 7mm; border-radius: 50%; background: var(--navy); color: #fff; font-style: normal; font-family: var(--mono); font-size: 8pt; font-weight: 600; display: grid; place-items: center; }
+  .loop4 h4 { font-size: 7.6pt; color: var(--navy); }
+  .loop4 p { font-size: 6.2pt; color: #444; margin-top: .5mm; line-height: 1.32; }
+  .h3s { font-size: 9.4pt; color: var(--navy); margin-top: 3.6mm; }
+
+  /* ---------- print: one A5 page per sheet, no screen chrome ---------- */
+  @page { size: 148mm 210mm; margin: 0; }
+  @media print {
+    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    body { background: #fff; }
+    .bar { display: none !important; }
+    .book { display: block; padding: 0; }
+    .page { zoom: 1; box-shadow: none; break-after: page; break-inside: avoid; }
+    .page:last-child { break-after: auto; }
+  }
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <img src="img/nexa-logo.png" alt="NEXA" width="1100" height="264">
+  <span>SEDIC@FOI2026 brochure</span>
+  <a href="./">Open the console</a>
+</header>
+
+<main class="book">
+
+<!-- ============ 1 · cover ============ -->
+<section class="page dark cover" id="cover">
+  <div class="deco" aria-hidden="true">
+    <div class="glow"></div><div class="glow o"></div>
+    <svg class="dots" viewBox="0 0 148 210" preserveAspectRatio="none">
+      <defs><pattern id="dp" width="4" height="4" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r=".22" fill="#9AA6B4" opacity=".35"/></pattern></defs>
+      <rect width="148" height="210" fill="url(#dp)"/>
+    </svg>
+    <svg class="rings" viewBox="0 0 100 100">
+      <g fill="none" stroke="#2E7DB9" stroke-width=".35">
+        <circle cx="50" cy="50" r="12"/><circle cx="50" cy="50" r="24"/><circle cx="50" cy="50" r="36" stroke-dasharray="1.2 1.6"/><circle cx="50" cy="50" r="48"/>
+        <line x1="50" y1="2" x2="50" y2="98" opacity=".5"/><line x1="2" y1="50" x2="98" y2="50" opacity=".5"/>
+      </g>
+      <path d="M50 50 L50 2 A48 48 0 0 0 16 16 Z" fill="url(#sw)"/>
+      <defs><linearGradient id="sw" x1="50" y1="2" x2="16" y2="16" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#F0A020" stop-opacity=".55"/><stop offset="1" stop-color="#F0A020" stop-opacity="0"/></linearGradient></defs>
+      <circle cx="31" cy="21" r="1.3" fill="#F0A020"/><circle cx="66" cy="70" r="1" fill="#7CFC00"/><circle cx="74" cy="38" r=".9" fill="#2E7DB9"/>
+    </svg>
+    <svg class="trace" viewBox="0 0 148 16" preserveAspectRatio="none">
+      <polyline fill="none" stroke="#F0A020" stroke-width=".35" opacity=".8" points="0,8 10,8 12,8 13,3 14,13 15,5 16,11 17,8 30,8 34,8 35,6 36,10 37,8 52,8 54,8 55,1 56,15 57,2 58,14 59,4 60,12 61,8 80,8 84,8 85,6 86,10 87,8 104,8 106,8 107,3 108,13 109,6 110,10 111,8 130,8 132,8 133,5 134,11 135,8 148,8"/>
+      <polyline fill="none" stroke="#2E7DB9" stroke-width=".25" opacity=".6" points="0,11 148,11"/>
+    </svg>
+  </div>
+  <div class="top">
+    <img src="img/nexa-logo-light.png" alt="NEXA" width="1100" height="264">
+    <span class="event">SEDIC@FOI2026</span>
+  </div>
+  <figure class="hero">
+    <img src="img/foi26/scene_cover.png" alt="A wideband spectrogram with NEXA's own boxes and answers: a pulsed jammer spread across the band, and under it a partial-band jammer, a CPFSK link and a BPSK link." width="820" height="374">
+    <span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
+    <span class="live"><i></i>3.2 MHz · 10 ms</span>
+  </figure>
+  <div class="scale" aria-hidden="true"><span>0 ms</span><span>2.5</span><span>5</span><span>7.5</span><span>10 ms</span></div>
+  <p class="hero-cap">NEXA's own boxes and answers on a simulated capture at 20 dB, not retouched: a pulsed jammer laid over three other signals, and every one still found and named.</p>
+  <div class="words">
+    <p class="track">Track I · RF signal intelligence</p>
+    <h1>Every emitter on the band, <em>named.</em></h1>
+    <p class="sub">NEXA watches a whole band of radio spectrum, finds every transmission in it and tells the operator what each one is: jammer, radar, voice or data. It runs offline on one workstation, and people stay in control.</p>
+  </div>
+  <div class="facts">
+    <div><b>60</b><span>signal classes in 12 families</span></div>
+    <div><b>90%</b><span>right signal family, 15 dB, 8-window vote</span></div>
+    <div><b>79.4%</b><span>exact class out of 60, SNR ≥ 10 dB, 16-window vote</span></div>
+    <div><b>0</b><span>data leaves the machine</span></div>
+  </div>
+</section>
+
+<!-- ============ 2 · the problem ============ -->
+<section class="page" id="problem">
+  <div class="brand"><img src="img/nexa-logo.png" alt="" width="1100" height="264"><img class="sedic" src="img/sedic-logo.png" alt="" width="831" height="238"></div>
+  <div class="folio"><b>02</b>The problem</div>
+  <h2>One band. Many emitters. All at once.</h2>
+  <p class="lead">In contested spectrum, friendly links, radars and deliberate interference overlap in time and frequency. An operator has seconds to work out what is on the air. NEXA answers three questions for every emitter it finds.</p>
+
+  <div class="tells">
+    <div class="card"><p class="kicker">What</p><h4>What is it?</h4><p>One of 60 signal types, or the family when the exact type cannot be told apart.</p></div>
+    <div class="card"><p class="kicker">How sure</p><h4>How sure is it?</h4><p>A confidence band on every answer: high, medium or uncertain.</p></div>
+    <div class="card"><p class="kicker">Where</p><h4>Where and when?</h4><p>A box on the spectrogram: its frequency, start time and duration.</p></div>
+  </div>
+
+  <div class="rows">
+    <div class="hd">What the operator sees · one row per emitter</div>
+    <ul>
+      <li><b>RADAR_PULSE + JAM_DRFM</b><span>A jammer copying a radar: both on the air</span><i class="band high">HIGH</i></li>
+      <li><b>QPSK</b><span>A digital data link</span><i class="band high">HIGH</i></li>
+      <li><b>QAM 16–256</b><span>Sizes look alike: likeliest 64QAM</span><i class="band med">MEDIUM</i></li>
+      <li><b>weak burst</b><span>Too weak to name: flagged for a person</span><i class="band unsure">UNCERTAIN</i></li>
+    </ul>
+  </div>
+
+  <div class="callout"><b>Two answers can both be true.</b> Each class is its own yes or no, so a radar and the jammer sitting on top of it are reported together, not as one or the other.</div>
+
+  <figure style="margin-top:4mm">
+    <div class="fig"><img src="img/foi26/snr_ladder.png" alt="The same radar chirp at minus 10, 0, plus 10 and plus 20 dB signal-to-noise ratio." width="1177" height="319"></div>
+    <figcaption class="cap">The same radar chirp from −10 dB (buried in noise) to +20 dB (clear). NEXA is trained across the whole range, so it learns when to say “uncertain”.</figcaption>
+  </figure>
+
+  <div class="foot"><span>NEXA · SEDIC@FOI2026</span><span>02</span></div>
+</section>
+
+<!-- ============ 3 · performance ============ -->
+<section class="page" id="accuracy">
+  <div class="brand"><img src="img/nexa-logo.png" alt="" width="1100" height="264"><img class="sedic" src="img/sedic-logo.png" alt="" width="831" height="238"></div>
+  <div class="folio"><b>03</b>Performance</div>
+  <h2>Named exactly, out of 60.</h2>
+
+  <div class="headline">
+    <b>79.4<small>%</small></b>
+    <div>
+      <h3>exact class, per emitter</h3>
+      <p>All 60 classes · SNR ≥ 10 dB · vote over 16 windows (2.6 ms of signal) · fixed test set of 120,000 windows the model never trained on. Chance is 1.7%.</p>
+    </div>
+  </div>
+
+  <div class="look">
+    <h3>From one window to a vote</h3>
+    <p>One window is 160 µs. The tracker averages every window of the same emitter, and the answer firms up.</p>
+    <div class="bars">
+      <div class="bar-row"><label>One window<small>SNR ≥ 10 dB</small></label><div class="track-bar"><i style="width:62.4%"></i><b style="left:calc(62.4% - 11mm)">62.4%</b></div></div>
+      <div class="bar-row"><label>Vote of 16 windows<small>SNR ≥ 10 dB</small></label><div class="track-bar"><i class="vote" style="width:79.4%"></i><b style="left:calc(79.4% - 11mm)">79.4%</b></div></div>
+      <div class="bar-row gap"><label>One window<small>all noise levels</small></label><div class="track-bar"><i style="width:49.8%"></i><b style="left:calc(49.8% - 11mm)">49.8%</b></div></div>
+      <div class="bar-row"><label>Vote of 16 windows<small>all noise levels</small></label><div class="track-bar"><i class="vote2" style="width:73%"></i><b style="left:calc(73% - 11mm)">73.0%</b></div></div>
+    </div>
+    <p class="cond" style="margin-top:1.6mm">Exact class out of 60, same fixed test set. “All noise levels” includes signals buried at −10 dB.</p>
+  </div>
+
+  <div class="sure">
+    <div class="card">
+      <h3>It says how sure it is</h3>
+      <p><i class="band high">HIGH</i> <i class="band med">MEDIUM</i> <i class="band unsure">UNCERTAIN</i></p>
+      <p>Confidence is calibrated on held-out data, and every answer carries a band. Uncertain answers go to a person, not into the log as fact.</p>
+    </div>
+    <div class="card">
+      <h3>It does not guess what it cannot see</h3>
+      <p>QAM, APSK and high-order PSK sizes look alike in 160 µs. NEXA names the group and offers the likeliest size as a hint. An empty channel is reported as empty.</p>
+    </div>
+  </div>
+
+  <div class="famacc">
+    <h3>Right family: 90% across all 12</h3>
+    <div class="fgrid">
+      <div><span>ASK</span><i style="width:100%"></i><b>100%</b></div>
+      <div><span>FSK</span><i style="width:100%"></i><b>100%</b></div>
+      <div><span>Radar</span><i style="width:95%"></i><b>95%</b></div>
+      <div><span>QAM</span><i style="width:94%"></i><b>94%</b></div>
+      <div><span>Jammers</span><i style="width:93%"></i><b>93%</b></div>
+      <div><span>OFDM / LTE / NR</span><i style="width:93%"></i><b>93%</b></div>
+      <div><span>PSK</span><i style="width:91%"></i><b>91%</b></div>
+      <div><span>Analog voice</span><i style="width:86%"></i><b>86%</b></div>
+      <div><span>Spread spectrum</span><i style="width:82%"></i><b>82%</b></div>
+      <div><span>Pulse comms</span><i style="width:70%"></i><b>70%</b></div>
+      <div><span>APSK</span><i style="width:69%"></i><b>69%</b></div>
+      <div><span>Noise floor</span><i style="width:66%"></i><b>66%</b></div>
+    </div>
+    <p class="cond">Answer lands in the right family · 15 dB · vote over 8 windows · 32 fresh tracks per class from our own generators, one emitter at a time (cleaner than the test set) · physics_aug_best.</p>
+  </div>
+
+  <div class="foot"><span>NEXA · SEDIC@FOI2026</span><span>03</span></div>
+</section>
+
+<!-- ============ 4 · class by class ============ -->
+<section class="page tint" id="classes">
+  <div class="brand"><img src="img/nexa-logo.png" alt="" width="1100" height="264"><img class="sedic" src="img/sedic-logo.png" alt="" width="831" height="238"></div>
+  <div class="folio"><b>04</b>Class by class</div>
+  <h2>60 signal classes, every one scored.</h2>
+  <div class="bigs">
+    <div><b>37<small> / 60</small></b><span>classes named exactly 90% of the time or more</span></div>
+    <div><b>48<small> / 60</small></b><span>classes named exactly at least half the time</span></div>
+    <div><b>10<small> / 10</small></b><span>jammer types recognised as jamming: family 93%</span></div>
+  </div>
+  <div class="tiers"><span>Families by tier:</span><u class="tier thr">Threat</u><u class="tier mil">Military</u><u class="tier civ">Civilian</u><u class="tier emp">Empty</u></div>
+  <div class="cgrid">
+      <div class="cfam thr"><h4><span>Jammers<u class="tier thr">Threat</u></span><i>family 93%</i></h4><div class="chips"><span class="chip hi">Barrage<b>100</b></span><span class="chip hi">Spot<b>100</b></span><span class="chip hi">Multitone<b>100</b></span><span class="chip hi">Swept<b>100</b></span><span class="chip hi">Chirp<b>100</b></span><span class="chip hi">Pulsed<b>100</b></span><span class="chip hi">Partial-band<b>100</b></span><span class="chip hi">Reactive<b>100</b></span><span class="chip mid">DRFM<b>81</b></span><span class="chip mid">Tone<b>50</b></span></div></div>
+      <div class="cfam mil"><h4><span>Radar<u class="tier mil">Military</u></span><i>family 95%</i></h4><div class="chips"><span class="chip hi">Pulse<b>100</b></span><span class="chip hi">LFM<b>100</b></span><span class="chip hi">Barker<b>100</b></span><span class="chip hi">Frank<b>100</b></span><span class="chip hi">Costas<b>100</b></span><span class="chip hi">FMCW<b>100</b></span><span class="chip hi">Poly-Barker<b>97</b></span><span class="chip mid">CW<b>62</b></span></div></div>
+      <div class="cfam mil"><h4><span>Spread spectrum<u class="tier mil">Military</u></span><i>family 82%</i></h4><div class="chips"><span class="chip hi">FHSS<b>100</b></span><span class="chip hi">DSSS<b>94</b></span><span class="chip mid">LoRa<b>53</b></span></div></div>
+      <div class="cfam mil"><h4><span>Pulse comms<u class="tier mil">Military</u></span><i>family 70%</i></h4><div class="chips"><span class="chip hi">PPM<b>100</b></span><span class="chip hi">SSR / IFF<b>100</b></span><span class="chip lo">AFSK<b>9</b></span></div></div>
+      <div class="cfam civ"><h4><span>Analog voice<u class="tier civ">Civilian</u></span><i>family 86%</i></h4><div class="chips"><span class="chip hi">AM-DSB-WC<b>100</b></span><span class="chip hi">AM-DSB-SC<b>100</b></span><span class="chip hi">AM-SSB-WC<b>100</b></span><span class="chip hi">WBFM<b>100</b></span><span class="chip hi">PM<b>94</b></span><span class="chip mid">NBFM<b>50</b></span><span class="chip lo">AM-SSB-SC<b>0</b></span></div></div>
+      <div class="cfam civ"><h4><span>FSK<u class="tier civ">Civilian</u></span><i>family 100%</i></h4><div class="chips"><span class="chip hi">2FSK<b>100</b></span><span class="chip hi">4FSK<b>100</b></span><span class="chip hi">8FSK<b>100</b></span><span class="chip hi">GFSK<b>100</b></span><span class="chip hi">MSK<b>100</b></span><span class="chip hi">CPFSK<b>100</b></span><span class="chip mid">GMSK<b>78</b></span></div></div>
+      <div class="cfam civ"><h4><span>ASK<u class="tier civ">Civilian</u></span><i>family 100%</i></h4><div class="chips"><span class="chip hi">OOK<b>100</b></span><span class="chip hi">4ASK<b>91</b></span><span class="chip mid">8ASK<b>84</b></span></div></div>
+      <div class="cfam civ"><h4><span>OFDM / LTE / NR<u class="tier civ">Civilian</u></span><i>family 93%</i></h4><div class="chips"><span class="chip hi">NR-like<b>100</b></span><span class="chip mid">LTE-like<b>78</b></span><span class="chip lo">OFDM<b>12</b></span></div></div>
+      <div class="cfam civ"><h4><span>PSK<u class="tier civ">Civilian</u></span><i>family 91%</i></h4><div class="chips"><span class="chip hi">OQPSK<b>100</b></span><span class="chip hi">16PSK<b>100</b></span><span class="chip hi">QPSK<b>97</b></span><span class="chip lo">BPSK<b>47</b></span><span class="chip lo">8PSK<b>0</b></span><span class="chip lo">32PSK<b>0</b></span></div><em>sizes answered as a group</em></div>
+      <div class="cfam civ"><h4><span>QAM<u class="tier civ">Civilian</u></span><i>family 94%</i></h4><div class="chips"><span class="chip hi">256QAM<b>97</b></span><span class="chip lo">32QAM<b>47</b></span><span class="chip lo">16QAM<b>3</b></span><span class="chip lo">64QAM<b>0</b></span><span class="chip lo">128QAM<b>0</b></span></div><em>sizes answered as a group</em></div>
+      <div class="cfam civ"><h4><span>APSK<u class="tier civ">Civilian</u></span><i>family 69%</i></h4><div class="chips"><span class="chip mid">32APSK<b>69</b></span><span class="chip mid">16APSK<b>66</b></span><span class="chip lo">64APSK<b>6</b></span><span class="chip lo">128APSK<b>0</b></span></div><em>sizes answered as a group</em></div>
+      <div class="cfam emp"><h4><span>Noise floor<u class="tier emp">Empty</u></span><i>family 66%</i></h4><div class="chips"><span class="chip mid">Nothing on air<b>66</b></span></div></div>
+  </div>
+  <p class="cond" style="margin-top:2.4mm"><span class="chip hi"><b>90+</b></span> <span class="chip mid"><b>50–89</b></span> <span class="chip lo"><b>&lt;50</b></span> exact class, % · 15 dB · vote over 8 windows · 32 fresh tracks per class from our own generators, one emitter at a time · physics_aug_best. Sizes of QAM, APSK and high-order PSK look alike in 160 µs: NEXA answers the group and gives the likeliest size as a hint, so a low size score is still a right family answer.</p>
+  <div class="foot"><span>NEXA · SEDIC@FOI2026</span><span>04</span></div>
+</section>
+
+<!-- ============ 5 · market comparison ============ -->
+<section class="page" id="market">
+  <div class="brand"><img src="img/nexa-logo.png" alt="" width="1100" height="264"><img class="sedic" src="img/sedic-logo.png" alt="" width="831" height="238"></div>
+  <div class="folio"><b>05</b>How NEXA compares</div>
+  <h2>Built for contested spectrum, not just monitoring.</h2>
+  <p class="lead">Commercial tools are mature and field-proven, and most are built to monitor and decode communications. NEXA is built for the case they do not describe: a jammer on top of a signal, radar and comms on one band, and an answer the operator can trust.</p>
+
+  <table class="cmp">
+    <thead><tr>
+      <th></th>
+      <th class="nx">NEXA<small>this project</small></th>
+      <th>DeepSig OmniSIG<small>AI RF sensing</small></th>
+      <th>R&amp;S CA100<small>signal analysis software</small></th>
+      <th>PROCITEC go2MONITOR<small>radio monitoring</small></th>
+    </tr></thead>
+    <tbody>
+      <tr><th>What it names</th><td class="nx">60 classes: comms, 8 radar, 10 jammer types, noise</td><td>Signals the user trains it on</td><td>Modulation type and transmission system, HF–UHF</td><td>Modulation types and 350+ modems</td></tr>
+      <tr><th>How</th><td class="nx">Deep learning, four views of each window</td><td>Deep learning</td><td>Classifier with rule-based processing</td><td>Multi-stage classifier library</td></tr>
+      <tr><th>Jammer on top of a signal</th><td class="nx">Both reported (multi-label)</td><td class="ns">not stated</td><td class="ns">not stated</td><td class="ns">not stated</td></tr>
+      <tr><th>Confidence on each answer</th><td class="nx">Calibrated band: high, medium, uncertain</td><td class="ns">not stated</td><td class="ns">not stated</td><td class="ns">not stated</td></tr>
+      <tr><th>Voice and Morse to text</th><td class="nx">Speech and Morse to text, local AI summary</td><td class="ns">not stated</td><td>Demodulation, decoding, content recovery</td><td>Automatic decoding</td></tr>
+      <tr><th>Learns from operators</th><td class="nx">Two-person approval, gated retrain, rollback</td><td>Retrain by labelling captures (Studio)</td><td class="ns">not stated</td><td>User-built decoders</td></tr>
+      <tr><th>Runs on</th><td class="nx">One offline workstation, any SDR or IQ file</td><td>Edge devices and containers</td><td>PC, dongle licence</td><td>PC with supported receivers</td></tr>
+      <tr><th>Maturity</th><td class="nx">Research prototype</td><td>Commercial</td><td>Commercial</td><td>Commercial</td></tr>
+    </tbody>
+  </table>
+
+  <div class="edge">
+    <div><h4>Sees the attack</h4><p>Ten jammer types and eight radar waveforms, named next to the signal they sit on.</p></div>
+    <div><h4>Says how sure it is</h4><p>Every answer carries a calibrated band, and uncertain ones go to a person.</p></div>
+    <div><h4>Stays in the room</h4><p>Detection, speech recognition and AI reading all run on one offline machine.</p></div>
+  </div>
+
+  <p class="fair">How we compared: from each vendor's public product pages, November 2026. “Not stated” means we found no public claim, not that the product cannot do it. Vendors do not publish accuracy on a shared test set, so we compare capabilities, not scores.</p>
+  <p class="src">deepsig.ai/omnisig-sdk · rohde-schwarz.com (R&amp;S CA100) · procitec.com (PRO Monitoring Suite tech. specs, products brochure 24.1)</p>
+  <div class="foot"><span>NEXA · SEDIC@FOI2026</span><span>05</span></div>
+</section>
+
+<!-- ============ 6 · how it works ============ -->
+<section class="page" id="how">
+  <div class="brand"><img src="img/nexa-logo.png" alt="" width="1100" height="264"><img class="sedic" src="img/sedic-logo.png" alt="" width="831" height="238"></div>
+  <div class="folio"><b>06</b>How it works</div>
+  <h2>See the whole spectrum, then name every emitter.</h2>
+
+  <div class="stage">
+    <h3>1 · See the spectrum</h3>
+    <div class="steps">
+      <div class="step"><img src="img/foi26/t_capture.png" alt="" width="335" height="193"><div><h4><i>1</i>Capture</h4><p>Raw IQ samples from a radio receiver, a recorded file or the simulator. Seconds of the whole band at once.</p></div></div>
+      <div class="step"><img src="img/foi26/t_spectrogram.png" alt="" width="335" height="193"><div><h4><i>2</i>Spectrogram</h4><p>The band as a picture: time across, frequency down. Every emitter leaves its own mark.</p></div></div>
+      <div class="step"><img src="img/foi26/t_detector.png" alt="" width="335" height="193"><div><h4><i>3</i>Detector</h4><p>A YOLO model draws a box around every emitter in time and frequency, many at once.</p></div></div>
+      <div class="step"><img src="img/foi26/t_cut.png" alt="" width="335" height="193"><div><h4><i>4</i>Cut and clean</h4><p>Each box is centred, filtered and cut into 160 µs windows. Gaps between pulses are skipped.</p></div></div>
+    </div>
+  </div>
+
+  <div class="stage b">
+    <h3>2 · Name it</h3>
+    <div class="steps">
+      <div class="step"><img src="img/foi26/t_classifier.png" alt="" width="335" height="193"><div><h4><i>5</i>Classifier</h4><p>60 yes / no answers per window, from four views of the signal: raw samples, spectrogram, expert and physics measurements.</p></div></div>
+      <div class="step"><img src="img/foi26/t_track.png" alt="" width="335" height="193"><div><h4><i>6</i>Tracker and vote</h4><p>Joins the windows of one emitter over time and averages them, so a single miss stops mattering.</p></div></div>
+      <div class="step"><div class="mini" aria-hidden="true"><span>CW radar / tone jam <b>?</b></span><span>LoRa / swept jam <b>?</b></span><span>QAM size <b>group</b></span></div><div><h4><i>7</i>Resolver</h4><p>Settles look-alikes from behaviour over time, and names the group where sizes cannot be told apart.</p></div></div>
+      <div class="step"><div class="mini" aria-hidden="true"><span>PULSE + DRFM <i class="band high">HIGH</i></span><span>QAM 16–256 <i class="band med">MED</i></span><span>weak burst <i class="band unsure">UNSURE</i></span></div><div><h4><i>8</i>Dashboard</h4><p>Boxes on the spectrogram and one row per emitter: answer, confidence band, frequency, time, alerts.</p></div></div>
+    </div>
+  </div>
+
+  <figure style="margin-top:3mm">
+    <div class="fig" style="background:#05080D;border-color:var(--slate-3)"><img style="height:40mm;width:auto;margin:0 auto" src="img/foi26/scene_nexa.png" alt="NEXA's own boxes and answers on a simulated capture." width="820" height="374"></div>
+    <figcaption class="cap">NEXA's own answers on a simulated capture at 15 dB, not retouched: <b style="color:var(--green)">right</b>, <b style="color:var(--red)">wrong</b>, <b style="color:#6B7280">uncertain</b>. One 64QAM link was called a jammer; one jammer was missed.</figcaption>
+  </figure>
+
+  <div class="foot"><span>NEXA · SEDIC@FOI2026</span><span>06</span></div>
+</section>
+
+<!-- ============ 7 · listen, read, learn ============ -->
+<section class="page tint" id="listen">
+  <div class="brand"><img src="img/nexa-logo.png" alt="" width="1100" height="264"><img class="sedic" src="img/sedic-logo.png" alt="" width="831" height="238"></div>
+  <div class="folio"><b>07</b>Listen, read, learn</div>
+  <h2>Voice and Morse become text. People stay in control.</h2>
+
+  <div class="row3">
+    <div class="card"><img src="img/foi26/t_zoom.png" alt="" width="335" height="193"><h4><i>1</i>Zoom in</h4><p>Measures carrier and sidebands; rules name it AM, FM, SSB or CW.</p></div>
+    <div class="card"><img src="img/foi26/t_demod.png" alt="" width="335" height="193"><h4><i>2</i>Demodulate</h4><p>The right demodulator turns radio samples into audio.</p></div>
+    <div class="card"><div class="mini" aria-hidden="true"><span>speech</span><span style="color:var(--amber)">→ text</span><span>on this machine</span></div><h4><i>3</i>Voice to text</h4><p>Whisper speech recognition, run locally. No audio leaves.</p></div>
+  </div>
+
+  <figure class="morse" style="margin-top:2.4mm">
+    <div class="fig"><img src="img/foi26/morse_decode.png" alt="Morse audio and the on / off keying NEXA recovered from it." width="1092" height="384"></div>
+    <div class="out"><code>CQ CQ DE NEXA K</code><span><b style="color:var(--navy)">Morse to text.</b> Times each key press, measures the dot length, turns dots and dashes into letters (18 words per minute). A local AI summarises the text and anything not in the text is removed.</span></div>
+  </figure>
+
+  <h3 class="h3s">It learns, but only with approval</h3>
+  <div class="loop4">
+    <div><i>1</i><section><h4>Operator corrects</h4><p>Flags or fixes an answer with one click.</p></section></div>
+    <div><i>2</i><section><h4>Analyst approves</h4><p>A second person checks the stored signal.</p></section></div>
+    <div><i>3</i><section><h4>Retrain</h4><p>Started by a person, never on its own.</p></section></div>
+    <div><i>4</i><section><h4>Gate</h4><p>Goes live only if it beats the current model on the same test set; rollback any time.</p></section></div>
+  </div>
+
+  <div class="trust" style="margin-top:2.6mm">
+    <div class="card"><p class="kicker">Hardware</p><h4>Receiver, file or simulator</h4><p>A software-defined radio, a recorded IQ file or the built-in simulator, at any sample rate.</p></div>
+    <div class="card"><p class="kicker">Accountable</p><h4>Tamper-evident audit trail</h4><p>Every capture, decision and correction is logged locally, each entry chained to the one before.</p></div>
+  </div>
+  <div class="strip">Offline · tamper-evident audit trail · <em>no data leaves the machine</em></div>
+  <div class="foot"><span>NEXA · SEDIC@FOI2026</span><span>07</span></div>
+</section>
+
+<!-- ============ 8 · back cover ============ -->
+<section class="page dark back" id="back">
+  <img class="logo" src="img/nexa-logo-light.png" alt="NEXA" width="1100" height="264">
+  <p class="title">AI-powered RF spectrum intelligence</p>
+  <p class="subt">60 signal classes · offline · human in the loop</p>
+
+  <figure class="photo"><img src="img/team.jpg" alt="Group NEXA. Left to right: Eavan Tan, Eileen Yeoh Jing Han, Dr Noureen Talpur, Jessy Pang Xin Yuan, Chua Xin Ying." width="1400" height="1050"></figure>
+  <div class="people">
+    <div><b>Eavan Tan</b><span>Group leader</span></div>
+    <div><b>Eileen Yeoh Jing Han</b></div>
+    <div><b>Dr Noureen Talpur</b><span>Advisor</span></div>
+    <div><b>Jessy Pang Xin Yuan</b></div>
+    <div><b>Chua Xin Ying</b></div>
+  </div>
+
+  <div class="rule" aria-hidden="true"></div>
+  <p class="scan">Scan to see it run</p>
+  <div class="qrs">
+    <div class="qr"><div class="code" id="qrDemo"></div><b>Try the console</b><span>In your browser</span></div>
+    <div class="qr"><div class="code" id="qrVideo"></div><b>Watch the demo</b><span>NEXA running, on video</span></div>
+    <div class="qr"><div class="code" id="qrSelf"></div><b>Keep this brochure</b><span>Scan to save or share</span></div>
+  </div>
+
+  <p class="url">sedic-ai-nexa.vercel.app</p>
+  <p class="org">Group NEXA · Universiti Teknologi PETRONAS<br>SEDIC@FOI2026</p>
+</section>
+
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+(() => {
+  /* Scale the A5 pages to the window: phones shrink them, wide screens enlarge them. */
+  const mm = 96 / 25.4, pageW = 148 * mm;
+  const fit = () => {
+    const z = Math.max(0.4, Math.min(1.7, (innerWidth - 24) / pageW));
+    document.documentElement.style.setProperty("--z", z.toFixed(3));
+  };
+  fit(); addEventListener("resize", fit);
+
+  /* QR codes always point at the deployed site, so the printed PDF works when built from a local file. */
+  const SITE = "https://sedic-ai-nexa.vercel.app/";
+  const DEMO_VIDEO_URL = "https://canva.link/rqno27jh02rd9bz";
+  const targets = [["qrDemo", SITE], ["qrVideo", DEMO_VIDEO_URL], ["qrSelf", SITE + "brochure-foi26.html"]];
+  for (const [id, url] of targets) {
+    const box = document.getElementById(id);
+    if (typeof QRCode === "undefined") {
+      box.innerHTML = '<span class="fallback"></span>'; box.firstChild.textContent = url; continue;
+    }
+    new QRCode(box, { text: url, width: 512, height: 512, colorDark: "#22306B", colorLight: "#ffffff", correctLevel: QRCode.CorrectLevel.M });
+  }
+})();
+</script>
+</body>
+</html>
