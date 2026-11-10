@@ -36,12 +36,14 @@ def main():
     p.add_argument("--run-label", default=None, help="run name shown on the page (default: the folder name)")
     p.add_argument("--vote-high", type=float, default=None,
                    help="share right when voting over 16 windows at >= 10 dB (from the run notes), optional")
+    p.add_argument("--compare-key", default=None,
+                   help="this run's entry in compare.json (default: the one named '... this run ...')")
     p.add_argument("--out", default=str(REPO_ROOT / "web" / "data" / "current_model.json"))
     a = p.parse_args()
     run = Path(a.run_dir)
     sc = json.loads((run / "scorecard.json").read_text(encoding="utf-8"))
     cmp_ = json.loads((run / "compare.json").read_text(encoding="utf-8"))
-    mine = next(v for k, v in cmp_.items() if "this run" in k)
+    mine = cmp_[a.compare_key] if a.compare_key else next(v for k, v in cmp_.items() if "this run" in k)
     per_class = sc["test"]["per_class"]
     groups = dict(CLASS_GROUPS)
     groups.setdefault("NOISE", ["NOISE_FLOOR"])

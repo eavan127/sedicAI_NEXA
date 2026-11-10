@@ -14,7 +14,7 @@ const KIND_TEXT = {
 };
 const BAND_COL = { high: "#2E7D32", medium: "#B7791F", uncertain: "#9B2C2C" };
 const CONF = c => c >= 0.6 ? "#2E7D32" : c >= 0.3 ? "#B7791F" : "#9B2C2C";
-const LANG_TEXT = { auto: "Language: detect", ms: "Malay", en: "English", id: "Indonesian" };
+const LANG_TEXT = { auto: "Language: detect", ms: "Malay", en: "English", id: "Indonesian", zh: "Mandarin" };
 
 function whisperOptions(info) {
   const have = info.whisper_models || [];
@@ -247,7 +247,7 @@ function drawResult(box, id, r) {
       · ${(res.duration_ms || 0).toFixed(0)} ms analysed · ${tracks.length} transmitters · ${esc(r.detector)} detector</div>
     <img src="/api/pipeline/${encodeURIComponent(id)}/tracks.png" alt="Waterfall with every transmitter boxed and named"
       style="width:100%;margin-top:10px;border:1px solid var(--grid);background:#000;">
-    ${heard.length ? `<div style="margin-top:14px;font-weight:700;">What it says</div>` + heard.map(L => listenCard(id, L)).join("") : ""}
+    ${heard.length ? `<div style="margin-top:14px;font-weight:700;">What it says</div>` + heard.map(L => listenCard(id, L, hfKhz(tracks, L, centre))).join("") : ""}
     <div style="margin-top:14px;font-weight:700;">Every transmitter</div>
     <div class="note">Answer = the 60-class model voted over the whole transmission; when two classes cannot be told apart from
       the signal (e.g. RADAR_CW / JAM_TONE) both are shown with the reason. Confidence band from the track probability: high (≥ 0.40), medium (≥ 0.10), uncertain (below: shown as 'uncertain' with the likeliest class). Voice / Morse tracks on a clear signal are named by the zoom-in, which listens to the whole track.</div>
@@ -261,9 +261,62 @@ function drawResult(box, id, r) {
     </tbody></table></div>
     <details style="margin-top:8px;"><summary class="note">Run log</summary>
       <pre style="white-space:pre-wrap;max-height:240px;overflow:auto;">${esc(r.log || "")}</pre></details>`;
+  for (const form of box.querySelectorAll("form.tdoa")) {
+    form.addEventListener("submit", async ev => {
+      ev.preventDefault();
+      const out = form.querySelector(".tdoa-msg");
+      const lat = Number(form.lat.value), lon = Number(form.lon.value);
+      if (!(Math.abs(lat) <= 90 && Math.abs(lon) <= 180) || form.lat.value === "" || form.lon.value === "") {
+        out.textContent = "Latitude -90..90 and longitude -180..180, e.g. 3.14 and 101.69.";
+        return;
+      }
+      try {
+        const res = await fetch("/api/audit", { method: "POST", credentials: "same-origin",
+          headers: { ...HDR, "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "client.tdoa_location", target_type: "pipeline_run", target_id: id,
+            details: { freq_khz: Number(form.dataset.khz), lat, lon, receivers: form.rx.value.trim(),
+                       note: form.note.value.trim(), source: "KiwiSDR TDoA" } }) });
+        if (!res.ok) throw new Error((await res.json()).error || `HTTP ${res.status}`);
+        out.textContent = `Saved in the audit trail: ${lat.toFixed(3)}, ${lon.toFixed(3)}.`;
+      } catch (e) { out.textContent = `Could not save: ${e.message}`; }
+    });
+  }
 }
 
-function listenCard(id, L) {
+// KiwiSDR direction finding (TDoA) is a KiwiSDR service: NEXA links to it for
+// HF signals with a known frequency and records the location the analyst reads
+// off its map. Nothing is sent from NEXA; the link opens the receiver's page.
+const KIWI_RX = "http://21439.proxy2.kiwisdr.com:8073";   // 9M2AMH, Kuala Lumpur (GPS-timed)
+const HF_MAX_KHZ = 30000;
+
+/** Absolute frequency (kHz) of a heard signal, when the capture's centre is known and it is HF. */
+function hfKhz(tracks, L, centre) {
+  if (!centre) return null;
+  const t = tracks.find(t => t.listen === L) || tracks.find(t => (L.tracks || []).includes(t.track));
+  if (!t) return null;
+  const khz = (centre + ((t.f_lo_khz + t.f_hi_khz) / 2) * 1e3) / 1e3;
+  return khz > 0 && khz <= HF_MAX_KHZ ? khz : null;
+}
+
+function locateBlock(khz) {
+  const url = `${KIWI_RX}/?f=${khz.toFixed(2)}iqz10`;
+  return `<details style="margin-top:8px;"><summary><b>Locate on KiwiSDR</b> <span class="note">(HF ${khz.toFixed(2)} kHz: where is the transmitter?)</span></summary>
+    <div class="note" style="margin:6px 0;">
+      1. <a href="${esc(url)}" target="_blank" rel="noopener noreferrer">Open the Kuala Lumpur KiwiSDR at ${khz.toFixed(2)} kHz in IQ mode</a>
+         (an outside website; only the frequency is in the link).<br>
+      2. In its bottom-right panel, choose <b>Extension → TDoA</b>, tick 3 or more receivers on the map that hear the signal, press <b>Submit</b>.<br>
+      3. When the map shows the most likely area, enter its centre below. It is saved in NEXA's audit trail next to this detection.<br>
+      Short-wave paths bounce off the ionosphere, so expect an area tens to hundreds of km across, not a point.</div>
+    <form class="tdoa filters" data-khz="${khz.toFixed(3)}">
+      <input name="lat" placeholder="latitude (e.g. 3.14)" style="width:150px;">
+      <input name="lon" placeholder="longitude (e.g. 101.69)" style="width:160px;">
+      <input name="rx" placeholder="receivers used" style="width:170px;">
+      <input name="note" placeholder="note" style="width:180px;">
+      <button type="submit">Record location</button> <span class="note tdoa-msg"></span>
+    </form></details>`;
+}
+
+function listenCard(id, L, khz = null) {
   const rd = L.reading || {};
   const said = L.morse ? `<div><b>Morse:</b> <code>${esc(L.morse)}</code></div>`
     : L.transcript !== undefined ? `<div><b>Speech (Whisper${L.whisper_model ? ` ${esc(L.whisper_model)}` : ""}${L.language ? `, ${esc(L.language)}` : ""}):</b>
@@ -281,5 +334,6 @@ function listenCard(id, L) {
       <div>${esc(rd.summary)}</div>
       ${(rd.evidence || []).map(e => `<div class="note"><code>${esc(e.quote)}</code> — ${esc(e.why)}</div>`).join("")}
       ${rd.removed_ungrounded ? `<div class="note">${rd.removed_ungrounded} unsupported item(s) the model made up were removed.</div>` : ""}` : ""}
+    ${khz ? locateBlock(khz) : ""}
   </div>`;
 }

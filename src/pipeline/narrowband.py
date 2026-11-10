@@ -203,9 +203,8 @@ def _peaks(db, f, floor, min_gap=60.0, above=10.0, top=6):
 
 def features(y, fs=FA):
     y = np.asarray(y, np.complex64)
-    y = y - y.mean() * 0                                    # keep DC: a carrier at 0 Hz is information
-    nfft = 8192
-    f, p = welch(y, fs=fs, nperseg=min(nfft, len(y)), return_onesided=False)
+    nfft = 8192                                             # detrend=False keeps DC: a carrier at 0 Hz is information
+    f, p = welch(y, fs=fs, nperseg=min(nfft, len(y)), return_onesided=False, detrend=False)
     order = np.argsort(f)
     f, p = f[order], p[order]
     db = 10 * np.log10(p + 1e-20)

@@ -82,7 +82,9 @@ def hint_for(f_khz):
 def measure(iq, fs):
     """Signal shape, from the spectrum and the envelope only."""
     nfft = int(2 ** np.ceil(np.log2(fs / 5)))               # ~5 Hz bins
-    f, p = welch(iq - iq.mean(), fs=fs, nperseg=min(nfft, len(iq) // 4), return_onesided=False)
+    # detrend=False: a carrier tuned to the centre (time stations) is at 0 Hz; KiwiSDR IQ has
+    # no DC artefact to remove (checked on the 2026-11-09 clips).
+    f, p = welch(iq, fs=fs, nperseg=min(nfft, len(iq) // 4), return_onesided=False, detrend=False)
     order = np.argsort(f)
     f, p = f[order], p[order]
     keep = np.abs(f) < 0.45 * fs                            # the receiver's own filter edges

@@ -43,6 +43,7 @@ import atexit
 import collections
 import datetime
 import json
+import re
 import secrets
 import shutil
 import sys
@@ -325,6 +326,13 @@ def replay_receiver(buf, path, speed=1.0, loop=True):
     raw = np.frombuffer(frames, dtype="<i2").astype(np.float32) / 32768
     iq = (raw[0::2] + 1j * raw[1::2]).astype(np.complex64)
     buf.info.update({"device_sample_rate": str(fs), "active_device": f"replay of {Path(path).name}"})
+    # KiwiSDR recordings (scripts/kiwi_collect.py: <guess>_<kHz>_<UTC>.wav, or kiwirecorder's
+    # ..._<Hz>_iq.wav) carry their centre frequency in the name: the dashboard can then show
+    # real frequencies and offer "Locate on KiwiSDR".
+    m = re.search(r"_(\d{3,5}(?:\.\d+)?)_\d{8}T\d{6}Z", Path(path).name) or re.search(r"_(\d{6,9})_iq", Path(path).name)
+    if m:
+        hz = float(m.group(1)) * (1e3 if "." in m.group(1) or len(m.group(1)) <= 5 else 1.0)
+        buf.info["device_center_frequency"] = str(int(round(hz)))
     step = int(fs * 0.05)
     t0 = time.monotonic()
     sent = 0
@@ -391,7 +399,9 @@ def spectrum_blocks(iq, fs, block_s=BLOCK_S):
     edges = [i * step for i in range(max(1, len(iq) // step))] + [len(iq)]
     rows = []
     for a, b in zip(edges, edges[1:]):
-        f, p = welch(iq[a:b], fs=fs, nperseg=nfft, return_onesided=False, scaling="density")
+        # detrend=False: a carrier exactly at the centre (a VFO-centred stream, an auto-tuned
+        # signal) is the mean of each segment, and the default detrend would delete it.
+        f, p = welch(iq[a:b], fs=fs, nperseg=nfft, return_onesided=False, scaling="density", detrend=False)
         rows.append(p)
     order = np.argsort(f)
     return f[order], 10 * np.log10(np.array(rows)[:, order] + 1e-20), edges
@@ -525,10 +535,13 @@ def plot_snapshot(iq, fs, tracks, path, centre_hz=None):
         f, t, s = spectrogram(iq[0:len(iq)], fs=fs, nperseg=nfft, noverlap=nfft // 2, return_onesided=False)
         t_end = t[-1]
     else:                                                  # long recording: one averaged column per pixel
-        cuts = np.linspace(0, len(iq), MAX_PLOT_COLS + 1).astype(int)
+        # Every column must hold at least one full FFT, or welch shortens it and the
+        # columns no longer line up (a 30 s KiwiSDR clip at 12 kS/s has < 256 samples a column).
+        cols_n = max(1, min(MAX_PLOT_COLS, len(iq) // nfft))
+        cuts = np.linspace(0, len(iq), cols_n + 1).astype(int)
         cols = []
         for a, b in zip(cuts, cuts[1:]):
-            f, p = welch(iq[int(a):int(b)], fs=fs, nperseg=nfft, noverlap=0, return_onesided=False)
+            f, p = welch(iq[int(a):int(b)], fs=fs, nperseg=nfft, noverlap=0, return_onesided=False, detrend=False)
             cols.append(p)
         s, t_end = np.array(cols).T, len(iq) / fs
     order = np.argsort(f)

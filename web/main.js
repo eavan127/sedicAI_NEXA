@@ -1901,6 +1901,11 @@ const AUDIT_LABEL = {
   "report.export": "Report exported",
   "client.receiver_connect": "Receiver connected",
   "client.receiver_disconnect": "Receiver disconnected",
+  "pipeline.start": "Pipeline run started",
+  "pipeline.result": "Pipeline run finished",
+  "live.result": "Live recording analysed",
+  "intel.recording": "Comms Intel recording added",
+  "client.tdoa_location": "Transmitter located (KiwiSDR TDoA)",
 };
 
 function auditSummary(e) {
@@ -1912,6 +1917,17 @@ function auditSummary(e) {
     case "analysis.delete": return d.deleted?.file_name || d.deleted?.case_note || "";
     case "analysis.clear": return `${(d.deleted_ids || []).length} deleted, ${d.kept_with_corrections || 0} kept`;
     case "iq.store": return `${d.name} · ${(d.bytes / 1024).toFixed(0)} KB · sha256 ${String(d.sha256).slice(0, 12)}…`;
+    case "pipeline.start":
+      return `${d.file || d.source || ""} · ${d.max_s ?? "?"} s · ${d.detector || ""}${d.language ? ` · ${d.language}` : ""}`;
+    case "pipeline.result":
+    case "live.result":
+      return `${d.source || ""} · ${d.n_tracks ?? 0} transmitter(s)`
+        + ((d.tracks || []).length ? ": " + d.tracks.slice(0, 4).map(t => `${t.answer}${t.text ? ` “${t.text.slice(0, 40)}”` : ""}`).join(", ") : "");
+    case "client.tdoa_location":
+      return `${d.freq_khz} kHz → ${Number(d.lat).toFixed(3)}, ${Number(d.lon).toFixed(3)}`
+        + (d.receivers ? ` · receivers: ${d.receivers}` : "") + (d.note ? ` · “${d.note}”` : "");
+    case "intel.recording":
+      return `${d.file || ""} · ${d.kind || ""} · ${d.transmissions ?? 0} transmissions · ${d.category || ""}`;
     case "client.report_export": return `${(d.format || "").toUpperCase()} · ${d.scope || ""}`
       + (d.captures ? ` · ${d.captures} captures` : "");
     case "correction.create":

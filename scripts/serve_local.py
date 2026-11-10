@@ -95,6 +95,7 @@ import re
 import socket
 import subprocess
 import sys
+import datetime
 import threading
 import time
 import webbrowser
@@ -107,7 +108,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from src.localdb import ROLLING_IQ_BYTES, SESSION_HOURS, TOP_ROLE, Actor, LocalDB, role_at_least  # noqa: E402
+from src.localdb import ROLLING_IQ_BYTES, SESSION_HOURS, SYSTEM, TOP_ROLE, Actor, LocalDB, role_at_least  # noqa: E402
 from src.report_export import _iq_payload, build_export  # noqa: E402
 
 WEB = ROOT / "web"
@@ -352,6 +353,7 @@ class Handler(SimpleHTTPRequestHandler):
         """The decoded recordings. Files only, never written here; the id is
         checked so a request cannot reach outside the folder."""
         d = self.intel_dir
+        self._audit_results()
         if not rest:
             index = d / "index.json"
             if not index.is_file():
@@ -402,10 +404,60 @@ class Handler(SimpleHTTPRequestHandler):
             meta["took_s"] = round(max((d / "tracks.json").stat().st_mtime - (d / "job.json").stat().st_mtime, 0.0), 1)
         return meta
 
+    _audit_lock = threading.Lock()
+
+    def _audit_results(self):
+        """Enter Python-side results into the audit log. Pipeline runs, live
+        bridge recordings (scripts/live_sdrconnect.py) and Comms Intel
+        recordings are written by other processes that do not touch the
+        database, so the server logs each one the first time it sees it
+        finished: what came in, what was found, what was heard. A marker
+        keeps every result to one entry."""
+        with Handler._audit_lock:
+            try:
+                runs = sorted(p for p in PIPELINE_DIR.iterdir() if p.is_dir() and PIPE_ID.fullmatch(p.name)) \
+                    if PIPELINE_DIR.is_dir() else []
+                for d in runs:
+                    mark = d / ".audited"
+                    if mark.exists() or not (d / "tracks.json").exists():
+                        continue
+                    meta = json.loads((d / "job.json").read_text(encoding="utf-8")) if (d / "job.json").exists() else {}
+                    doc = json.loads((d / "tracks.json").read_text(encoding="utf-8"), parse_constant=lambda c: None)
+                    tracks = doc.get("tracks") or []
+                    heard = [{"answer": t.get("answer"), "kind": (t.get("listen") or {}).get("kind"),
+                              "f_khz": [round(t.get("f_lo_khz") or 0, 1), round(t.get("f_hi_khz") or 0, 1)],
+                              "text": ((t.get("listen") or {}).get("transcript")
+                                       or (t.get("listen") or {}).get("morse") or "")[:200]} for t in tracks[:40]]
+                    live = bool(meta.get("live"))
+                    actor = Actor("live bridge", "system", "localhost") if live else \
+                        Actor(meta.get("who") or "operator", meta.get("role") or "operator", meta.get("client"))
+                    self.db.log(actor, "live.result" if live else "pipeline.result", "pipeline_run", d.name,
+                                {"source": meta.get("file") or meta.get("source"), "detector": meta.get("detector"),
+                                 "classifiers": meta.get("classifiers"), "duration_ms": doc.get("duration_ms"),
+                                 "n_tracks": len(tracks), "tracks": heard})
+                    mark.write_text(datetime.datetime.now().isoformat(timespec="seconds"), encoding="utf-8")
+                index = self.intel_dir / "index.json"
+                if index.is_file():
+                    done_f = self.intel_dir / ".audited.json"
+                    done = set(json.loads(done_f.read_text(encoding="utf-8"))) if done_f.is_file() else set()
+                    new = [r for r in json.loads(index.read_text(encoding="utf-8")).get("recordings", [])
+                           if r.get("id") and r["id"] not in done]
+                    for r in new:
+                        self.db.log(SYSTEM, "intel.recording", "intel", r["id"],
+                                    {k: r.get(k) for k in ("file", "kind", "recorded_at", "duration_s", "transmissions",
+                                                           "category", "confidence", "call_signs", "model")}
+                                    | {"summary": (r.get("summary") or "")[:300]})
+                        done.add(r["id"])
+                    if new:
+                        done_f.write_text(json.dumps(sorted(done)), encoding="utf-8")
+            except Exception as e:                       # noqa: BLE001 -- auditing must not break the page
+                print(f"audit of pipeline / intel results failed: {type(e).__name__}: {e}", file=sys.stderr)
+
     def _pipeline(self, method, rest, query):
         """Start a pipeline run on an uploaded IQ file (or the voice demo) and
         read its results. Runs are folders under results/pipeline/jobs/."""
         PIPELINE_DIR.mkdir(parents=True, exist_ok=True)
+        self._audit_results()
         if method == "GET" and not rest:
             from src.intel import voice
             runs = sorted((d for d in PIPELINE_DIR.iterdir() if d.is_dir() and PIPE_ID.fullmatch(d.name)),
@@ -474,8 +526,10 @@ class Handler(SimpleHTTPRequestHandler):
         max_s = min(max(float(q("max_s", "1.0")), 0.05), 10.0)
         cmd = [self.pipeline_python(), "-u", str(ROOT / "scripts" / "run_pipeline.py"),
                "--classifier", *map(str, classifiers), "--out", str(d), "--max-seconds", str(max_s)]
+        actor = self._actor()
         meta = {"id": rid, "source": source, "max_s": max_s, "status": "running",
-                "classifiers": [c.name for c in classifiers], "who": self._actor().name}
+                "classifiers": [c.name for c in classifiers], "who": actor.name, "role": actor.role,
+                "client": actor.client}
         if source == "voice-demo":
             cmd.append("--voice-demo")
         else:
@@ -526,6 +580,9 @@ class Handler(SimpleHTTPRequestHandler):
                 env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         finally:
             log.close()
+        self.db.log(actor, "pipeline.start", "pipeline_run", rid,
+                    {k: meta.get(k) for k in ("source", "file", "max_s", "detector", "classifiers", "listen",
+                                              "whisper_model", "language")})
         return self._send_json(meta, HTTPStatus.CREATED)
 
     # -- routes ---------------------------------------------------------------
