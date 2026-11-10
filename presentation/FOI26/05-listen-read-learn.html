@@ -1,0 +1,83 @@
+<!doctype html>
+<!-- SESSION 4 · PART 2 of 2 · continues 04-system-architecture.html, top to bottom:
+     voice / Morse channels are zoomed, demodulated, turned into text and read by a local AI; then the human in the loop.
+     Owner: edit this file only. Small pictures: scripts/make_deck_figures.py (t_zoom, t_demod, t_morse; the Morse is our
+     own test message, not a real recording). Code: src/pipeline/listen.py, analog.py, demod.py, src/intel/morse.py,
+     src/intel/reason.py, src/localdb.py, scripts/serve_local.py -->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NEXA Listen, Read and Learn</title>
+<link rel="stylesheet" href="assets/fonts.css"><link rel="stylesheet" href="assets/deck.css">
+<style>
+  .fork { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .fork .vbox { --pw: 190px; }
+  .bubble { width: 100%; height: 100%; padding: 10px; display: flex; flex-direction: column; justify-content: center; gap: 6px; background: #EEF6F4; }
+  .bubble div { background: #fff; border-radius: 10px 10px 10px 2px; padding: 6px 9px; font-size: 14.8px; font-weight: 600; color: var(--ink); }
+  .mpic { width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; gap: 4px; padding: 6px; }
+  .mpic img { height: 60px !important; }
+  .mpic code { font: 800 17.7px Consolas, "Courier New", monospace; color: var(--navy); text-align: center; letter-spacing: 1px; }
+  .json { width: 100%; height: 100%; font: 600 15.3px Consolas, "Courier New", monospace; background: #F6F2FB; padding: 10px 12px; line-height: 1.55;
+    color: var(--ink); white-space: pre; display: block; padding-top: 22px; }
+  .json .k { color: var(--purple); }
+  .hitl .step { padding: 16px 18px; }
+  .hitl .step b { font-size: 25px; }
+  .hitl .step span { font-size: 19px; }
+  .gate { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .gate .step b { font-size: 21px; }
+</style></head><body>
+<div class="viewport"><div class="stage" id="stage">
+  <div class="abs logo"><img src="assets/nexa-logo.png" alt="NEXA"><small>TRACK I · RF / SIGNAL · SESSION 4 · 2/2</small></div>
+  <div class="abs title-pill">Inside NEXA: listen, read, and learn</div>
+  <div class="abs question">Continued from Part 1: voice and Morse become text; people stay in control</div>
+  <div class="abs event"><img src="assets/sedic-logo.png" alt="SEDIC 26"><span>NOVEMBER 2026 UPDATE</span></div>
+
+  <a class="abs link rv" href="04-system-architecture.html" style="left:40px;top:146px;width:1180px;height:46px;--c:var(--amber);--d:.05">
+    <span class="tri"></span>from Part 1: the resolver's answer for each track · a voice or Morse channel comes down here</a>
+
+  <!-- column 3: listen and read -->
+  <div class="vcol rv" style="left:40px;top:200px;width:1180px;--c:var(--teal);--d:.15">
+    <div class="vdown"></div>
+    <div class="lt">3 · LISTEN AND READ IT</div>
+    <div class="vbox" style="--c:var(--teal);--h:170px"><div class="pic"><img src="assets/img/t_zoom.png" alt="zoomed spectrum: carrier and sidebands"></div>
+      <div class="tx"><b>Zoom-in</b><span>Zoomed to a few kHz and measured: carrier, sidebands, loudness. Rules name it AM, FM, SSB or CW; a clear result overrides the classifier.</span><em>voice demo 3 / 3</em></div></div>
+    <div class="vdown"></div>
+    <div class="vbox" style="--c:var(--teal);--h:165px"><div class="pic"><img src="assets/img/t_demod.png" alt="demodulated audio"></div>
+      <div class="tx"><b>Demodulate</b><span>The right demodulator for the kind (AM, FM, SSB, CW) turns the IQ into 16 kHz audio.</span></div></div>
+    <div class="vdown"></div>
+    <div class="fork">
+      <div class="vbox" style="--c:var(--teal);--h:172px"><div class="pic"><div class="bubble"><div>speech → text</div><div>on this machine</div></div></div>
+        <div class="tx"><b>Voice → text</b><span>Whisper speech recognition, run locally. No training on our side.</span></div></div>
+      <div class="vbox" style="--c:var(--navy);--h:172px"><div class="pic"><div class="mpic"><img src="assets/img/t_morse.png" alt="Morse key track"><code>CQ CQ DE NEXA K</code></div></div>
+        <div class="tx"><b>Morse → text</b><span>Finds the beep, times each key press, measures the dot length, turns dots and dashes into letters.</span><em>18 WPM test message</em></div></div>
+    </div>
+    <div class="vdown"></div>
+    <div class="vbox" style="--c:var(--purple);--h:172px;--pw:330px"><div class="pic"><div class="json"><span class="k">"summary"</span>:    one or two lines
+<span class="k">"category"</span>:   calling / message …
+<span class="k">"call_signs"</span>: only if in the text
+<span class="k">"evidence"</span>:   exact quotes</div></div>
+      <div class="tx"><b>AI reasoning, kept honest</b><span>A local model (Ollama) reads the text plus measured facts. Anything it names that is
+        <b style="display:inline;font-size:inherit;color:var(--ink)">not in the decoded text is removed</b>; the text is shown beside it.</span></div></div>
+  </div>
+
+  <!-- column 4: human in the loop (kept small) -->
+  <div class="vcol rv hitl" style="left:1260px;top:146px;width:620px;--c:var(--green);--d:.5">
+    <div class="lt">4 · HUMAN IN THE LOOP</div>
+    <div class="step" style="--c:var(--red)"><b>Operator checks the dashboard</b><span>flags or corrects an answer with one click</span></div>
+    <div class="vdown"></div>
+    <div class="step" style="--c:var(--amber)"><b>Analyst approves</b><span>sees the signal again before a correction counts</span></div>
+    <div class="vdown"></div>
+    <div class="step" style="--c:var(--blue)"><b>Retrain</b><span>approved corrections are added; a person starts it</span></div>
+    <div class="vdown"></div>
+    <div class="step" style="--c:var(--ink)"><b>Gate: does it beat the current model?</b><span>scored on the same test set, family by family</span></div>
+    <div class="vdown"></div>
+    <div class="gate">
+      <div class="step" style="--c:var(--green)"><b>Yes → goes live</b><span>roll back any time</span></div>
+      <div class="step" style="--c:#888"><b>No → stays out</b><span>current model kept</span></div>
+    </div>
+    <div class="vdown"></div>
+    <a class="link" href="04-system-architecture.html" style="--c:var(--green)"><span class="tri up"></span>back to the Classifier (Part 1)</a>
+    <div class="k" style="margin-top:12px">Every capture, decision and correction stays in a local database with a tamper-evident audit trail.</div>
+    <div style="margin-top:10px"><span class="tag" style="--c:var(--green);font-size:16.5px;padding:6px 12px">OFFLINE · ONE WORKSTATION · NO DATA LEAVES</span></div>
+  </div>
+</div></div>
+<script src="assets/deck.js"></script>
+</body></html>

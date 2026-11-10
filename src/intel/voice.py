@@ -25,7 +25,7 @@ from scipy.signal import resample_poly
 from .audio import WavInfo, iter_chunks
 
 DEFAULT_MODEL = "medium"
-LANGUAGES = ("auto", "ms", "en", "id")      # what the pipeline and dashboard offer; auto = let Whisper detect
+LANGUAGES = ("auto", "ms", "en", "id", "zh")  # what the pipeline and dashboard offer; auto = let Whisper detect
 LOW_LOGPROB, HIGH_NO_SPEECH = -1.0, 0.6     # beyond these a segment counts as doubtful
 _MODELS = {}
 

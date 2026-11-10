@@ -146,6 +146,8 @@ def main():
                    help="add the amplitude-histogram + delay-correlation branch (overrides week1.expert_features)")
     p.add_argument("--full-spectrum", action="store_true",
                    help="add the whole-window spectrum branch (SED-39 experiment)")
+    p.add_argument("--physics-features", action="store_true",
+                   help="add the physics branch (src/physics_features.py; docs/SEPARABILITY_ANALYSIS.md)")
     args = p.parse_args()
 
     ckpt_dir = Path(args.ckpt_dir or REPO_ROOT / CFG["paths"]["checkpoints"] / f"week1_seed{args.seed}")
@@ -168,6 +170,8 @@ def main():
     # Only recorded when on, so runs saved before this flag existed still resume.
     if args.full_spectrum:
         model_flags["full_spectrum"] = True
+    if args.physics_features:
+        model_flags["physics_features"] = True
     model = AMC_CNN(num_classes=C, input_len=Xtr.shape[-1], stft_n_fft=w["stft_n_fft"], **model_flags).to(DEVICE)
     dampen = {DATASET_CLASSES.index(c): m for c, m in w.get("class_weight_multipliers", {}).items()}
     criterion = nn.BCEWithLogitsLoss(pos_weight=compute_class_weights(ytr, C, dampen=dampen).to(DEVICE))

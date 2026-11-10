@@ -123,6 +123,7 @@ def main():
     p.add_argument("--detector", default=str(DEFAULT_DETECTOR))
     p.add_argument("--energy", action="store_true", help="use the classical energy detector")
     p.add_argument("--hybrid", action="store_true", help="YOLO + energy boxes for long narrow signals it missed")
+    p.add_argument("--all-windows", action="store_true", help="vote with every window, also those where the emitter is off (old behaviour)")
     p.add_argument("--score-thr", type=float, default=0.3, help="detector confidence threshold")
     p.add_argument("--out", default=str(REPO_ROOT / "results" / "pipeline" / "run"))
     args = p.parse_args()
@@ -147,7 +148,7 @@ def main():
     if args.hybrid and not args.energy:
         detector = HybridDetector(detector)
     classifier = Classifier(args.classifier)
-    answers, _ = process_capture(iq, detector, classifier, rng=rng)
+    answers, _ = process_capture(iq, detector, classifier, rng=rng, active_only=not args.all_windows)
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -160,6 +161,14 @@ def main():
     doc = finite({"n_samples": len(iq), "duration_ms": len(iq) / FS * 1e3,
                   "source": source, "tracks": answers, "truth": truth})
     (out / "tracks.json").write_text(json.dumps(doc, indent=1, default=float, allow_nan=False))
+    if args.iq and args.listen:                           # real recordings only, not the synthetic demos
+        from src.intel import store
+        try:
+            saved = store.save_decoded_tracks(out.name, doc["source"], doc["tracks"], out)
+            if saved:
+                print(f"Comms Intel: saved {len(saved)} decoded recording(s).")
+        except Exception as e:                            # noqa: BLE001 -- the run itself is already safe
+            print(f"Comms Intel: could not save this run: {type(e).__name__}: {e}")
     plot(iq, answers, truth, out / "tracks.png")
     print(f"{len(iq) / FS * 1e3:.1f} ms, {len(answers)} track(s)")
     for a in answers:

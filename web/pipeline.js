@@ -12,6 +12,7 @@ const KIND_TEXT = {
   USB: "Upper sideband (SSB)", LSB: "Lower sideband (SSB)", CW: "Morse (CW)", CARRIER: "Plain carrier (no modulation)",
   UNKNOWN: "Too weak to tell", ERROR: "Error",
 };
+const BAND_COL = { high: "#2E7D32", medium: "#B7791F", uncertain: "#9B2C2C" };
 const CONF = c => c >= 0.6 ? "#2E7D32" : c >= 0.3 ? "#B7791F" : "#9B2C2C";
 const LANG_TEXT = { auto: "Language: detect", ms: "Malay", en: "English", id: "Indonesian" };
 
@@ -32,7 +33,7 @@ function speechText(L) {
     : esc(s.text)).join(" ");
 }
 
-let state = { open: null, timer: null };
+let state = { open: null, timer: null, follow: false, liveTimer: null };
 
 function chip(text, color) {
   return `<span class="chip" style="background:${color}1f;color:${color};">${esc(text)}</span>`;
@@ -89,9 +90,21 @@ export async function renderPipeline(root, { server }) {
     </div>
     <div class="block" id="pipeRunBox" hidden></div>
     <div class="block">
+      <div class="block-label">Live (SDRconnect)</div>
+      <div class="note">Start the bridge on the analysis laptop: <code>python scripts/live_sdrconnect.py --host &lt;SDRconnect laptop&gt;</code>
+        (or <code>--replay file.wav</code>). It records everything SDRconnect sends until the stream stops, then analyses the whole recording;
+        with this ticked, the page opens each finished run by itself. Everything stays on the local network.</div>
+      <label class="note" style="margin:6px 0 0;"><input type="checkbox" id="pipeFollow"> Follow live snapshots</label>
+      <span class="note" id="pipeLiveMsg" style="margin-left:8px;"></span>
+    </div>
+    <div class="block">
       <div class="block-label">Recent runs</div>
       <div class="table-wrap" id="pipeRuns"></div>
     </div>`;
+  const follow = root.querySelector("#pipeFollow");
+  follow.checked = state.follow || false;
+  follow.addEventListener("change", () => { state.follow = follow.checked; if (follow.checked) followLive(root); });
+  if (state.follow) followLive(root);
   const msg = root.querySelector("#pipeMsg");
   const start = async (demo) => {
     const p = new URLSearchParams({
@@ -134,12 +147,49 @@ export async function renderPipeline(root, { server }) {
   else if (info.runs[0]) openRun(root, info.runs[0].id);
 }
 
+// Poll for live-bridge snapshots (scripts/live_sdrconnect.py) and show the newest finished one.
+async function followLive(root) {
+  clearTimeout(state.liveTimer);
+  if (!state.follow || !root.isConnected) return;
+  const msg = root.querySelector("#pipeLiveMsg");
+  try {
+    const runs = (await (await fetch("/api/pipeline", { credentials: "same-origin" })).json()).runs;
+    const live = runs.filter(r => r.live && r.status === "done");
+    if (!live.length) {
+      if (msg) msg.textContent = "waiting for the first snapshot…";
+    } else {
+      const newest = live[0];
+      if (msg) msg.textContent = `newest snapshot ${newest.id}`;
+      if (state.open !== newest.id) { await openRun(root, newest.id); await listRuns(root, runs); }
+    }
+  } catch (e) {
+    if (msg) msg.textContent = `cannot reach the server: ${e.message}`;
+  }
+  state.liveTimer = setTimeout(() => followLive(root), 2000);
+}
+
+// Run ids start with the local time: 20261108-222233-ff1d.
+function runTime(id) {
+  const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/.exec(id);
+  if (!m) return "—";
+  return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6])
+    .toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function runTook(r) {
+  if (r.status === "running") return "running…";
+  if (r.took_s == null) return "—";
+  if (r.took_s < 60) return `${r.took_s.toFixed(1)} s`;
+  const total = Math.round(r.took_s);
+  return `${Math.floor(total / 60)} min ${total % 60} s`;
+}
+
 async function listRuns(root, runs) {
   const box = root.querySelector("#pipeRuns");
   if (!runs) runs = (await (await fetch("/api/pipeline", { credentials: "same-origin" })).json()).runs;
-  box.innerHTML = runs.length ? `<table><thead><tr><th>Run</th><th>Source</th><th>Seconds</th><th>Detector</th><th>Status</th></tr></thead><tbody>`
+  box.innerHTML = runs.length ? `<table><thead><tr><th>Run</th><th>Time</th><th>Source</th><th>Seconds</th><th>Analysis took</th><th>Detector</th><th>Status</th></tr></thead><tbody>`
     + runs.map(r => `<tr data-id="${esc(r.id)}" style="cursor:pointer;"><td><code>${esc(r.id)}</code></td>
-      <td>${esc(r.file || r.source)}</td><td>${esc(r.max_s)}</td><td>${esc(r.detector)}</td>
+      <td>${esc(runTime(r.id))}</td><td>${esc(r.file || r.source)}</td><td>${esc(r.max_s)}</td><td>${esc(runTook(r))}</td><td>${esc(r.detector)}</td>
       <td>${chip(r.status, r.status === "done" ? "#2E7D32" : r.status === "running" ? "#2B6CB0" : "#9B2C2C")}</td></tr>`).join("")
     + `</tbody></table>` : `<div class="note">No runs yet.</div>`;
   for (const tr of box.querySelectorAll("tr[data-id]")) tr.addEventListener("click", () => openRun(root, tr.dataset.id));
@@ -200,12 +250,12 @@ function drawResult(box, id, r) {
     ${heard.length ? `<div style="margin-top:14px;font-weight:700;">What it says</div>` + heard.map(L => listenCard(id, L)).join("") : ""}
     <div style="margin-top:14px;font-weight:700;">Every transmitter</div>
     <div class="note">Answer = the 60-class model voted over the whole transmission; when two classes cannot be told apart from
-      the signal (e.g. RADAR_CW / JAM_TONE) both are shown with the reason. Confidence colours: green ≥ 0.6, amber ≥ 0.3, red below.</div>
+      the signal (e.g. RADAR_CW / JAM_TONE) both are shown with the reason. Confidence band from the track probability: high (≥ 0.40), medium (≥ 0.10), uncertain (below: shown as 'uncertain' with the likeliest class). Voice / Morse tracks on a clear signal are named by the zoom-in, which listens to the whole track.</div>
     <div class="table-wrap"><table><thead><tr><th>#</th><th>Time (ms)</th><th>Frequency</th><th>Answer</th>
       <th>Confidence</th><th>Why</th><th>Other candidates</th><th>Zoom</th></tr></thead><tbody>
     ${tracks.map(t => `<tr><td>${t.track}</td><td>${t.t_start_ms.toFixed(1)}–${t.t_end_ms.toFixed(1)}</td>
-      <td style="white-space:nowrap;">${esc(freqText(t, centre))}</td><td><b>${esc(t.answer)}</b></td>
-      <td>${chip(t.confidence.toFixed(2), CONF(t.confidence))}</td><td class="note">${esc(t.reason)}</td>
+      <td style="white-space:nowrap;">${esc(freqText(t, centre))}</td><td>${t.band === 'uncertain' ? `<span class="note">uncertain</span><div class="note">likeliest ${esc(t.answer)}</div>` : `<b>${esc(t.answer)}</b>`}${t.decided_by === 'zoom' ? `<div class="note">by zoom-in (classifier: ${esc(t.classifier_answer)})</div>` : ''}</td>
+      <td>${chip(t.band || t.confidence.toFixed(2), BAND_COL[t.band] || CONF(t.confidence))}<div class="note">${t.confidence.toFixed(2)}</div></td><td class="note">${esc(t.reason)}</td>
       <td class="note">${esc((t.top5 || []).slice(1, 4).map(([c, p]) => `${c} ${p.toFixed(2)}`).join(", "))}</td>
       <td>${t.listen ? esc(KIND_TEXT[t.listen.kind] || t.listen.kind) : ""}</td></tr>`).join("")}
     </tbody></table></div>

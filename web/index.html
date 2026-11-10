@@ -128,7 +128,7 @@
 
     .print-only { display: block; }
     /* Controls, navigation and live status are interaction, not content. */
-    nav, .grow, #status, h3.page-title, .note, .receiver, #corrMissed, #eventsTable button, #consoleEnlarge, #suggestBlock, .tl-cursor, .tl-sel, #authChip, .review-banner, #queueBlock { display: none !important; }
+    nav, .grow, #status, #replayControls, #windowDetail, h3.page-title, .note, .receiver, #corrMissed, #eventsTable button, #consoleEnlarge, #suggestBlock, .tl-cursor, .tl-sel, #authChip, .review-banner, #queueBlock { display: none !important; }
     header { margin-bottom: 10px; }
     .layout { display: block; }
     main { width: 100%; }
@@ -162,7 +162,7 @@
     tbody tr { break-inside: avoid; page-break-inside: avoid; }
 
     /* Other pages are not part of this report. */
-    #page-signal, #page-history, #page-performance, #page-model { display: none !important; }
+    #page-pipeline, #page-history, #page-performance, #page-model { display: none !important; }
   }
   /* History page. Bars are divs, not a canvas: they reflow with the panel and
      survive the print stylesheet that the browser-print PDF path uses. */
@@ -455,6 +455,104 @@
   .chat-compare tr.diff td, .chat-compare tr.diff th { background: #FFF3D6; }
   .chat-compare td.dim { color: var(--text-dim); }
   .chat-link { font: inherit; font-weight: 600; background: none; border: 0; padding: 0; color: var(--brand-olive-dark); text-decoration: underline; cursor: pointer; }
+  /* Pieces of the merged RF Replay page */
+  .subsection { margin-top: 30px; padding-top: 28px; border-top: 1px solid var(--grid); }
+  .subhead { font-size: 18px; font-weight: 700; margin: 0 0 10px; }
+  .section-title { font-size: 20px; font-weight: 700; margin: 36px 0 10px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 14px; }
+  .review-banner[hidden], .triage[hidden] { display: none; }   /* their display rules would override [hidden] */
+  body:not(.has-capture) .needs-capture { display: none; }
+  body.has-capture .no-capture { display: none; }
+  .subsection:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+
+  /* Room to read. Screen only: the printed report keeps its own tight layout. */
+  @media screen {
+    body { padding: 0 34px 64px; font-size: 16px; line-height: 1.5; }
+    header { padding: 20px 0 16px; margin-bottom: 30px; }
+    .layout { gap: 38px; }
+    nav { width: 214px; gap: 10px; }
+    nav .menu-label { margin: 2px 0 6px; }
+    nav button { padding: 13px 16px; line-height: 1.3; }
+    h3.page-title { font-size: 25px; margin: 4px 0 24px; }
+    .block { padding: 26px; margin-bottom: 28px; }
+    .block-label { font-size: 20px; margin-bottom: 14px; }
+    .note { font-size: 15.5px; line-height: 1.6; margin: 0 0 10px; max-width: 82ch; }
+    code { font-size: 0.94em; }
+
+    .grow { gap: 20px; margin-bottom: 22px; }
+    .field { gap: 8px; }
+    .field > label { font-size: 15px; }
+    select, .radio button, button.primary, button.secondary { font-size: 16px; min-height: 46px; }
+    select { padding: 10px 12px; }
+    .radio { gap: 8px; }
+    .radio button { padding: 10px 18px; }
+    button.primary, button.secondary { padding: 10px 22px; }
+    .filters { gap: 12px 18px; margin-bottom: 20px; }
+    .filters select, .filters input { min-height: 44px; padding: 9px 11px; font-size: 15.5px; border-radius: 6px; }
+    /* Labels beside their fields, tick boxes at tick-box size (the rule above would stretch them). */
+    .filters label.note { display: inline-flex; align-items: center; gap: 10px; max-width: none; line-height: 1.3; }
+    .filters input[type="checkbox"], #pipeFollow { width: 18px; height: 18px; min-height: 0; padding: 0; margin: 0; flex: none; accent-color: var(--brand-olive); }
+    .filters input[type="file"] { padding: 7px 10px; }
+    /* Signal Pipeline's form */
+    #pipelineRoot .filters { gap: 16px 26px; margin-bottom: 0; }
+    #pipelineRoot .note + .filters { margin-top: 24px !important; }
+    #pipelineRoot .filters + .filters { margin-top: 22px; }
+    #pipeRun, #pipeDemo {
+      min-height: 46px; padding: 10px 22px; font-family: var(--font); font-size: 16px; font-weight: 600;
+      color: var(--text); background: var(--panel); border: 1px solid var(--grid); border-radius: 6px; cursor: pointer;
+    }
+    #pipeRun:hover, #pipeDemo:hover { background: var(--brand-olive-tint); }
+    #pipeMsg { margin: 16px 0 0; }
+    #pipeMsg:empty { display: none; }
+    #pipelineRoot label:has(#pipeFollow) { display: inline-flex; align-items: center; gap: 10px; }
+    button.mini { padding: 7px 13px; font-size: 14.5px; border-radius: 6px; }
+
+    table { font-size: 15.5px; }
+    thead th { padding: 13px 15px; }
+    tbody td { padding: 12px 15px; line-height: 1.45; }
+    .chip { font-size: 13.5px; padding: 3px 11px; margin-top: 4px; }
+    .pill { font-size: 13.5px; padding: 3px 11px; }
+
+    .receiver { border: 0; border-radius: 0; background: none; padding: 0; margin: 0; }
+    .rx-head { margin-bottom: 18px; }
+    .rx-readouts { gap: 14px 22px; }
+    .rx-k { font-size: 13.5px; margin-bottom: 2px; }
+    .rx-log { padding: 10px 14px; margin-top: 14px; }
+
+    #status { font-size: 16px; margin: 0; min-height: 24px; }
+    #headline { font-size: 17px; line-height: 1.75; margin: 0 0 22px; }
+    .panels { gap: 24px; margin-bottom: 28px; }
+    .triage { gap: 12px; margin-bottom: 22px; }
+    .triage .tri { padding: 13px 17px; font-size: 16px; }
+    .review-banner { padding: 16px 20px; margin-bottom: 26px; }
+    .sugg { gap: 14px; padding: 13px 0; }
+
+    .kpi-row { gap: 18px; }
+    .kpi { padding: 18px 20px; }
+    .kpi-label { font-size: 13.5px; margin-bottom: 4px; }
+    .tier-row { gap: 10px; margin-top: 16px; }
+    .tier-chip { padding: 6px 13px; font-size: 15px; }
+    .barlist { gap: 11px; }
+    .barrow { gap: 12px; font-size: 15.5px; }
+    .bartrack { height: 16px; }
+
+    .storage-grid, .rb-grid { gap: 18px; }
+    .rb-grid fieldset { padding: 12px 16px; }
+    .rb-grid label { padding: 5px 0; }
+    .checklist li { padding: 6px 0; }
+    .req-list { gap: 20px; }
+    .bulkbar { gap: 14px; padding: 12px 14px; margin: 12px 0; }
+    .hist-job { padding: 16px 18px; margin: 14px 0; }
+    #page-history > .block, #page-history > .panels { margin-bottom: 36px; }
+    #page-history > .panels { gap: 24px; }
+
+    #chatLog { padding: 20px; gap: 14px; }
+    .chat-msg { padding: 11px 15px; line-height: 1.55; }
+    #chatSuggest { gap: 10px; margin: 14px 0; }
+    #chatSuggest button, #chatClear, #chatForm button { padding: 9px 14px; }
+    #chatForm { gap: 10px; }
+    #chatForm input { padding: 11px 13px; }
+  }
 </style>
 </head>
 <body>
@@ -471,9 +569,8 @@
   <div class="layout">
     <nav>
       <div class="menu-label">Menu</div>
-      <button class="active" data-page="replay">RF Replay</button>
-      <button data-page="signal">Signal Analysis</button>
-      <button data-page="pipeline">Signal Pipeline</button>
+      <button class="active" data-page="pipeline">Signal Pipeline</button>
+      <button data-page="replay">RF Replay</button>
       <button data-page="intel">Comms Intel</button>
       <button data-page="history">History</button>
       <button data-page="audit">Audit trail</button>
@@ -484,7 +581,13 @@
     </nav>
 
     <main>
-    <section id="page-replay">
+    <!-- Whole wideband chain on a recording (web/pipeline.js, /api/pipeline). -->
+    <section id="page-pipeline">
+      <h3 class="page-title">Signal Pipeline</h3>
+      <div id="pipelineRoot"></div>
+    </section>
+
+    <section id="page-replay" hidden>
       <!-- Print-only cover block. Populated in main.js:render() so the
            exported PDF carries the run's own provenance: a page of
            detections with no record of which case, SNR, model or thresholds
@@ -492,105 +595,106 @@
       <div id="printHeader" class="print-only"></div>
 
       <h3 class="page-title">RF Replay</h3>
-
-      <!-- Global settings, matching rf_replay.py's first Row -->
-      <div class="grow">
-        <div class="field" style="flex:2;min-width:150px;">
-          <label for="hopSel">Window hop</label>
-          <select id="hopSel">
-            <option value="512">no overlap, 512</option>
-            <option value="256" selected>50% overlap, 256</option>
-            <option value="128">75% overlap, 128</option>
-            <option value="64">87.5% overlap, 64</option>
-          </select>
+      <div class="block" id="replayControls">
+        <div class="subsection">
+          <h4 class="subhead">Fast scan in this browser</h4>
+          <div class="note">Classifies a capture right here with the ONNX models, with no Python needed.
+            These settings also apply to the live receiver and test scenarios below.</div>
+          <div class="grow" style="margin-top:18px;">
+            <div class="field" style="flex:2;min-width:200px;">
+              <label for="hopSel">Window hop</label>
+              <select id="hopSel">
+                <option value="512">no overlap, 512</option>
+                <option value="256" selected>50% overlap, 256</option>
+                <option value="128">75% overlap, 128</option>
+                <option value="64">87.5% overlap, 64</option>
+              </select>
+            </div>
+            <div class="field" style="flex:2;min-width:200px;">
+              <label>Display</label>
+              <div class="radio" id="smoothingRadio">
+                <button data-value="Smoothed" class="on">Smoothed</button>
+                <button data-value="Raw">Raw</button>
+              </div>
+            </div>
+            <div class="field" style="flex:2;min-width:220px;">
+              <label for="modelSel">Model</label>
+              <select id="modelSel">
+                <option value="ensemble" selected>Ensemble (5 models)</option>
+                <option value="single">Single, best_model.pt</option>
+              </select>
+            </div>
+          </div>
+          <div class="actions">
+            <button class="primary" id="uploadBtn" disabled>Select &amp; Analyze Source File</button>
+            <input type="file" id="fileInput" multiple accept=".bin,.f32,.cf32,.cfile,.iq,.dat,.raw,.sigmf,.sigmf-meta,.sigmf-data" style="display:none">
+          </div>
+          <div class="note" style="margin-top:16px;">Smoothing, the NOISE_FLOOR gate and event hold are display-only.
+            The Performance page is always per-window, ungated and unsmoothed.</div>
         </div>
-        <div class="field" style="flex:2;min-width:150px;">
-          <label>Display</label>
-          <div class="radio" id="smoothingRadio">
-            <button data-value="Smoothed" class="on">Smoothed</button>
-            <button data-value="Raw">Raw</button>
+
+        <div class="subsection">
+          <h4 class="subhead">Live receiver</h4>
+          <!-- web/receiver.js. The status light is the "is the receiver plugged
+               in and delivering IQ" indicator an operator console always shows. -->
+          <div class="receiver" id="receiverPanel">
+            <div class="rx-head">
+              <span class="rx-light off" id="rxLight" aria-hidden="true"></span>
+              <span class="rx-state" id="rxState">RECEIVER · DISCONNECTED</span>
+            </div>
+            <div class="grow">
+              <div class="field" style="flex:3;min-width:240px;">
+                <label for="rxSource">Receiver source</label>
+                <select id="rxSource">
+                  <option value="sim" selected>Simulated receiver (virtual SDR)</option>
+                  <option value="file">File replay (.bin or SigMF, as if live)</option>
+                </select>
+              </div>
+              <div class="field" style="flex:1;min-width:120px;">
+                <label for="rxDwell">Dwell</label>
+                <select id="rxDwell">
+                  <option value="0.02">20 ms</option>
+                  <option value="0.05" selected>50 ms</option>
+                </select>
+              </div>
+              <button class="primary" id="rxConnect" style="flex:2;min-width:180px;">Connect &amp; stream</button>
+              <button class="secondary" id="rxStop" style="flex:1;min-width:110px;" disabled>Stop</button>
+              <input type="file" id="rxFileInput" multiple accept=".bin,.f32,.cf32,.cfile,.iq,.dat,.raw,.sigmf,.sigmf-meta,.sigmf-data" style="display:none">
+            </div>
+            <div class="rx-readouts" id="rxReadouts">
+              <div style="grid-column:1/-1;"><span class="rx-k">Hardware</span><span class="rx-v">none connected, press Connect to start the simulated receiver</span></div>
+            </div>
+            <div class="rx-log" id="rxLog" hidden aria-live="polite"></div>
+            <div class="note" id="rxNote" style="margin-top:12px;">
+              Connect to stream: the console classifies one dwell at a time and updates as each arrives.
+              For the fastest updates choose the single model and no-overlap hop.
+            </div>
           </div>
         </div>
-        <div class="field" style="flex:2;min-width:170px;">
-          <label for="modelSel">Model</label>
-          <select id="modelSel">
-            <option value="ensemble" selected>Ensemble (5 models)</option>
-            <option value="single">Single, best_model.pt</option>
-          </select>
-        </div>
-      </div>
 
-      <!-- Receiver: live streaming (web/receiver.js). The status light is the
-           "is the receiver plugged in and delivering IQ" indicator an
-           operator console always shows. -->
-      <div class="receiver" id="receiverPanel">
-        <div class="rx-head">
-          <span class="rx-light off" id="rxLight" aria-hidden="true"></span>
-          <span class="rx-state" id="rxState">RECEIVER · DISCONNECTED</span>
-        </div>
-        <div class="grow" style="margin-bottom:8px;">
-          <div class="field" style="flex:3;min-width:220px;">
-            <label for="rxSource">Receiver source</label>
-            <select id="rxSource">
-              <option value="sim" selected>Simulated receiver (virtual SDR)</option>
-              <option value="file">File replay (.bin or SigMF, as if live)</option>
-            </select>
+        <div class="subsection">
+          <h4 class="subhead">Test scenario</h4>
+          <div class="grow">
+            <div class="field" style="flex:3;min-width:220px;">
+              <label for="caseSel">Scenario case</label>
+              <select id="caseSel"></select>
+            </div>
+            <div class="field" style="flex:2;min-width:150px;">
+              <label for="snrSel">SNR (per emitter)</label>
+              <select id="snrSel"></select>
+            </div>
+            <button class="secondary" id="synthBtn" style="flex:2;min-width:190px;" disabled>Synthesize Scenario</button>
+            <button class="secondary" id="printBtn" style="flex:2;min-width:190px;" disabled>Download report (PDF)</button>
           </div>
-          <div class="field" style="flex:1;min-width:110px;">
-            <label for="rxDwell">Dwell</label>
-            <select id="rxDwell">
-              <option value="0.02">20 ms</option>
-              <option value="0.05" selected>50 ms</option>
-            </select>
-          </div>
-          <button class="primary" id="rxConnect" style="flex:2;min-width:170px;">Connect &amp; stream</button>
-          <button class="secondary" id="rxStop" style="flex:1;min-width:110px;" disabled>Stop</button>
-          <input type="file" id="rxFileInput" multiple accept=".bin,.f32,.cf32,.cfile,.iq,.dat,.raw,.sigmf,.sigmf-meta,.sigmf-data" style="display:none">
-        </div>
-        <div class="rx-readouts" id="rxReadouts">
-          <div style="grid-column:1/-1;"><span class="rx-k">Hardware</span><span class="rx-v">none connected, press Connect to start the simulated receiver</span></div>
-        </div>
-        <div class="rx-log" id="rxLog" hidden aria-live="polite"></div>
-        <div class="note" id="rxNote" style="margin-top:6px;">
-          Connect to stream: the console classifies one dwell at a time and updates as each arrives.
-          For the fastest updates choose the single model and no-overlap hop.
+          <div id="status" role="status">Loading onnxruntime-web and the 5-model ensemble…</div>
         </div>
       </div>
 
-      <!-- Source input -->
-      <div class="grow">
-        <button class="primary full" id="uploadBtn" disabled>Select &amp; Analyze Source File</button>
-        <input type="file" id="fileInput" multiple accept=".bin,.f32,.cf32,.cfile,.iq,.dat,.raw,.sigmf,.sigmf-meta,.sigmf-data" style="display:none">
-      </div>
-
-      <!-- Synthesize scenario -->
-      <div class="grow">
-        <div class="field" style="flex:3;min-width:190px;">
-          <label for="caseSel">Scenario case</label>
-          <select id="caseSel"></select>
-        </div>
-        <div class="field" style="flex:2;min-width:140px;">
-          <label for="snrSel">SNR (per emitter)</label>
-          <select id="snrSel"></select>
-        </div>
-        <button class="secondary" id="synthBtn" style="flex:2;min-width:170px;" disabled>Synthesize Scenario</button>
-        <button class="secondary" id="printBtn" style="flex:2;min-width:170px;" disabled>Download report (PDF)</button>
-      </div>
-
-      <div class="note">
-        Smoothing, the NOISE_FLOOR gate and event hold are display-only.
-        The Performance page is always per-window, ungated and unsmoothed.
-      </div>
-      <div class="note">
-        Static build. Runs entirely in this browser tab via ONNX, with no Python and no
-        server-side inference.
-      </div>
-
-      <div id="status">Loading onnxruntime-web and the 5-model ensemble…</div>
+      <div id="sigBody">
       <div id="headline"></div>
       <div class="triage" id="triageBanner" role="alert" hidden></div>
 
-      <div class="panels">
+      <div class="panels needs-capture">
         <div id="statusBox"></div>
         <div id="latestBox"></div>
       </div>
@@ -600,52 +704,22 @@
       <div class="block">
         <div class="block-label" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
           Spectrum · waterfall · detections · tier · shared time axis
-          <button class="mini" id="consoleEnlarge" title="Show this figure full-window">⤢ Enlarge</button>
+          <button class="mini needs-capture" id="consoleEnlarge" title="Show this figure full-window">⤢ Enlarge</button>
         </div>
-        <div class="note">Hover over the timeline to read the exact time. Click a spot, or drag across a
+        <div class="note no-capture">The spectrum and waterfall appear here once a capture is analysed: use the fast
+          scan, live receiver or test scenario above.</div>
+        <div class="note needs-capture">Hover over the timeline to read the exact time. Click a spot, or drag across a
           stretch, to correct it. Dashed boxes are the true answer (synthesized or annotated captures only).</div>
-        <div class="tl-wrap">
+        <div class="tl-wrap needs-capture">
           <canvas id="console"></canvas>
           <div class="tl-sel" id="tlSel" hidden></div>
           <div class="tl-cursor" id="tlCursor" hidden><span id="tlLabel"></span></div>
         </div>
       </div>
 
-      <div class="block" id="suggestBlock" hidden>
-        <div class="block-label">Recommended corrections</div>
-        <div class="note" id="suggestNote"></div>
-        <div class="bulkbar" id="suggBulk" hidden></div>
-        <div id="suggestList"></div>
-        <div class="note" id="suggestStatus" role="status"></div>
-      </div>
-
-      <div class="block" id="constellationBlock" hidden>
-        <div class="block-label">Civilian constellation: raw I/Q vs recovered symbols</div>
-        <canvas id="constellationCanvas"></canvas>
-      </div>
-
-      <div class="block" style="padding:0;">
-        <div class="block-label" style="padding:12px 12px 0;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-          Detection events
-          <button class="mini" id="corrMissed" title="The model missed something: say what and where">＋ Report a missed signal</button>
-        </div>
-        <div class="note" id="eventsNote" role="status" style="padding:0 12px;"></div>
-        <div class="table-wrap">
-          <table id="eventsTable">
-            <colgroup><col style="width:5%"><col style="width:12%"><col style="width:14%"><col style="width:57%"><col style="width:12%"></colgroup>
-            <thead><tr><th>#</th><th>Start (ms)</th><th>Duration (ms)</th><th>Detected (peak confidence)</th><th>Human review</th></tr></thead>
-            <tbody></tbody>
-          </table>
-        </div>
-      </div>
-    </section>
-
-    <section id="page-signal" hidden>
-      <h3 class="page-title">Signal Analysis</h3>
-      <div class="note" style="margin-bottom:12px;">
-        One 512-sample window of 160 µs, exactly as the classifier sees it.
-        Load a capture on RF Replay first, then pick a window.
-      </div>
+      <div id="windowDetail" class="needs-capture">
+      <h4 class="section-title">Signal Analysis</h4>
+      <div class="note" style="margin-bottom:16px;">One 512-sample window of 160 µs, exactly as the classifier sees it. Pick a window.</div>
       <div class="grow">
         <div class="field" style="flex:1;min-width:260px;">
           <label for="winSlider">Window</label>
@@ -667,12 +741,37 @@
           </div>
         </div>
       </div>
-    </section>
+      </div>
 
-    <!-- Whole wideband chain on a recording (web/pipeline.js, /api/pipeline). -->
-    <section id="page-pipeline" hidden>
-      <h3 class="page-title">Signal Pipeline</h3>
-      <div id="pipelineRoot"></div>
+      <div class="block" id="suggestBlock" hidden>
+        <div class="block-label">Recommended corrections</div>
+        <div class="note" id="suggestNote"></div>
+        <div class="bulkbar" id="suggBulk" hidden></div>
+        <div id="suggestList"></div>
+        <div class="note" id="suggestStatus" role="status"></div>
+      </div>
+
+      <div class="block" id="constellationBlock" hidden>
+        <div class="block-label">Civilian constellation: raw I/Q vs recovered symbols</div>
+        <canvas id="constellationCanvas"></canvas>
+      </div>
+
+      <div class="block needs-capture" style="padding:0;">
+        <div class="block-label" style="padding:24px 24px 0;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          Detection events
+          <button class="mini" id="corrMissed" title="The model missed something: say what and where">＋ Report a missed signal</button>
+        </div>
+        <div class="note" id="eventsNote" role="status" style="padding:0 24px 8px;"></div>
+        <div class="table-wrap">
+          <table id="eventsTable">
+            <colgroup><col style="width:5%"><col style="width:12%"><col style="width:14%"><col style="width:57%"><col style="width:12%"></colgroup>
+            <thead><tr><th>#</th><th>Start (ms)</th><th>Duration (ms)</th><th>Detected (peak confidence)</th><th>Human review</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      </div>
     </section>
 
     <!-- Decoded receiver audio + local-LLM reading (web/intel.js, /api/intel). -->
@@ -804,6 +903,9 @@
 
     <section id="page-performance" hidden>
       <h3 class="page-title">Performance</h3>
+      <div class="block" id="currentModelBox"><div class="note">Loading the current model's results…</div></div>
+      <details id="perfOlder" style="margin-top:14px;">
+        <summary style="font-size:1.05rem;cursor:pointer;">Older results: September 5-model ensemble (earlier class list), kept for comparison</summary>
       <div id="perfProvenance" style="margin-bottom:12px;"></div>
 
       <div class="block">
@@ -847,6 +949,7 @@
           emitters overlap. The red line is the benchmark pass mark.
         </div>
       </div>
+      </details>
     </section>
 
     <section id="page-model" hidden>

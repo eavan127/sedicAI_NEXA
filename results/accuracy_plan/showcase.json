@@ -1,0 +1,511 @@
+{
+ "classifier": "results/classifier/physics_best.pt",
+ "n": 256,
+ "vote": 8,
+ "snr": {
+  "15": {
+   "overall": {
+    "top1": 0.5720703125,
+    "family_right": 0.7373697916666667,
+    "vote_top1": 0.7677083333333333,
+    "vote_family_right": 0.8854166666666666
+   },
+   "family": {
+    "ANALOG": {
+     "top1": 0.5848214285714286,
+     "family_right": 0.7924107142857143,
+     "vote_top1": 0.7991071428571429,
+     "vote_family_right": 0.8616071428571429
+    },
+    "APSK": {
+     "top1": 0.25390625,
+     "family_right": 0.6484375,
+     "vote_top1": 0.4375,
+     "vote_family_right": 0.90625
+    },
+    "ASK": {
+     "top1": 0.6888020833333334,
+     "family_right": 0.9713541666666666,
+     "vote_top1": 0.9166666666666666,
+     "vote_family_right": 1.0
+    },
+    "FSK": {
+     "top1": 0.7717633928571429,
+     "family_right": 0.9363839285714286,
+     "vote_top1": 0.9776785714285714,
+     "vote_family_right": 1.0
+    },
+    "JAMMING": {
+     "top1": 0.775390625,
+     "family_right": 0.786328125,
+     "vote_top1": 0.909375,
+     "vote_family_right": 0.909375
+    },
+    "MULTICARRIER": {
+     "top1": 0.3489583333333333,
+     "family_right": 0.65625,
+     "vote_top1": 0.7291666666666666,
+     "vote_family_right": 0.9270833333333334
+    },
+    "NOISE": {
+     "top1": 0.21484375,
+     "family_right": 0.21484375,
+     "vote_top1": 0.78125,
+     "vote_family_right": 0.78125
+    },
+    "PSK": {
+     "top1": 0.4108072916666667,
+     "family_right": 0.7649739583333334,
+     "vote_top1": 0.5625,
+     "vote_family_right": 0.9114583333333334
+    },
+    "PULSE_COMMS": {
+     "top1": 0.4765625,
+     "family_right": 0.4791666666666667,
+     "vote_top1": 0.65625,
+     "vote_family_right": 0.65625
+    },
+    "QAM": {
+     "top1": 0.071875,
+     "family_right": 0.303125,
+     "vote_top1": 0.19375,
+     "vote_family_right": 0.525
+    },
+    "RADAR": {
+     "top1": 0.7802734375,
+     "family_right": 0.849609375,
+     "vote_top1": 0.9921875,
+     "vote_family_right": 0.9921875
+    },
+    "SPREAD": {
+     "top1": 0.7447916666666666,
+     "family_right": 0.7486979166666666,
+     "vote_top1": 0.9375,
+     "vote_family_right": 0.9375
+    }
+   },
+   "class": {
+    "JAM_BARRAGE": {
+     "family": "JAMMING",
+     "top1": 0.953125,
+     "family_right": 0.984375,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "JAM_SPOT": {
+     "family": "JAMMING",
+     "top1": 0.67578125,
+     "family_right": 0.6875,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "JAM_TONE": {
+     "family": "JAMMING",
+     "top1": 0.140625,
+     "family_right": 0.14453125,
+     "vote_top1": 0.1875,
+     "vote_family_right": 0.1875
+    },
+    "JAM_MULTITONE": {
+     "family": "JAMMING",
+     "top1": 0.94140625,
+     "family_right": 0.94921875,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "JAM_SWEPT": {
+     "family": "JAMMING",
+     "top1": 0.97265625,
+     "family_right": 0.97265625,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "JAM_CHIRP": {
+     "family": "JAMMING",
+     "top1": 0.9921875,
+     "family_right": 1.0,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "JAM_PULSED": {
+     "family": "JAMMING",
+     "top1": 0.984375,
+     "family_right": 0.984375,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "JAM_PARTIAL_BAND": {
+     "family": "JAMMING",
+     "top1": 0.87890625,
+     "family_right": 0.890625,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "JAM_REACTIVE": {
+     "family": "JAMMING",
+     "top1": 0.9921875,
+     "family_right": 0.99609375,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "JAM_DRFM": {
+     "family": "JAMMING",
+     "top1": 0.22265625,
+     "family_right": 0.25390625,
+     "vote_top1": 0.90625,
+     "vote_family_right": 0.90625
+    },
+    "NOISE_FLOOR": {
+     "family": "NOISE",
+     "top1": 0.21484375,
+     "family_right": 0.21484375,
+     "vote_top1": 0.78125,
+     "vote_family_right": 0.78125
+    },
+    "PPM": {
+     "family": "PULSE_COMMS",
+     "top1": 0.9609375,
+     "family_right": 0.9609375,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "AFSK": {
+     "family": "PULSE_COMMS",
+     "top1": 0.03515625,
+     "family_right": 0.04296875,
+     "vote_top1": 0.0,
+     "vote_family_right": 0.0
+    },
+    "SSR_IFF": {
+     "family": "PULSE_COMMS",
+     "top1": 0.43359375,
+     "family_right": 0.43359375,
+     "vote_top1": 0.96875,
+     "vote_family_right": 0.96875
+    },
+    "FHSS": {
+     "family": "SPREAD",
+     "top1": 0.9453125,
+     "family_right": 0.94921875,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "DSSS": {
+     "family": "SPREAD",
+     "top1": 0.76953125,
+     "family_right": 0.76953125,
+     "vote_top1": 0.9375,
+     "vote_family_right": 0.9375
+    },
+    "LORA_CSS": {
+     "family": "SPREAD",
+     "top1": 0.51953125,
+     "family_right": 0.52734375,
+     "vote_top1": 0.875,
+     "vote_family_right": 0.875
+    },
+    "RADAR_PULSE": {
+     "family": "RADAR",
+     "top1": 0.64453125,
+     "family_right": 0.66015625,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "LFM_RADAR": {
+     "family": "RADAR",
+     "top1": 0.9296875,
+     "family_right": 0.94921875,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "RADAR_BARKER": {
+     "family": "RADAR",
+     "top1": 0.67578125,
+     "family_right": 0.7578125,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "RADAR_POLY_BARKER": {
+     "family": "RADAR",
+     "top1": 0.66796875,
+     "family_right": 0.8984375,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "RADAR_FRANK": {
+     "family": "RADAR",
+     "top1": 0.81640625,
+     "family_right": 0.97265625,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "RADAR_COSTAS": {
+     "family": "RADAR",
+     "top1": 0.94140625,
+     "family_right": 0.984375,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "RADAR_FMCW": {
+     "family": "RADAR",
+     "top1": 0.97265625,
+     "family_right": 0.9765625,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "RADAR_CW": {
+     "family": "RADAR",
+     "top1": 0.59375,
+     "family_right": 0.59765625,
+     "vote_top1": 0.9375,
+     "vote_family_right": 0.9375
+    },
+    "AM_DSB_WC": {
+     "family": "ANALOG",
+     "top1": 0.6015625,
+     "family_right": 0.86328125,
+     "vote_top1": 0.90625,
+     "vote_family_right": 1.0
+    },
+    "AM_DSB_SC": {
+     "family": "ANALOG",
+     "top1": 0.8671875,
+     "family_right": 0.87109375,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "AM_SSB_WC": {
+     "family": "ANALOG",
+     "top1": 0.65625,
+     "family_right": 0.81640625,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "AM_SSB_SC": {
+     "family": "ANALOG",
+     "top1": 0.13671875,
+     "family_right": 0.2734375,
+     "vote_top1": 0.03125,
+     "vote_family_right": 0.03125
+    },
+    "WBFM": {
+     "family": "ANALOG",
+     "top1": 0.89453125,
+     "family_right": 0.95703125,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "NBFM": {
+     "family": "ANALOG",
+     "top1": 0.4140625,
+     "family_right": 0.87890625,
+     "vote_top1": 0.75,
+     "vote_family_right": 1.0
+    },
+    "PM": {
+     "family": "ANALOG",
+     "top1": 0.5234375,
+     "family_right": 0.88671875,
+     "vote_top1": 0.90625,
+     "vote_family_right": 1.0
+    },
+    "OOK": {
+     "family": "ASK",
+     "top1": 0.890625,
+     "family_right": 0.9609375,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "4ASK": {
+     "family": "ASK",
+     "top1": 0.49609375,
+     "family_right": 0.99609375,
+     "vote_top1": 0.90625,
+     "vote_family_right": 1.0
+    },
+    "8ASK": {
+     "family": "ASK",
+     "top1": 0.6796875,
+     "family_right": 0.95703125,
+     "vote_top1": 0.84375,
+     "vote_family_right": 1.0
+    },
+    "OFDM": {
+     "family": "MULTICARRIER",
+     "top1": 0.33984375,
+     "family_right": 0.7890625,
+     "vote_top1": 0.40625,
+     "vote_family_right": 1.0
+    },
+    "LTE_LIKE": {
+     "family": "MULTICARRIER",
+     "top1": 0.08203125,
+     "family_right": 0.33203125,
+     "vote_top1": 0.78125,
+     "vote_family_right": 0.78125
+    },
+    "NR_LIKE": {
+     "family": "MULTICARRIER",
+     "top1": 0.625,
+     "family_right": 0.84765625,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "16APSK": {
+     "family": "APSK",
+     "top1": 0.55078125,
+     "family_right": 0.6875,
+     "vote_top1": 0.875,
+     "vote_family_right": 0.9375
+    },
+    "32APSK": {
+     "family": "APSK",
+     "top1": 0.40234375,
+     "family_right": 0.6796875,
+     "vote_top1": 0.875,
+     "vote_family_right": 0.9375
+    },
+    "64APSK": {
+     "family": "APSK",
+     "top1": 0.0546875,
+     "family_right": 0.5859375,
+     "vote_top1": 0.0,
+     "vote_family_right": 0.875
+    },
+    "128APSK": {
+     "family": "APSK",
+     "top1": 0.0078125,
+     "family_right": 0.640625,
+     "vote_top1": 0.0,
+     "vote_family_right": 0.875
+    },
+    "2FSK": {
+     "family": "FSK",
+     "top1": 0.765625,
+     "family_right": 0.8671875,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "4FSK": {
+     "family": "FSK",
+     "top1": 0.59375,
+     "family_right": 0.8984375,
+     "vote_top1": 0.9375,
+     "vote_family_right": 1.0
+    },
+    "8FSK": {
+     "family": "FSK",
+     "top1": 0.98046875,
+     "family_right": 0.98828125,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "GFSK": {
+     "family": "FSK",
+     "top1": 0.85546875,
+     "family_right": 0.94921875,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "GMSK": {
+     "family": "FSK",
+     "top1": 0.46484375,
+     "family_right": 0.95703125,
+     "vote_top1": 0.90625,
+     "vote_family_right": 1.0
+    },
+    "MSK": {
+     "family": "FSK",
+     "top1": 0.86328125,
+     "family_right": 0.94921875,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "CPFSK": {
+     "family": "FSK",
+     "top1": 0.87890625,
+     "family_right": 0.9453125,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "BPSK": {
+     "family": "PSK",
+     "top1": 0.40625,
+     "family_right": 0.4296875,
+     "vote_top1": 0.46875,
+     "vote_family_right": 0.46875
+    },
+    "QPSK": {
+     "family": "PSK",
+     "top1": 0.72265625,
+     "family_right": 0.86328125,
+     "vote_top1": 0.96875,
+     "vote_family_right": 1.0
+    },
+    "OQPSK": {
+     "family": "PSK",
+     "top1": 0.75390625,
+     "family_right": 0.77734375,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "8PSK": {
+     "family": "PSK",
+     "top1": 0.23046875,
+     "family_right": 0.87109375,
+     "vote_top1": 0.21875,
+     "vote_family_right": 1.0
+    },
+    "16PSK": {
+     "family": "PSK",
+     "top1": 0.00390625,
+     "family_right": 0.8359375,
+     "vote_top1": 0.0,
+     "vote_family_right": 1.0
+    },
+    "32PSK": {
+     "family": "PSK",
+     "top1": 0.34765625,
+     "family_right": 0.8125,
+     "vote_top1": 0.71875,
+     "vote_family_right": 1.0
+    },
+    "16QAM": {
+     "family": "QAM",
+     "top1": 0.0703125,
+     "family_right": 0.30078125,
+     "vote_top1": 0.375,
+     "vote_family_right": 0.5625
+    },
+    "32QAM": {
+     "family": "QAM",
+     "top1": 0.05859375,
+     "family_right": 0.26953125,
+     "vote_top1": 0.09375,
+     "vote_family_right": 0.46875
+    },
+    "64QAM": {
+     "family": "QAM",
+     "top1": 0.10546875,
+     "family_right": 0.36328125,
+     "vote_top1": 0.125,
+     "vote_family_right": 0.53125
+    },
+    "128QAM": {
+     "family": "QAM",
+     "top1": 0.0625,
+     "family_right": 0.2890625,
+     "vote_top1": 0.21875,
+     "vote_family_right": 0.53125
+    },
+    "256QAM": {
+     "family": "QAM",
+     "top1": 0.0625,
+     "family_right": 0.29296875,
+     "vote_top1": 0.15625,
+     "vote_family_right": 0.53125
+    }
+   }
+  }
+ }
+}

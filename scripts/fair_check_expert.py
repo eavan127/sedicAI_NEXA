@@ -13,6 +13,11 @@ Same data, same head, same training -- the only difference is the features.
 B beating A means the features carry information the CNN missed; B equal to
 A means the CNN already had it and retraining with them is not worth 2 h.
 
+--features physics runs the same check for the physics branch
+(src/physics_features.py, 56 values; docs/SEPARABILITY_ANALYSIS.md). The CNN
+may already have the expert branch: then A is that model's own summary and B
+adds the physics numbers on top.
+
 Writes <out>/fair_check.json and fair_check.png (overall, per family, per
 class at >= 10 dB).
 
@@ -34,7 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.config import CFG, CLASS_GROUPS, DATASET_CLASSES, REPO_ROOT  # noqa: E402
 from src.data import labels  # noqa: E402
-from src.models.amc_cnn import AMC_CNN, ExpertFeatures  # noqa: E402
+from src.models.amc_cnn import AMC_CNN, ExpertFeatures, PhysicsFeatures  # noqa: E402
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 C = len(DATASET_CLASSES)
@@ -121,17 +126,23 @@ def main():
     p.add_argument("--out", default=None, help="default: <ckpt folder>/fair_check")
     p.add_argument("--limit", type=int, default=0, help="first N windows of val and of test (quick check)")
     p.add_argument("--seeds", type=int, default=2, help="heads trained per variant (results averaged)")
+    p.add_argument("--features", choices=("expert", "physics"), default="expert",
+                   help="which hand-made features to test (default expert)")
     args = p.parse_args()
 
     ck = torch.load(args.ckpt, map_location=DEVICE, weights_only=False)
     meta = ck["meta"]
-    if meta.get("model_flags", {}).get("expert_features"):
-        sys.exit("This best.pt already has the expert features built in; the fair check needs a model trained without them.")
+    flag = f"{args.features}_features"
+    if meta.get("model_flags", {}).get(flag):
+        sys.exit(f"This best.pt already has the {args.features} features built in; "
+                 "the fair check needs a model trained without them.")
     model = AMC_CNN(num_classes=C, input_len=meta["input_len"], stft_n_fft=meta["stft_n_fft"],
                     **meta.get("model_flags", {})).to(DEVICE).eval()
     model.load_state_dict(ck["state_dict"])
-    expert = ExpertFeatures(meta["input_len"]).to(DEVICE).eval()
-    out = Path(args.out or Path(args.ckpt).parent / "fair_check")
+    feats = ExpertFeatures if args.features == "expert" else PhysicsFeatures
+    expert = feats(meta["input_len"]).to(DEVICE).eval()
+    default_out = "fair_check" if args.features == "expert" else "fair_check_physics"
+    out = Path(args.out or Path(args.ckpt).parent / default_out)
     out.mkdir(parents=True, exist_ok=True)
     print(f"device {DEVICE}; model from epoch {meta['epoch']} (seed {meta['seed']})")
 
@@ -147,7 +158,7 @@ def main():
     # 85% of val trains the heads, 15% picks their best epoch; test only scores.
     cut = int(0.85 * len(emb_v))
     variants = {"A: CNN only": (emb_v, emb_t),
-                "B: CNN + expert": (np.hstack([emb_v, feat_v]), np.hstack([emb_t, feat_t]))}
+                f"B: CNN + {args.features}": (np.hstack([emb_v, feat_v]), np.hstack([emb_t, feat_t]))}
     res = {}
     for name, (tr, te) in variants.items():
         runs = []
@@ -170,14 +181,14 @@ def main():
     res["CNN as trained"] = scores(own, y_t, snr_t)
     print(f"  CNN as trained: top-1 {res['CNN as trained']['top1']:.3f}   at >=10 dB {res['CNN as trained']['top1_high']:.3f}")
 
-    a, b = res["A: CNN only"], res["B: CNN + expert"]
+    a, b = res["A: CNN only"], res[f"B: CNN + {args.features}"]
     print("\nPer family at >= 10 dB (A -> B):")
     for g in a["family_high"]:
         print(f"  {g:>13}  {a['family_high'][g]:.3f} -> {b['family_high'][g]:.3f}  ({b['family_high'][g] - a['family_high'][g]:+.3f})")
     delta = sorted(((b["class_high"][c] - a["class_high"][c], c) for c in DATASET_CLASSES), reverse=True)
     print("\nBiggest gains:", ", ".join(f"{c} {d:+.2f}" for d, c in delta[:8]))
     print("Biggest losses:", ", ".join(f"{c} {d:+.2f}" for d, c in delta[-5:]))
-    (out / "fair_check.json").write_text(json.dumps({"ckpt": str(args.ckpt), "limit": args.limit, **res}, indent=1))
+    (out / "fair_check.json").write_text(json.dumps({"ckpt": str(args.ckpt), "limit": args.limit, "features": args.features, **res}, indent=1))
 
     import matplotlib
     matplotlib.use("Agg")
@@ -186,7 +197,7 @@ def main():
     fig, ax = plt.subplots(1, 2, figsize=(16, 5), gridspec_kw={"width_ratios": [1, 2.4]})
     x = np.arange(len(fams))
     ax[0].bar(x - 0.2, [a["family_high"][g] for g in fams], 0.4, label="A: CNN only", color="#9aa5b1")
-    ax[0].bar(x + 0.2, [b["family_high"][g] for g in fams], 0.4, label="B: + expert features", color="#2f7ed8")
+    ax[0].bar(x + 0.2, [b["family_high"][g] for g in fams], 0.4, label=f"B: + {args.features} features", color="#2f7ed8")
     ax[0].set_xticks(x); ax[0].set_xticklabels(fams, rotation=60, fontsize=8); ax[0].set_ylim(0, 1)
     ax[0].set_title("Top-1 per family, test, >= 10 dB"); ax[0].legend(fontsize=8)
     d = [b["class_high"][c] - a["class_high"][c] for c in DATASET_CLASSES]

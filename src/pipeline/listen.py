@@ -61,12 +61,18 @@ def listen_track(iq, ans, out_dir, noise_var, rng, whisper_model=None, language=
         y1 = y1 * np.exp(-2j * np.pi * centre * np.arange(len(y1)) / fa1)
         fa, y = FS / analog.DECIM, analog.zoom(y1, analog.DECIM // WIDE_DECIM)
     kind, feats, why = analog.classify(y, fa, wide_hint=wide)
+    demod_kind, slow = kind, None
+    if not wide:                                    # second opinion from the slow-path model (src/pipeline/narrowband.py)
+        from src.pipeline import narrowband
+        kind, why, demod_kind, slow = narrowband.refine(kind, why, y, fa)
     out = {"kind": kind, "why": why, "duration_s": round(len(y) / fa, 3),
            "features": {k: (round(float(v), 3) if isinstance(v, (float, np.floating)) else v)
                         for k, v in feats.items() if k != "band"}}
+    if slow:
+        out["slow_path"] = slow
     if kind == "UNKNOWN":
         return out
-    sound = demod.demodulate(y, fa, kind, feats)
+    sound = demod.demodulate(y, fa, demod_kind, feats)
     if sound is None:
         return out
     out_dir = Path(out_dir)
@@ -82,6 +88,7 @@ def listen_track(iq, ans, out_dir, noise_var, rng, whisper_model=None, language=
             m = morse.analyse(info)
             segments = m["segments"]
             out["morse"] = " / ".join(s["text"] for s in segments)
+            out["morse_detail"] = m
             text_kind = "morse"
         elif kind in VOICE_KINDS and use_whisper and out["duration_s"] >= MIN_SPEECH_S:
             from src.intel import voice
@@ -92,6 +99,9 @@ def listen_track(iq, ans, out_dir, noise_var, rng, whisper_model=None, language=
             out["doubtful_share"] = tr.get("doubtful_share", 0.0)
             out["segments"] = [{"start_s": s["clip_start_s"], "end_s": s["clip_end_s"], "text": s["text"],
                                 "doubtful": s["doubtful"]} for s in tr.get("segments", [])]
+            # Every segment, for the Comms Intel store (src/intel/store.py reads speech_segments).
+            out["speech_segments"] = [{"start_s": s["start_s"], "end_s": s["end_s"], "text": s["text"]}
+                                      for s in out["segments"]]
             # The AI reading only gets what Whisper was sure of, so it cannot build
             # a confident summary on text Whisper itself doubted.
             segments = [{"start_s": s["start_s"], "text": s["text"]} for s in out["segments"] if not s["doubtful"]]
@@ -102,7 +112,8 @@ def listen_track(iq, ans, out_dir, noise_var, rng, whisper_model=None, language=
         from src.intel import reason
         kw = {"model": llm_model} if llm_model else {}
         out["reading"] = reason.read_recording(f"track {ans['track']}", segments, kind=text_kind,
-                                               duration=f"{out['duration_s']:.1f} s", **kw)
+                                               duration=f"{out['duration_s']:.1f} s",
+                                               active_min=out.get("morse_detail", {}).get("active_minutes", 0), **kw)
     return out
 
 
@@ -144,4 +155,51 @@ def listen_all(iq, answers, out_dir, rng=None, **kw):
         res["t_start_ms"], res["t_end_ms"] = span["t_start_ms"], span["t_end_ms"]
         for a in g:
             a["listen"] = res
+            override(a, res)
     return answers
+
+
+# The zoom looks at the whole track at 50 kS/s; the classifier at 160 us
+# windows, too short to hear a voice cycle, so it calls voice radios tones or
+# spot jammers (error budget, docs/ACCURACY_PLAN.md P3). On a clear signal the
+# zoom's answer wins. Measured on voice-like signals: 70/72 kinds right at
+# 30 dB, 65/72 at 20 dB, 62/72 at 15 dB (src/pipeline/analog.py tests).
+ZOOM_MIN_SNR_DB = 15.0
+ZOOM_HIGH_SNR_DB = 20.0
+
+
+def zoom_answer(kind, feats):
+    """Analog kind -> (answer label, dataset classes it stands for), or None."""
+    carrier = feats.get("carrier_frac", 0) >= analog.CARRIER_FRAC
+    table = {
+        "NBFM": ("NBFM", ["NBFM"]),
+        "WBFM": ("WBFM", ["WBFM"]),
+        "AM": ("AM_DSB_WC", ["AM_DSB_WC"]),
+        "AM_SC": ("AM_DSB_SC", ["AM_DSB_SC"]),
+        "USB": ("AM_SSB_WC (USB)" if carrier else "AM_SSB_SC (USB)", ["AM_SSB_WC" if carrier else "AM_SSB_SC"]),
+        "LSB": ("AM_SSB_WC (LSB)" if carrier else "AM_SSB_SC (LSB)", ["AM_SSB_WC" if carrier else "AM_SSB_SC"]),
+        "CW": ("OOK (Morse CW)", ["OOK"]),
+        "CARRIER": ("RADAR_CW / JAM_TONE", ["RADAR_CW", "JAM_TONE"]),
+        # Named by the slow-path model (src/pipeline/narrowband.py): slow HF data modes.
+        "RTTY": ("2FSK (RTTY)", ["2FSK"]),
+        "PSK31": ("BPSK (PSK31-type)", ["BPSK"]),
+        "AFSK": ("AFSK", ["AFSK"]),
+    }
+    return table.get(kind)
+
+
+def override(ans, res):
+    """Replace the classifier's answer with the zoom's when the zoom is sure."""
+    z = zoom_answer(res.get("kind"), res.get("features") or {})
+    snr = (res.get("features") or {}).get("snr_db", -99.0)
+    if z is None or snr is None or snr < ZOOM_MIN_SNR_DB:
+        return
+    label, classes = z
+    if label == ans["answer"]:
+        return
+    ans["classifier_answer"] = ans["answer"]
+    ans["answer"], ans["classes"] = label, classes
+    ans["band"] = "high" if snr >= ZOOM_HIGH_SNR_DB else "medium"
+    ans["decided_by"] = "zoom"
+    ans["reason"] = f"zoom-in over the whole track ({snr:.0f} dB): {res.get('why', '')}; " \
+                    f"the 160 us classifier said {ans['classifier_answer']}"

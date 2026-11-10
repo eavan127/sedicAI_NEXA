@@ -1,0 +1,339 @@
+{
+ "model": "physics_best.pt",
+ "run": "2026-11-07_physics_seed4",
+ "data_version": "f993d8ebc417",
+ "seed": 4,
+ "epoch": 14,
+ "git_commit": "f87ac1b306e47b9977e789f2232df01a9728ef84",
+ "n_classes": 60,
+ "top1": 0.4874,
+ "top1_clear": 0.6159,
+ "vote_clear": 0.806,
+ "families": [
+  {
+   "family": "JAMMING",
+   "plain": "Jammers (signals meant to block radios)",
+   "right": 0.7601,
+   "classes": [
+    {
+     "name": "JAM_SWEPT",
+     "right": 0.878
+    },
+    {
+     "name": "JAM_CHIRP",
+     "right": 0.8675
+    },
+    {
+     "name": "JAM_MULTITONE",
+     "right": 0.8431
+    },
+    {
+     "name": "JAM_REACTIVE",
+     "right": 0.7494
+    },
+    {
+     "name": "JAM_BARRAGE",
+     "right": 0.72
+    },
+    {
+     "name": "JAM_TONE",
+     "right": 0.7126
+    },
+    {
+     "name": "JAM_PARTIAL_BAND",
+     "right": 0.7113
+    },
+    {
+     "name": "JAM_PULSED",
+     "right": 0.7087
+    },
+    {
+     "name": "JAM_SPOT",
+     "right": 0.6512
+    },
+    {
+     "name": "JAM_DRFM",
+     "right": 0.6458
+    }
+   ]
+  },
+  {
+   "family": "SPREAD",
+   "plain": "Spread spectrum (hopping, LoRa)",
+   "right": 0.6701,
+   "classes": [
+    {
+     "name": "FHSS",
+     "right": 0.775
+    },
+    {
+     "name": "LORA_CSS",
+     "right": 0.7673
+    },
+    {
+     "name": "DSSS",
+     "right": 0.5913
+    }
+   ]
+  },
+  {
+   "family": "RADAR",
+   "plain": "Radars",
+   "right": 0.6465,
+   "classes": [
+    {
+     "name": "RADAR_FMCW",
+     "right": 0.8462
+    },
+    {
+     "name": "RADAR_COSTAS",
+     "right": 0.7294
+    },
+    {
+     "name": "LFM_RADAR",
+     "right": 0.7137
+    },
+    {
+     "name": "RADAR_CW",
+     "right": 0.7126
+    },
+    {
+     "name": "RADAR_FRANK",
+     "right": 0.6444
+    },
+    {
+     "name": "RADAR_PULSE",
+     "right": 0.5556
+    },
+    {
+     "name": "RADAR_POLY_BARKER",
+     "right": 0.5519
+    },
+    {
+     "name": "RADAR_BARKER",
+     "right": 0.4844
+    }
+   ]
+  },
+  {
+   "family": "FSK",
+   "plain": "FSK data (tone-switching data)",
+   "right": 0.6086,
+   "classes": [
+    {
+     "name": "8FSK",
+     "right": 0.7181
+    },
+    {
+     "name": "MSK",
+     "right": 0.6856
+    },
+    {
+     "name": "GFSK",
+     "right": 0.6825
+    },
+    {
+     "name": "CPFSK",
+     "right": 0.63
+    },
+    {
+     "name": "2FSK",
+     "right": 0.6225
+    },
+    {
+     "name": "4FSK",
+     "right": 0.48
+    },
+    {
+     "name": "GMSK",
+     "right": 0.4412
+    }
+   ]
+  },
+  {
+   "family": "ASK",
+   "plain": "ASK data (on/off data)",
+   "right": 0.5446,
+   "classes": [
+    {
+     "name": "OOK",
+     "right": 0.6856
+    },
+    {
+     "name": "8ASK",
+     "right": 0.5938
+    },
+    {
+     "name": "4ASK",
+     "right": 0.3544
+    }
+   ]
+  },
+  {
+   "family": "ANALOG",
+   "plain": "Analog voice radio (AM, FM)",
+   "right": 0.4398,
+   "classes": [
+    {
+     "name": "WBFM",
+     "right": 0.7725
+    },
+    {
+     "name": "AM_DSB_SC",
+     "right": 0.6188
+    },
+    {
+     "name": "AM_DSB_WC",
+     "right": 0.4531
+    },
+    {
+     "name": "AM_SSB_WC",
+     "right": 0.4294
+    },
+    {
+     "name": "PM",
+     "right": 0.4062
+    },
+    {
+     "name": "NBFM",
+     "right": 0.3275
+    },
+    {
+     "name": "AM_SSB_SC",
+     "right": 0.0712
+    }
+   ]
+  },
+  {
+   "family": "PULSE_COMMS",
+   "plain": "Pulse links (IFF, PPM)",
+   "right": 0.3669,
+   "classes": [
+    {
+     "name": "PPM",
+     "right": 0.7731
+    },
+    {
+     "name": "SSR_IFF",
+     "right": 0.295
+    },
+    {
+     "name": "AFSK",
+     "right": 0.0325
+    }
+   ]
+  },
+  {
+   "family": "PSK",
+   "plain": "PSK data (phase-switching data)",
+   "right": 0.3185,
+   "classes": [
+    {
+     "name": "OQPSK",
+     "right": 0.525
+    },
+    {
+     "name": "QPSK",
+     "right": 0.5088
+    },
+    {
+     "name": "BPSK",
+     "right": 0.4325
+    },
+    {
+     "name": "8PSK",
+     "right": 0.2175
+    },
+    {
+     "name": "32PSK",
+     "right": 0.2087
+    },
+    {
+     "name": "16PSK",
+     "right": 0.0187
+    }
+   ]
+  },
+  {
+   "family": "MULTICARRIER",
+   "plain": "Multicarrier (Wi-Fi, 4G, 5G-like)",
+   "right": 0.2481,
+   "classes": [
+    {
+     "name": "NR_LIKE",
+     "right": 0.4188
+    },
+    {
+     "name": "OFDM",
+     "right": 0.2888
+    },
+    {
+     "name": "LTE_LIKE",
+     "right": 0.0369
+    }
+   ]
+  },
+  {
+   "family": "APSK",
+   "plain": "APSK (satellite data)",
+   "right": 0.1891,
+   "classes": [
+    {
+     "name": "16APSK",
+     "right": 0.3644
+    },
+    {
+     "name": "32APSK",
+     "right": 0.2825
+    },
+    {
+     "name": "64APSK",
+     "right": 0.1081
+    },
+    {
+     "name": "128APSK",
+     "right": 0.0013
+    }
+   ]
+  },
+  {
+   "family": "NOISE",
+   "plain": "Empty band (noise only)",
+   "right": 0.0906,
+   "classes": [
+    {
+     "name": "NOISE_FLOOR",
+     "right": 0.0906
+    }
+   ]
+  },
+  {
+   "family": "QAM",
+   "plain": "QAM (dense high-speed data)",
+   "right": 0.0411,
+   "classes": [
+    {
+     "name": "128QAM",
+     "right": 0.0544
+    },
+    {
+     "name": "16QAM",
+     "right": 0.0531
+    },
+    {
+     "name": "256QAM",
+     "right": 0.0419
+    },
+    {
+     "name": "64QAM",
+     "right": 0.035
+    },
+    {
+     "name": "32QAM",
+     "right": 0.0213
+    }
+   ]
+  }
+ ],
+ "exported": "2026-11-08T21:31:45"
+}

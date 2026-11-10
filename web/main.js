@@ -156,6 +156,7 @@ function paintTriage(t) {
 }
 
 function render() {
+  document.body.classList.add("has-capture");     // before anything reads the canvas width
   const { capture, result, source, caseNote, truth, snrDb, which,
            snrCapped, requestedSnrDb, mode } = session;
   const smoothed = smoothingChoice === "Smoothed";
@@ -234,6 +235,7 @@ function render() {
     tbody.appendChild(tr);
   });
   session.events = events;
+  if (currentPage === "replay") renderSignal();   // Signal Analysis is on the same page
 }
 
 /** Everything a capture needs that does NOT depend on the model or the
@@ -1018,7 +1020,8 @@ printBtn.addEventListener("click", async () => {
   // A real .pdf when the library is reachable; the print dialog (which also
   // produces a PDF, via the print stylesheet) when it is not, so an offline
   // demo still has a way to export.
-  if (!lastRecord) { window.print(); return; }
+  const printPage = () => { showPage("replay"); window.print(); };   // only a visible page prints
+  if (!lastRecord) { printPage(); return; }
   printBtn.disabled = true;
   try {
     await buildSingle(lastRecord, { classes: CLASSES });
@@ -1027,7 +1030,7 @@ printBtn.addEventListener("click", async () => {
     statusEl.textContent += "  Report downloaded.";
   } catch (e) {
     statusEl.textContent = `PDF library unavailable (${e.message}); using the print dialog instead.`;
-    window.print();
+    printPage();
   } finally {
     printBtn.disabled = false;
   }
@@ -1123,7 +1126,7 @@ async function store(file, sess = session) {
 const winSlider = el("winSlider"), winReadout = el("winReadout");
 const probsBox = el("probsBox"), winMetaBox = el("winMetaBox");
 const attnCanvas = el("attnCanvas"), breakdownCanvas = el("breakdownCanvas");
-let currentPage = "replay";
+let currentPage = "pipeline";
 const chatLogPromise = openChatLog();
 let perfData = null, modelCard = null;
 
@@ -1136,15 +1139,14 @@ function showPage(page) {
     sec.hidden = sec.id !== `page-${page}`;
   }
   // Canvases cannot be sized while hidden, so each page draws on entry.
-  if (page === "signal") renderSignal();
+  if (page === "replay") { if (session) render(); else renderSignal(); }
   if (page === "history") return renderHistory();
   if (page === "audit") renderAudit();
   if (page === "performance") renderPerformance();
   if (page === "model") renderModel();
   if (page === "users") renderUsers();
-  if (page === "pipeline") renderPipeline(document.getElementById("pipelineRoot"), { server: readConfig().backend === "server" });
+  if (page === "pipeline") renderPipeline(el("pipelineRoot"), { server: readConfig().backend === "server" });
   if (page === "intel") renderIntel(document.getElementById("intelRoot"), { server: readConfig().backend === "server" });
-  if (page === "replay" && session) render();
 }
 
 for (const btn of document.querySelectorAll("nav button[data-page]")) {
@@ -1153,7 +1155,7 @@ for (const btn of document.querySelectorAll("nav button[data-page]")) {
 
 function renderSignal() {
   if (!session) {
-    probsBox.innerHTML = `<div class="note">Load a capture on RF Replay first.</div>`;
+    probsBox.innerHTML = `<div class="note">Load a capture above first.</div>`;
     winMetaBox.innerHTML = "";
     return;
   }
@@ -1167,9 +1169,76 @@ function renderSignal() {
   registerZoom(attnCanvas, t => drawAttention(t, session, idx));
 }
 
-winSlider.addEventListener("input", () => { if (currentPage === "signal") renderSignal(); });
+winSlider.addEventListener("input", () => { if (currentPage === "replay") renderSignal(); });
+
+// The CURRENT model's results (web/data/current_model.json, written by
+// scripts/export_current_model.py from the run's scorecard), in plain words.
+let currentModel = null;
+function currentModelHtml(d) {
+  const pct = v => v == null ? "—" : `${(100 * v).toFixed(1)}%`;
+  const colour = v => v >= 0.6 ? "#4A6B3A" : v >= 0.35 ? "#A47A2C" : "#8E3B35";   // muted: olive / ochre / brick
+  const esc = t => String(t ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const bar = (v, h) => `<div class="cm-track" style="height:${h}px;"><div style="width:${Math.max(1, 100 * v)}%;background:${colour(v)};"></div></div>`;
+  return `
+    <style>
+      #currentModelBox .cm { font-size:0.92rem; line-height:1.45; }
+      #currentModelBox .cm-head { display:flex; justify-content:space-between; align-items:baseline; gap:12px; flex-wrap:wrap;
+        padding-bottom:8px; border-bottom:1px solid var(--grid); }
+      #currentModelBox .cm-title { font-size:1.02rem; font-weight:600; letter-spacing:0.01em; }
+      #currentModelBox .cm-meta { font-size:0.8rem; opacity:0.7; }
+      #currentModelBox details { border-bottom:1px solid var(--grid); }
+      #currentModelBox summary { list-style:none; cursor:pointer; padding:8px 4px; display:grid;
+        grid-template-columns:16px minmax(160px,250px) 1fr 58px; align-items:center; gap:12px; }
+      #currentModelBox summary::-webkit-details-marker { display:none; }
+      #currentModelBox summary:hover { background:var(--panel); }
+      #currentModelBox .cm-chev { font-size:0.7rem; opacity:0.6; transition:transform 0.15s; }
+      #currentModelBox details[open] .cm-chev { transform:rotate(90deg); }
+      #currentModelBox .cm-track { background:var(--grid); border-radius:3px; overflow:hidden; }
+      #currentModelBox .cm-track > div { height:100%; border-radius:3px; }
+      #currentModelBox .cm-pct { text-align:right; font-variant-numeric:tabular-nums; font-weight:600; }
+      #currentModelBox .cm-sub { display:grid; grid-template-columns:minmax(150px,226px) 1fr 58px; align-items:center;
+        gap:12px; padding:3px 4px 3px 32px; font-size:0.82rem; }
+      #currentModelBox .cm-sub code { font-size:0.8rem; }
+      #currentModelBox .cm-list { padding-bottom:8px; }
+    </style>
+    <div class="cm">
+      <div class="cm-head">
+        <div class="cm-title">Classification accuracy by signal family</div>
+        <div class="cm-meta">Model ${esc(d.model)} · run ${esc(d.run)} · data ${esc(d.data_version)} · ${esc(d.n_classes)} classes</div>
+      </div>
+      ${d.vote_clear != null ? `
+      <div style="display:flex;align-items:baseline;gap:10px;margin:10px 0 0;">
+        <span style="font-size:1.5rem;font-weight:600;font-variant-numeric:tabular-nums;">${pct(d.vote_clear)}</span>
+        <span>exact-class accuracy on clear signals (10 dB or more), voting over 16 consecutive windows</span>
+      </div>` : ""}
+      <div class="cm-meta" style="margin:2px 0 10px;">Single window on clear signals: ${pct(d.top1_clear)}.
+        Breakdown below: single window, all signal strengths.</div>
+      <div class="cm-meta" style="margin:2px 0 2px;">Share of test signals in each family identified as their exact class. Select a family to view its classes.</div>
+      ${d.families.map(f => `
+        <details>
+          <summary>
+            <span class="cm-chev">&#9654;</span>
+            <span>${esc(f.plain)}</span>
+            ${bar(f.right, 8)}
+            <span class="cm-pct" style="color:${colour(f.right)};">${pct(f.right)}</span>
+          </summary>
+          <div class="cm-list">
+            ${f.classes.map(c => `<div class="cm-sub"><code>${esc(c.name)}</code>${bar(c.right, 5)}<span class="cm-pct" style="font-weight:500;">${pct(c.right)}</span></div>`).join("")}
+          </div>
+        </details>`).join("")}
+    </div>`;
+}
 
 async function renderPerformance() {
+  const cm = el("currentModelBox");
+  if (cm) {
+    try {
+      currentModel = currentModel || await (await fetch("./data/current_model.json")).json();
+      cm.innerHTML = currentModelHtml(currentModel);
+    } catch (e) {
+      cm.innerHTML = `<div class="note">Could not load the current model's results (web/data/current_model.json): ${e.message}</div>`;
+    }
+  }
   const box = el("scorecardBox"), prov = el("perfProvenance");
   if (!perfData) {
     prov.innerHTML = `<div class="note">Loading…</div>`;
@@ -1531,6 +1600,7 @@ Promise.all([chatLogPromise, ollamaCheck]).then(([chatLog, hasOllama]) => initAs
 // page load instead of on whoever's first question -- see ollama.js:warmUp.
 ollamaCheck.then(has => { if (has) ollamaWarmUp(); });
 
+showPage("pipeline");
 init();
 
 

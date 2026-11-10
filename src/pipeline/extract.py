@@ -34,6 +34,7 @@ from src.detect import scenes
 FS = CFG["signal"]["fs"]
 WINDOW_LEN = CFG["signal"]["window_len"]
 MIN_MARGIN_HZ = 25e3            # extra band kept on each side of the box
+CUT_MARGIN_FRAC = 0.1           # ... or this share of the box width, whichever is larger
 SMOOTH = 32                     # samples averaged in the frequency track
 SIDEBAND_GUARD_HZ = 2e3         # around the main line, not counted as a sideband
 BLOCK = 1024                    # power blocks for power_cv (0.32 ms)
@@ -86,7 +87,7 @@ def cut(iq, t0, t1, f_lo, f_hi, noise_var, rng, margin_hz=None):
         t1 = min(n, t0 + WINDOW_LEN)
     seg = np.asarray(iq[t0:t1], dtype=complex)
     fc = (f_lo + f_hi) / 2
-    half = (f_hi - f_lo) / 2 + (margin_hz if margin_hz is not None else max(MIN_MARGIN_HZ, 0.1 * (f_hi - f_lo)))
+    half = (f_hi - f_lo) / 2 + (margin_hz if margin_hz is not None else max(MIN_MARGIN_HZ, CUT_MARGIN_FRAC * (f_hi - f_lo)))
     seg = seg * np.exp(-2j * np.pi * fc * np.arange(t0, t1) / FS)
     X = np.fft.fft(seg)
     keep = np.abs(np.fft.fftfreq(len(seg), 1 / FS)) <= half
@@ -107,6 +108,26 @@ def windows(c, max_windows=MAX_WINDOWS):
     if n > max_windows:
         starts = starts[np.linspace(0, n - 1, max_windows).round().astype(int)]
     return np.stack([c.filled[s:s + WINDOW_LEN] for s in starts])
+
+
+def active_windows(c, max_windows=MAX_WINDOWS, min_snr_db=3.0):
+    """Like windows(), but only windows where the emitter is actually on:
+    in-band power at least min_snr_db above the in-band noise. A pulsed radar
+    or a keyed signal leaves many windows between pulses that hold only noise;
+    voting with them drags the track's answer towards whatever the classifier
+    says about noise. Falls back to windows(c) when fewer than 2 are active."""
+    n = len(c.filled) // WINDOW_LEN
+    if n == 0:
+        return windows(c, max_windows)
+    seg = np.asarray(c.inband[:n * WINDOW_LEN]).reshape(n, WINDOW_LEN)
+    power = np.mean(np.abs(seg) ** 2, axis=1)
+    noise = c.noise_var * c.keep_frac
+    on = np.flatnonzero(power >= noise * (1 + 10 ** (min_snr_db / 10)))
+    if len(on) < 2:
+        return windows(c, max_windows)
+    if len(on) > max_windows:
+        on = on[np.linspace(0, len(on) - 1, max_windows).round().astype(int)]
+    return np.stack([c.filled[s * WINDOW_LEN:(s + 1) * WINDOW_LEN] for s in on])
 
 
 def _smooth(x, k):
