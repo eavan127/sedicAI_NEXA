@@ -23,6 +23,9 @@ Features are measured on the same cut with the out-of-band part left empty
                   the carrier is modulated (FM/AM sidebands, data)
   line_db         the main line above the noise floor
   power_cv        how much the power varies between 0.32 ms blocks
+  envelope_m4     E|x|^4 / (E|x|^2)^2 of the in-band signal: 2.0 for noise
+                  (a noise jammer, at any SNR), at most ~1.7 for QAM and
+                  lower for PSK / FSK / chirps, even at 0 dB
 """
 from dataclasses import dataclass, field
 
@@ -253,6 +256,8 @@ def features(c):
         power_cv = float(bp.std() / (bp.mean() + 1e-20))
     else:
         power_cv = float("nan")
+    pw = np.abs(x) ** 2
+    envelope_m4 = float(np.mean(pw ** 2) / max(np.mean(pw) ** 2, 1e-30))
     return dict(snr_db=float(snr_db), occupied_hz=float(occupied), wraps=wraps, sweep_rate_hz=sweep_rate,
                 line_db=float(line_db), sideband_db=float(sideband_db), power_cv=power_cv,
-                duration_s=(c.t1 - c.t0) / FS)
+                envelope_m4=envelope_m4, duration_s=(c.t1 - c.t0) / FS)

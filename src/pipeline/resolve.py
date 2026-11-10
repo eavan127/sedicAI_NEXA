@@ -22,6 +22,12 @@ behaviour features of src/pipeline/extract.py, which can:
                           signal that was already there is a jammer; a tone
                           alone for a long time (cw_min_s) is a CW radar.
                           Otherwise the answer stays "RADAR_CW / JAM_TONE".
+  JAM_REACTIVE vs other   a reactive jammer's windows are band noise like a
+    noise jammers         barrage or partial-band jammer's; its training
+                          windows hold the moment it switches on, which a
+                          capture shows only once. So context decides, as for
+                          tones: a noise jammer that switched on over a signal
+                          that was already transmitting is reactive.
   JAM_DRFM + radar        both are true: a radar with a DRFM jammer copying it.
   constellation size      not settled at all: the classifier's size guess
                           inside these groups is no better than chance, so
@@ -40,6 +46,7 @@ from src.pipeline import extract
 from src.pipeline.tracker import FS, freq_iou
 
 TONES = ("RADAR_CW", "JAM_TONE")
+NOISE_JAMMERS = ("JAM_BARRAGE", "JAM_PARTIAL_BAND", "JAM_SPOT", "JAM_REACTIVE")
 SWEEPS = ("LORA_CSS", "JAM_SWEPT")
 DRFM_RADARS = ("RADAR_PULSE", "LFM_RADAR", "RADAR_BARKER")
 # Carriers that can look like a pure tone in one window when lightly modulated.
@@ -68,7 +75,18 @@ NO_WRAP_MIN_S = 1.2e-3          # > 2 of the longest LoRa symbols with no wrap: 
 SIDEBAND_DB = 15.0              # strongest off-carrier line above the floor
 LINE_DB_FOR_PURITY = 35.0       # the line must be strong enough that missing sidebands mean something
 CW_MIN_S = 1.0                  # a lone tone this long is taken as a CW radar
-CO_CHANNEL_LEAD_S = 1e-3        # the other signal must have been there this long before the tone
+CO_CHANNEL_LEAD_S = 1e-3        # the other signal must have been there this long before the tone / jammer
+REACTIVE_RULE = True            # noise jammer switching on over a signal already there -> JAM_REACTIVE
+# Noise-like track: E|x|^4 / (E|x|^2)^2 >= NOISE_M4 (noise 2.0 at any SNR; 256QAM
+# <= 1.71 even at 0 dB, PSK / FSK / chirps lower; extract.features), measured only
+# where the track stands NOISE_LIKE_MIN_SNR_DB above the noise (below that any
+# signal reads as noise).
+# 1.75, not 2.0: a jammer over its target reads 1.7-1.9 (the signal underneath
+# pulls it down); 256QAM at >= 10 dB in-band reads ~1.55.
+NOISE_M4 = 1.75
+NOISE_LIKE_MIN_SNR_DB = 3.0
+REACTIVE_MIN_IOU = 0.3          # frequency overlap between a reactive jammer and the signal it covers
+SWITCH_TOL_S = 1e-3            # the signal underneath may end up to this long before the jammer track starts
 
 
 @dataclass
@@ -91,14 +109,33 @@ def _one(probs, c, reason):
     return Answer(c, (c,), _p(probs, c), reason)
 
 
-def _tone(track, probs, feats, others, cw_min_s):
+def _came_on_over(track, others):
+    """The track already on the air under this one when it switched on (it
+    started at least CO_CHANNEL_LEAD_S earlier and overlaps it in frequency),
+    or None."""
     start = track.t_first
     for o in others:
-        if o is track or o.t_first > start - CO_CHANNEL_LEAD_S * FS or o.t_last < start:
+        # o.t_last may end just before `start`: once a jammer covers the band,
+        # the detector boxes the jammer and the signal's own track stops there.
+        if o is track or o.t_first > start - CO_CHANNEL_LEAD_S * FS or o.t_last < start - SWITCH_TOL_S * FS:
             continue
         if freq_iou(track.f_lo, track.f_hi, o.f_lo, o.f_hi) > 0 or (o.f_lo <= track.f_lo and track.f_hi <= o.f_hi):
-            return _one(probs, "JAM_TONE",
-                        f"pure tone that appeared on top of track {o.id}, which was already transmitting")
+            return o
+    return None
+
+
+def _noise_like(feats):
+    """In-band envelope statistics of noise (a noise jammer): the classifier
+    often calls band noise a dense QAM / APSK / PSK at a few percent."""
+    m4 = feats.get("envelope_m4", float("nan"))
+    return bool(np.isfinite(m4) and m4 >= NOISE_M4 and feats["snr_db"] >= NOISE_LIKE_MIN_SNR_DB)
+
+
+def _tone(track, probs, feats, others, cw_min_s):
+    o = _came_on_over(track, others)
+    if o is not None:
+        return _one(probs, "JAM_TONE",
+                    f"pure tone that appeared on top of track {o.id}, which was already transmitting")
     if feats["duration_s"] >= cw_min_s:
         return _one(probs, "RADAR_CW", f"pure tone, steady and alone for {feats['duration_s']:.1f} s")
     return _undecided(probs, TONES, f"pure tone for {feats['duration_s'] * 1e3:.1f} ms with no other signal "
@@ -141,6 +178,17 @@ def resolve(track, others=(), cw_min_s=CW_MIN_S):
 
     if top in TONE_LIKE and sb < SIDEBAND_DB and line >= LINE_DB_FOR_PURITY:
         return _tone(track, probs, feats, others, cw_min_s)
+
+    dense = any(top in m for m in SIZE_GROUPS.values())
+    if REACTIVE_RULE and (top in NOISE_JAMMERS or (dense and _noise_like(feats))):
+        o = _came_on_over(track, others)
+        # A reactive jammer aims at its target: it must sit on the signal, not
+        # just touch its band (on 200 random captures, where jammers start at
+        # random, "touching" renamed 12 more spot / partial-band jammers than
+        # it found reactive ones).
+        if o is not None and freq_iou(track.f_lo, track.f_hi, o.f_lo, o.f_hi) >= REACTIVE_MIN_IOU:
+            return Answer("JAM_REACTIVE", ("JAM_REACTIVE",), max(_p(probs, c) for c in NOISE_JAMMERS),
+                          f"noise jammer that switched on over track {o.id}, which was already transmitting")
 
     for group, members in SIZE_GROUPS.items():
         if top in members:

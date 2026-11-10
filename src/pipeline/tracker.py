@@ -122,6 +122,7 @@ class Track:
             line_db=med("line_db"),
             snr_db=med("snr_db"),
             power_cv=med("power_cv"),
+            envelope_m4=med("envelope_m4"),
         )
 
 

@@ -272,6 +272,27 @@ DETECTOR = REPO_ROOT / "results" / "detector" / "emitter_detector.pt"
 
 
 @pytest.mark.skipif(not DETECTOR.exists(), reason="no trained detector in results/detector/")
+def _jam_track(tid, t0, t1, cls, m4=2.0):
+    t = Track(tid, [det(t0, t1, 100e3, 400e3, probs_for(cls), envelope_m4=m4, snr_db=15.0)])
+    return t
+
+
+def test_noise_jammer_switching_on_over_a_signal_is_reactive():
+    sig = Track(1, [det(0, 20000, 150e3, 350e3, probs_for("QPSK"))])
+    lead = int(2e-3 * FS)
+    jam_on = _jam_track(2, lead, 30000, "JAM_PARTIAL_BAND")
+    assert resolve.resolve(jam_on, [sig, jam_on]).label == "JAM_REACTIVE"
+    # band noise the classifier calls a dense constellation, recognised by its envelope
+    dense = _jam_track(3, lead, 30000, "64APSK")
+    assert resolve.resolve(dense, [sig, dense]).label == "JAM_REACTIVE"
+    real_qam = _jam_track(4, lead, 30000, "64APSK", m4=1.55)
+    assert resolve.resolve(real_qam, [sig, real_qam]).label == "APSK"
+    # on from the start with the signal, or alone: not reactive
+    both = _jam_track(5, 0, 30000, "JAM_PARTIAL_BAND")
+    assert resolve.resolve(both, [sig, both]).label == "JAM_PARTIAL_BAND"
+    assert resolve.resolve(jam_on, [jam_on]).label == "JAM_PARTIAL_BAND"
+
+
 def test_trained_detector_runs_in_the_chain():
     rng = np.random.default_rng(7)
     iq, _ = make_capture(rng, n_chunks=2, n_emitters=2, snr_db=15)
