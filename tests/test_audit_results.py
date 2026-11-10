@@ -48,3 +48,11 @@ def test_live_and_intel_results_are_audited_once(tmp_path, monkeypatch):
     assert d["n_tracks"] == 1 and d["tracks"][0]["answer"] == "NBFM" and "Radio check" in d["tracks"][0]["text"]
     assert live[0]["actor"] == "live bridge"
     assert srv.nexa_db.verify_audit()["ok"]                # the hash chain still holds
+    # A second server with its OWN database still gets every result once.
+    srv2 = serve_local.make_server(tmp_path / "other.db", "127.0.0.1", 0, demo=True, intel_dir=intel)
+    threading.Thread(target=srv2.serve_forever, daemon=True).start()
+    try:
+        _get(f"http://127.0.0.1:{srv2.server_address[1]}", "/api/pipeline")
+    finally:
+        srv2.shutdown()
+    assert len([e for e in srv2.nexa_db.audit(100) if e["action"] == "live.result"]) == 1

@@ -413,12 +413,15 @@ class Handler(SimpleHTTPRequestHandler):
         database, so the server logs each one the first time it sees it
         finished: what came in, what was found, what was heard. A marker
         keeps every result to one entry."""
+        # The marker names THIS database: two servers with different databases (the
+        # demo database and a test one, say) each log every result once.
+        db_tag = hashlib.sha1(str(Path(self.db.path).resolve()).lower().encode()).hexdigest()[:10]
         with Handler._audit_lock:
             try:
                 runs = sorted(p for p in PIPELINE_DIR.iterdir() if p.is_dir() and PIPE_ID.fullmatch(p.name)) \
                     if PIPELINE_DIR.is_dir() else []
                 for d in runs:
-                    mark = d / ".audited"
+                    mark = d / f".audited-{db_tag}"
                     if mark.exists() or not (d / "tracks.json").exists():
                         continue
                     meta = json.loads((d / "job.json").read_text(encoding="utf-8")) if (d / "job.json").exists() else {}
@@ -438,7 +441,7 @@ class Handler(SimpleHTTPRequestHandler):
                     mark.write_text(datetime.datetime.now().isoformat(timespec="seconds"), encoding="utf-8")
                 index = self.intel_dir / "index.json"
                 if index.is_file():
-                    done_f = self.intel_dir / ".audited.json"
+                    done_f = self.intel_dir / f".audited-{db_tag}.json"
                     done = set(json.loads(done_f.read_text(encoding="utf-8"))) if done_f.is_file() else set()
                     new = [r for r in json.loads(index.read_text(encoding="utf-8")).get("recordings", [])
                            if r.get("id") and r["id"] not in done]

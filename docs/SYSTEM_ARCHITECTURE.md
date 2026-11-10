@@ -42,7 +42,8 @@ Keep **one** `*best*.pt` in `results/classifier/`: the dashboard averages every 
 | **Transmitter location** | the analyst, from "Locate on KiwiSDR" → Record location | `client.tdoa_location` |
 
 The append-only triggers and the hash chain (`/api/audit/verify`) cover every row above. Pipeline and live results
-are logged once (marker `.audited` in the run folder, `.audited.json` in the Comms Intel folder).
+are logged once **per database** (marker `.audited-<db>` in the run folder, `.audited-<db>.json` in the Comms Intel
+folder), so the demo database and any test database each get every result.
 
 ## 4. Outputs
 
