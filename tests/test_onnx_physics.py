@@ -108,9 +108,10 @@ def test_shipped_web_model_matches_the_page_class_list():
 def test_shipped_web_model_is_the_pipeline_checkpoint():
     """When the checkpoint is here (git-ignored), the committed ONNX file is
     its export: same scores, up to the physics branch's rounding noise."""
-    ckpt = ROOT / "results" / "classifier" / "physics_best.pt"
+    from src.config import CFG
+    ckpt = ROOT / CFG["browser_model"]
     if not ckpt.exists():
-        pytest.skip("results/classifier/physics_best.pt not here (git-ignored)")
+        pytest.skip(f"{CFG['browser_model']} not here (git-ignored)")
     ort = pytest.importorskip("onnxruntime")
     ck = torch.load(ckpt, map_location="cpu", weights_only=False)
     assert ck["meta"]["combined_version"] == _meta()["MODEL"]["data_version"]

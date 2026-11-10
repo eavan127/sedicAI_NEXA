@@ -6,7 +6,7 @@ Model page (POST /api/retrain/start), or by hand:
     python scripts/retrain_from_feedback.py --job <job id>
 
 The model is the 60-class one the dashboard and the Python Signal Pipeline
-both run: results/classifier/physics_best.pt (or the active retrained version
+both run: configs/default.yaml browser_model (or the active retrained version
 of it). What it does, in order (each step is printed, and the page shows the
 log):
 
@@ -41,7 +41,7 @@ Scope: "single" only. "both" (single + the 5-member ensemble) belonged to the
 
 Nothing here overwrites a shipped file: every version is written to
 data/local/models/<version>/ and kept forever, whether it passed or not. The
-shipped physics_best.pt and web/models/best_model.onnx stay untouched, so
+shipped checkpoint and web/models/best_model.onnx stay untouched, so
 "use shipped" always restores them exactly.
 """
 from __future__ import annotations
@@ -65,7 +65,8 @@ from src.report_export import _iq_payload  # noqa: E402
 
 FS = 3_200_000
 WIN = 512
-SHIPPED = ROOT / "results" / "classifier" / "physics_best.pt"
+from src.config import CFG as _CFG  # noqa: E402
+SHIPPED = ROOT / _CFG.get("browser_model", "results/classifier/physics_aug_best.pt")
 COMBINED = ROOT / "data" / "combined"
 JAM_IDX = [CLASSES.index(c) for c in JAMMERS]
 NOISE_IDX = CLASSES.index("NOISE_FLOOR")

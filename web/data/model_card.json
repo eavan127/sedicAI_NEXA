@@ -1,11 +1,11 @@
 {
  "architecture": "AMC_CNN",
  "member_architecture": "AMC_CNN",
- "name": "physics_best.pt",
+ "name": "physics_aug_best.pt",
  "data_version": "f993d8ebc417",
  "seed": 4,
- "epoch": 14,
- "val_top1": 0.488525,
+ "epoch": 15,
+ "val_top1": 0.5001333333333333,
  "flags": {
   "stft_freq_summary": false,
   "stft_keep_rows": true,
@@ -314,5 +314,5 @@
    "64": 0.98
   }
  },
- "generated": "2026-11-09T21:56:12"
+ "generated": "2026-11-10T14:46:22"
 }

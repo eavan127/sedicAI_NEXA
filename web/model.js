@@ -3,7 +3,7 @@
 // src/pipeline/classify.py:Classifier returns in Python.
 //
 // The model is the 60-class one the Python Signal Pipeline runs
-// (results/classifier/physics_best.pt, exported by scripts/export_onnx.py and
+// (configs/default.yaml browser_model, exported by scripts/export_onnx.py and
 // copied here by web/build.py). Its class list, window length and STFT size
 // come from model_meta.js, which web/build.py generates from the same
 // checkpoint, so they cannot drift from the file. The 8-class model and the
@@ -76,6 +76,13 @@ export function preprocessWindow(wRe, wIm, outRe, outIm) {
 }
 
 /** Runs the model over every sliding window of a capture.
+ *
+ * Windows are cut from the capture as it is: a signal stays at its own
+ * frequency, never moved to 0 Hz. That is how the 60-class training windows
+ * were made (since f993d8ebc417 every one sits somewhere in the band, none at
+ * exactly 0 Hz), and the Python pipeline does the same since KEEP_POSITION
+ * (src/pipeline/extract.py): centring a tone turns it into a DC offset the
+ * model never saw (RADAR_CW / JAM_TONE went from 80% to 0% at 15 dB).
  *
  * Returns { starts, probs, nWindows, nClasses } with probs a Float32Array
  * laid out [window][class], already sigmoided and (for the ensemble)

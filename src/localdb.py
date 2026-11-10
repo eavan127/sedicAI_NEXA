@@ -39,7 +39,7 @@ SCHEMA_VERSION = 3
 GENESIS_HASH = "0" * 64
 
 # The model's classes, in its output order: the 60-class model the dashboard
-# and the Signal Pipeline run (results/classifier/physics_best.pt). Duplicated
+# and the Signal Pipeline run (configs/default.yaml browser_model). Duplicated
 # from configs/default.yaml's dataset_classes (via src.config) so this module
 # stays standard-library only; tests/test_localdb.py fails if the two ever
 # disagree.

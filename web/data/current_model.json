@@ -1,14 +1,24 @@
 {
- "model": "physics_best.pt",
- "run": "2026-11-07_physics_seed4",
+ "model": "physics_aug_best.pt",
+ "run": "2026-11-09_physics_augment_seed4",
  "data_version": "f993d8ebc417",
  "seed": 4,
- "epoch": 14,
- "git_commit": "f87ac1b306e47b9977e789f2232df01a9728ef84",
+ "epoch": 15,
+ "augment": "rot90+flip",
+ "git_commit": "b8ef56ed59053300cd255dd80b07b3b67f018c54",
  "n_classes": 60,
- "top1": 0.4874,
- "top1_clear": 0.6159,
- "vote_clear": 0.806,
+ "top1": 0.498,
+ "top1_clear": 0.624,
+ "vote_clear": 0.794,
+ "families_from": {
+  "model": "physics_best.pt",
+  "run": "2026-11-07_physics_seed4",
+  "epoch": 14,
+  "top1": 0.4874,
+  "top1_clear": 0.6159,
+  "vote_clear": 0.806,
+  "why": "the per-family scorecard of the augmented run is not in the repo yet; re-run scripts/export_current_model.py on its run folder to replace this breakdown"
+ },
  "families": [
   {
    "family": "JAMMING",
@@ -335,5 +345,5 @@
    ]
   }
  ],
- "exported": "2026-11-08T21:31:45"
+ "exported": "2026-11-10T14:44:50"
 }

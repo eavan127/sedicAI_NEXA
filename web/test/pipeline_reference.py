@@ -1,6 +1,6 @@
 """End-to-end reference: a fixed IQ capture and the per-window probabilities
 the REAL Python pipeline produces for it with the 60-class model the
-dashboard runs (results/classifier/physics_best.pt, the checkpoint
+dashboard runs (configs/default.yaml browser_model, the checkpoint
 src/pipeline/classify.py loads): sliding_windows -> preprocess_window ->
 AMC_CNN -> sigmoid.
 

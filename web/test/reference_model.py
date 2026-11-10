@@ -1,7 +1,7 @@
 """Shared by the *_reference.py scripts: the 60-class model the page runs, and
 the Python display layer pointed at its classes.
 
-The page runs results/classifier/physics_best.pt (web/models/best_model.onnx
+The page runs configs/default.yaml browser_model (web/models/best_model.onnx
 is its export). src/timeline.py and src/ui/session.py still name the 8
 classes in their module globals; their logic is class-agnostic, so the
 references point those globals at the 60 classes, the page's tiers
@@ -21,7 +21,7 @@ from src.config import CFG, DATASET_CLASSES
 from src.models.amc_cnn import AMC_CNN
 
 ROOT = Path(__file__).resolve().parents[2]
-CKPT = ROOT / "results" / "classifier" / "physics_best.pt"
+CKPT = ROOT / CFG["browser_model"]
 CLASSES = list(DATASET_CLASSES)
 LINE = float(CFG.get("web_threshold", 0.3))
 THRESHOLDS = {c: LINE for c in CLASSES}

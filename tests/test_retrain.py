@@ -2,7 +2,7 @@
 script (small synthetic settings) on the 60-class model, four-eyes model
 approval, activation, the served model file, and roll back.
 
-The end-to-end tests need results/classifier/physics_best.pt, which is
+The end-to-end tests need the checkpoint configs/default.yaml browser_model names, which is
 git-ignored (docs/DATA_VERSIONS.md); they skip without it."""
 import json
 import subprocess
@@ -22,7 +22,8 @@ from src.localdb import Actor, LocalDB, now_iso  # noqa: E402
 import serve_local  # noqa: E402
 
 EAVAN, JESSY, CHUA = Actor("eavan"), Actor("jessy"), Actor("chua")
-SHIPPED = ROOT / "results" / "classifier" / "physics_best.pt"
+from src.config import CFG  # noqa: E402
+SHIPPED = ROOT / CFG["browser_model"]
 
 
 @pytest.fixture
@@ -84,7 +85,7 @@ def test_rollback_with_nothing_active(db):
 @pytest.fixture(scope="module")
 def trained(tmp_path_factory):
     if not SHIPPED.exists():
-        pytest.skip("results/classifier/physics_best.pt not here (git-ignored)")
+        pytest.skip(f"{SHIPPED.name} not here (git-ignored)")
     tmp = tmp_path_factory.mktemp("retrain")
     db = LocalDB(tmp / "nexa.db")
     seed_feedback(db, tmp)
@@ -119,7 +120,7 @@ def test_script_registers_a_candidate(trained):
     assert sess.get_outputs()[0].shape[1] == 60
     import torch
     ck = torch.load(tmp / Path(m["path"]).with_suffix(".pt"), weights_only=False)
-    assert ck["meta"]["fine_tuned"]["from"].endswith("physics_best.pt") and len(ck["meta"]["classes"]) == 60
+    assert ck["meta"]["fine_tuned"]["from"].endswith(SHIPPED.name) and len(ck["meta"]["classes"]) == 60
     assert "Single model GATE" in proc.stdout and "Done in" in proc.stdout
     assert db.audit(limit=1)[0]["action"] == "retrain.finish"
 

@@ -1222,8 +1222,11 @@ function currentModelHtml(d) {
         <span style="font-size:1.5rem;font-weight:600;font-variant-numeric:tabular-nums;">${pct(d.vote_clear)}</span>
         <span>exact-class accuracy on clear signals (10 dB or more), voting over 16 consecutive windows</span>
       </div>` : ""}
-      <div class="cm-meta" style="margin:2px 0 10px;">Single window on clear signals: ${pct(d.top1_clear)}.
-        Breakdown below: single window, all signal strengths.</div>
+      <div class="cm-meta" style="margin:2px 0 10px;">Single window on clear signals: ${pct(d.top1_clear)};
+        single window, all signal strengths: ${pct(d.top1)}.
+        Breakdown below: single window, all signal strengths${d.families_from ? `, from the previous model
+        (${esc(d.families_from.model)}, run ${esc(d.families_from.run)}, ${pct(d.families_from.top1)} overall): this
+        model's own breakdown is not exported yet` : ""}.</div>
       <div class="cm-meta" style="margin:2px 0 2px;">Share of test signals in each family identified as their exact class. Select a family to view its classes.</div>
       ${d.families.map(f => `
         <details>

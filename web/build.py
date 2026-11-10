@@ -14,12 +14,13 @@ folder with no build step of its own:
      generated from that model's checkpoint, so the page's class list,
      window length and STFT size can never disagree with the file it runs.
 
-The browser runs the SAME model as the Python Signal Pipeline:
-results/classifier/physics_best.pt (60 classes), exported with
+The browser runs the SAME model as the Python Signal Pipeline: the
+checkpoint configs/default.yaml names as browser_model (60 classes),
+exported with
 
-    python scripts/export_onnx.py --ckpt results/classifier/physics_best.pt
+    python scripts/export_onnx.py --ckpt <browser_model>
 
-which writes results/classifier/physics_best.onnx next to it. The old 8-class
+which writes the .onnx next to it. The old 8-class
 files (best_model.onnx + ensemble_0..4.onnx, 26 Sept 2026) are in git history.
 
 Usage:
@@ -38,7 +39,12 @@ WEB = REPO / "web"
 MODELS_OUT = WEB / "models"
 # The model the browser runs: the same checkpoint src/pipeline/classify.py
 # loads. Its ONNX export sits next to it (scripts/export_onnx.py --ckpt).
-BROWSER_CKPT = REPO / "results" / "classifier" / "physics_best.pt"
+def _browser_ckpt():
+    from src.config import CFG
+    return REPO / CFG.get("browser_model", "results/classifier/physics_aug_best.pt")
+
+
+BROWSER_CKPT = _browser_ckpt()
 BROWSER_ONNX = BROWSER_CKPT.with_suffix(".onnx")
 WEB_MODEL = "best_model"          # served as /models/best_model.onnx (serve_local swaps in retrained ones)
 # Files from the 8-class era that must not linger next to the 60-class model.
@@ -64,6 +70,7 @@ def build_html():
         print(f"  warning: {logo} not found — header will show a broken image")
         src = ""
     out = template.replace("__LOGO_BASE64__", src)
+    out = out.replace("__BROWSER_MODEL__", BROWSER_CKPT.name)
 
     # Supabase credentials. Only the DEPLOYED site gets a key: analyses from
     # the live app go to the shared table, while a development run stays in

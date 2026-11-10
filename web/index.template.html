@@ -620,7 +620,7 @@
             <div class="field" style="flex:2;min-width:220px;">
               <label for="modelSel">Model</label>
               <select id="modelSel">
-                <option value="single" selected>60-class, physics_best.pt</option>
+                <option value="single" selected>60-class, __BROWSER_MODEL__</option>
               </select>
             </div>
           </div>
@@ -956,7 +956,7 @@
       <div class="block" id="retrainBlock" hidden>
         <div class="block-label">Retraining from human feedback</div>
         <div class="note">Approved corrections become training data. A retrain fine-tunes the 60-class model the
-          dashboard and the Signal Pipeline run (physics_best.pt) on them, mixed with original training data so it does
+          dashboard and the Signal Pipeline run (__BROWSER_MODEL__) on them, mixed with original training data so it does
           not forget, then sits a fixed exam against the version in use: a new version is only offered for activation if
           it does not get worse on LFM_RADAR, FHSS or the jammers, and only an analyst can activate it. <strong>Every version is
           kept</strong>, including ones that failed or were rejected, so any of them, or the shipped files, can be
@@ -973,7 +973,7 @@
         <fieldset class="rt-scope">
           <legend>What to retrain</legend>
           <label><input type="radio" name="rtScope" id="rtScopeSingle" value="single" checked>
-            <span><strong>The 60-class model</strong> (physics_best.pt) · about 5 minutes on a laptop.
+            <span><strong>The 60-class model</strong> (__BROWSER_MODEL__) · about 5 minutes on a laptop.
             There is no 60-class ensemble yet, so there is nothing else to retrain.</span></label>
         </fieldset>
         <div class="filters" style="margin-top:8px;">
