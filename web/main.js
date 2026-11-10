@@ -1187,7 +1187,8 @@ winSlider.addEventListener("input", () => { if (currentPage === "replay") render
 let currentModel = null;
 function currentModelHtml(d) {
   const pct = v => v == null ? "—" : `${(100 * v).toFixed(1)}%`;
-  const colour = v => v >= 0.6 ? "#4A6B3A" : v >= 0.35 ? "#A47A2C" : "#8E3B35";   // muted: olive / ochre / brick
+  // One navy ramp, as on the FOI26 brochure: score shades never reuse the tier or confidence colours
+  const colour = v => v >= 0.6 ? "#22306B" : v >= 0.35 ? "#7584A8" : "#C3C7CF";
   const esc = t => String(t ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const bar = (v, h) => `<div class="cm-track" style="height:${h}px;"><div style="width:${Math.max(1, 100 * v)}%;background:${colour(v)};"></div></div>`;
   return `

@@ -142,7 +142,7 @@ function draw(root, data) {
           <div class="note">${esc(Math.round(r.active_minutes || 0))} min with signal</div></td>
         <td style="white-space:nowrap;">${esc(KIND_LABEL[r.kind] || r.kind)}${r.wpm_median ? `<div class="note">${Math.round(r.wpm_median)} WPM</div>` : ""}</td>
         <td>${r.error ? chip("LLM failed", "#9B2C2C") : esc(r.category || "—")}
-          ${r.confidence ? `<div>${chip(r.confidence, CONF_COLOR[r.confidence] || "#5F6B72")}</div>` : ""}</td>
+          ${r.confidence ? `<div>${chip(r.confidence, CONF_COLOR[r.confidence] || "#5E6673")}</div>` : ""}</td>
         <td>${esc((r.call_signs || []).slice(0, 4).join(", "))}</td>
         <td>${esc(r.error || r.summary || "")}</td></tr>`).join("")
       + `</tbody></table>${shown.length ? "" : `<div class="note" style="padding:8px;">No recording matches.</div>`}`;
@@ -206,7 +206,7 @@ async function openRecording(root, id) {
         ${r.error ? `<div style="color:#9B2C2C;">The AI could not read this one: ${esc(r.error)}</div>` : !rec.reading
           ? `<div class="note">No AI reading for this recording.</div>` : `
         ${r.translation_en ? `<div><b>In plain English:</b> ${esc(r.translation_en)}</div>` : `<div>${esc(r.summary)}</div>`}
-        ${(r.call_signs || []).length ? `<div style="margin-top:8px;"><b>Station names (call signs):</b> ${r.call_signs.map(c => chip(c, "#4A552F")).join(" ")}</div>` : ""}
+        ${(r.call_signs || []).length ? `<div style="margin-top:8px;"><b>Station names (call signs):</b> ${r.call_signs.map(c => chip(c, "#172152")).join(" ")}</div>` : ""}
         ${(r.places || []).length ? `<div style="margin-top:6px;"><b>Places mentioned:</b> ${r.places.map(c => chip(c, "#2B6CB0")).join(" ")}</div>` : ""}
         ${(r.key_points || []).length ? `<ul style="margin:8px 0 0 20px;padding:0;">${r.key_points.map(p => `<li>${esc(p)}</li>`).join("")}</ul>` : ""}
         ${(r.evidence || []).length ? `<div style="margin-top:12px;font-weight:700;">Proof: the exact ${decoded} the AI based this on</div>
@@ -304,7 +304,7 @@ function drawStrip(canvas, rec, onPick) {
   g.clearRect(0, 0, W, H);
   if (!total) return;
   const x = t => Math.min(W, t / total * W);
-  g.fillStyle = "#EFF1EA";                                  // each message, behind the bars
+  g.fillStyle = "#E8ECF6";                                  // each message, behind the bars
   for (const s of rec.segments || []) g.fillRect(x(s.start_s), top, Math.max(2, x(s.end_s) - x(s.start_s)), base - top);
   down.forEach((d, i) => {
     const s = snr[i] ?? 0;
@@ -315,10 +315,10 @@ function drawStrip(canvas, rec, onPick) {
     const x0 = x(i * step), w = x((i + 1) * step) - x0;
     g.fillRect(x0, base - h, Math.max(1, w > 4 ? w - 1 : w), h);
   });
-  g.strokeStyle = "#DFE3D9";
+  g.strokeStyle = "#E3E6EC";
   g.beginPath(); g.moveTo(0, base + 0.5); g.lineTo(W, base + 0.5); g.stroke();
-  g.fillStyle = "#5F6B72";
-  g.font = '13px "Inter", "Segoe UI", Arial, sans-serif';
+  g.fillStyle = "#5E6673";
+  g.font = '13px "Montserrat", "Segoe UI", Arial, sans-serif';
   g.textBaseline = "top";
   const every = tickEvery(total);
   for (let t = 0; t <= total + 1e-6; t += every) {

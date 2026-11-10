@@ -9,13 +9,13 @@ import { TIER_COLOR, TIER_OF, estimateSnrDb, tierOfClasses, THRESHOLDS } from ".
 import { CLASSES, FS, WINDOW_LEN } from "./model.js";
 
 const PANEL = "#FFFFFF";
-const BG = "#F7F8F5";
-const GRID = "#DFE3D9";
+const BG = "#F5F7FA";
+const GRID = "#E3E6EC";
 // Provenance sits on grey so it reads as apparatus rather than as a result:
 // every other block on the page is a white PANEL carrying numbers.
-const PANEL_MUTED = "#EFF1EC";
-const TEXT = "#121C27";
-const TEXT_DIM = "#5F6B72";
+const PANEL_MUTED = "#EEF1F6";
+const TEXT = "#0E1622";
+const TEXT_DIM = "#5E6673";
 const INSTRUMENT = "#42505C";
 // src/ui/palette.py:MONO_STACK, but quoted with SINGLE quotes.
 //
@@ -27,13 +27,13 @@ const INSTRUMENT = "#42505C";
 // and padding. Single quotes are equally valid in CSS and survive the
 // attribute.
 const MONO = "'JetBrains Mono','Cascadia Mono',Consolas,'DejaVu Sans Mono',monospace";
-const FONT = '"Inter", "Segoe UI", "Helvetica Neue", Arial, sans-serif';
+const FONT = '"Montserrat", "Segoe UI", "Helvetica Neue", Arial, sans-serif';
 
 // src/ui/palette.py:CLASS_COLOR -- per-class hues, for charts that draw
 // every class at once (tier colours give 8 classes only 4 colours).
 export const CLASS_COLOR = {
   BPSK: "#1F6FB2", QPSK: "#2AA3A3", "16QAM": "#7A5BC0", "64QAM": "#C2569A",
-  LFM_RADAR: "#627143", FHSS: "#B07D2B", JAMMING: "#C1121F", NOISE_FLOOR: "#6B7280",
+  LFM_RADAR: "#C77A00", FHSS: "#B07D2B", JAMMING: "#C1121F", NOISE_FLOOR: "#6B7280",
 };
 
 /** src/ui/palette.py:lighten -- mix toward white, so a secondary series

@@ -37,9 +37,10 @@ export { TIER_OF };
 // src/timeline.py:TIER_PRIORITY -- worst first.
 export const TIER_PRIORITY = ["Hostile", "Military", "Civilian", "Empty"];
 
-// src/ui/palette.py:TIER_COLOR
+// Tier colours of the FOI26 brochure (web/brochure-foi26.html): threat red, military orange,
+// civilian blue, empty slate. (src/ui/palette.py:TIER_COLOR still has the older teal set.)
 export const TIER_COLOR = {
-  Civilian: "#0F766E", Military: "#B45309", Hostile: "#C1121F", Empty: "#6B7280",
+  Civilian: "#2E7DB9", Military: "#C77A00", Hostile: "#B0281A", Empty: "#5B6472",
 };
 
 // src/ui/session.py display-rule defaults.

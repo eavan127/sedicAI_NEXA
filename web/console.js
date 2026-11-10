@@ -20,23 +20,24 @@ import { CLASSES } from "./model.js";
 import { ORDER, answers } from "./taxonomy.js";
 
 const PANEL = "#FFFFFF";
-const BG = "#F7F8F5";
-const GRID = "#DFE3D9";
-const TEXT = "#121C27";
-const TEXT_DIM = "#5F6B72";
+const BG = "#F5F7FA";
+const GRID = "#E3E6EC";
+const TEXT = "#0E1622";
+const TEXT_DIM = "#5E6673";
 const INSTRUMENT = "#42505C";
-const TRUTH_COLOR = "#121C27";
-const FONT = '"Inter", "Segoe UI", "Helvetica Neue", Arial, sans-serif';
+const TRUTH_COLOR = "#0E1622";
+const FONT = '"Montserrat", "Segoe UI", "Helvetica Neue", Arial, sans-serif';
 
-/** Google's turbo colormap (the polynomial approximation) -- palette.py
- * picks turbo for the waterfall as "perceptually better than jet, reads
- * almost identically". */
+/** matplotlib's magma colormap (Matt Zucker's polynomial fit), the map every
+ * spectrogram in the FOI26 brochure and slides uses, so the waterfall looks
+ * the same on screen and on paper. Perceptually uniform like turbo, which it
+ * replaces. Kept under the old name so callers need no change. */
 function turbo(x) {
   x = Math.min(Math.max(x, 0), 1);
-  const x2 = x * x, x3 = x2 * x, x4 = x3 * x, x5 = x4 * x;
-  const r = 0.13572138 + 4.61539260 * x - 42.66032258 * x2 + 132.13108234 * x3 - 152.94239396 * x4 + 59.28637943 * x5;
-  const g = 0.09140261 + 2.19418839 * x + 4.84296658 * x2 - 14.18503333 * x3 + 4.27729857 * x4 + 2.82956604 * x5;
-  const b = 0.10667330 + 12.64194608 * x - 60.58204836 * x2 + 110.36276771 * x3 - 89.90310912 * x4 + 27.34824973 * x5;
+  const x2 = x * x, x3 = x2 * x, x4 = x3 * x, x5 = x4 * x, x6 = x5 * x;
+  const r = -0.002136485053939582 + 0.2516605407371642 * x + 8.353717279216625 * x2 - 27.66873308576866 * x3 + 52.17613981234068 * x4 - 50.76852536473588 * x5 + 18.65570506591883 * x6;
+  const g = -0.000749655052795221 + 0.6775232436837668 * x - 3.577719514958484 * x2 + 14.26473078096533 * x3 - 27.94360607168351 * x4 + 29.04658282127291 * x5 - 11.48977351997711 * x6;
+  const b = -0.005386127855323933 + 2.494026599312351 * x + 0.3144679030132573 * x2 - 13.64921318813922 * x3 + 12.94416944238394 * x4 + 4.23415299384598 * x5 - 5.601961508734096 * x6;
   return [
     Math.round(255 * Math.min(Math.max(r, 0), 1)),
     Math.round(255 * Math.min(Math.max(g, 0), 1)),

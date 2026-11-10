@@ -493,11 +493,11 @@ export function civilianWindows(probs, nWindows, nClasses, thresholds, count = 4
 // --- the figure (plots.py:constellation_figure) -----------------------------
 
 const PANEL = "#FFFFFF";
-const GRID = "#DFE3D9";
-const TEXT_DIM = "#5F6B72";
+const GRID = "#E3E6EC";
+const TEXT_DIM = "#5E6673";
 const INSTRUMENT = "#42505C";
-const CIVILIAN_TIER = "#0F766E";
-const FONT = '"Inter", "Segoe UI", "Helvetica Neue", Arial, sans-serif';
+const CIVILIAN_TIER = "#2E7DB9";   // brochure civilian blue
+const FONT = '"Montserrat", "Segoe UI", "Helvetica Neue", Arial, sans-serif';
 
 /** Draws the panel. Returns false when there is nothing to draw, so the
  * caller can HIDE the component rather than render an empty figure --

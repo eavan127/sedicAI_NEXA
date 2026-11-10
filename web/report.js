@@ -23,7 +23,7 @@ const JSPDF_URLS = [
   "https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js",
 ];
 
-const OLIVE = [98, 113, 67];       // --brand-olive, so the PDF matches the app
+const OLIVE = [34, 48, 107];       // --brand (navy), so the PDF matches the app
 const SLATE = [18, 28, 39];        // --brand-slate
 const DIM = [95, 107, 114];        // --text-dim
 const BANNER = [179, 38, 30];      // classification marking red

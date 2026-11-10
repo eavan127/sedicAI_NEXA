@@ -14,10 +14,10 @@ import {
 } from "./analysis.js";
 
 const PANEL = "#FFFFFF";
-const GRID = "#DFE3D9";
-const TEXT = "#121C27";
-const TEXT_DIM = "#5F6B72";
-const BRAND_OLIVE = "#627143";
+const GRID = "#E3E6EC";
+const TEXT = "#0E1622";
+const TEXT_DIM = "#5E6673";
+const BRAND_OLIVE = "#22306B";   // brand navy (FOI26 theme)
 // src/ui/palette.py:MONO_STACK -- used for the report's parameter values,
 // where a fixed pitch keeps the dot-leader column aligned.
 // SINGLE-quoted on purpose -- see the note on the same constant in pages.js.

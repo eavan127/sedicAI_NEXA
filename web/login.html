@@ -9,9 +9,9 @@
      contained (no other file but the logo) so it works with no internet. -->
 <style>
   :root {
-    --brand-olive: #627143; --brand-olive-dark: #4A552F; --brand-olive-tint: #EEF1E6;
-    --brand-slate: #121C27; --bg: #F7F8F5; --panel: #FFFFFF; --grid: #DFE3D9;
-    --text: #121C27; --text-dim: #5F6B72; --error: #B3261E;
+    --brand: #22306B; --brand-dark: #172152; --brand-tint: #E8ECF6;
+    --slate: #0E1622; --bg: #F5F7FA; --panel: #FFFFFF; --grid: #E3E6EC;
+    --text: #0E1622; --text-dim: #5E6673; --error: #B3261E;
     --font: "Inter", "Segoe UI", "Helvetica Neue", Arial, "Noto Sans", sans-serif;
   }
   * { box-sizing: border-box; }
@@ -19,16 +19,16 @@
   body {
     font-family: var(--font); color: var(--text); background: var(--bg);
     min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center;
-    padding: 24px 16px; border-top: 4px solid var(--brand-olive);
+    padding: 24px 16px; border-top: 4px solid var(--brand);
   }
   .card {
     width: min(400px, 100%); background: var(--panel); border: 1px solid var(--grid); border-radius: 12px;
     padding: 28px 28px 24px; box-shadow: 0 8px 30px rgba(18, 28, 39, 0.08);
   }
   .brand { display: flex; align-items: center; gap: 16px; padding-bottom: 18px; margin-bottom: 20px;
-           border-bottom: 2px solid var(--brand-olive); }
+           border-bottom: 2px solid var(--brand); }
   .brand img { height: 46px; width: auto; display: block; }
-  .brand .name { font-size: 22px; font-weight: 700; letter-spacing: 0.16em; color: var(--brand-slate); line-height: 1.1; }
+  .brand .name { font-size: 22px; font-weight: 700; letter-spacing: 0.16em; color: var(--slate); line-height: 1.1; }
   .brand .tag { font-size: 12px; color: var(--text-dim); margin-top: 3px; }
   h1 { font-size: 18px; margin: 0 0 4px; }
   .note { font-size: 13px; color: var(--text-dim); line-height: 1.45; margin: 0 0 16px; }
@@ -37,15 +37,15 @@
     font-family: var(--font); font-size: 14px; padding: 9px 11px; border: 1px solid var(--grid); border-radius: 7px;
     background: var(--panel); color: var(--text);
   }
-  input:focus-visible, button:focus-visible { outline: 2px solid var(--brand-olive); outline-offset: 1px; border-color: var(--brand-olive); }
+  input:focus-visible, button:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; border-color: var(--brand); }
   button {
     width: 100%; margin-top: 4px; font-family: var(--font); font-size: 14px; font-weight: 600; padding: 10px 14px;
-    border-radius: 7px; border: 1px solid var(--brand-olive-dark); background: var(--brand-olive); color: #fff; cursor: pointer;
+    border-radius: 7px; border: 1px solid var(--brand-dark); background: var(--brand); color: #fff; cursor: pointer;
   }
-  button:hover { background: var(--brand-olive-dark); }
+  button:hover { background: var(--brand-dark); }
   button:disabled { opacity: 0.6; cursor: progress; }
   .error { color: var(--error); font-size: 13px; min-height: 1.3em; margin: 2px 0 8px; }
-  .first-run { background: var(--brand-olive-tint); border-radius: 7px; padding: 10px 12px; }
+  .first-run { background: var(--brand-tint); border-radius: 7px; padding: 10px 12px; }
   .foot { margin-top: 16px; font-size: 12px; color: var(--text-dim); text-align: center; max-width: 400px; }
   [hidden] { display: none !important; }
 </style>
