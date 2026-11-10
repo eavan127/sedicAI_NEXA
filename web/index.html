@@ -37,8 +37,18 @@
     margin: 0;
     padding: 0 26px 40px;
   }
+  /* --header-h is measured by the script at the end of the page (ResizeObserver), so the
+     sidebar, jump links and sticky table headings always clear the pinned header. */
+  :root { --header-h: 84px; --th-top: var(--header-h); }
+  html { scroll-padding-top: calc(var(--header-h) + 16px); }
+  @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+  .skip-link { position: absolute; left: 12px; top: -48px; z-index: 100; background: var(--accent); color: var(--slate);
+    font-weight: 700; padding: 8px 14px; border-radius: 0 0 8px 8px; text-decoration: none; transition: top .15s; }
+  .skip-link:focus { top: 0; }
   header {
-    position: relative; display: flex; align-items: center; gap: 22px;
+    position: sticky; top: 0; z-index: 50;
+    transition: padding .18s ease, box-shadow .18s ease;
+    display: flex; align-items: center; gap: 22px;
     margin: 0 -26px 14px; padding: 16px 26px 14px;
     background: var(--slate); color: #EEF2F7;
     background-image: radial-gradient(circle at 1px 1px, rgba(154,166,180,.16) 1px, transparent 0);
@@ -46,7 +56,12 @@
   }
   header::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 3px;
     background: linear-gradient(90deg, var(--accent) 0, var(--accent) 22%, var(--brand) 22%, #2E7DB9 100%); }
-  header .nexa-logo { height: 34px; width: auto; display: block; }
+  header .nexa-logo { height: 34px; width: auto; display: block; transition: height .18s ease; }
+  header .sedic-tile img { transition: height .18s ease; }
+  header.scrolled { box-shadow: 0 6px 18px rgba(14, 22, 34, 0.22); }
+  header.scrolled .nexa-logo { height: 26px; }
+  header.scrolled .sedic-tile img { height: 28px; }
+  header.scrolled .lockup .name { display: none; }
   header .sedic-tile { background: #fff; border-radius: 8px; padding: 5px 9px; line-height: 0; }
   header .sedic-tile img { height: 36px; width: auto; display: block; }
   .lockup { border-left: 1px solid var(--slate-3); padding-left: 22px; }
@@ -67,7 +82,8 @@
   nav .menu-label { text-transform: uppercase; letter-spacing: 0.12em; font-size: 13px !important; color: var(--text-dim); }
   nav button:disabled { color: var(--text-dim); cursor: not-allowed; opacity: 0.75; }
   /* The menu stays in view while a long page scrolls, so the History outline below stays usable. */
-  nav { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; scrollbar-width: none; }
+  nav { position: sticky; top: calc(var(--header-h) + 20px); max-height: calc(100vh - var(--header-h) - 40px);
+        overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--grid) transparent; padding: 2px; }
   nav::-webkit-scrollbar { display: none; }
   /* History outline: one link per section, like a Google Docs document outline */
   .subnav { display: flex; flex-direction: column; gap: 1px; margin: -2px 0 4px 12px; padding-left: 8px; border-left: 2px solid var(--grid); }
@@ -75,7 +91,7 @@
   .subnav a { font-size: 14px; line-height: 1.3; color: var(--text-dim); text-decoration: none; padding: 5px 8px; border-radius: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .subnav a:hover { background: var(--brand-tint); color: var(--text); }
   .subnav a.on { color: var(--brand-dark); font-weight: 700; background: var(--brand-tint); box-shadow: inset 3px 0 0 var(--brand); }
-  #page-history .block { scroll-margin-top: 12px; }
+  /* jump links clear the pinned header through html's scroll-padding-top (a scroll-margin here would add to it) */
   /* More room between the History page's sections (screen only; print keeps its own layout) */
   @media screen {
     #page-history > .block, #page-history > .panels { margin-bottom: 32px; }
@@ -86,6 +102,8 @@
   nav button[data-page="history"].collapsed::after { content: "▸"; }
 
   main { flex: 1; min-width: 0; }
+  main:focus { outline: none; }
+  :where(button, a, select, input, textarea, summary, [tabindex]):focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
   h3.page-title { font-size: 20px; font-weight: 800; margin: 2px 0 14px; color: var(--brand); letter-spacing: -0.01em; }
   h3.page-title::before { content: ""; display: inline-block; width: 26px; height: 4px; border-radius: 2px; background: var(--accent); vertical-align: middle; margin-right: 12px; }
 
@@ -128,7 +146,7 @@
   .block-label { font-size: 17px; font-weight: 700; color: var(--brand); margin-bottom: 8px; }
   canvas { width: 100%; display: block; }
 
-  .table-wrap { max-height: 520px; overflow-y: auto; background: var(--panel); }
+  .table-wrap { max-height: 520px; overflow: auto; background: var(--panel); }   /* wide tables scroll inside their box, never the page */
 
   /* ---- PDF export -------------------------------------------------------
      The browser's own "Save as PDF" rather than a JS PDF library: it needs
@@ -201,7 +219,37 @@
   /* The label column shrinks before the bar does: at 120px fixed, the two
      side-by-side panels left the track 2px wide and the chart read as a list
      of numbers with a hairline beside it. */
-  .barrow { display: grid; grid-template-columns: minmax(0, 7.5rem) minmax(40px, 1fr) 2.5rem; align-items: center; gap: 8px; font-size: 14px; }
+  .barrow { display: grid; grid-template-columns: minmax(0, 10.5rem) minmax(40px, 1fr) 2.5rem; align-items: center; gap: 8px; font-size: 14px; }
+  /* RF Replay result: four figure cards */
+  .stat-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .panels > div:has(> .stat-grid) { border: 0; }
+  @media screen and (max-width: 560px) { .stat-grid { grid-template-columns: 1fr; } }
+  .stat-card { background: var(--panel); border: 1px solid var(--grid); border-top: 3px solid var(--brand); border-radius: 10px; padding: 12px 14px; }
+  .stat-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .stat-label { font-size: 12.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text-dim); }
+  .stat-kind { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; border-radius: 999px; padding: 1px 7px; }
+  .stat-kind.measured { background: #EEF1F6; color: var(--text-dim); }
+  .stat-kind.model { background: var(--brand-tint); color: var(--brand); }
+  .stat-value { font-size: 28px; font-weight: 800; color: var(--brand); line-height: 1.1; margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .stat-value small { font-size: 14px; font-weight: 600; color: var(--text-dim); margin-left: 2px; }
+  .stat-meter { height: 6px; background: var(--grid); border-radius: 3px; overflow: hidden; margin-top: 8px; }
+  .stat-meter i { display: block; height: 100%; background: var(--brand); }
+  .stat-note { font-size: 13px; color: var(--text-dim); margin-top: 6px; line-height: 1.35; }
+  /* History: the verdict mix as one stacked bar */
+  .tier-mix { margin-top: 18px; }
+  .tier-mix-label { font-size: 12.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text-dim); margin-bottom: 8px; }
+  .tier-stack { display: flex; height: 16px; border-radius: 8px; overflow: hidden; background: var(--grid); }
+  .tier-stack i { display: block; height: 100%; }
+  .tier-stack i + i { box-shadow: inset 2px 0 0 #fff; }
+  .tier-legend { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 10px; font-size: 14px; }
+  .tier-key { display: inline-flex; align-items: center; gap: 6px; }
+  .tier-key i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+  .tier-key.zero { opacity: .5; }
+  .tier-key .dim { color: var(--text-dim); }
+  /* Signal Pipeline: a failed run, in a sentence */
+  .run-error { display: flex; flex-direction: column; gap: 4px; border: 1px solid #E8C4BF; border-left: 4px solid #B0281A;
+    background: #FBEFED; border-radius: 8px; padding: 10px 14px; font-size: 15px; }
+  .run-error span { font-family: var(--mono); font-size: 14px; color: #6B1A10; overflow-wrap: anywhere; }
   .barlabel { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .bartrack { background: var(--bg); border: 1px solid var(--grid); border-radius: 3px; height: 14px; }
   .barfill { background: var(--brand); height: 100%; border-radius: 2px 0 0 2px; }
@@ -426,7 +474,9 @@
                 color: #fff; font-size: 14px; letter-spacing: 0.04em; }
   @media print { .zoom-overlay { display: none !important; } }
   table { width: 100%; border-collapse: collapse; font-size: 14px; table-layout: fixed; }
-  thead th { background: var(--brand); color: #fff; text-align: left; padding: 7px 10px; font-weight: 600; position: sticky; top: 0; }
+  thead th { background: var(--brand); color: #fff; text-align: left; padding: 7px 10px; font-weight: 600; position: sticky; top: var(--th-top); z-index: 1; }
+  /* inside a box that scrolls on its own, a heading sticks to the top of that box */
+  .table-wrap, .zoom-stage, #chatLog, dialog { --th-top: 0px; }
   tbody td { padding: 6px 10px; border-bottom: 1px solid var(--grid); background: var(--panel); color: var(--text); word-wrap: break-word; }
   tbody tr:nth-child(odd) td { background: var(--bg); color: var(--text); }
   tbody tr:hover td { background: var(--brand-tint); color: var(--text); }
@@ -491,6 +541,7 @@
   @media screen {
     body { padding: 0 34px 64px; font-size: 16px; line-height: 1.5; }
     header { padding: 20px 34px 18px; margin: 0 -34px 30px; }
+    header.scrolled { padding-top: 10px; padding-bottom: 10px; }
     .layout { gap: 38px; }
     nav { width: 214px; gap: 10px; }
     nav .menu-label { margin: 2px 0 6px; }
@@ -575,9 +626,34 @@
     #chatForm { gap: 10px; }
     #chatForm input { padding: 11px 13px; }
   }
+  /* Narrow windows: the menu becomes a pinned row of tabs under the header. */
+  @media screen and (max-width: 960px) {
+    body { padding: 0 16px 48px; }
+    header, header.scrolled { margin: 0 -16px 18px; padding-left: 16px; padding-right: 16px; gap: 14px; }
+    header .lockup .tag b, header .sedic-tile { display: none; }
+    header .lockup { padding-left: 14px; }
+    .layout { flex-direction: column; align-items: stretch; gap: 14px; }
+    body { overflow-x: clip; }   /* last guard: nothing pushes the page sideways (clip keeps sticky working) */
+    nav { position: sticky; top: var(--header-h); z-index: 40; width: auto; max-height: none; margin: 0 -16px;
+          flex-direction: row; gap: 8px; overflow-x: auto; overflow-y: hidden; padding: 10px 16px;
+          background: var(--bg); border-bottom: 1px solid var(--grid); scrollbar-width: none; }
+    nav::-webkit-scrollbar { display: none; }
+    nav .menu-label, nav .subnav { display: none !important; }
+    nav button { flex: none; padding: 9px 14px; white-space: nowrap; }
+    nav button[data-page="history"]::after { content: none; }
+    :root { --th-top: calc(var(--header-h) + 60px); }
+    html { scroll-padding-top: calc(var(--header-h) + 76px); }
+    .panels { flex-direction: column; align-items: stretch; }
+    main input[type="file"] { max-width: 100%; }
+    main :is(code, pre) { overflow-wrap: anywhere; white-space: pre-wrap; }
+  }
+  @media screen and (max-width: 560px) {
+    header .lockup { display: none; }
+  }
 </style>
 </head>
 <body>
+  <a class="skip-link" href="#main">Skip to content</a>
   <header>
     <img class="nexa-logo" src="img/nexa-logo-light.png" alt="NEXA" width="1100" height="264">
     <div class="lockup">
@@ -603,7 +679,7 @@
       <button data-page="users" hidden>Users</button>
     </nav>
 
-    <main>
+    <main id="main" tabindex="-1">
     <!-- Whole wideband chain on a recording (web/pipeline.js, /api/pipeline). -->
     <section id="page-pipeline">
       <h3 class="page-title">Signal Pipeline</h3>
@@ -1153,7 +1229,8 @@
   function spy() {
     if (outline.hidden || !blocks.length) return;
     let cur = blocks[0];
-    for (const b of blocks) if (b.getBoundingClientRect().top <= 140) cur = b;
+    const line = (document.querySelector("header")?.offsetHeight || 0) + 60;   // just below the pinned header
+    for (const b of blocks) if (b.getBoundingClientRect().top <= line) cur = b;
     if (innerHeight + scrollY >= document.documentElement.scrollHeight - 4) cur = blocks[blocks.length - 1];
     [...outline.children].forEach((a, i) => a.classList.toggle("on", entries[i].blocks.includes(cur)));
   }
@@ -1161,6 +1238,24 @@
   new MutationObserver(sync).observe(page, { attributes: true, attributeFilter: ["hidden"], subtree: true });
   addEventListener("scroll", spy, { passive: true });
   sync();
+})();
+</script>
+<script>
+/* Pinned header: measure it (it wraps on narrow windows and shrinks once the page
+   scrolls) so the sidebar, jump links and table headings sit just below it. */
+(() => {
+  const header = document.querySelector("header");
+  if (!header) return;
+  const root = document.documentElement;
+  const setH = () => root.style.setProperty("--header-h", header.offsetHeight + "px");
+  new ResizeObserver(setH).observe(header);
+  setH();
+  let ticking = false;
+  addEventListener("scroll", () => {
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(() => { header.classList.toggle("scrolled", scrollY > 24); ticking = false; });
+  }, { passive: true });
 })();
 </script>
 </body>

@@ -216,8 +216,15 @@ async function openRun(root, id) {
     return;
   }
   if (r.status !== "done") {
+    // The log is a Python traceback with terminal colour codes: strip them, lead with the
+    // error itself in a sentence, and keep the full log one click away.
+    const log = (r.log || "").replace(/\x1b\[[0-9;]*[A-Za-z]/g, "").trim();
+    const lines = log.split("\n").map(s => s.trim()).filter(Boolean);
+    const err = [...lines].reverse().find(s => /^[A-Za-z_.]*(Error|Exception|Interrupt)\b/.test(s)) || lines[lines.length - 1] || "No log was written.";
     box.innerHTML = `<div class="block-label">Run ${esc(id)} ${chip("failed", "#9B2C2C")}</div>
-      <pre style="white-space:pre-wrap;max-height:260px;overflow:auto;">${esc((r.log || "").slice(-2000))}</pre>`;
+      <div class="run-error"><b>The run stopped with an error</b><span>${esc(err)}</span></div>
+      <details style="margin-top:10px;"><summary class="note">Full log</summary>
+        <pre style="white-space:pre-wrap;max-height:260px;overflow:auto;">${esc(log.slice(-4000))}</pre></details>`;
     return;
   }
   drawResult(box, id, r);

@@ -18,6 +18,7 @@ import {
 } from "./pages.js";
 import { civilianWindows, drawConstellation } from "./constellation.js";
 import { THRESHOLDS, TIER_COLOR } from "./analysis.js";
+import { TIER_OF } from "./model_meta.js";
 import { initAssistant, openChatLog } from "./chatbot.js";
 import { isAvailable as ollamaAvailable, rewrite as ollamaRewrite, warmUp as ollamaWarmUp } from "./ollama.js";
 import {
@@ -477,7 +478,9 @@ function scrollToLanes() {
   if (!consoleGeom) return;
   const r = consoleCanvas.getBoundingClientRect(), k = r.width / consoleGeom.cssW;
   const mid = (consoleGeom.yLaneTop + consoleGeom.yBot) / 2 * k;
-  window.scrollTo({ top: window.scrollY + r.top + mid - window.innerHeight / 2, behavior: "smooth" });
+  // Centre in the part of the window below the pinned header.
+  const top = document.querySelector("header")?.offsetHeight || 0;
+  window.scrollTo({ top: window.scrollY + r.top + mid - (top + (window.innerHeight - top) / 2), behavior: "smooth" });
 }
 
 tbody.addEventListener("click", async (ev) => {
@@ -1145,6 +1148,7 @@ function showPage(page) {
   currentPage = page;
   for (const btn of document.querySelectorAll("nav button")) {
     btn.classList.toggle("active", btn.dataset.page === page);
+    if (btn.dataset.page === page) btn.setAttribute("aria-current", "page"); else btn.removeAttribute("aria-current");
   }
   for (const sec of document.querySelectorAll("main section")) {
     sec.hidden = sec.id !== `page-${page}`;
@@ -1161,7 +1165,17 @@ function showPage(page) {
 }
 
 for (const btn of document.querySelectorAll("nav button[data-page]")) {
-  btn.addEventListener("click", () => showPage(btn.dataset.page));
+  btn.addEventListener("click", () => {
+    const changed = btn.dataset.page !== currentPage;
+    showPage(btn.dataset.page);
+    if (changed) {
+      // A new page starts at its top, with focus moved there for keyboard and screen-reader users.
+      window.scrollTo({ top: 0, behavior: "instant" });
+      document.getElementById("main")?.focus({ preventScroll: true });
+      // In the narrow layout the menu is a row of tabs: keep the chosen one in view.
+      btn.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+  });
 }
 
 function renderSignal() {
@@ -1190,7 +1204,16 @@ function currentModelHtml(d) {
   // One navy ramp, as on the FOI26 brochure: score shades never reuse the tier or confidence colours
   const colour = v => v >= 0.6 ? "#22306B" : v >= 0.35 ? "#7584A8" : "#C3C7CF";
   const esc = t => String(t ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-  const bar = (v, h) => `<div class="cm-track" style="height:${h}px;"><div style="width:${Math.max(1, 100 * v)}%;background:${colour(v)};"></div></div>`;
+  // Every bar carries a tick at the average over all 60 classes, and each family says how far
+  // above or below it sits, so the strong and weak families stand out at a glance.
+  const avg = d.top1;
+  const bar = (v, h, mark = true) => `<div class="cm-track" style="height:${h}px;"><div style="width:${Math.max(1, 100 * v)}%;background:${colour(v)};"></div>${
+    mark && avg != null ? `<span class="cm-avg" style="left:${100 * avg}%"></span>` : ""}</div>`;
+  const delta = v => {
+    if (avg == null || v == null) return "<span></span>";
+    const pts = 100 * (v - avg);
+    return `<span class="cm-delta ${pts >= 0 ? "up" : "down"}">${pts >= 0 ? "+" : "&minus;"}${Math.abs(pts).toFixed(0)} pts</span>`;
+  };
   return `
     <style>
       #currentModelBox .cm { font-size:0.92rem; line-height:1.45; }
@@ -1200,7 +1223,15 @@ function currentModelHtml(d) {
       #currentModelBox .cm-meta { font-size:0.8rem; opacity:0.7; }
       #currentModelBox details { border-bottom:1px solid var(--grid); }
       #currentModelBox summary { list-style:none; cursor:pointer; padding:8px 4px; display:grid;
-        grid-template-columns:16px minmax(160px,250px) 1fr 58px; align-items:center; gap:12px; }
+        grid-template-columns:16px minmax(160px,250px) 1fr 58px 70px; align-items:center; gap:12px; }
+      #currentModelBox .cm-track { position:relative; }
+      #currentModelBox .cm-avg { position:absolute; top:-4px; bottom:-4px; width:0; border-left:2px dashed var(--accent); }
+      #currentModelBox .cm-delta { font-size:0.8rem; font-weight:700; font-variant-numeric:tabular-nums; text-align:right;
+        border-radius:999px; padding:1px 8px; }
+      #currentModelBox .cm-delta.up { background:var(--brand-tint); color:var(--brand); }
+      #currentModelBox .cm-delta.down { background:#F1F2F4; color:var(--text-dim); }
+      #currentModelBox .cm-legend { display:flex; gap:16px; align-items:center; font-size:0.8rem; color:var(--text-dim); margin:4px 0 6px; }
+      #currentModelBox .cm-legend i { display:inline-block; width:0; height:12px; border-left:2px dashed var(--accent); margin-right:6px; vertical-align:-2px; }
       #currentModelBox summary::-webkit-details-marker { display:none; }
       #currentModelBox summary:hover { background:var(--panel); }
       #currentModelBox .cm-chev { font-size:0.7rem; opacity:0.6; transition:transform 0.15s; }
@@ -1208,7 +1239,7 @@ function currentModelHtml(d) {
       #currentModelBox .cm-track { background:var(--grid); border-radius:3px; overflow:hidden; }
       #currentModelBox .cm-track > div { height:100%; border-radius:3px; }
       #currentModelBox .cm-pct { text-align:right; font-variant-numeric:tabular-nums; font-weight:600; }
-      #currentModelBox .cm-sub { display:grid; grid-template-columns:minmax(150px,226px) 1fr 58px; align-items:center;
+      #currentModelBox .cm-sub { display:grid; grid-template-columns:minmax(150px,226px) 1fr 58px 70px; align-items:center;
         gap:12px; padding:3px 4px 3px 32px; font-size:0.82rem; }
       #currentModelBox .cm-sub code { font-size:0.8rem; }
       #currentModelBox .cm-list { padding-bottom:8px; }
@@ -1229,6 +1260,7 @@ function currentModelHtml(d) {
         (${esc(d.families_from.model)}, run ${esc(d.families_from.run)}, ${pct(d.families_from.top1)} overall): this
         model's own breakdown is not exported yet` : ""}.</div>
       <div class="cm-meta" style="margin:2px 0 2px;">Share of test signals in each family identified as their exact class. Select a family to view its classes.</div>
+      ${avg != null ? `<div class="cm-legend"><span><i></i>average over all 60 classes, ${pct(avg)}</span><span>pts = percentage points above or below it</span></div>` : ""}
       ${d.families.map(f => `
         <details>
           <summary>
@@ -1236,9 +1268,10 @@ function currentModelHtml(d) {
             <span>${esc(f.plain)}</span>
             ${bar(f.right, 8)}
             <span class="cm-pct" style="color:${colour(f.right)};">${pct(f.right)}</span>
+            ${delta(f.right)}
           </summary>
           <div class="cm-list">
-            ${f.classes.map(c => `<div class="cm-sub"><code>${esc(c.name)}</code>${bar(c.right, 5)}<span class="cm-pct" style="font-weight:500;">${pct(c.right)}</span></div>`).join("")}
+            ${f.classes.map(c => `<div class="cm-sub"><code>${esc(c.name)}</code>${bar(c.right, 5)}<span class="cm-pct" style="font-weight:500;">${pct(c.right)}</span><span></span></div>`).join("")}
           </div>
         </details>`).join("")}
     </div>`;
@@ -1665,7 +1698,10 @@ function paintHistory() {
   const s = summarise(filtered);
   histSummary.innerHTML = histSummaryHtml(s);
   histClassBars.innerHTML = barsHtml(Object.entries(s.byClass),
-    { empty: "No class has been detected in a stored capture yet." });
+    { empty: "No class has been detected in a stored capture yet.",
+      colorOf: c => TIER_COLOR[TIER_OF[c]] || "var(--brand)" })
+    + `<div class="tier-legend" style="margin-top:14px">${["Hostile", "Military", "Civilian"].map(t =>
+      `<span class="tier-key"><i style="background:${TIER_COLOR[t]}"></i>${t}</span>`).join("")}</div>`;
   histSnrBars.innerHTML = barsHtml(s.snr.map(b => [b.label, b.count]),
     { empty: "No capture carries a known SNR.", sort: false });
   histDayBars.innerHTML = barsHtml(s.byDay, { empty: "Nothing stored yet.", sort: false });

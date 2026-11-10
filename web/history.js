@@ -113,21 +113,30 @@ export function summaryHtml(s) {
     ["Signal time", `${s.seconds.toFixed(2)} s`],
     ["Mean SNR", s.meanSnrDb == null ? "—" : `${s.meanSnrDb} dB`],
   ];
-  const tierRow = TIER_PRIORITY.map(t => {
+  // The verdict mix as one stacked bar (parts of a whole read best side by side),
+  // with the counts in a legend under it.
+  const parts = TIER_PRIORITY.map(t => {
     const n = s.byTier[t] || 0;
-    const pct = s.total ? Math.round((n / s.total) * 100) : 0;
-    return `<span class="tier-chip" style="border-color:${TIER_COLOR[t] || "#888"}">
-      <b style="color:${TIER_COLOR[t] || "#888"}">${t}</b> ${n} <span class="dim">(${pct}%)</span></span>`;
-  }).join("");
+    return { t, n, pct: s.total ? (n / s.total) * 100 : 0, c: TIER_COLOR[t] || "#888" };
+  });
+  const stack = s.total
+    ? parts.filter(p => p.n).map(p =>
+        `<i style="width:${p.pct}%;background:${p.c}" title="${p.t}: ${p.n} (${Math.round(p.pct)}%)"></i>`).join("")
+    : "";
+  const legend = parts.map(p =>
+    `<span class="tier-key${p.n ? "" : " zero"}"><i style="background:${p.c}"></i><b>${p.t}</b> ${p.n}` +
+    ` <span class="dim">${Math.round(p.pct)}%</span></span>`).join("");
   return `<div class="kpi-row">${tiles.map(([k, v]) =>
     `<div class="kpi"><div class="kpi-label">${esc(k)}</div><div class="kpi-value">${esc(v)}</div></div>`).join("")}
-    </div><div class="tier-row">${tierRow}</div>`;
+    </div>
+    <div class="tier-mix"><div class="tier-mix-label">Worst verdict per capture</div>
+      <div class="tier-stack">${stack}</div><div class="tier-legend">${legend}</div></div>`;
 }
 
 /** Horizontal bars, drawn as divs rather than on a canvas: they reflow with
  *  the panel, carry their own text labels, and survive the print stylesheet
  *  that produces the PDF. */
-export function barsHtml(pairs, { empty = "Nothing recorded yet.", sort = true } = {}) {
+export function barsHtml(pairs, { empty = "Nothing recorded yet.", sort = true, colorOf = null } = {}) {
   // sort=false matters for any axis that has its OWN order: SNR bands read
   // low-to-high and days read oldest-to-newest, and sorting those by count
   // turns the chart into a ranking of bins that no longer means anything.
@@ -136,8 +145,8 @@ export function barsHtml(pairs, { empty = "Nothing recorded yet.", sort = true }
   if (!rows.length) return `<div class="note">${esc(empty)}</div>`;
   return `<div class="barlist">${rows.map(([label, n]) => `
     <div class="barrow">
-      <div class="barlabel">${esc(label)}</div>
-      <div class="bartrack"><div class="barfill" style="width:${(n / max) * 100}%"></div></div>
+      <div class="barlabel" title="${esc(label)}">${esc(label)}</div>
+      <div class="bartrack"><div class="barfill" style="width:${(n / max) * 100}%${colorOf ? `;background:${colorOf(label)}` : ""}"></div></div>
       <div class="barvalue">${n}</div>
     </div>`).join("")}</div>`;
 }

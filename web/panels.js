@@ -62,16 +62,20 @@ export function headerLine({ mode = "REPLAY", source, snrKnown, trueSnrDb, snrCa
 /** rf_replay.py:_render's status_html -- MEASURED and MODEL figures, each
  * labelled with which it is. */
 export function statusBlock({ occupancyValue, nEvents, nWindows, hop, durationMs, emptyPct }) {
-  const pad = (s, n) => String(s).padStart(n);
-  return `<div style="font-family:monospace;background:${PANEL};padding:14px;border-radius:6px;color:${TEXT};line-height:1.8;">` +
-    `Occupancy   ${pad((occupancyValue * 100).toFixed(1), 5)}%   ` +
-    `<span style="color:${TEXT_DIM};">measured, fraction of the spectrogram above the noise floor</span><br>` +
-    `Detections  ${pad(nEvents, 5)}   ` +
-    `<span style="color:${TEXT_DIM};">model, grouped events, not windows</span><br>` +
-    `Windows     ${pad(nWindows, 5)}   ` +
-    `<span style="color:${TEXT_DIM};">hop ${hop} · ${durationMs.toFixed(1)} ms capture</span><br>` +
-    `Channel     ${pad(emptyPct.toFixed(0), 5)}%   ` +
-    `<span style="color:${TEXT_DIM};">model, windows reported as empty spectrum</span></div>`;
+  // Four figure cards: the number first, what it is under it, and whether it was
+  // MEASURED from the signal or said by the MODEL (the tag), as before.
+  const card = (label, value, unit, note, kind, fill) =>
+    `<div class="stat-card"><div class="stat-top"><span class="stat-label">${label}</span>` +
+    `<span class="stat-kind ${kind}">${kind === "measured" ? "Measured" : "Model"}</span></div>` +
+    `<div class="stat-value">${value}<small>${unit}</small></div>` +
+    (fill == null ? "" : `<div class="stat-meter"><i style="width:${Math.max(0, Math.min(100, fill)).toFixed(1)}%"></i></div>`) +
+    `<div class="stat-note">${note}</div></div>`;
+  return `<div class="stat-grid">` +
+    card("Detections", nEvents, nEvents === 1 ? " emitter" : " emitters", "grouped events, not windows", "model") +
+    card("Occupancy", (occupancyValue * 100).toFixed(1), "%", "spectrogram above the noise floor", "measured", occupancyValue * 100) +
+    card("Empty channel", emptyPct.toFixed(0), "%", "windows reported as empty spectrum", "model", emptyPct) +
+    card("Windows", nWindows, "", `hop ${hop} · ${durationMs.toFixed(1)} ms capture`, "measured") +
+    `</div>`;
 }
 
 /** rf_replay.py:_detection_list_html */
