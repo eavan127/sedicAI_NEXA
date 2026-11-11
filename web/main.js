@@ -479,7 +479,7 @@ function scrollToLanes() {
   const r = consoleCanvas.getBoundingClientRect(), k = r.width / consoleGeom.cssW;
   const mid = (consoleGeom.yLaneTop + consoleGeom.yBot) / 2 * k;
   // Centre in the part of the window below the pinned header.
-  const top = document.querySelector("header")?.offsetHeight || 0;
+  const top = (parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--header-h")) || 0);   // pinned header height, 0 when it scrolls away
   window.scrollTo({ top: window.scrollY + r.top + mid - (top + (window.innerHeight - top) / 2), behavior: "smooth" });
 }
 

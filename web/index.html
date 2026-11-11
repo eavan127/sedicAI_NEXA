@@ -649,6 +649,22 @@
   }
   @media screen and (max-width: 560px) {
     header .lockup { display: none; }
+    header, header.scrolled { padding-top: 8px; padding-bottom: 8px; }
+    header .nexa-logo, header.scrolled .nexa-logo { height: 22px; }
+    /* one compact line: the role buttons stay, the "Acting as" words go */
+    header .auth-chip { flex-wrap: nowrap; gap: 6px; font-size: 0; }
+    header .auth-chip button { font-size: 12px; padding: 4px 8px; }
+    header .auth-chip strong, header .auth-chip .auth-role { font-size: 11px; }
+  }
+  /* Short windows (a small pane, a landscape phone, a projector at low resolution):
+     pinning the header as well would leave too little room to use the page, so only
+     the menu stays pinned and the header scrolls away. */
+  @media screen and (max-height: 640px) {
+    header { position: relative; }
+    nav { top: 12px; max-height: calc(100vh - 24px); }
+  }
+  @media screen and (max-height: 640px) and (max-width: 960px) {
+    nav { top: 0; max-height: none; }
   }
 </style>
 </head>
@@ -1229,7 +1245,7 @@
   function spy() {
     if (outline.hidden || !blocks.length) return;
     let cur = blocks[0];
-    const line = (document.querySelector("header")?.offsetHeight || 0) + 60;   // just below the pinned header
+    const line = (parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--header-h")) || 0) + 60;   // just below the pinned header (0 when it is not pinned)
     for (const b of blocks) if (b.getBoundingClientRect().top <= line) cur = b;
     if (innerHeight + scrollY >= document.documentElement.scrollHeight - 4) cur = blocks[blocks.length - 1];
     [...outline.children].forEach((a, i) => a.classList.toggle("on", entries[i].blocks.includes(cur)));
@@ -1247,7 +1263,10 @@
   const header = document.querySelector("header");
   if (!header) return;
   const root = document.documentElement;
-  const setH = () => root.style.setProperty("--header-h", header.offsetHeight + "px");
+  // Only a pinned header takes room at the top; when it scrolls away (short windows) nothing does.
+  const setH = () => root.style.setProperty("--header-h",
+    (getComputedStyle(header).position === "sticky" ? header.offsetHeight : 0) + "px");
+  addEventListener("resize", setH);
   new ResizeObserver(setH).observe(header);
   setH();
   let ticking = false;
