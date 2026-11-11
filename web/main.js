@@ -92,16 +92,16 @@ async function init() {
     // model -- only possible when the server sends the cross-origin
     // isolation headers (scripts/serve_local.py, web/vercel.json); without
     // them the browser forces one thread and this is a no-op.
-    // Proxy only over https (the deployed site). Served from this machine
-    // (http://localhost, scripts/serve_local.py) Chrome blocks the threads
-    // the proxy worker starts, so the model never finishes loading ("Failed
-    // to fetch dynamically imported module ...jsep.mjs"). Without the proxy
-    // the page starts those threads itself, which it may, and keeps every core.
-    // 11 Nov: the proxy worker never finished loading the 60-class model on the
-    // deployed site either (status stuck on "Loading…", every button disabled),
-    // so it is off everywhere. Threads still run when the page is cross-origin
-    // isolated (numThreads below); the page may pause during a long classification.
-    ort.env.wasm.proxy = false;
+    // Earlier the proxy was https-only because Chrome blocked the worker's threads
+    // on http://localhost ("Failed to fetch dynamically imported module ...jsep.mjs");
+    // with serve_local's isolation headers that no longer happens (checked 11 Nov).
+    // 11 Nov: on everywhere, localhost included. Preparing the 60-class model
+    // takes 30-80 s; on the page's own thread that froze the whole page for that
+    // long (only scrolling worked). In the worker the page never pauses for more
+    // than ~0.1 s and the menu works while the model loads. Measured in a real
+    // Chrome window, live site and localhost. (Headless Chrome never finishes
+    // loading through the worker: test with a visible window.)
+    ort.env.wasm.proxy = true;
     if (globalThis.crossOriginIsolated) {
       ort.env.wasm.numThreads = Math.min(8, Math.max(1, (navigator.hardwareConcurrency || 2) - 2));
     }
