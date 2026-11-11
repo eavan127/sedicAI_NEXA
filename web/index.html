@@ -53,6 +53,8 @@
     background: var(--slate); color: #EEF2F7;
     background-image: radial-gradient(circle at 1px 1px, rgba(154,166,180,.16) 1px, transparent 0);
     background-size: 14px 14px;
+    /* Own compositing layer: the dotted background is not repainted on every scroll step. */
+    transform: translateZ(0); will-change: transform;
   }
   header::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 3px;
     background: linear-gradient(90deg, var(--accent) 0, var(--accent) 22%, var(--brand) 22%, #2E7DB9 100%); }
@@ -1266,14 +1268,28 @@
   // Only a pinned header takes room at the top; when it scrolls away (short windows) nothing does.
   const setH = () => root.style.setProperty("--header-h",
     (getComputedStyle(header).position === "sticky" ? header.offsetHeight : 0) + "px");
+  // While the header shrinks or grows (a 0.18 s animation) its height changes every frame;
+  // re-measuring each frame re-lays out the sidebar and every sticky table heading. Measure
+  // once the animation is over instead.
+  let animating = false;
+  header.addEventListener("transitionstart", () => { animating = true; });
+  header.addEventListener("transitionend", () => { animating = false; setH(); });
   addEventListener("resize", setH);
-  new ResizeObserver(setH).observe(header);
+  new ResizeObserver(() => { if (!animating) setH(); }).observe(header);
   setH();
+  // Two thresholds (hysteresis): shrinking the header moves the page up by the height it
+  // loses, which with one threshold flips it back and forth (the jitter when scrolling up).
+  const SHRINK_AT = 80, GROW_AT = 8;
   let ticking = false;
   addEventListener("scroll", () => {
     if (ticking) return;
     ticking = true;
-    requestAnimationFrame(() => { header.classList.toggle("scrolled", scrollY > 24); ticking = false; });
+    requestAnimationFrame(() => {
+      const small = header.classList.contains("scrolled");
+      if (!small && scrollY > SHRINK_AT) header.classList.add("scrolled");
+      else if (small && scrollY < GROW_AT) header.classList.remove("scrolled");
+      ticking = false;
+    });
   }, { passive: true });
 })();
 </script>
