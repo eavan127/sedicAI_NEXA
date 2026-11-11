@@ -97,7 +97,11 @@ async function init() {
     // the proxy worker starts, so the model never finishes loading ("Failed
     // to fetch dynamically imported module ...jsep.mjs"). Without the proxy
     // the page starts those threads itself, which it may, and keeps every core.
-    ort.env.wasm.proxy = location.protocol === "https:";
+    // 11 Nov: the proxy worker never finished loading the 60-class model on the
+    // deployed site either (status stuck on "Loading…", every button disabled),
+    // so it is off everywhere. Threads still run when the page is cross-origin
+    // isolated (numThreads below); the page may pause during a long classification.
+    ort.env.wasm.proxy = false;
     if (globalThis.crossOriginIsolated) {
       ort.env.wasm.numThreads = Math.min(8, Math.max(1, (navigator.hardwareConcurrency || 2) - 2));
     }
