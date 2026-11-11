@@ -1206,7 +1206,13 @@ let currentModel = null;
 function currentModelHtml(d) {
   const pct = v => v == null ? "—" : `${(100 * v).toFixed(1)}%`;
   // One navy ramp, as on the FOI26 brochure: score shades never reuse the tier or confidence colours
-  const colour = v => v >= 0.6 ? "#22306B" : v >= 0.35 ? "#7584A8" : "#C3C7CF";
+  // Magnitude = one hue, light to dark: a continuous blue ramp from #7A93C6 (0%) to the
+  // brand navy #22306B (100%). Every step is at least 3:1 against the panel, so even the
+  // weakest family's bar is clearly visible (the old light grey was 1.7:1 and faded out).
+  const colour = v => {
+    const k = Math.max(0, Math.min(1, v ?? 0)), a = [0x7A, 0x93, 0xC6], b = [0x22, 0x30, 0x6B];
+    return `rgb(${a.map((x, i) => Math.round(x + (b[i] - x) * k)).join(",")})`;
+  };
   const esc = t => String(t ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   // Every bar carries a tick at the average over all 60 classes, and each family says how far
   // above or below it sits, so the strong and weak families stand out at a glance.
@@ -1240,9 +1246,11 @@ function currentModelHtml(d) {
       #currentModelBox summary:hover { background:var(--panel); }
       #currentModelBox .cm-chev { font-size:0.7rem; opacity:0.6; transition:transform 0.15s; }
       #currentModelBox details[open] .cm-chev { transform:rotate(90deg); }
-      #currentModelBox .cm-track { background:var(--grid); border-radius:3px; overflow:hidden; }
-      #currentModelBox .cm-track > div { height:100%; border-radius:3px; }
+      #currentModelBox .cm-track { background:#EDF0F5; border-radius:4px; overflow:visible; }
+      #currentModelBox .cm-track > div { height:100%; border-radius:4px; }
       #currentModelBox .cm-pct { text-align:right; font-variant-numeric:tabular-nums; font-weight:600; }
+      #currentModelBox summary > span[title], #currentModelBox .cm-sub > span[title] { display:block; }
+      #currentModelBox .cm-pct { color:var(--text); }
       #currentModelBox .cm-sub { display:grid; grid-template-columns:minmax(150px,226px) 1fr 58px 70px; align-items:center;
         gap:12px; padding:3px 4px 3px 32px; font-size:0.82rem; }
       #currentModelBox .cm-sub code { font-size:0.8rem; }
@@ -1270,12 +1278,12 @@ function currentModelHtml(d) {
           <summary>
             <span class="cm-chev">&#9654;</span>
             <span>${esc(f.plain)}</span>
-            ${bar(f.right, 8)}
-            <span class="cm-pct" style="color:${colour(f.right)};">${pct(f.right)}</span>
+            <span title="${esc(f.plain)}: ${pct(f.right)} exact class">${bar(f.right, 12)}</span>
+            <span class="cm-pct">${pct(f.right)}</span>
             ${delta(f.right)}
           </summary>
           <div class="cm-list">
-            ${f.classes.map(c => `<div class="cm-sub"><code>${esc(c.name)}</code>${bar(c.right, 5)}<span class="cm-pct" style="font-weight:500;">${pct(c.right)}</span><span></span></div>`).join("")}
+            ${f.classes.map(c => `<div class="cm-sub"><code>${esc(c.name)}</code><span title="${esc(c.name)}: ${pct(c.right)}">${bar(c.right, 7)}</span><span class="cm-pct" style="font-weight:500;">${pct(c.right)}</span><span></span></div>`).join("")}
           </div>
         </details>`).join("")}
     </div>`;
