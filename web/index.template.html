@@ -762,8 +762,7 @@
             </div>
             <div class="rx-log" id="rxLog" hidden aria-live="polite"></div>
             <div class="note" id="rxNote" style="margin-top:12px;">
-              Connect to listen: NEXA draws the waterfall and names each signal as it arrives. If a transmission
-              could hold voice or Morse it is recorded and decoded, and the result goes to History.
+              Connect to listen. Voice or Morse is recorded, decoded and sent to History.
             </div>
           </div>
         </div>
@@ -772,8 +771,7 @@
           <summary>More options: check a file, test scenarios, display settings</summary>
         <div class="subsection">
           <h4 class="subhead">Fast scan in this browser</h4>
-          <div class="note">Classifies a capture right here with the ONNX models, with no Python needed.
-            These settings also apply to the live receiver and test scenarios below.</div>
+          <div class="note">Classifies a capture in this browser. These settings also apply to the receiver and test scenarios below.</div>
           <div class="grow" style="margin-top:18px;">
             <div class="field" style="flex:2;min-width:200px;">
               <label for="hopSel">Window hop</label>
@@ -796,8 +794,7 @@
             <button class="primary" id="uploadBtn" disabled>Select &amp; Analyze Source File</button>
             <input type="file" id="fileInput" multiple accept=".bin,.f32,.cf32,.cfile,.iq,.dat,.raw,.sigmf,.sigmf-meta,.sigmf-data" style="display:none">
           </div>
-          <div class="note" style="margin-top:16px;">Smoothing, the NOISE_FLOOR gate and event hold are display-only.
-            The Performance page is always per-window, ungated and unsmoothed.</div>
+          <div class="note" style="margin-top:16px;">Smoothing and the noise gate change the display only, not the scores.</div>
         </div>
 
         <div class="subsection">
@@ -816,7 +813,7 @@
           </div>
         </div>
         </details>
-        <div id="status" role="status">Loading the 60-class AI model in the background (up to a minute the first time). The rest of the console works meanwhile; these buttons switch on when it is ready.</div>
+        <div id="status" role="status">Loading the AI model (up to a minute the first time). These buttons switch on when it is ready.</div>
       </div>
 
       <div id="sigBody">
@@ -835,10 +832,8 @@
           Spectrum · waterfall · detections · tier · shared time axis
           <button class="mini needs-capture" id="consoleEnlarge" title="Show this figure full-window">⤢ Enlarge</button>
         </div>
-        <div class="note no-capture">The spectrum and waterfall appear here once a capture is analysed: use the fast
-          scan, live receiver or test scenario above.</div>
-        <div class="note needs-capture">Hover over the timeline to read the exact time. Click a spot, or drag across a
-          stretch, to correct it. Dashed boxes are the true answer (synthesized or annotated captures only).</div>
+        <div class="note no-capture">The waterfall appears here once a capture is analysed.</div>
+        <div class="note needs-capture">Click or drag on the timeline to correct it. Dashed boxes show the true answer, when known.</div>
         <div class="tl-wrap needs-capture">
           <canvas id="console"></canvas>
           <div class="tl-sel" id="tlSel" hidden></div>
@@ -848,7 +843,7 @@
 
       <div id="windowDetail" class="needs-capture">
       <h4 class="section-title">Signal Analysis</h4>
-      <div class="note" style="margin-bottom:16px;">One 512-sample window of 160 µs, exactly as the classifier sees it. Pick a window.</div>
+      <div class="note" style="margin-bottom:16px;">One 160 µs window, as the model sees it. Pick a window.</div>
       <div class="grow">
         <div class="field" style="flex:1;min-width:260px;">
           <label for="winSlider">Window</label>
@@ -917,16 +912,14 @@
       <h3 class="page-title">History</h3>
       <div class="block" id="alertBlock" hidden>
         <div class="block-label">Alerts</div>
-        <div class="note">Captures where the model saw a military or hostile emitter. Open one on the waterfall to approve it
-          or correct it.</div>
+        <div class="note">Military or hostile emitters. Open one on the waterfall to approve or correct it.</div>
         <div class="note" id="alertMsg" role="status"></div>
         <div class="table-wrap" id="alertList"></div>
       </div>
 
       <div class="block" id="decodedBlock" hidden>
         <div class="block-label">Decoded review</div>
-        <div class="note">Voice and Morse that NEXA decoded on this machine. Open one to read the full result. The decode and the
-          AI reading can contain errors, so check anything important against the signal.</div>
+        <div class="note">Voice and Morse decoded on this machine. Open one to read it; decodes can contain errors.</div>
         <div class="filters" style="margin-top:8px;"><input id="decodedSearch" placeholder="Search call sign, word, file" style="width:260px;"></div>
         <div class="note" id="decodedMsg" role="status"></div>
         <div class="table-wrap" id="decodedList"></div>
@@ -934,9 +927,7 @@
 
       <div class="block" id="corrBlock" hidden>
         <div class="block-label">Corrections review</div>
-        <div class="note">Operators correct detections on the waterfall, and an <strong>analyst</strong> approves or
-          rejects each one before it can become training data; it is read-only once reviewed. An analyst's own
-          corrections are approved directly, and recorded as such in the audit trail.</div>
+        <div class="note">An <strong>analyst</strong> approves or rejects each correction before it is used for training.</div>
         <div class="filters" style="margin-top:8px;">
           <select id="corrStatusSel">
             <option value="pending" selected>Waiting for review</option>
@@ -952,9 +943,7 @@
 
       <div class="block" id="queueBlock" hidden>
         <div class="block-label">Low-confidence review</div>
-        <div class="note">The model only just made up its mind on these (a score under 1.5x that class's
-          threshold), or saw possible jamming it did not report. An operator views one and corrects it on the
-          timeline; an analyst may instead mark the model right. Their raw signal is kept either way.</div>
+        <div class="note">Detections the model was unsure about, or possible jamming it did not report. Open one to correct it, or (analyst) mark it right.</div>
         <div class="note" id="queueMsg" role="status"></div>
         <div class="table-wrap" id="queueList"></div>
       </div>
@@ -977,8 +966,7 @@
 
       <div class="block" id="reportBlock">
         <div class="block-label">Report builder</div>
-        <div class="note">Builds a report from the captures that match the filters above
-          (<strong id="rbCount">0 captures</strong>). Tick what to include, pick a format, build.</div>
+        <div class="note">Report on the <strong id="rbCount">0 captures</strong> matching the filters above.</div>
         <div class="rb-grid">
           <fieldset id="rbSections"><legend>Sections</legend>
             <label><input type="checkbox" value="summary" checked> Summary: counts, verdicts, classes</label>
@@ -1040,9 +1028,7 @@
       <h3 class="page-title">Audit trail</h3>
       <div class="block" id="auditBlock" hidden>
         <div class="block-label">Audit trail</div>
-        <div class="note">Every analysis, stored raw IQ file, deletion and report export, newest first.
-          Entries can never be edited or deleted, and each carries a fingerprint (hash) of the one
-          before it, so any later change to the database file breaks the chain.</div>
+        <div class="note">Every action, newest first. Entries cannot be edited or deleted; Verify checks that none were.</div>
         <div class="filters" style="margin-top:8px;">
           <label class="note" for="operatorInput" style="margin:0;">Operator</label>
           <input id="operatorInput" maxlength="64" style="width:160px;" title="Recorded on every action you take">
@@ -1096,9 +1082,7 @@
         <canvas id="breakdownCanvas"></canvas>
         <div id="breakdownTable"></div>
         <div class="note" style="margin-top:8px;">
-          Additive to the scorecard, not a competing one: same test split, same per-class
-          thresholds, same checkpoint. Solid = single-signal windows, dashed = windows where
-          emitters overlap. The red line is the benchmark pass mark.
+          Solid: one signal at a time. Dashed: overlapping signals. Red line: pass mark.
         </div>
       </div>
       </details>
@@ -1108,16 +1092,10 @@
       <h3 class="page-title">Model</h3>
       <div class="block" id="retrainBlock" hidden>
         <div class="block-label">Retraining from human feedback</div>
-        <div class="note">Approved corrections become training data. A retrain fine-tunes the 60-class model the
-          dashboard and the Signal Pipeline run (__BROWSER_MODEL__) on them, mixed with original training data so it does
-          not forget, then sits a fixed exam against the version in use: a new version is only offered for activation if
-          it does not get worse on LFM_RADAR, FHSS or the jammers, and only an analyst can activate it. <strong>Every version is
-          kept</strong>, including ones that failed or were rejected, so any of them, or the shipped files, can be
-          brought back at any time.</div>
+        <div class="note">Retraining teaches the model (__BROWSER_MODEL__) from approved corrections. A new version is offered only if it passes a fixed test, and only an analyst can switch to it. <strong>Every version is kept</strong> and can be restored.</div>
         <div id="modelTrigger"></div>
         <div class="note" id="rtActive" style="margin-top:10px;"></div>
-        <div class="note" id="rtOperatorNote" hidden style="margin-top:8px;">Only an analyst starts a retrain or changes the
-          model in use. As an operator you see which model is running and every saved version.</div>
+        <div class="note" id="rtOperatorNote" hidden style="margin-top:8px;">Only an analyst can retrain or change the model.</div>
         <div id="rtControls">
         <label class="corr-block">Why retrain now? (required, recorded in the audit trail)
           <textarea id="rtReason" rows="2" placeholder="e.g. operators keep correcting FHSS as LFM_RADAR on the new captures"></textarea></label>
@@ -1126,8 +1104,7 @@
         <fieldset class="rt-scope">
           <legend>What to retrain</legend>
           <label><input type="radio" name="rtScope" id="rtScopeSingle" value="single" checked>
-            <span><strong>The 60-class model</strong> (__BROWSER_MODEL__) · about 5 minutes on a laptop.
-            There is no 60-class ensemble yet, so there is nothing else to retrain.</span></label>
+            <span><strong>The 60-class model</strong> (__BROWSER_MODEL__) · about 5 minutes</span></label>
         </fieldset>
         <div class="filters" style="margin-top:8px;">
           <label class="note" for="rtOperator" style="margin:0;">Your name</label>
@@ -1150,10 +1127,7 @@
 
       <div class="block" id="historyBlock" hidden>
         <div class="block-label">Fine-tuning history</div>
-        <div class="note">Every retrain, newest first: when and by whom it was started and why, which models it
-          fine-tuned and from what, whether it passed its exam, and every decision taken since (approved, rejected,
-          restored, activated by override, rolled back), by whom and when. The same events are in the audit trail
-          on the History page, where Verify integrity proves none were edited.</div>
+        <div class="note">Every retrain, newest first: who, why, test result and every decision since.</div>
         <div id="rtHistory"></div>
       </div>
       <div class="block">
@@ -1178,9 +1152,7 @@
       <h3 class="page-title">Users</h3>
       <div class="block">
         <div class="block-label">Accounts</div>
-        <div class="note">Operators analyse captures and submit corrections. Analysts can also approve corrections
-          and retrained models, and delete a capture. Admins can also start retraining, roll back the model, clear
-          the history and manage accounts. Every change here is written to the audit trail.</div>
+        <div class="note">Operators analyse and correct. Analysts also approve and delete. Admins also retrain and manage accounts.</div>
         <div class="table-wrap" id="usersTable"></div>
         <div class="note" id="usersMsg" role="status"></div>
       </div>
