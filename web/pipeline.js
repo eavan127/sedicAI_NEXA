@@ -16,13 +16,6 @@ const BAND_COL = { high: "#2E7D32", medium: "#B7791F", uncertain: "#9B2C2C" };
 const CONF = c => c >= 0.6 ? "#2E7D32" : c >= 0.3 ? "#B7791F" : "#9B2C2C";
 const LANG_TEXT = { auto: "Language: detect", ms: "Malay", en: "English", id: "Indonesian", zh: "Mandarin" };
 
-function whisperOptions(info) {
-  const have = info.whisper_models || [];
-  if (!have.length) return `<option value="">no speech model on this PC</option>`;
-  const pick = have.includes(info.whisper_default) ? info.whisper_default : have[0];
-  return have.map(m => `<option value="${esc(m)}"${m === pick ? " selected" : ""}>Whisper ${esc(m)}</option>`).join("");
-}
-
 // The transcript line by line, with the lines Whisper itself doubted marked. A line
 // with no mark is not known to be right: Whisper can be wrong without saying so.
 function speechText(L) {
@@ -72,14 +65,10 @@ export async function renderPipeline(root, { server }) {
         <label class="note" style="margin:0;">Seconds <input id="pipeSec" type="number" min="0.05" max="10" step="0.25" value="1" style="width:70px;"></label>
         <label class="note" style="margin:0;" title="Only for raw files without a header">Sample rate <input id="pipeFs" placeholder="from file" style="width:90px;"></label>
         <select id="pipeDtype" title="Only for raw files"><option value="">raw type</option><option>int16</option><option>float32</option><option>int8</option><option>uint8</option></select>
-        <select id="pipeDet" title="YOLO + narrow: also keeps long narrow signals (walkie-talkie, carriers) YOLO may miss">
-          <option value="hybrid">YOLO + narrow signals</option><option value="yolo">YOLO only</option><option value="energy">Energy detector</option></select>
       </div>
       <div class="filters">
         <label class="note" style="margin:0;"><input type="checkbox" id="pipeListen" checked> Listen to voice / Morse</label>
         <label class="note" style="margin:0;"><input type="checkbox" id="pipeWhisper" checked> Whisper</label>
-        <select id="pipeModel" title="Speech model on this PC. medium is far better, especially on Malay, but takes about 6 s per second of speech; base is faster">
-          ${whisperOptions(info)}</select>
         <select id="pipeLang" title="Language spoken. Setting it is safer on short clips, but a wrong choice gives nonsense">
           ${(info.languages || ["auto"]).map(l => `<option value="${esc(l)}">${esc(LANG_TEXT[l] || l)}</option>`).join("")}</select>
         <label class="note" style="margin:0;"><input type="checkbox" id="pipeLlm" checked> AI reading (Ollama)</label>
@@ -90,10 +79,9 @@ export async function renderPipeline(root, { server }) {
     </div>
     <div class="block" id="pipeRunBox" hidden></div>
     <div class="block">
-      <div class="block-label">Live (SDRconnect)</div>
-      <div class="note">Start the bridge on the analysis laptop: <code>python scripts/live_sdrconnect.py --host &lt;SDRconnect laptop&gt;</code>
-        (or <code>--replay file.wav</code>). It records everything SDRconnect sends until the stream stops, then analyses the whole recording;
-        with this ticked, the page opens each finished run by itself. Everything stays on the local network.</div>
+      <div class="block-label">Live decodes</div>
+      <div class="note">Each transmission the live receiver records and decodes is added to Recent runs below. With this ticked,
+        the page opens each finished one by itself.</div>
       <label class="note" style="margin:6px 0 0;"><input type="checkbox" id="pipeFollow"> Follow live snapshots</label>
       <span class="note" id="pipeLiveMsg" style="margin-left:8px;"></span>
     </div>
@@ -109,14 +97,12 @@ export async function renderPipeline(root, { server }) {
   const start = async (demo) => {
     const p = new URLSearchParams({
       source: demo ? "voice-demo" : "file", max_s: root.querySelector("#pipeSec").value || "1",
-      detector: root.querySelector("#pipeDet").value,
+      detector: "hybrid",                  // always YOLO + the narrow-signal finder
       listen: root.querySelector("#pipeListen").checked ? "1" : "0",
       whisper: root.querySelector("#pipeWhisper").checked ? "1" : "0",
       llm: root.querySelector("#pipeLlm").checked ? "1" : "0",
       language: root.querySelector("#pipeLang").value,
     });
-    const model = root.querySelector("#pipeModel").value;
-    if (model) p.set("whisper_model", model);
     let body = null;
     if (!demo) {
       const f = root.querySelector("#pipeFile").files[0];

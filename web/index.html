@@ -200,7 +200,7 @@
     tbody tr { break-inside: avoid; page-break-inside: avoid; }
 
     /* Other pages are not part of this report. */
-    #page-pipeline, #page-history, #page-performance, #page-model { display: none !important; }
+    #pipelineRoot, #page-history, #page-performance, #page-model { display: none !important; }
   }
   /* History page. Bars are divs, not a canvas: they reflow with the panel and
      survive the print stylesheet that the browser-print PDF path uses. */
@@ -248,6 +248,16 @@
   .tier-key i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
   .tier-key.zero { opacity: .5; }
   .tier-key .dim { color: var(--text-dim); }
+  /* Live antenna status and the fall-back notice */
+  .rx-live { display: flex; align-items: center; gap: 8px; min-height: 38px; }
+  .rx-mark { width: 22px; height: 22px; border-radius: 50%; flex: none; display: inline-flex; align-items: center; justify-content: center;
+             font-weight: 700; font-size: 14px; color: #fff; background: #9AA3A8; }
+  .rx-mark.ok { background: #2E9E4F; }
+  .rx-mark.bad { background: #B3261E; }
+  .rx-mark.wait { background: #D49A1F; }
+  .rx-fallback { margin: 10px 0 0; padding: 10px 12px; border-radius: 8px; background: #FDF1E3; border: 1px solid #D49A1F; color: #6B4A0B; }
+  .more-options { margin-top: 14px; }
+  .more-options > summary { cursor: pointer; font-weight: 600; padding: 6px 0; }
   /* Signal Pipeline: a failed run, in a sentence */
   .run-error { display: flex; flex-direction: column; gap: 4px; border: 1px solid #E8C4BF; border-left: 4px solid #B0281A;
     background: #FBEFED; border-radius: 8px; padding: 10px 14px; font-size: 15px; }
@@ -686,9 +696,7 @@
   <div class="layout">
     <nav>
       <div class="menu-label">Menu</div>
-      <button class="active" data-page="pipeline">Signal Pipeline</button>
-      <button data-page="replay">RF Replay</button>
-      <button data-page="intel">Comms Intel</button>
+      <button class="active" data-page="replay">Signal Pipeline</button>
       <button data-page="history">History</button>
       <button data-page="audit">Audit trail</button>
       <button data-page="performance">Performance</button>
@@ -698,21 +706,70 @@
     </nav>
 
     <main id="main" tabindex="-1">
-    <!-- Whole wideband chain on a recording (web/pipeline.js, /api/pipeline). -->
-    <section id="page-pipeline">
-      <h3 class="page-title">Signal Pipeline</h3>
-      <div id="pipelineRoot"></div>
-    </section>
-
-    <section id="page-replay" hidden>
+    <!-- One page: the live receiver, its waterfall and detections, then the
+         wideband chain (YOLO + classifier) on recordings below them. -->
+    <section id="page-replay">
       <!-- Print-only cover block. Populated in main.js:render() so the
            exported PDF carries the run's own provenance: a page of
            detections with no record of which case, SNR, model or thresholds
            produced them is unreadable a week later. -->
       <div id="printHeader" class="print-only"></div>
 
-      <h3 class="page-title">RF Replay</h3>
+      <h3 class="page-title">Signal Pipeline</h3>
       <div class="block" id="replayControls">
+        <div class="subsection">
+          <h4 class="subhead">Live receiver</h4>
+          <!-- web/receiver.js. The status light is the "is the receiver plugged
+               in and delivering IQ" indicator an operator console always shows. -->
+          <div class="receiver" id="receiverPanel">
+            <div class="rx-head">
+              <span class="rx-light off" id="rxLight" aria-hidden="true"></span>
+              <span class="rx-state" id="rxState">RECEIVER · DISCONNECTED</span>
+            </div>
+            <div class="rx-fallback" id="rxFallback" role="alert" hidden></div>
+            <div class="grow">
+              <!-- The antenna, through SDRconnect. If it cannot be used the mark turns into a cross
+                   and the page falls back to the built-in simulator by itself (main.js). -->
+              <div class="field" style="flex:3;min-width:240px;">
+                <label>Live antenna</label>
+                <div class="rx-live"><span class="rx-mark idle" id="rxMark" aria-hidden="true">–</span><span id="rxLiveText">SDRconnect: not connected yet</span></div>
+              </div>
+              <!-- feat/live-sdr-console (SDR connection): where SDRconnect runs -->
+              <div class="field" id="rxSdrFields" style="flex:2;min-width:220px;">
+                <label for="rxSdrHost">SDRconnect at</label>
+                <div style="display:flex;gap:6px;">
+                  <input id="rxSdrHost" value="127.0.0.1" spellcheck="false" style="flex:3;min-width:0;" title="laptop running SDRconnect (127.0.0.1 = this one)">
+                  <input id="rxSdrPort" value="5454" inputmode="numeric" style="flex:1;min-width:0;" title="WebSocket port (Settings -> WebSocket interface)">
+                </div>
+                <label style="display:flex;gap:6px;align-items:center;margin-top:4px;font-weight:normal;">
+                  <input type="checkbox" id="rxSdrDecode" checked> decode Morse / voice (Whisper) in the background
+                </label>
+              </div>
+              <div class="field" style="flex:1;min-width:120px;">
+                <label for="rxDwell">Dwell</label>
+                <select id="rxDwell">
+                  <option value="0.02">20 ms</option>
+                  <option value="0.05" selected>50 ms</option>
+                </select>
+              </div>
+              <button class="primary" id="rxConnect" style="flex:2;min-width:180px;">Connect &amp; stream</button>
+              <button class="secondary" id="rxStop" style="flex:1;min-width:110px;" disabled>Stop</button>
+              <button class="secondary" id="rxReplayFile" style="flex:1;min-width:130px;" title="Play a .bin or SigMF recording as if it were arriving live">Replay a file</button>
+              <input type="file" id="rxFileInput" multiple accept=".bin,.f32,.cf32,.cfile,.iq,.dat,.raw,.sigmf,.sigmf-meta,.sigmf-data" style="display:none">
+            </div>
+            <div class="rx-readouts" id="rxReadouts">
+              <div style="grid-column:1/-1;"><span class="rx-k">Hardware</span><span class="rx-v">none connected, press Connect to listen on the antenna</span></div>
+            </div>
+            <div class="rx-log" id="rxLog" hidden aria-live="polite"></div>
+            <div class="note" id="rxNote" style="margin-top:12px;">
+              Connect to listen: NEXA draws the waterfall and names each signal as it arrives. If a transmission
+              could hold voice or Morse it is recorded and decoded, and the result goes to History.
+            </div>
+          </div>
+        </div>
+
+        <details class="more-options">
+          <summary>More options: check a file, test scenarios, display settings</summary>
         <div class="subsection">
           <h4 class="subhead">Fast scan in this browser</h4>
           <div class="note">Classifies a capture right here with the ONNX models, with no Python needed.
@@ -734,12 +791,6 @@
                 <button data-value="Raw">Raw</button>
               </div>
             </div>
-            <div class="field" style="flex:2;min-width:220px;">
-              <label for="modelSel">Model</label>
-              <select id="modelSel">
-                <option value="single" selected>60-class, physics_aug_best.pt</option>
-              </select>
-            </div>
           </div>
           <div class="actions">
             <button class="primary" id="uploadBtn" disabled>Select &amp; Analyze Source File</button>
@@ -747,58 +798,6 @@
           </div>
           <div class="note" style="margin-top:16px;">Smoothing, the NOISE_FLOOR gate and event hold are display-only.
             The Performance page is always per-window, ungated and unsmoothed.</div>
-        </div>
-
-        <div class="subsection">
-          <h4 class="subhead">Live receiver</h4>
-          <!-- web/receiver.js. The status light is the "is the receiver plugged
-               in and delivering IQ" indicator an operator console always shows. -->
-          <div class="receiver" id="receiverPanel">
-            <div class="rx-head">
-              <span class="rx-light off" id="rxLight" aria-hidden="true"></span>
-              <span class="rx-state" id="rxState">RECEIVER · DISCONNECTED</span>
-            </div>
-            <div class="grow">
-              <div class="field" style="flex:3;min-width:240px;">
-                <label for="rxSource">Receiver source</label>
-                <select id="rxSource">
-                  <option value="sim" selected>Simulated receiver (virtual SDR)</option>
-                  <option value="file">File replay (.bin or SigMF, as if live)</option>
-                  <!-- feat/live-sdr-console (SDR connection): the real antenna via SDRconnect -->
-                  <option value="sdr">SDRconnect (live antenna)</option>
-                </select>
-              </div>
-              <!-- feat/live-sdr-console (SDR connection): where SDRconnect runs; shown for "sdr" only -->
-              <div class="field" id="rxSdrFields" style="flex:2;min-width:220px;" hidden>
-                <label for="rxSdrHost">SDRconnect at</label>
-                <div style="display:flex;gap:6px;">
-                  <input id="rxSdrHost" value="127.0.0.1" spellcheck="false" style="flex:3;min-width:0;" title="laptop running SDRconnect (127.0.0.1 = this one)">
-                  <input id="rxSdrPort" value="5454" inputmode="numeric" style="flex:1;min-width:0;" title="WebSocket port (Settings -> WebSocket interface)">
-                </div>
-                <label style="display:flex;gap:6px;align-items:center;margin-top:4px;font-weight:normal;">
-                  <input type="checkbox" id="rxSdrDecode" checked> decode Morse / voice (Whisper) in the background
-                </label>
-              </div>
-              <div class="field" style="flex:1;min-width:120px;">
-                <label for="rxDwell">Dwell</label>
-                <select id="rxDwell">
-                  <option value="0.02">20 ms</option>
-                  <option value="0.05" selected>50 ms</option>
-                </select>
-              </div>
-              <button class="primary" id="rxConnect" style="flex:2;min-width:180px;">Connect &amp; stream</button>
-              <button class="secondary" id="rxStop" style="flex:1;min-width:110px;" disabled>Stop</button>
-              <input type="file" id="rxFileInput" multiple accept=".bin,.f32,.cf32,.cfile,.iq,.dat,.raw,.sigmf,.sigmf-meta,.sigmf-data" style="display:none">
-            </div>
-            <div class="rx-readouts" id="rxReadouts">
-              <div style="grid-column:1/-1;"><span class="rx-k">Hardware</span><span class="rx-v">none connected, press Connect to start the simulated receiver</span></div>
-            </div>
-            <div class="rx-log" id="rxLog" hidden aria-live="polite"></div>
-            <div class="note" id="rxNote" style="margin-top:12px;">
-              Connect to stream: the console classifies one dwell at a time and updates as each arrives.
-              For the fastest updates choose the single model and no-overlap hop.
-            </div>
-          </div>
         </div>
 
         <div class="subsection">
@@ -815,8 +814,9 @@
             <button class="secondary" id="synthBtn" style="flex:2;min-width:190px;" disabled>Synthesize Scenario</button>
             <button class="secondary" id="printBtn" style="flex:2;min-width:190px;" disabled>Download report (PDF)</button>
           </div>
-          <div id="status" role="status">Loading the 60-class AI model in the background (up to a minute the first time). The rest of the console works meanwhile; these buttons switch on when it is ready.</div>
         </div>
+        </details>
+        <div id="status" role="status">Loading the 60-class AI model in the background (up to a minute the first time). The rest of the console works meanwhile; these buttons switch on when it is ready.</div>
       </div>
 
       <div id="sigBody">
@@ -901,16 +901,64 @@
       </div>
 
       </div>
+
+      <!-- Wideband chain on a recording, and every decoded run (web/pipeline.js, /api/pipeline). -->
+      <div id="pipelineRoot"></div>
     </section>
 
-    <!-- Decoded receiver audio + local-LLM reading (web/intel.js, /api/intel). -->
+    <!-- One decoded signal, opened from History's Decoded review: no menu entry of its
+         own (web/intel.js, /api/intel). -->
     <section id="page-intel" hidden>
-      <h3 class="page-title">Comms Intel</h3>
+      <h3 class="page-title">Decoded signal</h3>
       <div id="intelRoot"></div>
     </section>
 
     <section id="page-history" hidden>
       <h3 class="page-title">History</h3>
+      <div class="block" id="alertBlock" hidden>
+        <div class="block-label">Alerts</div>
+        <div class="note">Captures where the model saw a military or hostile emitter. Open one on the waterfall to approve it
+          or correct it.</div>
+        <div class="note" id="alertMsg" role="status"></div>
+        <div class="table-wrap" id="alertList"></div>
+      </div>
+
+      <div class="block" id="decodedBlock" hidden>
+        <div class="block-label">Decoded review</div>
+        <div class="note">Voice and Morse that NEXA decoded on this machine. Open one to read the full result. The decode and the
+          AI reading can contain errors, so check anything important against the signal.</div>
+        <div class="filters" style="margin-top:8px;"><input id="decodedSearch" placeholder="Search call sign, word, file" style="width:260px;"></div>
+        <div class="note" id="decodedMsg" role="status"></div>
+        <div class="table-wrap" id="decodedList"></div>
+      </div>
+
+      <div class="block" id="corrBlock" hidden>
+        <div class="block-label">Corrections review</div>
+        <div class="note">Operators correct detections on the waterfall, and an <strong>analyst</strong> approves or
+          rejects each one before it can become training data; it is read-only once reviewed. An analyst's own
+          corrections are approved directly, and recorded as such in the audit trail.</div>
+        <div class="filters" style="margin-top:8px;">
+          <select id="corrStatusSel">
+            <option value="pending" selected>Waiting for review</option>
+            <option value="approved">Approved</option>
+            <option value="rejected">Rejected</option>
+            <option value="">All</option>
+          </select>
+          <span class="note" id="corrStats"></span>
+        </div>
+        <div class="note" id="corrMsg" role="status"></div>
+        <div class="table-wrap" id="corrTable"></div>
+      </div>
+
+      <div class="block" id="queueBlock" hidden>
+        <div class="block-label">Low-confidence review</div>
+        <div class="note">The model only just made up its mind on these (a score under 1.5x that class's
+          threshold), or saw possible jamming it did not report. An operator views one and corrects it on the
+          timeline; an analyst may instead mark the model right. Their raw signal is kept either way.</div>
+        <div class="note" id="queueMsg" role="status"></div>
+        <div class="table-wrap" id="queueList"></div>
+      </div>
+
       <div class="filters">
         <button class="secondary" id="histRefresh">Refresh</button>
         <select id="histTier"><option value="">Every verdict</option></select>
@@ -918,6 +966,7 @@
         <select id="histSource"><option value="">Every input</option>
           <option value="File upload">File upload</option>
           <option value="Synthesized">Synthesized</option>
+          <option value="Live · SDRconnect">Live · SDRconnect</option>
           <option value="Live · simulated receiver">Live · simulated receiver</option>
           <option value="Live · file replay">Live · file replay</option></select>
         <input id="histQuery" type="search" placeholder="Search file, case, class">
@@ -978,15 +1027,6 @@
         <div id="histDayBars"></div>
       </div>
 
-      <div class="block" id="queueBlock" hidden>
-        <div class="block-label">Review required: low-confidence detections</div>
-        <div class="note">The model only just made up its mind on these (a score under 1.5x that class's
-          threshold), or saw possible jamming it did not report. An operator views one and corrects it on the
-          timeline; an analyst may instead mark the model right. Their raw signal is kept either way.</div>
-        <div class="note" id="queueMsg" role="status"></div>
-        <div class="table-wrap" id="queueList"></div>
-      </div>
-
       <div class="block">
         <div class="block-label">Stored analyses</div>
         <div class="table-wrap" id="histTable"></div>
@@ -994,23 +1034,6 @@
 
       <div id="histBackendNote" hidden></div>
 
-      <div class="block" id="corrBlock" hidden>
-        <div class="block-label">Human corrections: review queue</div>
-        <div class="note">Operators correct detections on the RF Replay page, and an <strong>analyst</strong> approves or
-          rejects each one before it can become training data; it is read-only once reviewed. An analyst's own
-          corrections are approved directly, and recorded as such in the audit trail.</div>
-        <div class="filters" style="margin-top:8px;">
-          <select id="corrStatusSel">
-            <option value="pending" selected>Waiting for review</option>
-            <option value="approved">Approved</option>
-            <option value="rejected">Rejected</option>
-            <option value="">All</option>
-          </select>
-          <span class="note" id="corrStats"></span>
-        </div>
-        <div class="note" id="corrMsg" role="status"></div>
-        <div class="table-wrap" id="corrTable"></div>
-      </div>
     </section>
 
     <section id="page-audit" hidden>

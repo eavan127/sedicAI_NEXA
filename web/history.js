@@ -155,6 +155,7 @@ export function barsHtml(pairs, { empty = "Nothing recorded yet.", sort = true, 
  *  the page wrote at the time (source + case note), so older rows label too. */
 export function inputLabel(r) {
   const note = r.case_note || "";
+  if (note.startsWith("LIVE · SDRconnect")) return "Live · SDRconnect";
   if (note.startsWith("LIVE · simulated receiver")) return "Live · simulated receiver";
   if (note.startsWith("LIVE · replay")) return "Live · file replay";
   if (r.source === "upload") return "File upload";
@@ -187,7 +188,7 @@ export function tableHtml(records, { canDelete = true } = {}) {
   // but not delete (web/supabase/schema.sql), so a Delete button there could
   // only ever fail. Rows are removed from the Supabase dashboard instead.
   if (!records.length) {
-    return `<div class="note">No stored analyses match. Analyse a capture on RF Replay,
+    return `<div class="note">No stored analyses match. Analyse a capture on Signal Pipeline,
              or clear the filters.</div>`;
   }
   const rows = records.map(r => `

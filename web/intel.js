@@ -1,4 +1,5 @@
-// Comms Intel page: receiver AUDIO recordings decoded on this machine by
+// Decoded signals: the Decoded review list in History, and the expanded page one
+// row opens. Receiver AUDIO recordings decoded on this machine by
 // scripts/comms_intel.py (Morse decoder, Whisper for voice, a local Ollama
 // model for the reading), served read-only by scripts/serve_local.py at
 // /api/intel. The LLM reading is shown NEXT TO the decoded text it came from,
@@ -9,12 +10,6 @@ const CONF_COLOR = { high: "#2E7D32", medium: "#B7791F", low: "#9B2C2C" };
 const KIND_LABEL = { morse: "Morse (CW)", voice: "Voice", silent: "No signal" };
 
 const esc = t => String(t ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-
-function hms(sec) {
-  sec = Math.round(sec || 0);
-  const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60;
-  return h ? `${h}h ${String(m).padStart(2, "0")}m` : `${m}m ${String(s).padStart(2, "0")}s`;
-}
 
 function clock(sec) {
   sec = Math.floor(sec || 0);
@@ -67,7 +62,7 @@ export function inShort(rec) {
   return lines;
 }
 
-let state = { rows: [], filter: "", kind: "", category: "", open: null };
+let state = { open: null, onBack: null };
 
 /** Pure: rows matching the filters (exported for tests). */
 export function filterRows(rows, { filter = "", kind = "", category = "" } = {}) {
@@ -76,85 +71,38 @@ export function filterRows(rows, { filter = "", kind = "", category = "" } = {})
     && (!q || [r.file, r.summary, r.category, ...(r.call_signs || [])].join(" ").toUpperCase().includes(q)));
 }
 
-export async function renderIntel(root, { server }) {
-  if (!server) {
-    // The page may ask before its own server check has finished: ask the server directly.
-    try { server = (await fetch("/api/health", { credentials: "same-origin" })).ok; } catch { server = false; }
-  }
-  if (!server) {
-    root.innerHTML = `<div class="block"><div class="note">Comms Intel needs the local server, because the
-      recordings and their decodes stay on this machine. Start it with
-      <code>python scripts/serve_local.py</code>, then decode a folder with
-      <code>python scripts/comms_intel.py --in "FOLDER"</code>.</div></div>`;
-    return;
-  }
-  root.innerHTML = `<div class="note">Loading…</div>`;
-  let data;
-  try {
-    const res = await fetch("/api/intel", { credentials: "same-origin" });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    data = await res.json();
-  } catch (e) {
-    root.innerHTML = `<div class="note">Could not read the decoded recordings: ${esc(e.message)}</div>`;
-    return;
-  }
-  state.rows = data.recordings || [];
-  draw(root, data);
+/** Every decoded recording for the Decoded review list, newest first. */
+export async function listDecoded() {
+  const res = await fetch("/api/intel", { credentials: "same-origin" });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const rows = (await res.json()).recordings || [];
+  return rows.filter(r => r.kind !== "silent").reverse();
 }
 
-function draw(root, data) {
-  const rows = state.rows;
-  const cats = [...new Set(rows.map(r => r.category).filter(Boolean))].sort();
-  const kinds = [...new Set(rows.map(r => r.kind).filter(Boolean))];
-  const totalH = rows.reduce((a, r) => a + (r.analysed_s || 0), 0) / 3600;
-  const sigMin = rows.reduce((a, r) => a + (r.active_minutes || 0), 0);
-  const tx = rows.reduce((a, r) => a + (r.transmissions || 0), 0);
-  root.innerHTML = `
-    <div class="block">
-      <div class="block-label">Decoded recordings</div>
-      <div class="note">Receiver audio decoded on this machine: Morse by the CW decoder, speech by Whisper, then
-        read by a local language model (Ollama). <b>The model's reading is a suggestion.</b> Every quote it gives
-        was checked against the decoded text, and anything it could not back up was removed. The decode itself can
-        contain errors (<code>*</code> = unreadable letter). Everything Whisper or the Morse decoder analyses in Signal
-        Pipeline, live or from a file, is added here by itself.</div>
-      ${rows.length ? `<div class="note" style="margin-top:6px;">${rows.length} recordings · ${totalH.toFixed(1)} h analysed ·
-        ${Math.round(sigMin)} min with signal · ${tx} transmissions</div>` : `<div class="note" style="margin-top:6px;">
-        Nothing decoded yet in <code>${esc(data.folder)}</code>. ${esc(data.hint || "")}</div>`}
-      <div class="filters" style="margin-top:10px;">
-        <input id="intelSearch" placeholder="Search call sign, word, file" value="${esc(state.filter)}" style="width:240px;">
-        <select id="intelKind"><option value="">All types</option>${kinds.map(k =>
-          `<option value="${esc(k)}" ${state.kind === k ? "selected" : ""}>${esc(KIND_LABEL[k] || k)}</option>`).join("")}</select>
-        <select id="intelCat"><option value="">All categories</option>${cats.map(c =>
-          `<option ${state.category === c ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>
-      </div>
-      <div class="table-wrap" id="intelTable"></div>
-    </div>
-    <div class="block" id="intelDetail" hidden></div>`;
-  const table = root.querySelector("#intelTable");
-  const paint = () => {
-    const shown = filterRows(rows, state);
-    table.innerHTML = `<table><thead><tr><th>Recorded</th><th>Length · signal</th><th>Type</th>
-      <th>Category</th><th>Call signs</th><th style="min-width:200px;">Summary</th></tr></thead><tbody>`
-      + shown.map(r => `<tr data-id="${esc(r.id)}" style="cursor:pointer;" title="Open">
-        <td style="white-space:nowrap;">${esc(r.recorded_at ? new Date(r.recorded_at).toLocaleString() : "—")}
-          <div class="note" style="font-family:var(--mono);font-size:13px;line-height:1.4;margin:4px 0 0;white-space:normal;overflow-wrap:anywhere;">${esc(r.file)}</div></td>
-        <td style="white-space:nowrap;">${hms(r.analysed_s)}${r.analysed_s < r.duration_s - 1 ? ` <span class="note">of ${hms(r.duration_s)}</span>` : ""}
-          <div class="note">${esc(Math.round(r.active_minutes || 0))} min with signal</div></td>
-        <td style="white-space:nowrap;">${esc(KIND_LABEL[r.kind] || r.kind)}${r.wpm_median ? `<div class="note">${Math.round(r.wpm_median)} WPM</div>` : ""}</td>
-        <td>${r.error ? chip("LLM failed", "#9B2C2C") : esc(r.category || "—")}
-          ${r.confidence ? `<div>${chip(r.confidence, CONF_COLOR[r.confidence] || "#5E6673")}</div>` : ""}</td>
-        <td>${esc((r.call_signs || []).slice(0, 4).join(", "))}</td>
-        <td>${esc(r.error || r.summary || "")}</td></tr>`).join("")
-      + `</tbody></table>${shown.length ? "" : `<div class="note" style="padding:8px;">No recording matches.</div>`}`;
-    for (const tr of table.querySelectorAll("tr[data-id]")) {
-      tr.addEventListener("click", () => openRecording(root, tr.dataset.id));
-    }
-  };
-  root.querySelector("#intelSearch").addEventListener("input", e => { state.filter = e.target.value; paint(); });
-  root.querySelector("#intelKind").addEventListener("change", e => { state.kind = e.target.value; paint(); });
-  root.querySelector("#intelCat").addEventListener("change", e => { state.category = e.target.value; paint(); });
-  paint();
-  if (state.open) openRecording(root, state.open);
+const DECODED_SHOWN = 50;
+
+/** Pure: the Decoded review table (exported for tests). */
+export function decodedTableHtml(rows) {
+  if (!rows.length) return `<div class="note">Nothing decoded yet.</div>`;
+  return (rows.length > DECODED_SHOWN ? `<div class="note">Newest ${DECODED_SHOWN} of ${rows.length} shown.</div>` : "")
+    + `<table><thead><tr><th>Recorded</th><th>Type</th><th>Call signs</th><th style="min-width:220px;">Summary</th><th></th></tr></thead><tbody>`
+    + rows.slice(0, DECODED_SHOWN).map(r => `<tr data-decoded="${esc(r.id)}" style="cursor:pointer;" title="Open this signal">
+      <td style="white-space:nowrap;">${esc(r.recorded_at ? new Date(r.recorded_at).toLocaleString() : "—")}
+        <div class="note" style="margin:4px 0 0;overflow-wrap:anywhere;white-space:normal;">${esc(r.file)}</div></td>
+      <td style="white-space:nowrap;">${esc(KIND_LABEL[r.kind] || r.kind)}</td>
+      <td>${esc((r.call_signs || []).slice(0, 4).join(", "))}</td>
+      <td>${esc(r.summary || r.error || "Decoded. Open to read the text.")}</td>
+      <td class="row-actions"><button class="mini">Open</button></td></tr>`).join("")
+    + `</tbody></table>`;
+}
+
+/** The expanded page for one decoded signal. */
+export async function renderIntelDetail(root, { id, onBack }) {
+  state.onBack = onBack;
+  root.innerHTML = `<div class="filters"><button class="secondary" id="intelBack">← Back to History</button></div>
+    <div class="block" id="intelDetail"></div>`;
+  root.querySelector("#intelBack").addEventListener("click", onBack);
+  await openRecording(root, id);
 }
 
 async function openRecording(root, id) {
@@ -238,7 +186,7 @@ async function openRecording(root, id) {
     ${rec.recorder_log ? `<details style="margin-top:10px;"><summary>Technical: recorder log (${esc(rec.file.replace(/\.wav$/i, ".log"))})</summary>
       <pre style="white-space:pre-wrap;max-height:240px;overflow:auto;">${esc(rec.recorder_log)}</pre></details>` : ""}
     </div>`;
-  box.querySelector("#intelClose").addEventListener("click", () => { box.hidden = true; state.open = null; });
+  box.querySelector("#intelClose").addEventListener("click", () => { state.open = null; state.onBack?.(); });
 
   const segBox = box.querySelector("#intelSegs");
   const count = box.querySelector("#intelSegCount");

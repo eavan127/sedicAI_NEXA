@@ -155,5 +155,5 @@ export function decodeLine(d) {
   if (!d.tracks?.length) return `Recording ${d.seconds} s (${d.why}): nothing above the noise`;
   const heard = d.tracks.map(t => `${t.kind} ${t.f_lo_khz >= 0 ? "+" : ""}${t.f_lo_khz.toFixed(1)} kHz`
     + (t.text ? ` "${t.text.slice(0, 60)}"` : "")).join("; ");
-  return `Decoded ${d.seconds} s: ${heard}${d.intel_ids?.length ? " · saved to Comms Intel" : ""}`;
+  return `Decoded ${d.seconds} s: ${heard}${d.intel_ids?.length ? " · added to Decoded review in History" : ""}`;
 }

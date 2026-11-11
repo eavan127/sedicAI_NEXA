@@ -33,7 +33,7 @@ import {
 import { applyFilters, barsHtml, canView, flagsHtml, summarise, summaryHtml as histSummaryHtml, tableHtml } from "./history.js";
 import { buildReport, buildSingle } from "./report.js";
 import { installZoom, registerZoom } from "./zoom.js";
-import { renderIntel } from "./intel.js";
+import { renderIntelDetail, listDecoded, decodedTableHtml, filterRows } from "./intel.js";
 import { renderPipeline } from "./pipeline.js";
 
 installZoom();
@@ -45,7 +45,8 @@ const consoleCanvas = el("console"), tbody = document.querySelector("#eventsTabl
 const constellationCanvas = el("constellationCanvas"), constellationBlock = el("constellationBlock");
 const printHeader = el("printHeader"), printBtn = el("printBtn");
 const synthBtn = el("synthBtn"), uploadBtn = el("uploadBtn"), fileInput = el("fileInput");
-const caseSel = el("caseSel"), snrSel = el("snrSel"), hopSel = el("hopSel"), modelSel = el("modelSel");
+const caseSel = el("caseSel"), snrSel = el("snrSel"), hopSel = el("hopSel");
+const MODEL_CHOICE = "single";          // one default model; there is no selector any more
 const smoothingRadio = el("smoothingRadio");
 
 for (const name of CASE_NAMES) {
@@ -267,7 +268,7 @@ async function analyze(re, im, { source, caseNote = "", truth = null, snrDb = nu
                                   signal = null, review = null }) {
   synthBtn.disabled = uploadBtn.disabled = true;
   try {
-    const which = modelSel.value;
+    const which = MODEL_CHOICE;
     const hop = Number(hopSel.value);
     const sessions = await getModel(which);
 
@@ -836,7 +837,8 @@ suggestList.addEventListener("click", (ev) => {
 // Receiver: live streaming from a simulated SDR or a replayed recording
 // ---------------------------------------------------------------------------
 
-const rxLight = el("rxLight"), rxState = el("rxState"), rxSourceSel = el("rxSource");
+const rxLight = el("rxLight"), rxState = el("rxState");
+const rxMark = el("rxMark"), rxLiveText = el("rxLiveText"), rxFallback = el("rxFallback");
 const rxDwellSel = el("rxDwell"), rxConnectBtn = el("rxConnect"), rxStopBtn = el("rxStop");
 const rxReadouts = el("rxReadouts"), rxNote = el("rxNote"), rxFileInput = el("rxFileInput");
 const rxLog = el("rxLog");
@@ -857,6 +859,13 @@ let rx = null;
 function rxSetState(state, text) {
   rxLight.className = `rx-light ${state}`;
   rxState.textContent = text;
+}
+
+/** The mark beside "Live antenna": is SDRconnect actually delivering? */
+function rxLiveStatus(state, text) {
+  rxMark.className = `rx-mark ${state}`;
+  rxMark.textContent = { ok: "✓", bad: "✗", wait: "…", idle: "–" }[state];
+  rxLiveText.textContent = text;
 }
 
 const fmtHz = hz => hz == null ? "—" : hz >= 1e9 ? `${(hz / 1e9).toFixed(3)} GHz` : `${(hz / 1e6).toFixed(3)} MHz`;
@@ -895,9 +904,9 @@ function rxPaint() {
     `<div><span class="rx-k">${k}</span><span class="rx-v">${v}</span></div>`).join("");
 }
 
-async function rxStart(source) {
+async function rxStart(source, { fallback = null } = {}) {
   rx = {
-    source, info: source.describe(), dwells: 0, stored: 0, airS: 0, samples: 0, level: null,
+    source, info: source.describe(), fallback, dwells: 0, stored: 0, airS: 0, samples: 0, level: null,
     lastProcS: null, prevClasses: null, startedAt: performance.now(), stopReason: null,
     streaming: false, timer: null, abort: new AbortController(),
   };
@@ -905,14 +914,17 @@ async function rxStart(source) {
   synthBtn.disabled = uploadBtn.disabled = true;
   rxConnectBtn.disabled = true;
   rxStopBtn.disabled = false;
-  rxSourceSel.disabled = rxDwellSel.disabled = true;
+  rxDwellSel.disabled = true;
+  el("rxReplayFile").disabled = true;
   rxSetState("connecting", "RECEIVER · CONNECTING");
   rxPaint();
   const me = rx;
   try {
     await source.connect(step => { if (rx === me) rxLogLine(step); });
   } catch (e) {                                  // a real receiver can be unreachable
-    if (rx === me) rxStop(`could not connect: ${e.message}`);
+    if (rx !== me) return;
+    if (me.info.kind === "sdr") rxFallToSimulator(e.message);
+    else rxStop(`could not connect: ${e.message}`);
     return;
   }
   if (rx !== me || me.stopReason) return;       // Stop pressed mid-handshake
@@ -923,16 +935,21 @@ async function rxStart(source) {
   // still being classified.
   me.timer = setInterval(rxPaint, 500);
   logEvent("receiver_connect", { source: rx.info.name, hardware: rx.info.hardware,
-    dwell_ms: Number(rxDwellSel.value) * 1000, model: modelSel.value, hop: Number(hopSel.value) });
+    dwell_ms: Number(rxDwellSel.value) * 1000, model: MODEL.name, hop: Number(hopSel.value),
+    ...(me.fallback ? { fallback_reason: me.fallback } : {}) });
   rxSetState("on", `RECEIVER · STREAMING · ${rx.info.name}${rx.info.simulated ? " (SIMULATED)" : ""}`);
+  if (me.info.kind === "sdr") {
+    rxLiveStatus("ok", `SDRconnect: receiving${me.info.centreHz ? ` at ${fmtHz(me.info.centreHz)}` : ""}`);
+    rxFallback.hidden = true;
+  }
   rxNote.textContent = rx.info.kind === "sim"
-    ? "Each dwell is a fresh slice of simulated air. Change the scenario case or SNR below at any "
-      + "time and the next dwell follows. A dwell is stored only when what is detected changes."
+    ? "Each dwell is a fresh slice of simulated air. Change the scenario case or SNR under More options "
+      + "at any time and the next dwell follows. A dwell is stored only when what is detected changes."
     : rx.info.kind === "sdr"
     ? "Live from the antenna: each dwell is the newest slice of what SDRconnect receives, classified "
       + "as it arrives (the air between dwells is not examined). In the background the server records "
       + "each transmission until the air goes quiet, then decodes it; results appear in this log, "
-      + "Signal Pipeline and Comms Intel."
+      + "below, and in History under Decoded review."
     : "Streaming the recording dwell by dwell, every sample in order. A dwell is stored only when "
       + "what is detected changes.";
   rxPaint();
@@ -946,10 +963,16 @@ async function rxLoop() {
     try {
       block = await me.source.next();
     } catch (e) {
-      rxStop(`source error: ${e.message}`);
+      if (rx === me && !me.stopReason && me.info.kind === "sdr") rxFallToSimulator(e.message);
+      else rxStop(`source error: ${e.message}`);
       return;
     }
-    if (!block) { rxStop("end of recording"); return; }
+    if (rx !== me || me.stopReason) return;
+    if (!block) {
+      if (me.info.kind === "sdr") rxFallToSimulator("the stream from SDRconnect stopped");
+      else rxStop("end of recording");
+      return;
+    }
     if (me.stopReason) break;
 
     const elapsed = await analyze(block.re, block.im, { ...block, live: true, signal: me.abort.signal });
@@ -1001,27 +1024,48 @@ function rxStop(reason = "stopped by operator") {
   rxNote.textContent = `${me.dwells} dwells classified, ${me.stored} stored. ${reason[0].toUpperCase()}${reason.slice(1)}.`;
   rxConnectBtn.disabled = false;
   rxStopBtn.disabled = true;
-  rxSourceSel.disabled = rxDwellSel.disabled = false;
+  rxDwellSel.disabled = false;
+  el("rxReplayFile").disabled = false;
   synthBtn.disabled = uploadBtn.disabled = false;
 }
 
-rxConnectBtn.addEventListener("click", () => {
-  const dwellS = Number(rxDwellSel.value);
-  if (rxSourceSel.value === "file") { rxFileInput.click(); return; }
-  if (rxSourceSel.value === "sdr") {             // feat/live-sdr-console (SDR connection)
-    rxStart(new SdrConnectReceiver({
-      dwellS, host: el("rxSdrHost").value.trim() || "127.0.0.1", port: Number(el("rxSdrPort").value) || 5454,
-      decode: el("rxSdrDecode").checked,
-      onDecode: d => rxLogLine(decodeLine(d)),
-    }));
-    return;
-  }
-  rxStart(new SimulatedReceiver({
-    dwellS,
+function rxStartSimulator(fallback = null) {
+  return rxStart(new SimulatedReceiver({
+    dwellS: Number(rxDwellSel.value),
     getSettings: () => ({ caseName: caseSel.value, snrDb: Number(snrSel.value) }),
     getLibrary: () => loadCivilianLibrary("./data"),
+  }), { fallback });
+}
+
+/** The antenna could not be used, or was lost: say so, and carry on with the
+ *  simulator so the console keeps working. Its output is always labelled simulated. */
+function rxFallToSimulator(detail) {
+  // The server's own error text is for the log; the operator gets a plain reason.
+  const why = /refused|unreachable|timed? ?out|getaddrinfo|not found|failed to fetch|network/i.test(detail)
+    ? `SDRconnect cannot be reached at ${el("rxSdrHost").value.trim() || "127.0.0.1"}:${el("rxSdrPort").value || 5454}`
+    : /[A-Za-z]Error|closed/.test(detail) ? "the connection to SDRconnect was lost" : detail;
+  rxStop(`live receiver unavailable: ${why}`);
+  rxLiveStatus("bad", `SDRconnect not working: ${why}`);
+  rxFallback.textContent = `The live receiver is not working (${why}). NEXA switched to the built-in simulator `
+    + "automatically, so everything below is simulated and is not from the antenna. "
+    + "Press Stop, then Connect, to try the antenna again.";
+  rxFallback.hidden = false;
+  rxStartSimulator(why);
+  rxLogLine(`Live receiver unavailable: ${why}. Using the simulator.`);
+}
+
+rxConnectBtn.addEventListener("click", () => {
+  rxFallback.hidden = true;
+  rxLiveStatus("wait", "SDRconnect: connecting…");
+  // feat/live-sdr-console (SDR connection)
+  rxStart(new SdrConnectReceiver({
+    dwellS: Number(rxDwellSel.value), host: el("rxSdrHost").value.trim() || "127.0.0.1",
+    port: Number(el("rxSdrPort").value) || 5454, decode: el("rxSdrDecode").checked, timeoutS: 12,
+    onDecode: d => rxLogLine(decodeLine(d)),
   }));
 });
+
+el("rxReplayFile").addEventListener("click", () => rxFileInput.click());
 
 rxFileInput.addEventListener("change", async () => {
   const files = [...(rxFileInput.files || [])];
@@ -1038,16 +1082,6 @@ rxFileInput.addEventListener("change", async () => {
 });
 
 rxStopBtn.addEventListener("click", () => rxStop());
-// feat/live-sdr-console (SDR connection): SDRconnect's address only matters for that source.
-rxSourceSel.addEventListener("change", () => { el("rxSdrFields").hidden = rxSourceSel.value !== "sdr"; });
-
-modelSel.addEventListener("change", async () => {
-  if (!session || rx) return;
-  await analyze(session.capture.re, session.capture.im, {
-    source: session.source, caseNote: session.caseNote,
-    truth: session.truth, snrDb: session.snrDb,
-  });
-});
 
 hopSel.addEventListener("change", async () => {
   if (!session || rx) return;
@@ -1167,28 +1201,30 @@ async function store(file, sess = session) {
 const winSlider = el("winSlider"), winReadout = el("winReadout");
 const probsBox = el("probsBox"), winMetaBox = el("winMetaBox");
 const attnCanvas = el("attnCanvas"), breakdownCanvas = el("breakdownCanvas");
-let currentPage = "pipeline";
+let currentPage = "replay";
 const chatLogPromise = openChatLog();
 let perfData = null, modelCard = null;
 
 function showPage(page) {
   currentPage = page;
   for (const btn of document.querySelectorAll("nav button")) {
-    btn.classList.toggle("active", btn.dataset.page === page);
-    if (btn.dataset.page === page) btn.setAttribute("aria-current", "page"); else btn.removeAttribute("aria-current");
+    const here = btn.dataset.page === (page === "intel" ? "history" : page);   // a decoded signal is part of History
+    btn.classList.toggle("active", here);
+    if (here) btn.setAttribute("aria-current", "page"); else btn.removeAttribute("aria-current");
   }
   for (const sec of document.querySelectorAll("main section")) {
     sec.hidden = sec.id !== `page-${page}`;
   }
   // Canvases cannot be sized while hidden, so each page draws on entry.
-  if (page === "replay") { if (session) render(); else renderSignal(); }
+  if (page === "replay") {
+    if (session) render(); else renderSignal();
+    renderPipeline(el("pipelineRoot"), { server: readConfig().backend === "server" });
+  }
   if (page === "history") return renderHistory();
   if (page === "audit") renderAudit();
   if (page === "performance") renderPerformance();
   if (page === "model") renderModel();
   if (page === "users") renderUsers();
-  if (page === "pipeline") renderPipeline(el("pipelineRoot"), { server: readConfig().backend === "server" });
-  if (page === "intel") renderIntel(document.getElementById("intelRoot"), { server: readConfig().backend === "server" });
 }
 
 for (const btn of document.querySelectorAll("nav button[data-page]")) {
@@ -1387,7 +1423,7 @@ async function renderModel() {
       return;
     }
   }
-  box.innerHTML = modelCardHtml(modelCard, modelSel.value);
+  box.innerHTML = modelCardHtml(modelCard, MODEL_CHOICE);
   renderRetrain();
 }
 
@@ -1401,15 +1437,10 @@ const rtModels = el("rtModels"), rtActive = el("rtActive");
 let rtPolling = null;
 const escH = t => String(t ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
-/** The Model dropdown names the files it will actually run: a retrained
- *  version when one is active, the shipped files otherwise. */
+/** Remember which retrained version (if any) is the one in use. */
 function labelModelOptions(single, ensemble) {
   activeSingleVersion = single ? single.version : null;
   activeEnsembleVersion = ensemble ? ensemble.version : null;
-  const s = modelSel.querySelector('option[value="single"]');
-  if (s) s.textContent = single ? `${CLASSES.length}-class, retrained ${single.version}` : `${CLASSES.length}-class, ${MODEL.name}`;
-  const e = modelSel.querySelector('option[value="ensemble"]');
-  if (e) e.textContent = ensemble ? `Ensemble (5 models), retrained ${ensemble.version}` : "Ensemble (5 models)";
 }
 
 function recallCell(m, cls) {
@@ -1686,7 +1717,7 @@ Promise.all([chatLogPromise, ollamaCheck]).then(([chatLog, hasOllama]) => initAs
 // page load instead of on whoever's first question -- see ollama.js:warmUp.
 ollamaCheck.then(has => { if (has) ollamaWarmUp(); });
 
-showPage("pipeline");
+showPage("replay");
 init();
 
 
@@ -1745,6 +1776,7 @@ function paintHistory() {
   const mayDelete = canDelete() && (readConfig().backend !== "server" || role === "analyst");
   histTable.innerHTML = tableHtml(filtered, { canDelete: mayDelete });
   paintQueue();
+  paintAlerts();
   paintReportBuilder(filtered.length);
   histStatus.textContent = filtered.length === histRecords.length
     ? `${histRecords.length} stored`
@@ -1753,6 +1785,68 @@ function paintHistory() {
 
 // "Review required": low-confidence detections nobody has reviewed yet, newest first. The
 // operator views each one, then corrects it or marks the model right.
+const alertBlock = el("alertBlock"), alertList = el("alertList"), alertMsg = el("alertMsg");
+const ALERTS_SHOWN = 15;
+
+function paintAlerts() {
+  alertBlock.hidden = readConfig().backend !== "server";
+  if (alertBlock.hidden) return;
+  const esc = t => String(t ?? "").replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
+  const waiting = histRecords.filter(r => r.alert_level && !r.reviewed_by);
+  alertList.innerHTML = !waiting.length
+    ? `<div class="note">No alerts waiting.</div>`
+    : `<div class="note">${waiting.length} waiting${waiting.length > ALERTS_SHOWN ? `, newest ${ALERTS_SHOWN} shown` : ""}.</div>`
+      + `<table><tbody>` + waiting.slice(0, ALERTS_SHOWN).map(r => `<tr>`
+        + `<td>${esc(new Date(r.created_at).toLocaleString())}</td>`
+        + `<td>${esc(r.file_name || r.case_note || r.source)}</td>`
+        + `<td><b style="color:${TIER_COLOR[r.verdict] || "inherit"}">${esc(r.verdict)}</b>${flagsHtml(r)}</td>`
+        + `<td>${esc((r.classes_detected || []).join(", ") || "—")}</td>`
+        + `<td class="row-actions">` + (canView(r)
+          ? `<button class="mini" data-alert="${esc(r.id)}">Open waterfall</button>`
+          : `<span class="note">raw signal no longer kept</span>`) + `</td></tr>`).join("")
+      + `</tbody></table>`;
+}
+
+alertList.addEventListener("click", ev => {
+  const btn = ev.target.closest("button[data-alert]");
+  if (btn) viewCapture(histRecords.find(r => r.id === btn.dataset.alert));
+});
+
+const decodedBlock = el("decodedBlock"), decodedList = el("decodedList");
+const decodedMsg = el("decodedMsg"), decodedSearch = el("decodedSearch");
+let decodedRows = [];
+
+function paintDecoded() {
+  decodedList.innerHTML = decodedTableHtml(filterRows(decodedRows, { filter: decodedSearch.value }));
+}
+
+async function renderDecoded() {
+  decodedBlock.hidden = readConfig().backend !== "server";
+  if (decodedBlock.hidden) return;
+  try {
+    decodedRows = await listDecoded();
+    decodedMsg.textContent = "";
+    paintDecoded();
+  } catch (e) {
+    decodedMsg.textContent = `Could not read the decoded signals: ${e.message}`;
+  }
+}
+
+decodedSearch.addEventListener("input", paintDecoded);
+decodedList.addEventListener("click", ev => {
+  const row = ev.target.closest("tr[data-decoded]");
+  if (!row) return;
+  showPage("intel");
+  window.scrollTo({ top: 0, behavior: "instant" });
+  renderIntelDetail(el("intelRoot"), {
+    id: row.dataset.decoded,
+    onBack: async () => {
+      await showPage("history");
+      decodedBlock.scrollIntoView({ block: "start" });
+    },
+  });
+});
+
 const queueBlock = el("queueBlock"), queueList = el("queueList"), queueMsg = el("queueMsg");
 const QUEUE_SHOWN = 15;
 
@@ -1843,6 +1937,7 @@ async function renderHistory() {
         + "Start the page with scripts/serve_local.py (web/start_demo.bat) to use the local database.";
   renderAudit();
   renderCorrections();
+  renderDecoded();
   histStatus.textContent = "Loading…";
   try {
     const { records, warning } = await listAnalyses();
@@ -2233,37 +2328,42 @@ corrTable.addEventListener("click", async (ev) => {
   await renderAudit();
 });
 
-corrTable.addEventListener("click", async (ev) => {
-  const viewBtn = ev.target.closest("button[data-view]");
-  if (viewBtn) return viewCorrection(corrRows.find(c => c.id === viewBtn.dataset.view));
-  const btn = ev.target.closest("button[data-review]");
-  if (!btn) return;
-  const decision = btn.dataset.review;
-  const note = window.prompt(btn.dataset.own
+/** Approve or reject one correction, from the table or the waterfall. -> true when done. */
+async function decideCorrection(id, decision, own) {
+  const note = window.prompt(own
     ? `This is your own correction. ${decision === "approve" ? "Approve" : "Reject"} it as a SELF-REVIEW? `
       + "Give a reason (at least 10 characters); it is recorded in the audit trail."
     : decision === "approve"
     ? `Approve as ${operatorName()}? Optional note:`
     : `Reject as ${operatorName()}. Why? (required)`, "");
-  if (note === null) return;
+  if (note === null) return false;
   corrMsg.textContent = "";
   corrMsg.className = "note";
   try {
-    await reviewCorrection(btn.dataset.id, decision, note);
+    await reviewCorrection(id, decision, note);
     corrMsg.textContent = `Correction ${decision === "approve" ? "approved" : "rejected"} by ${operatorName()}.`;
     await renderCorrections();
     await renderAudit();
+    return true;
   } catch (e) {
     corrMsg.className = "corr-error";       // a refusal must not look like a footnote
     corrMsg.textContent = e.message.replace(/^Local database review failed \(\d+\)\. /, "");
+    return false;
   }
+}
+
+corrTable.addEventListener("click", async (ev) => {
+  const viewBtn = ev.target.closest("button[data-view]");
+  if (viewBtn) return viewCorrection(corrRows.find(c => c.id === viewBtn.dataset.view));
+  const btn = ev.target.closest("button[data-review]");
+  if (btn) await decideCorrection(btn.dataset.id, btn.dataset.review, !!btn.dataset.own);
 });
 
-// Reviewing a correction: open its capture on RF Replay so the reviewer judges
+// Reviewing a correction: open its capture on the waterfall so the reviewer judges
 // the signal, not just the operator's words.
 const reviewBanner = el("reviewBanner");
 
-/** Open a stored capture on RF Replay again: `fetchIq` gets its raw signal,
+/** Open a stored capture on the waterfall again: `fetchIq` gets its raw signal,
  *  `review` is what the banner describes. Not stored again (analyze skips it). */
 async function openStored(cap, fetchIq, review, msgEl) {
   msgEl.className = "note";
@@ -2320,12 +2420,13 @@ function showReviewBanner() {
     const a = r.rec;
     reviewBanner.innerHTML = `<div><strong>Stored capture</strong> ${esc(r.capture)}, analysed `
       + `${esc(new Date(a.created_at).toLocaleString())} as <strong>${esc(a.verdict)}</strong>. `
-      + (a.needs_review && !a.reviewed_by ? "It was flagged as a low-confidence detection: inspect it, then correct it "
-         + "(click or drag on the timeline)" + (isAnalyst() ? " or mark the model right." : "; an analyst decides whether the model was right.") : "")
+      + ((a.needs_review || a.alert_level) && !a.reviewed_by
+         ? `It was flagged as ${a.alert_level ? "an alert" : "a low-confidence detection"}: inspect it, then correct it `
+           + "(click or drag on the timeline)" + (isAnalyst() ? " or approve it if the model is right." : "; an analyst decides whether the model was right.") : "")
       + `<div class="note">Raw signal: ${esc(a.retention?.why || "")}. The model shown is the one in use now.`
       + (session.truth?.length ? " Dashed boxes are the known true answer." : "") + `</div></div>`
       + `<div class="row-actions">`
-      + (a.needs_review && !a.reviewed_by && isAnalyst() ? `<button class="mini" id="reviewRight">Model is right</button> ` : "")
+      + ((a.needs_review || a.alert_level) && !a.reviewed_by && isAnalyst() ? `<button class="mini" id="reviewRight">Approve: model is right</button> ` : "")
       + `<button class="mini" id="reviewBack">← Back to History</button></div>`;
     return;
   }
@@ -2338,14 +2439,29 @@ function showReviewBanner() {
     + (session.truth?.length ? " Dashed boxes are the known true answer." :
        " No true answer was saved with this capture (dashed boxes are only kept for captures analysed after 2 Oct 2026), so judge it from the waterfall.")
     + `</div></div>`
-    + `<button class="mini" id="reviewBack">← Back to corrections</button>`;
+    + `<div class="row-actions">`
+    + (r.status === "pending" && (isAnalyst() || !currentAuth().user)
+       ? `<button class="mini" data-banner-review="approve">Approve</button> <button class="mini" data-banner-review="reject">Reject</button> ` : "")
+    + `<button class="mini" id="reviewBack">← Back to corrections</button></div>`;
 }
 
 reviewBanner.addEventListener("click", async (ev) => {
+  const decide = ev.target.closest("button[data-banner-review]");
+  if (decide) {
+    const r = session.review;
+    const own = r.operator?.toLowerCase() === operatorName().toLowerCase();
+    if (await decideCorrection(r.id, decide.dataset.bannerReview, own)) {
+      r.status = decide.dataset.bannerReview === "approve" ? "approved" : "rejected";
+      showReviewBanner();
+    } else if (corrMsg.className === "corr-error") {
+      alert(corrMsg.textContent);            // corrMsg is on History, not on this page
+    }
+    return;
+  }
   if (ev.target.closest("#reviewRight")) {
     const r = session?.review;
     try {
-      await markReviewed(r.id, "checked on RF Replay");
+      await markReviewed(r.id, "checked on the waterfall");
       r.rec.reviewed_by = operatorName();
       showReviewBanner();
     } catch (e) { statusEl.textContent = `Could not mark it checked: ${e.message}`; }
