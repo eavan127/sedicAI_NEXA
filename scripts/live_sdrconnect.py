@@ -72,6 +72,7 @@ REPLAY_ONCE = [False]                     # --replay-once: play the file once, l
 COMMON_RATES = [48e3, 62.5e3, 96e3, 125e3, 192e3, 250e3, 500e3, 1e6, 1.536e6, 2e6, 2.048e6, 2.4e6, 3e6, 3.2e6,
                 4e6, 5e6, 6e6, 8e6, 10e6]
 ZOOM_FS = analog.FA                       # 50 kS/s, what the zoom rules and the demodulator expect
+VOICE_KINDS = {"NBFM", "WBFM", "AM", "AM_SC", "USB", "LSB"}   # what Whisper is run on (as src/pipeline/listen.py)
 KIND_CLASS = {"NBFM": "NBFM", "WBFM": "WBFM", "AM": "AM_DSB_WC", "AM_SC": "AM_DSB_SC",
               "USB": "AM_SSB_SC", "LSB": "AM_SSB_SC", "CW": "CW", "CARRIER": "CARRIER",
               "RTTY": "2FSK (RTTY)", "PSK31": "BPSK (PSK31-type)", "AFSK": "AFSK"}
@@ -499,7 +500,9 @@ def voice_snapshot(iq, fs, out_dir, whisper_model, language, use_whisper, use_ll
                         segments, text_kind = m["segments"], "morse"
                         L["morse"] = " / ".join(s["text"] for s in segments)
                         L["morse_detail"] = m
-                    elif use_whisper and L["duration_s"] >= 1.0:
+                    # Speech only: RTTY / PSK31 / AFSK are typed data, and Whisper on them gives
+                    # made-up words (and loads a multi-GB model for nothing).
+                    elif kind in VOICE_KINDS and use_whisper and L["duration_s"] >= 1.0:
                         from src.intel import voice
                         tr = voice.transcribe(wavio.wav_info(wav), model=whisper_model,
                                               max_minutes=L["duration_s"] / 60 + 1, language=language)
