@@ -24,6 +24,7 @@ from fractions import Fraction
 from pathlib import Path
 
 import numpy as np
+from scipy import fft as sfft
 from scipy.signal import resample_poly
 
 from src.config import CFG
@@ -123,16 +124,26 @@ def to_fs(iq, fs_in, rng=None):
     ratio = Fraction(FS / fs_in).limit_denominator(1000)
     y = resample_poly(iq, ratio.numerator, ratio.denominator).astype(np.complex64)
     if fs_in < FS:
+        # Single precision and in place: a 10 s recording is 34 M samples at
+        # 3.2 MS/s, and the double-precision version (fftfreq, two FFTs and a
+        # np.where copy, ~550 MB each) ran out of memory on an 8 GB laptop.
         rng = rng or np.random.default_rng(0)
         n = len(y)
-        f = np.fft.fftfreq(n, 1 / FS)
-        Y = np.fft.fft(y)
-        inside = np.abs(f) < EDGE_GUARD * fs_in / 2
-        # noise floor per bin: the median bin inside the recorded band is noise
-        floor = np.median(np.abs(Y[inside]) ** 2)
-        W = np.fft.fft(rng.standard_normal(n) + 1j * rng.standard_normal(n)) * np.sqrt(floor / (2 * n))
-        Y = np.where(inside, Y, W)
-        y = np.fft.ifft(Y).astype(np.complex64)
+        kc = EDGE_GUARD * fs_in / 2 * n / FS          # bins with |f| below this are the recorded band
+        a, b = int(np.ceil(kc)), int(np.floor(n - kc)) + 1   # Y[a:b] lies outside it
+        Y = sfft.fft(y, overwrite_x=True)             # complex64 in, complex64 out
+        # Noise floor per bin: the median bin inside the recorded band is noise.
+        # The power of a complex-Gaussian bin is exponential, whose median is
+        # ln 2 of its mean, so the median alone left the fill 1.6 dB quieter
+        # than the real noise: a step at the band edge for the detector to see.
+        floor = np.median(np.abs(np.concatenate([Y[:a], Y[b:]])) ** 2) / np.log(2)
+        m = max(b - a, 0)
+        # White noise has independent complex-Gaussian bins, so draw them
+        # directly (E|W|^2 = floor) instead of transforming a noise signal.
+        scale = np.float32(np.sqrt(floor / 2))
+        Y[a:b] = (rng.standard_normal(m, dtype=np.float32) * scale
+                  + 1j * (rng.standard_normal(m, dtype=np.float32) * scale))
+        y = sfft.ifft(Y, overwrite_x=True).astype(np.complex64, copy=False)
     return y
 
 

@@ -148,7 +148,9 @@ def main():
     if args.hybrid and not args.energy:
         detector = HybridDetector(detector)
     classifier = Classifier(args.classifier)
-    answers, _ = process_capture(iq, detector, classifier, rng=rng, active_only=not args.all_windows)
+    band_hz = source["fs_in"] if args.iq else None      # a narrower recording's edges are fill noise
+    answers, _ = process_capture(iq, detector, classifier, rng=rng, active_only=not args.all_windows,
+                                 band_hz=band_hz)
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)

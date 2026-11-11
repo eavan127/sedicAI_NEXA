@@ -582,7 +582,7 @@ class FullChain:
         sys.path.insert(0, str(REPO_ROOT / "scripts"))
         from run_pipeline import plot
         x = iqio.to_fs(iq, fs, rng)
-        answers, _ = process_capture(x, self.detector, self.classifier, rng=rng)
+        answers, _ = process_capture(x, self.detector, self.classifier, rng=rng, band_hz=fs)
         listen.listen_all(x, answers, out_dir, rng=rng, **listen_kw)
         plot(x, answers, None, out_dir / "tracks.png")
         return answers, len(x) / iqio.FS * 1e3

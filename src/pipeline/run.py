@@ -15,7 +15,7 @@ from src.config import CFG
 from src.detect import baseline
 from src.detect import model as det
 from src.detect import scenes
-from src.pipeline import extract
+from src.pipeline import extract, iqio
 from src.pipeline.resolve import resolve
 from src.pipeline.tracker import Detection, Tracker, top_classes
 
@@ -106,11 +106,39 @@ def box_to_physical(box, chunk_start):
     return t0, t1, f_lo, f_hi
 
 
-def process_capture(iq, detector, classifier, rng=None, tracker=None, cw_min_s=None, active_only=True):
+def recorded_edge_hz(band_hz):
+    """Half-width (Hz) of the band a recording really covers after it was
+    resampled to FS, or None when it covers the whole band. A narrower
+    recording's edges are noise filled in by iqio.to_fs, so nothing found
+    there is real; the outer 10% of its own band is filter roll-off."""
+    if band_hz is None or band_hz >= FS - 1:
+        return None
+    return iqio.EDGE_GUARD * float(band_hz) / 2
+
+
+def keep_in_band(f_lo, f_hi, edge, min_inside=0.5):
+    """A box -> (f_lo, f_hi) clipped to +-edge, or None when less than
+    `min_inside` of its width lies in the recorded band. SED-44: on a
+    250 kS/s demo file the detector drew ~30 boxes 10 ms long and ~2.5 MHz
+    wide across the fill noise (named JAM_TONE / AFSK / QAM); under 10% of
+    each is real band. Nothing real can be wider than the recording."""
+    if edge is None:
+        return f_lo, f_hi
+    lo, hi = max(f_lo, -edge), min(f_hi, edge)
+    if hi <= lo or hi - lo < min_inside * (f_hi - f_lo):
+        return None
+    return lo, hi
+
+
+def process_capture(iq, detector, classifier, rng=None, tracker=None, cw_min_s=None, active_only=True,
+                    band_hz=None):
     """Run the chain over complex `iq`. Returns (answers, tracker): one dict
-    per track, in order of first appearance."""
+    per track, in order of first appearance. `band_hz` is the sample rate the
+    recording was made at, when that was narrower than FS: boxes outside the
+    band it really covers are dropped, boxes across its edge clipped."""
     rng = rng or np.random.default_rng(0)
     tracker = tracker or Tracker()
+    edge = recorded_edge_hz(band_hz)
     iq = np.asarray(iq)
     for k, s in enumerate(range(0, len(iq), CHUNK)):
         chunk = iq[s:s + CHUNK]
@@ -123,8 +151,10 @@ def process_capture(iq, detector, classifier, rng=None, tracker=None, cw_min_s=N
         for box, score in zip(boxes, scores):
             t0, t1, f_lo, f_hi = box_to_physical(box, s)
             t1 = min(t1, len(iq))
-            if t1 - t0 <= 0:
+            band = keep_in_band(f_lo, f_hi, edge)
+            if t1 - t0 <= 0 or band is None or band[1] <= band[0]:
                 continue
+            f_lo, f_hi = band
             c = extract.cut(iq, t0, t1, f_lo, f_hi, nv, rng)
             probs = classifier(extract.active_windows(c) if active_only else extract.windows(c))
             dets.append(Detection(c.t0, c.t1, c.f_lo, c.f_hi, float(score), probs, c.features, chunk=k))

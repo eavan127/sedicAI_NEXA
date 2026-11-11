@@ -139,8 +139,10 @@ def write_iq(path, iq):
 def candidates(src, max_s, per_recording):
     rows, seen = [], set()
     for f in sorted(src.glob("*.json")):
+        if f.name.startswith("."):                    # the server's audit markers, not recordings
+            continue
         j = json.loads(f.read_text(encoding="utf-8"))
-        if "segments" not in j:
+        if not isinstance(j, dict) or "segments" not in j:
             continue
         n = 0
         for s in sorted(j["segments"], key=lambda s: -s.get("snr_db", 0)):

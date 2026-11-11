@@ -67,6 +67,18 @@ python scripts/run_pipeline.py --iq "$env:USERPROFILE\Downloads\military_radio_I
 
 Or use the dashboard: `python scripts/serve_local.py`, then Signal Pipeline → Analyse file.
 
+Score the whole set against its manifests (57 voice + 27 Morse, one pipeline run per file, a few
+minutes each on a CPU; runs resume, so it can be stopped and started again):
+
+```powershell
+python scripts/eval_military_radio.py --limit 3          # a quick look first
+python scripts/eval_military_radio.py                    # all 84 -> results/eval_military_radio/scores.csv
+```
+
+Per file: transmission found, right analog kind (NBFM / AM / USB / CW), audio written, Whisper word
+error (Mandarin: character error) or Morse character error, and junk tracks. A copy unzipped one
+level deeper (`military_radio_IQ\military_radio_IQ`) is found too.
+
 ## 4. Live on ONE laptop (rehearsal, or a solo demo)
 
 ```powershell

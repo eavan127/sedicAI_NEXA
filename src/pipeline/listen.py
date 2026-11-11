@@ -17,13 +17,20 @@ audio and the analog kind in place, with the error noted.
 from pathlib import Path
 
 import numpy as np
+from scipy import fft as sfft
+from scipy.signal import resample_poly
 
 from src.config import CLASS_GROUPS, CFG
 from src.intel import audio as wavio
 from src.pipeline import analog, demod, extract
 
 FS = float(CFG["signal"]["fs"])
-LISTEN_CLASSES = set(CLASS_GROUPS["ANALOG"]) | {"RADAR_CW", "JAM_TONE", "OOK", "JAM_SPOT"}
+# The whole ASK group, not only OOK: Morse is OOK, and the classifier cannot
+# tell ASK sizes apart (resolve answers "4ASK / 8ASK"). SED-44: every word of
+# a 20 WPM Morse recording came out "4ASK / 8ASK" and was never decoded. The
+# zoom decides what it really is; a real ASK data signal is named UNKNOWN or
+# kept as the classifier said.
+LISTEN_CLASSES = set(CLASS_GROUPS["ANALOG"]) | set(CLASS_GROUPS["ASK"]) | {"RADAR_CW", "JAM_TONE", "JAM_SPOT"}
 TOP5_ANALOG_P = 0.2
 MAX_WIDTH_HZ = 300e3            # wider tracks are not voice/Morse radios
 MIN_SPEECH_S = 1.0
@@ -41,16 +48,51 @@ def wanted(ans):
     return any(c in CLASS_GROUPS["ANALOG"] and p >= TOP5_ANALOG_P for c, p in ans.get("top5", []))
 
 
+MIX_BLOCK = 1 << 20
+
+
+def zoomed_cut(iq, t0, t1, f_lo, f_hi, noise_var, rng, decim=WIDE_DECIM):
+    """analog.zoom(extract.cut(...).filled, decim), zoomed FIRST: the box mixed
+    to 0 Hz and decimated, then everything outside it (plus extract's margin)
+    replaced by noise at the floor. The same signal for 1/decim of the memory:
+    the full-rate cut of a 10 s recording (34 M samples, ~6 double-precision
+    copies) ran out of memory on the SED-44 Morse files."""
+    n = len(iq)
+    t0, t1 = int(max(0, t0)), int(min(n, t1))
+    if t1 - t0 < extract.WINDOW_LEN:
+        mid = (t0 + t1) // 2
+        t0 = max(0, min(mid - extract.WINDOW_LEN // 2, n - extract.WINDOW_LEN))
+        t1 = min(n, t0 + extract.WINDOW_LEN)
+    fc = (f_lo + f_hi) / 2
+    half = (f_hi - f_lo) / 2 + max(extract.MIN_MARGIN_HZ, extract.CUT_MARGIN_FRAC * (f_hi - f_lo))
+    x = np.empty(t1 - t0, np.complex64)
+    for s in range(t0, t1, MIX_BLOCK):              # mix to 0 Hz block by block: no full-length phase array
+        e = min(t1, s + MIX_BLOCK)
+        x[s - t0:e - t0] = iq[s:e] * np.exp(-2j * np.pi * fc * np.arange(s, e) / FS).astype(np.complex64)
+    y = resample_poly(x, 1, decim)
+    del x
+    fa, m = FS / decim, len(y)
+    kc = half * m / fa                                # bins with |f| <= half are the box
+    a, b = int(np.floor(kc)) + 1, int(np.ceil(m - kc))   # Y[a:b] lies outside it
+    if b > a:
+        Y = sfft.fft(y, overwrite_x=True)
+        # white noise of variance noise_var at FS keeps noise_var / decim per sample after the zoom
+        scale = np.float32(np.sqrt(m * noise_var / decim / 2))
+        Y[a:b] = (rng.standard_normal(b - a, dtype=np.float32) * scale
+                  + 1j * (rng.standard_normal(b - a, dtype=np.float32) * scale))
+        y = sfft.ifft(Y, overwrite_x=True)
+    return np.asarray(y, dtype=np.complex64)
+
+
 def listen_track(iq, ans, out_dir, noise_var, rng, whisper_model=None, language=None, llm_model=None,
                  use_whisper=True, use_llm=True):
     t0 = int(ans["t_start_ms"] * FS / 1e3)
     t1 = int(ans["t_end_ms"] * FS / 1e3)
     f_lo, f_hi = ans["f_lo_khz"] * 1e3, ans["f_hi_khz"] * 1e3
-    c = extract.cut(iq, t0, t1, f_lo, f_hi, noise_var, rng)
     # Two-step zoom: 400 kS/s first, find the signal itself inside the (often
     # much wider) box, then centre on it and zoom to 50 kS/s for voice / Morse.
     fa1 = FS / WIDE_DECIM
-    y1 = analog.zoom(c.filled, WIDE_DECIM)          # noise-filled outside the box: the floor stays measurable
+    y1 = zoomed_cut(iq, t0, t1, f_lo, f_hi, noise_var, rng)   # noise-filled outside the box: the floor stays measurable
     m1 = analog.measure(y1, fa1)
     lo1, hi1 = m1.get("band", (-fa1 / 4, fa1 / 4))
     wide = ans["answer"] == "WBFM" or (hi1 - lo1) > analog.WBFM_HZ

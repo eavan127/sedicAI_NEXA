@@ -35,6 +35,19 @@ def test_transcript_saved_and_indexed(tmp_path):
     assert row["id"] == "r1_track_1" and row["summary"] == "alpha bravo" and row["transmissions"] == 1
 
 
+def test_audit_markers_in_the_folder_do_not_break_the_index(tmp_path):
+    # serve_local.py writes .audited-<db>.json (a JSON list) into this folder;
+    # reading it as a recording stopped every later save (SED-44 demo run).
+    run, out = tmp_path / "run", tmp_path / "intel"
+    run.mkdir()
+    out.mkdir()
+    (out / ".audited-0123456789.json").write_text(json.dumps(["r0_track_1"]), encoding="utf-8")
+    name = wav(run)
+    assert store.save_decoded_tracks("r1", SOURCE, [track(1, name, "alpha bravo")], run, out) == ["r1_track_1"]
+    rows = json.loads((out / "index.json").read_text(encoding="utf-8"))["recordings"]
+    assert [r["id"] for r in rows] == ["r1_track_1"]
+
+
 def test_no_words_recorded_as_such_unless_slicing(tmp_path):
     run, out = tmp_path / "run", tmp_path / "intel"
     run.mkdir()

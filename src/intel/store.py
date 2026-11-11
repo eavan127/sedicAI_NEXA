@@ -55,10 +55,14 @@ def write_index(out):
     out = Path(out)
     rows = []
     for p in sorted(out.glob("*.json")):
-        if p.name == "index.json":
+        # Dot files are not recordings: the server's audit markers
+        # (.audited-<db>.json, a list of logged ids) live here too.
+        if p.name == "index.json" or p.name.startswith("."):
             continue
         try:
-            rows.append(summary_row(json.loads(p.read_text(encoding="utf-8"))))
+            rec = json.loads(p.read_text(encoding="utf-8"))
+            if isinstance(rec, dict):
+                rows.append(summary_row(rec))
         except (json.JSONDecodeError, KeyError):
             continue
     rows.sort(key=lambda r: (r.get("recorded_at") or "", r["file"]))

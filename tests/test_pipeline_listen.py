@@ -55,6 +55,71 @@ def test_resamples_narrower_recording_and_fills_its_edges(tmp_path):
     assert 0.5 < edge / inside < 2                    # the band edges hold noise at the floor, not nothing
 
 
+def test_edge_fill_matches_the_real_noise_floor_without_a_step():
+    # SED-44: the fill was the in-band MEDIAN bin power, 1.6 dB under the
+    # mean noise, which left a visible step at the recording's band edge.
+    rng = np.random.default_rng(3)
+    fs, n = 250e3, 125_000
+    iq = ((rng.standard_normal(n) + 1j * rng.standard_normal(n)) * 0.1).astype(np.complex64)
+    out = iqio.to_fs(iq, fs, np.random.default_rng(4))
+    assert out.dtype == np.complex64
+    P = np.abs(np.fft.fft(out)) ** 2
+    f = np.fft.fftfreq(len(out), 1 / FS)
+    inside = P[np.abs(f) < 0.8 * fs / 2].mean()
+    edge = P[np.abs(f) > fs].mean()
+    assert abs(10 * np.log10(edge / inside)) < 0.3
+
+
+def test_zoomed_cut_matches_cut_then_zoom():
+    # listen.zoomed_cut replaces analog.zoom(extract.cut(...).filled) to save memory
+    from src.pipeline import extract
+    rng = np.random.default_rng(5)
+    n = 1 << 18
+    t = np.arange(n) / FS
+    noise = (rng.standard_normal(n) + 1j * rng.standard_normal(n)) * np.sqrt(0.5)
+    iq = (noise + 3 * np.exp(2j * np.pi * 105e3 * t) + 3 * np.exp(2j * np.pi * 400e3 * t)).astype(np.complex64)
+    old = analog.zoom(extract.cut(iq, 0, n, 80e3, 120e3, 1.0, np.random.default_rng(1)).filled, listen.WIDE_DECIM)
+    new = listen.zoomed_cut(iq, 0, n, 80e3, 120e3, 1.0, np.random.default_rng(1))
+    assert new.dtype == np.complex64 and abs(len(new) - len(old)) <= 1
+    fa = FS / listen.WIDE_DECIM
+
+    def bins(y):
+        P = np.abs(np.fft.fft(y)) ** 2 / len(y)
+        f = np.fft.fftfreq(len(y), 1 / fa)
+        return P, f
+
+    for y in (old, new):
+        P, f = bins(y)
+        assert abs(f[np.argmax(P)] - 5e3) < 100          # the box's tone, now 5 kHz above its centre
+        assert P[np.abs(f - 300e3 + fa) < 2e3].max() < 50 * np.median(P)   # the 400 kHz neighbour is gone
+    Po, fo = bins(old)
+    Pn, fn = bins(new)
+    floor_old, floor_new = np.median(Po[np.abs(fo) > 100e3]), np.median(Pn[np.abs(fn) > 100e3])
+    assert abs(10 * np.log10(floor_new / floor_old)) < 0.5
+
+
+def test_ask_size_group_answers_are_listened_to():
+    # SED-44: Morse came out of the classifier as "4ASK / 8ASK" and was skipped.
+    def ans(answer, classes, lo=-40.0, hi=76.0):
+        return {"answer": answer, "classes": classes, "f_lo_khz": lo, "f_hi_khz": hi, "top5": []}
+    assert listen.wanted(ans("4ASK / 8ASK", ["4ASK", "8ASK"]))
+    assert listen.wanted(ans("OOK", ["OOK"]))
+    assert not listen.wanted(ans("QAM", ["16QAM", "64QAM"]))
+    assert not listen.wanted(ans("4ASK / 8ASK", ["4ASK", "8ASK"], lo=-400.0, hi=400.0))   # too wide for a radio
+
+
+def test_boxes_in_the_fill_noise_are_dropped_and_edge_boxes_clipped():
+    from src.pipeline.run import keep_in_band, recorded_edge_hz
+    assert recorded_edge_hz(None) is None and recorded_edge_hz(FS) is None
+    edge = recorded_edge_hz(250e3)
+    assert edge == pytest.approx(112.5e3)
+    assert keep_in_band(-1283e3, 1301e3, edge) is None          # a 10 ms box across the whole band
+    assert keep_in_band(300e3, 500e3, edge) is None              # wholly in the fill
+    assert keep_in_band(-107e3, -32e3, edge) == (-107e3, -32e3)  # the real NBFM track
+    assert keep_in_band(60e3, 140e3, edge) == (60e3, 112.5e3)    # across the edge: clipped
+    assert keep_in_band(-1e6, 1e6, None) == (-1e6, 1e6)          # full-band recording: untouched
+
+
 def test_audio_wav_is_refused_with_a_hint(tmp_path):
     from src.intel import audio
     audio.write_wav(tmp_path / "audio.wav", np.zeros(800), 8000)

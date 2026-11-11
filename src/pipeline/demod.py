@@ -4,7 +4,7 @@ Turn a zoomed narrowband track back into the sound an operator would hear.
 Input: complex baseband at 50 kS/s (src/pipeline/analog.zoom), the kind from
 analog.classify and its features. Output: float audio at 16 kHz in [-1, 1].
 
-  NBFM   frequency discriminator, 750 us de-emphasis, 3.5 kHz low-pass
+  NBFM   frequency discriminator, 750 us de-emphasis, 300 Hz - 3.5 kHz voice band
   WBFM   the same at 400 kS/s, 50 us de-emphasis, 15 kHz low-pass
   AM     carrier to 0 Hz, envelope, DC removed
   AM_SC  carrier phase from the squared signal, real part
@@ -42,10 +42,21 @@ def _to_audio(a, fs):
     return np.clip(0.9 * a / peak, -1, 1).astype(np.float32)
 
 
-def fm(y, fs, tau=750e-6, audio_hz=3500):
+def fm(y, fs, tau=750e-6, audio_hz=3500, low_hz=None):
     d = np.angle(y[1:] * np.conj(y[:-1])) * fs / (2 * np.pi)
     d = _deemphasis(d - np.median(d), fs, tau)
-    return _to_audio(_lowpass(d, fs, audio_hz), fs)
+    d = _lowpass(d, fs, audio_hz)
+    if low_hz:
+        d = sosfiltfilt(butter(4, low_hz, btype="high", fs=fs, output="sos"), d)
+    return _to_audio(d, fs)
+
+
+# A voice radio's receiver passes 300-3000 Hz (below that sit sub-audible
+# squelch tones). Without it, half the NBFM audio power was rumble under
+# 300 Hz from the residual offset and drift after de-emphasis; filtering it
+# took Whisper's word error on a 21 dB demo clip from 67% to 33% (SED-44,
+# en_cv_001).
+VOICE_LOW_HZ = 300.0
 
 
 def demodulate(y, fs, kind, feats):
@@ -56,7 +67,7 @@ def demodulate(y, fs, kind, feats):
     carrier = feats.get("carrier_hz", 0.0)
     has_carrier = feats.get("carrier_frac", 0) >= 0.25
     if kind == "NBFM":
-        return fm(_shift(y, fs, (lo + hi) / 2), fs)
+        return fm(_shift(y, fs, (lo + hi) / 2), fs, low_hz=VOICE_LOW_HZ)
     if kind == "WBFM":
         return fm(y, fs, tau=50e-6, audio_hz=15000)
     if kind == "AM":
