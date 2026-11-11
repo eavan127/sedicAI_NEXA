@@ -764,7 +764,20 @@
                 <select id="rxSource">
                   <option value="sim" selected>Simulated receiver (virtual SDR)</option>
                   <option value="file">File replay (.bin or SigMF, as if live)</option>
+                  <!-- feat/live-sdr-console (SDR connection): the real antenna via SDRconnect -->
+                  <option value="sdr">SDRconnect (live antenna)</option>
                 </select>
+              </div>
+              <!-- feat/live-sdr-console (SDR connection): where SDRconnect runs; shown for "sdr" only -->
+              <div class="field" id="rxSdrFields" style="flex:2;min-width:220px;" hidden>
+                <label for="rxSdrHost">SDRconnect at</label>
+                <div style="display:flex;gap:6px;">
+                  <input id="rxSdrHost" value="127.0.0.1" spellcheck="false" style="flex:3;min-width:0;" title="laptop running SDRconnect (127.0.0.1 = this one)">
+                  <input id="rxSdrPort" value="5454" inputmode="numeric" style="flex:1;min-width:0;" title="WebSocket port (Settings -> WebSocket interface)">
+                </div>
+                <label style="display:flex;gap:6px;align-items:center;margin-top:4px;font-weight:normal;">
+                  <input type="checkbox" id="rxSdrDecode" checked> decode Morse / voice (Whisper) in the background
+                </label>
               </div>
               <div class="field" style="flex:1;min-width:120px;">
                 <label for="rxDwell">Dwell</label>

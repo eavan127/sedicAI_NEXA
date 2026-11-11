@@ -7,6 +7,7 @@ import {
 import { drawConsole } from "./console.js";
 import { annotationsToTruth, decodeSamples, describe, isSigmfName, parseDatatype, readSigmf } from "./sigmf.js";
 import { FileReplay, SimulatedReceiver, dwellLevel, toInterleavedF32 } from "./receiver.js";
+import { SdrConnectReceiver, decodeLine } from "./sdr_receiver.js";   // feat/live-sdr-console (SDR connection)
 import { peakScore, triage } from "./triage.js";
 import { formatEta, retrainProgress } from "./retrain_progress.js";
 import { coveredBy, detectedIn, spanAt, suggestCorrections } from "./review.js";
@@ -872,7 +873,8 @@ function rxPaint() {
     ["Hardware", d.serial ? `${d.hardware} · ${d.serial}` : d.hardware],
     ["Link", d.link],
     ["Centre freq", d.centreHz == null ? "not recorded" : fmtHz(d.centreHz) + sim],
-    ["Sample rate", `${(d.sampleRate / 1e6).toFixed(1)} MS/s`],
+    ["Sample rate", `${(d.sampleRate / 1e6).toFixed(1)} MS/s`
+      + (d.streamRate ? ` (stream ${(d.streamRate / 1e3).toFixed(1)} kS/s)` : "")],   // streamRate: SDRconnect
     ["Gain", d.gainDb == null ? "n/a" : `${d.gainDb} dB${sim}`],
     ["Uptime", rx.streaming ? fmtClock(wallS) : "—"],
     ["Samples in", rx.samples.toLocaleString()],
@@ -907,8 +909,14 @@ async function rxStart(source) {
   rxSetState("connecting", "RECEIVER · CONNECTING");
   rxPaint();
   const me = rx;
-  await source.connect(step => { if (rx === me) rxLogLine(step); });
+  try {
+    await source.connect(step => { if (rx === me) rxLogLine(step); });
+  } catch (e) {                                  // a real receiver can be unreachable
+    if (rx === me) rxStop(`could not connect: ${e.message}`);
+    return;
+  }
   if (rx !== me || me.stopReason) return;       // Stop pressed mid-handshake
+  me.info = source.describe();                  // a real receiver reports its settings once connected
   me.streaming = true;
   me.startedAt = performance.now();
   // Ticks between dwells too, so the panel visibly runs while a dwell is
@@ -920,6 +928,11 @@ async function rxStart(source) {
   rxNote.textContent = rx.info.kind === "sim"
     ? "Each dwell is a fresh slice of simulated air. Change the scenario case or SNR below at any "
       + "time and the next dwell follows. A dwell is stored only when what is detected changes."
+    : rx.info.kind === "sdr"
+    ? "Live from the antenna: each dwell is the newest slice of what SDRconnect receives, classified "
+      + "as it arrives (the air between dwells is not examined). In the background the server records "
+      + "each transmission until the air goes quiet, then decodes it; results appear in this log, "
+      + "Signal Pipeline and Comms Intel."
     : "Streaming the recording dwell by dwell, every sample in order. A dwell is stored only when "
       + "what is detected changes.";
   rxPaint();
@@ -995,6 +1008,14 @@ function rxStop(reason = "stopped by operator") {
 rxConnectBtn.addEventListener("click", () => {
   const dwellS = Number(rxDwellSel.value);
   if (rxSourceSel.value === "file") { rxFileInput.click(); return; }
+  if (rxSourceSel.value === "sdr") {             // feat/live-sdr-console (SDR connection)
+    rxStart(new SdrConnectReceiver({
+      dwellS, host: el("rxSdrHost").value.trim() || "127.0.0.1", port: Number(el("rxSdrPort").value) || 5454,
+      decode: el("rxSdrDecode").checked,
+      onDecode: d => rxLogLine(decodeLine(d)),
+    }));
+    return;
+  }
   rxStart(new SimulatedReceiver({
     dwellS,
     getSettings: () => ({ caseName: caseSel.value, snrDb: Number(snrSel.value) }),
@@ -1017,6 +1038,8 @@ rxFileInput.addEventListener("change", async () => {
 });
 
 rxStopBtn.addEventListener("click", () => rxStop());
+// feat/live-sdr-console (SDR connection): SDRconnect's address only matters for that source.
+rxSourceSel.addEventListener("change", () => { el("rxSdrFields").hidden = rxSourceSel.value !== "sdr"; });
 
 modelSel.addEventListener("change", async () => {
   if (!session || rx) return;

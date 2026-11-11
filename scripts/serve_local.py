@@ -605,6 +605,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self._intel(parts[1:])
         if head == "pipeline":
             return self._pipeline(method, parts[1:], query)
+        if head == "sdr":            # live SDRconnect receiver -- scripts/sdr_hub.py (feat/live-sdr-console)
+            return self._sdr(method, parts[1:], query)
         if head == "auth":
             return self._auth(method, parts[1:])
         if head == "users":
@@ -715,6 +717,65 @@ class Handler(SimpleHTTPRequestHandler):
                                     body.get("target_id"), body.get("details") or {})
                 return self._send_json(entry, HTTPStatus.CREATED)
 
+        return self._error(HTTPStatus.NOT_FOUND, "no such endpoint")
+
+    # -- live SDRconnect receiver (scripts/sdr_hub.py) ---------------------------
+    # One connection to SDRconnect for the whole server; every page reads it.
+    # Owned by the SDR-connection half of feat/live-sdr-console: see docs/LIVE_SDR_BRANCH.md.
+
+    _sdr_hub = None
+    _sdr_lock = threading.Lock()
+
+    def _hub(self):
+        with Handler._sdr_lock:
+            if Handler._sdr_hub is None:
+                sys.path.insert(0, str(Path(__file__).resolve().parent))
+                from sdr_hub import SdrHub
+                hub = SdrHub(jobs_dir=PIPELINE_DIR, intel_dir=self.intel_dir)
+                # Each decoded transmission goes into the audit trail as soon as it is
+                # done (live.result + intel.recording), not only when a page next opens
+                # Signal Pipeline. _audit_results only reads class-level state.
+                hub.on_result = lambda _entry, h=self: h._audit_results()
+                Handler._sdr_hub = hub
+            return Handler._sdr_hub
+
+    def _sdr(self, method, rest, query):
+        hub = self._hub()
+        if method == "GET" and rest == ["status"]:
+            return self._send_json(hub.status())
+        if method == "POST" and rest == ["connect"]:
+            body = self._read_json()
+            st = hub.connect(host=body.get("host") or "127.0.0.1", port=body.get("port") or 5454,
+                             device=body.get("device") or "primary", decode=body.get("decode"),
+                             whisper_model=body.get("whisper_model") or "small",
+                             language=body.get("language"), use_whisper=body.get("whisper", True),
+                             use_llm=bool(body.get("llm")))
+            self.db.log(self._actor(), "sdr.connect", "sdr", st["url"],
+                        {"device": st["device"], "decode": st["decode"]})
+            return self._send_json(st)
+        if method == "POST" and rest == ["disconnect"]:
+            was = hub.status()
+            st = hub.disconnect()
+            if was["state"] != "off":
+                self.db.log(self._actor(), "sdr.disconnect", "sdr", was["url"],
+                            {"samples": was["total_samples"], "decodes": len(was["decodes"])})
+            return self._send_json(st)
+        if method == "GET" and rest == ["dwell"]:
+            after = (query.get("after") or [None])[0]
+            iq, meta = hub.dwell(float((query.get("s") or ["0.05"])[0]), int(after) if after else None)
+            headers = {"X-NEXA-SDR-State": meta["state"], "X-NEXA-SDR-Total": str(meta["total"])}
+            if iq is None:
+                self.send_response(HTTPStatus.NO_CONTENT)
+                for k, v in headers.items():
+                    self.send_header(k, v)
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                return None
+            headers |= {"X-NEXA-Sample-Rate": str(int(meta.get("fs_in") or 0)),
+                        "X-NEXA-Level-Db": "" if meta.get("level_db") is None else f"{meta['level_db']:.1f}",
+                        "X-NEXA-Upsampled": "1" if meta.get("upsampled") else "0"}
+            # complex64 is float32 I, Q, I, Q ... (little-endian): the page's interleaved format as it is.
+            return self._send_file(iq.view("float32").tobytes(), "application/octet-stream", "dwell.f32", headers)
         return self._error(HTTPStatus.NOT_FOUND, "no such endpoint")
 
     def _auth(self, method, rest):
