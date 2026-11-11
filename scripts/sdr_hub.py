@@ -86,6 +86,7 @@ class SdrHub:
         self.opts = {}
         self.on_air = False
         self.rec_s = 0.0
+        self.label, self.skipped, self.fixed_fs = None, 0, None
         self.decodes = deque(maxlen=20)    # newest last
         self.analysing = 0
         self.work = queue.Queue()
@@ -112,6 +113,13 @@ class SdrHub:
         if language is not None and language not in voice.LANGUAGES:
             raise ValueError(f"language must be one of {list(voice.LANGUAGES)}")
         url = f"ws://{host if ':' not in host or host.startswith('[') else f'[{host}]'}:{port}"
+        opts = {"decode": self.decode_default if decode is None else bool(decode),
+                "whisper_model": whisper_model, "language": language,
+                "use_whisper": bool(use_whisper), "use_llm": bool(use_llm)}
+        return self._open(url, device, f"SDRconnect {url}", bridge.sdrconnect_receiver, (url, device), opts)
+
+    def _open(self, url, device, label, receiver, args, opts, fixed_fs=None):
+        """Start (or join) one stream: receiver(buf, *args) fills the buffer in a thread."""
         with self.lock:
             if self.state in ("connecting", "streaming") and self.url == url and self.device == device:
                 return self._status_locked()           # a second page joins the running stream
@@ -119,15 +127,12 @@ class SdrHub:
             self.gen += 1
             gen = self.gen
             self.buf, self.stop = bridge.IqBuffer(keep_s=4.0), threading.Event()
-            self.state, self.error, self.url, self.device = "connecting", None, url, device
+            self.state, self.error, self.url, self.device, self.label = "connecting", None, url, device, label
             self.fs = self.centre = None
-            self.centre_src, self.on_air, self.rec_s = "unknown", False, 0.0
-            self.opts = {"decode": self.decode_default if decode is None else bool(decode),
-                         "whisper_model": whisper_model, "language": language,
-                         "use_whisper": bool(use_whisper), "use_llm": bool(use_llm)}
+            self.centre_src, self.on_air, self.rec_s, self.skipped = "unknown", False, 0.0, 0
+            self.opts, self.fixed_fs = opts, fixed_fs
             buf, stop = self.buf, self.stop
-            threading.Thread(target=bridge.sdrconnect_receiver, args=(buf, url, device),
-                             daemon=True, name="sdr-ws").start()
+            threading.Thread(target=receiver, args=(buf, *args), daemon=True, name="sdr-rx").start()
             threading.Thread(target=self._start, args=(gen, buf, stop), daemon=True, name="sdr-start").start()
             return self._status_locked()
 
@@ -147,9 +152,18 @@ class SdrHub:
                 ws.close()
             except Exception:                          # noqa: BLE001 -- already closed
                 pass
+        proc = getattr(self.buf, "proc", None) if self.buf is not None else None
+        if proc is not None and proc.poll() is None:   # a KiwiSDR client process
+            proc.kill()
 
     def _start(self, gen, buf, stop):
-        fs = bridge.settle_rate(buf, wait_s=1.5)
+        if self.fixed_fs:                              # the source states its rate (KiwiSDR): wait for samples only
+            end = time.monotonic() + 30
+            while buf.t_first is None and buf.error is None and time.monotonic() < end and not stop.is_set():
+                time.sleep(0.1)
+            fs = self.fixed_fs if buf.t_first is not None else None
+        else:
+            fs = bridge.settle_rate(buf, wait_s=1.5)
         with self.lock:
             if gen != self.gen:
                 return
@@ -189,7 +203,8 @@ class SdrHub:
             "demodulator": info.get("demodulator"), "device_sample_rate": info.get("device_sample_rate"),
             "total_samples": buf.total if buf is not None else 0,
             "decode": dict(self.opts), "on_air": self.on_air, "recording_s": round(self.rec_s, 1),
-            "analysing": self.analysing, "decodes": list(self.decodes),
+            "analysing": self.analysing, "skipped": getattr(self, "skipped", 0), "label": getattr(self, "label", None),
+            "decodes": list(self.decodes),
         }
 
     def dwell(self, seconds=0.05, after=None):
@@ -221,7 +236,7 @@ class SdrHub:
         bridge.SPOOL.mkdir(parents=True, exist_ok=True)
         buf.rotate_spool(bridge.new_spool())
         checked, heard_at, started = buf.total, None, None
-        label = f"SDRconnect {self.url}"
+        label = self.label
         while not stop.wait(0.25) and not buf.error:
             now = time.monotonic()
             if buf.total - checked < CHECK_S * fs:
@@ -267,6 +282,15 @@ class SdrHub:
             return
         centre, _ = bridge.centre_of(buf, fs)
         problem = bridge.delivery_problem(n, fs, **buf.ended)
+        while True:                                      # slower than the air: only the newest clip waits
+            try:
+                old = self.work.get_nowait()
+            except queue.Empty:
+                break
+            old[0].unlink(missing_ok=True)
+            with self.lock:
+                self.analysing -= 1
+                self.skipped += 1
         with self.lock:
             self.analysing += 1
             opts = dict(self.opts)
@@ -276,6 +300,10 @@ class SdrHub:
         while True:
             job = self.work.get()
             try:
+                if not self.work.empty():                # analysis is slower than the air: always take the newest
+                    with self.lock:
+                        self.skipped += 1
+                    continue
                 self._analyse(*job)
             except Exception as e:                       # noqa: BLE001 -- the next transmission must still be decoded
                 with self.lock:
@@ -293,17 +321,17 @@ class SdrHub:
             d = self.jobs_dir / rid
             d.mkdir(parents=True)
             meta = {"id": rid, "source": "live", "file": f"LIVE · {label}", "max_s": round(len(rec) / fs, 1),
-                    "detector": "live voice path", "status": "running", "live": True, "who": "SDRconnect receiver"}
+                    "detector": "live voice path", "status": "running", "live": True, "who": "live receiver"}
             (d / "job.json").write_text(json.dumps(meta, indent=1), encoding="utf-8")
             done = threading.Event()
             threading.Thread(target=bridge.touch_until, args=(d / "alive", done), daemon=True).start()
             t0 = time.monotonic()
             try:
                 tracks = bridge.voice_snapshot(rec, fs, d, opts["whisper_model"], opts["language"],
-                                               opts["use_whisper"], opts["use_llm"], None)
+                                               opts["use_whisper"], opts["use_llm"], opts.get("llm_model"))
                 bridge.plot_snapshot(rec, fs, tracks, d / "tracks.png", centre)
                 source = {"file": f"LIVE · {label}",
-                          "format": "SDRconnect IQ stream (dashboard receiver)" + (f" · WARNING: {problem}" if problem else ""),
+                          "format": f"{label} IQ stream (dashboard receiver)" + (f" · WARNING: {problem}" if problem else ""),
                           "fs_in": fs, "centre_hz": centre, "resampled": False, "live": True, "snapshot_at": rid,
                           "delivery_problem": problem, "ended_because": why}
                 doc = bridge.finite({"n_samples": len(rec), "duration_ms": len(rec) / fs * 1e3, "source": source,
@@ -315,13 +343,18 @@ class SdrHub:
             finally:
                 done.set()
             took = time.monotonic() - t0
-            (d / "run.log").write_text(f"SDRconnect recording {len(rec) / fs:.1f} s at {fs / 1e3:.1f} kS/s "
+            (d / "run.log").write_text(f"{label} recording {len(rec) / fs:.1f} s at {fs / 1e3:.1f} kS/s "
                                        f"({why}), analysed in {took:.1f} s\n", encoding="utf-8")
+            def reading(L):
+                r = L.get("reading") or {}
+                return (r.get("translation_en") or r.get("summary") or "")[:300] if not r.get("error") else ""
             entry = {"id": rid, "at": time.strftime("%H:%M:%S"), "seconds": round(len(rec) / fs, 1), "why": why,
                      "centre_hz": centre, "intel_ids": list(saved or []), "warning": problem,
                      "tracks": [{"kind": t["listen"]["kind"], "answer": t["answer"],
                                  "f_lo_khz": round(t["f_lo_khz"], 2), "f_hi_khz": round(t["f_hi_khz"], 2),
-                                 "text": (t["listen"].get("transcript") or t["listen"].get("morse") or "")[:200]}
+                                 "text": (t["listen"].get("transcript") or t["listen"].get("morse")
+                                          or t["listen"].get("digital_text") or "")[:300],
+                                 "language": t["listen"].get("language"), "reading": reading(t["listen"])}
                                 for t in tracks]}
             with self.lock:
                 self.decodes.append(entry)
@@ -341,3 +374,88 @@ class SdrHub:
                 continue
         for old in sorted(live)[:-self.keep_runs]:
             shutil.rmtree(old, ignore_errors=True)
+
+
+# ---------- KiwiSDR: a public online receiver as a continuous live source ----------
+
+LLM_MODELS = ("llama3.2:3b", "qwen2.5:1.5b")   # local Ollama models: better / lighter (~2.5 GB / ~1 GB RAM)
+KIWI_FS = 12000.0                          # a KiwiSDR IQ channel (about +/-6 kHz)
+KIWIRECORDER = Path(__import__("os").environ.get("NEXA_KIWIRECORDER", "D:/tools/kiwiclient/kiwirecorder.py"))
+KIWI_DEFAULT = ("21439.proxy2.kiwisdr.com", 8073)   # 9M2AMH, Kuala Lumpur (GPS-timed, used for TDoA)
+
+
+def kiwi_receiver(buf, host, port, khz, user="NEXA"):
+    """Stream IQ from a KiwiSDR with the official client (kiwiclient, --nc: raw
+    little-endian int16 I/Q on stdout) into buf until the process ends. Runs in a thread."""
+    import subprocess
+    if not KIWIRECORDER.exists():
+        buf.error = (f"kiwirecorder not found at {KIWIRECORDER}: git clone https://github.com/jks-prv/kiwiclient "
+                     "D:/tools/kiwiclient (or set NEXA_KIWIRECORDER)")
+        return
+    cmd = [sys.executable, str(KIWIRECORDER), "-s", host, "-p", str(port), "-f", f"{khz:g}", "-m", "iq",
+           "--nc", "-q", "--user", user]
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=flags)
+    except OSError as e:
+        buf.error = f"could not start kiwirecorder: {e}"
+        return
+    buf.proc = proc
+    buf.info.update({"connected": "yes", "device_center_frequency": str(khz * 1e3),
+                     "device_sample_rate": str(KIWI_FS), "active_device": f"KiwiSDR {host}",
+                     "api_version": "kiwiclient"})
+    err = deque(maxlen=20)
+    threading.Thread(target=lambda: [err.append(line.decode("utf-8", "replace").strip()) for line in proc.stderr],
+                     daemon=True).start()
+    rest = b""
+    while True:
+        chunk = proc.stdout.read1(16384)
+        if not chunk:
+            break
+        data = rest + chunk
+        n = len(data) // 4 * 4
+        raw = np.frombuffer(data[:n], "<i2").astype(np.float32) / 32768
+        rest = data[n:]
+        if len(raw):
+            buf.add((raw[0::2] + 1j * raw[1::2]).astype(np.complex64))
+    proc.wait()
+    said = " ".join(err).lower()
+    buf.error = buf.error or ("the KiwiSDR is full (no free channel): try again in a minute" if "too many" in said
+                              or "busy" in said else
+                              f"KiwiSDR stream ended: {err[-1] if err else f'kiwirecorder exit {proc.returncode}'}")
+
+
+class KiwiHub(SdrHub):
+    """Continuous live analysis of one frequency on a KiwiSDR: every clip_s seconds
+    (or when a transmission ends) the IQ is decoded (Morse / RTTY / PSK31 / Whisper)
+    and read by the local AI, then saved like any live run."""
+
+    def __init__(self, jobs_dir=None, intel_dir=None, clip_s=30.0):
+        super().__init__(jobs_dir=jobs_dir, intel_dir=intel_dir, decode=True, quiet_s=2.0, max_s=clip_s)
+
+    def connect(self, host=KIWI_DEFAULT[0], port=KIWI_DEFAULT[1], freq_khz=None, whisper_model="small",
+                language=None, use_llm=True, clip_s=30.0, llm_model=None):
+        host = str(host or KIWI_DEFAULT[0]).strip()
+        if not HOST_RE.fullmatch(host):
+            raise ValueError("host must be a KiwiSDR address, e.g. 21439.proxy2.kiwisdr.com")
+        port = int(port or KIWI_DEFAULT[1])
+        if not 0 < port < 65536:
+            raise ValueError("port must be 1..65535")
+        khz = float(freq_khz or 0)
+        if not 10 <= khz <= 30000:
+            raise ValueError("frequency must be 10..30000 kHz (a KiwiSDR covers shortwave only)")
+        if whisper_model not in WHISPER_MODELS:
+            raise ValueError(f"whisper_model must be one of {list(WHISPER_MODELS)}")
+        from src.intel import voice
+        language = None if language in (None, "", "auto") else language
+        if language is not None and language not in voice.LANGUAGES:
+            raise ValueError(f"language must be one of {list(voice.LANGUAGES)}")
+        if llm_model is not None and llm_model not in LLM_MODELS:
+            raise ValueError(f"llm_model must be one of {list(LLM_MODELS)}")
+        self.max_s = min(max(float(clip_s or 30), 10.0), 120.0)
+        opts = {"decode": True, "whisper_model": whisper_model, "language": language,
+                "use_whisper": True, "use_llm": bool(use_llm), "freq_khz": khz,
+                "llm_model": llm_model}
+        key = f"kiwi://{host}:{port}/{khz:g}"
+        return self._open(key, "kiwi", f"KiwiSDR {host} {khz:g} kHz", kiwi_receiver, (host, port, khz), opts,
+                          fixed_fs=KIWI_FS)

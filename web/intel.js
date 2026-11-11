@@ -7,7 +7,9 @@
 // text (src/intel/reason.py ground()).
 
 const CONF_COLOR = { high: "#2E7D32", medium: "#B7791F", low: "#9B2C2C" };
-const KIND_LABEL = { morse: "Morse (CW)", voice: "Voice", silent: "No signal" };
+const KIND_LABEL = { morse: "Morse (CW)", voice: "Voice", silent: "No signal",
+  rtty: "RTTY (teleprinter)", psk31: "PSK31 (keyboard chat)", psk63: "PSK63", psk125: "PSK125" };
+const isDigital = rec => /^(rtty|psk)/.test(rec.kind || "");
 
 const esc = t => String(t ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
@@ -139,7 +141,9 @@ export function inShort(rec) {
   const r = rec.reading || {}, f = r.facts || {};
   const lines = [];
   const top = realCallSigns(f).solid[0] || (f.call_sign_like || [])[0];
-  const kind = rec.kind === "morse" ? "Morse code (beeps)" : rec.kind === "voice" ? "people speaking" : "no clear signal";
+  const kind = rec.kind === "morse" ? "Morse code (beeps)" : rec.kind === "voice" ? "people speaking"
+    : isDigital(rec) ? `${KIND_LABEL[rec.kind] || rec.kind} text${rec.decoded?.baud ? `, ${rec.decoded.baud} baud` : ""}`
+    : "no clear signal";
   lines.push(["What it is", `${kind}${top ? `, mostly from a station calling itself <b>${esc(top[0])}</b>` : ""}`]);
   const n = (rec.segments || []).length;
   lines.push(["How much", `${n} message${n === 1 ? "" : "s"} found in ${plainHours(rec.analysed_s)} of listening`]);
@@ -217,7 +221,7 @@ async function openRecording(root, id) {
   const segs = rec.segments || [];
   const LIMIT = 400;
   const pct = v => v != null ? Math.round(v * 100) + "%" : "—";
-  const decoded = rec.kind === "voice" ? "transcribed speech" : "Morse text";
+  const decoded = rec.kind === "voice" ? "transcribed speech" : isDigital(rec) ? "decoded text" : "Morse text";
   const calls = realCallSigns(f);
   // Only call signs the decoder really heard: the AI sometimes copies a misread one.
   const aiCalls = (r.call_signs || []).filter(c => calls.solid.some(([k]) => norm(k) === norm(c)));

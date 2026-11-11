@@ -607,6 +607,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self._pipeline(method, parts[1:], query)
         if head == "sdr":            # live SDRconnect receiver -- scripts/sdr_hub.py (feat/live-sdr-console)
             return self._sdr(method, parts[1:], query)
+        if head == "kiwi":           # continuous KiwiSDR listening -- scripts/sdr_hub.py KiwiHub
+            return self._kiwi(method, parts[1:])
         if head == "auth":
             return self._auth(method, parts[1:])
         if head == "users":
@@ -738,6 +740,37 @@ class Handler(SimpleHTTPRequestHandler):
                 hub.on_result = lambda _entry, h=self: h._audit_results()
                 Handler._sdr_hub = hub
             return Handler._sdr_hub
+
+    _kiwi_hub = None
+
+    def _kiwi(self, method, rest):
+        """Listen to one KiwiSDR frequency continuously: decode + AI reading every clip."""
+        with Handler._sdr_lock:
+            if Handler._kiwi_hub is None:
+                sys.path.insert(0, str(Path(__file__).resolve().parent))
+                from sdr_hub import KiwiHub
+                hub = KiwiHub(jobs_dir=PIPELINE_DIR, intel_dir=self.intel_dir)
+                hub.on_result = lambda _entry, h=self: h._audit_results()
+                Handler._kiwi_hub = hub
+        hub = Handler._kiwi_hub
+        if method == "GET" and rest == ["status"]:
+            return self._send_json(hub.status())
+        if method == "POST" and rest == ["start"]:
+            b = self._read_json()
+            st = hub.connect(host=b.get("host"), port=b.get("port"), freq_khz=b.get("freq_khz"),
+                             whisper_model=b.get("whisper_model") or "small", language=b.get("language"),
+                             use_llm=b.get("llm", True), clip_s=b.get("clip_s") or 30,
+                             llm_model=b.get("llm_model") or None)
+            self.db.log(self._actor(), "kiwi.start", "kiwi", st["url"], {"label": st["label"], "decode": st["decode"]})
+            return self._send_json(st)
+        if method == "POST" and rest == ["stop"]:
+            was = hub.status()
+            st = hub.disconnect()
+            if was["state"] != "off":
+                self.db.log(self._actor(), "kiwi.stop", "kiwi", was["url"],
+                            {"label": was["label"], "decodes": len(was["decodes"]), "skipped": was["skipped"]})
+            return self._send_json(st)
+        return self._error(HTTPStatus.NOT_FOUND, "no such endpoint")
 
     def _sdr(self, method, rest, query):
         hub = self._hub()

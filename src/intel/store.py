@@ -22,6 +22,7 @@ INTEL_DIR = REPO_ROOT / "results" / "comms_intel"
 VERSION = 1
 NO_WORDS = "Whisper listened to this and recognised no words."
 NO_MORSE = "The Morse decoder listened to this and could read no text."
+NO_DIGITAL = "The RTTY / PSK31 decoder could read no clean text from this signal."
 
 
 def safe_id(stem):
@@ -104,10 +105,11 @@ def save_decoded_tracks(run_id, source, tracks, run_dir, out=INTEL_DIR, keep_emp
     for t in tracks:
         L = t.get("listen") or {}
         morse = L.get("morse_detail")
-        if (morse is None and "transcript" not in L) or not L.get("audio") or L["audio"] in seen:
+        dig = L.get("digital")                            # RTTY / PSK31 text (src/intel/digital.py)
+        if (morse is None and dig is None and "transcript" not in L) or not L.get("audio") or L["audio"] in seen:
             continue
         seen.add(L["audio"])                              # tracks joined on one frequency share one listen
-        text = (L["morse"] if morse else L["transcript"]).strip()
+        text = (L["morse"] if morse else L["digital_text"] if dig else L["transcript"]).strip()
         if not text and not keep_empty:
             continue
         info = audio.wav_info(run_dir / L["audio"])
@@ -118,7 +120,8 @@ def save_decoded_tracks(run_id, source, tracks, run_dir, out=INTEL_DIR, keep_emp
                 chunk_s, chunks = fine_activity(morse)
         else:
             level = L.get("snr_db", (L.get("features") or {}).get("snr_db")) or 0.0
-            segments = [dict(s, snr_db=level) for s in L.get("speech_segments", [])]
+            said = L.get("digital_segments", []) if dig else L.get("speech_segments", [])
+            segments = [dict(s, snr_db=level) for s in said]
             chunk_s, chunks = _activity(segments, info.duration_s, level)
             active_minutes, dropped = round(sum(s["end_s"] - s["start_s"] for s in segments) / 60, 2), 0
         wpm = [s["wpm"] for s in segments if s.get("wpm")]
@@ -129,19 +132,24 @@ def save_decoded_tracks(run_id, source, tracks, run_dir, out=INTEL_DIR, keep_emp
         rec = {"version": VERSION, "id": rid, "file": f"{source.get('file', run_id)} · {where}",
                "recorded_at": datetime.now().isoformat(timespec="seconds"),
                "duration_s": round(info.duration_s, 1), "analysed_s": round(info.duration_s, 1),
-               "sample_rate": info.sample_rate, "bits": info.bits, "kind": "morse" if morse else "voice",
+               "sample_rate": info.sample_rate, "bits": info.bits, "kind": "morse" if morse else dig["mode"].lower() if dig else "voice",
                "active_minutes": active_minutes,
                "chunk_s": chunk_s, "chunks": chunks, "segments": segments, "dropped_noise_segments": dropped,
                "wpm_median": float(statistics.median(wpm)) if wpm else None, "pipeline_run": run_id,
                "processed_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
         if morse:
             rec["tone_purity"] = morse["tone_purity"]
+        elif dig:
+            rec["decoded"] = {"text": text, **{k: dig.get(k) for k in ("mode", "baud", "shift_hz", "inverted",
+                                                                        "carrier_hz", "why")}}
+            if dig.get("baud"):
+                rec["wpm_median"] = None                  # speed is in baud, shown from "decoded"
         else:
             rec["transcript"] = {"text": text, "language": L.get("language")}
         if L.get("reading"):
             rec["reading"] = L["reading"]
         if not text:
-            rec["note"] = NO_MORSE if morse else NO_WORDS
+            rec["note"] = NO_MORSE if morse else NO_DIGITAL if dig else NO_WORDS
         out.mkdir(parents=True, exist_ok=True)
         tmp = out / f"{rid}.{os.getpid()}.tmp"
         tmp.write_text(json.dumps(rec, indent=1, default=float), encoding="utf-8")

@@ -35,6 +35,7 @@ import { buildReport, buildSingle } from "./report.js";
 import { installZoom, registerZoom } from "./zoom.js";
 import { renderIntelDetail, listDecoded, decodedTableHtml, filterRows } from "./intel.js";
 import { renderPipeline } from "./pipeline.js";
+import { renderKiwiLive } from "./kiwi_live.js";
 
 installZoom();
 
@@ -1211,6 +1212,7 @@ function showPage(page) {
   if (page === "replay") {
     if (session) render(); else renderSignal();
     renderPipeline(el("pipelineRoot"), { server: readConfig().backend === "server" });
+    renderKiwiLive(el("kiwiLiveRoot"), { server: readConfig().backend === "server" });
   }
   if (page === "history") return renderHistory();
   if (page === "audit") renderAudit();

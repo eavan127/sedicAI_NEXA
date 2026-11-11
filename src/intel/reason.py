@@ -153,7 +153,8 @@ def read_recording(name, segments, kind="morse", duration="", active_min=0, mode
         return {"category": "unreadable", "summary": "Nothing readable was decoded.", "confidence": "high",
                 "call_signs": [], "places": [], "key_points": [], "evidence": [], "language": "",
                 "translation_en": "", "caveats": "", "removed_ungrounded": 0, "facts": f, "model": None}
-    prompt = PROMPT.format(what="Morse (CW) traffic" if kind == "morse" else "speech transcribed by Whisper",
+    prompt = PROMPT.format(what={"morse": "Morse (CW) traffic", "digital": "radioteletype (RTTY / PSK31) text"}.get(
+        kind, "speech transcribed by Whisper"),
                            name=name, duration=duration, active=active_min, facts=json.dumps(f),
                            n_shown=n_shown, n_total=n_total, text=text, categories=json.dumps(CATEGORIES))
     try:

@@ -107,6 +107,13 @@ def listen_track(iq, ans, out_dir, noise_var, rng, whisper_model=None, language=
     if not wide:                                    # second opinion from the slow-path model (src/pipeline/narrowband.py)
         from src.pipeline import narrowband
         kind, why, demod_kind, slow = narrowband.refine(kind, why, y, fa)
+    dig = None
+    if not wide:                                    # RTTY / PSK31 text (src/intel/digital.py)
+        from src.intel import digital
+        was = kind
+        kind, dig = digital.read(kind, y, fa)
+        if kind != was:
+            why, demod_kind = dig["why"], "USB"
     out = {"kind": kind, "why": why, "duration_s": round(len(y) / fa, 3),
            "features": {k: (round(float(v), 3) if isinstance(v, (float, np.floating)) else v)
                         for k, v in feats.items() if k != "band"}}
@@ -125,7 +132,11 @@ def listen_track(iq, ans, out_dir, noise_var, rng, whisper_model=None, language=
     info = wavio.wav_info(wav)
     segments, text_kind = [], None
     try:
-        if kind == "CW":
+        if dig is not None:
+            from src.intel import digital
+            out.update(digital.listen_fields(dig))
+            segments, text_kind = dig["segments"], "digital"
+        elif kind == "CW":
             from src.intel import morse
             m = morse.analyse(info)
             segments = m["segments"]

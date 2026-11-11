@@ -481,6 +481,11 @@ def voice_snapshot(iq, fs, out_dir, whisper_model, language, use_whisper, use_ll
         y_on = np.concatenate([y[int(edges[b] * scale):int(edges[b + 1] * scale)] for b in picks])
         kind, feats, why = analog.classify(y_on, ZOOM_FS)
         kind, why, demod_kind, slow = narrowband.refine(kind, why, y_on, ZOOM_FS)
+        from src.intel import digital
+        was = kind
+        kind, dig = digital.read(kind, y, ZOOM_FS)          # RTTY / PSK31 text (and a clean decode names the kind)
+        if kind != was:
+            why, demod_kind = dig["why"], "USB"
         L = {"kind": kind, "why": why, "duration_s": round(len(y) / ZOOM_FS, 3), "tracks": [k],
              "t_start_ms": t_on_ms, "t_end_ms": t_off_ms}
         if slow:
@@ -494,7 +499,10 @@ def voice_snapshot(iq, fs, out_dir, whisper_model, language, use_whisper, use_ll
                 L["audio"] = wav.name
                 segments, text_kind = [], None
                 try:
-                    if kind == "CW":
+                    if dig is not None:
+                        L.update(digital.listen_fields(dig))
+                        segments, text_kind = dig["segments"], "digital"
+                    elif kind == "CW":
                         from src.intel import morse
                         m = morse.analyse(wavio.wav_info(wav))
                         segments, text_kind = m["segments"], "morse"
@@ -784,6 +792,7 @@ def main():
         if whole:
             rec_path, rec_n, why, stopping = record_until_stop(buf, fs, args.stop_after_s, args.quiet_stop_s,
                                                                args.exit_when_idle)
+            stopping = stopping or bool(args.replay)  # a file plays once: analyse it, then exit (no SDRconnect to wait for)
             if rec_n < fs:                       # nothing, or a fragment between stop and play
                 if rec_n:
                     print(f"Recording of {rec_n / fs:.2f} s ({why}): too short, skipped.", flush=True)
