@@ -258,6 +258,59 @@
   .rx-fallback { margin: 10px 0 0; padding: 10px 12px; border-radius: 8px; background: #FDF1E3; border: 1px solid #D49A1F; color: #6B4A0B; }
   .more-options { margin-top: 14px; }
   .more-options > summary { cursor: pointer; font-weight: 600; padding: 6px 0; }
+  /* Performance: "What NEXA has seen" (web/seen.js) */
+  .seen-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 12px; }
+  .seen-wide { grid-column: 1 / -1; }
+  .seen-card { border: 1px solid var(--grid); border-radius: 12px; padding: 16px 18px; background: var(--panel); }
+  .seen-h { margin: 0 0 14px; font-size: 15px; color: var(--brand); }
+  .seen-mix { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 28px; align-items: center; }
+  .seen-donut { margin: 0; }
+  .seen-donut svg { width: 180px; height: 180px; display: block; margin: 0 auto; }
+  .seen-donut figcaption { display: flex; flex-wrap: wrap; gap: 6px 12px; justify-content: center; margin-top: 10px; }
+  .donut-arc { animation: donut-in 0.9s ease-out both; }
+  @keyframes donut-in { from { stroke-dasharray: 0 999; } }
+  .donut-num { font: 700 36px var(--font); fill: var(--brand); }
+  .donut-cap { font: 600 11px var(--font); fill: var(--text-dim); letter-spacing: 0.08em; text-transform: uppercase; }
+  .lolli { display: grid; gap: 9px; }
+  .lolli-row { display: grid; grid-template-columns: 150px minmax(0, 1fr) 36px; align-items: center; gap: 12px; }
+  .lolli-name { font-family: var(--mono); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lolli-track { position: relative; height: 16px; background: linear-gradient(var(--grid), var(--grid)) 0 50% / 100% 1px no-repeat; }
+  .lolli-stem { position: absolute; left: 0; top: 50%; height: 3px; margin-top: -1.5px; width: calc(var(--w) - 7px);
+                background: var(--c); border-radius: 2px; animation: grow-w 0.8s ease-out both; }
+  .lolli-stem::after { content: ""; position: absolute; right: -14px; top: 50%; width: 14px; height: 14px; margin-top: -7px; border-radius: 50%;
+                       background: var(--c); box-shadow: 0 0 0 4px color-mix(in srgb, var(--c) 20%, transparent); }
+  @keyframes grow-w { from { width: 0; } }
+  .lolli-n { text-align: right; font-family: var(--mono); font-size: 13px; color: var(--text-dim); }
+  .ladder { padding-top: 24px; }
+  .ladder-cols { position: relative; display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; height: 170px;
+                 align-items: end; border-bottom: 2px solid var(--grid); }
+  .ladder-col { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; }
+  .ladder-bar { width: 100%; height: var(--h); border-radius: 8px 8px 2px 2px; animation: grow-h 0.8s ease-out both;
+                background: color-mix(in srgb, var(--brand) calc(var(--k) * 100%), #C9D3EA); }
+  @keyframes grow-h { from { height: 0; } }
+  .ladder-n { position: relative; z-index: 1; font: 600 13px var(--mono); color: var(--text-dim); margin-bottom: 4px; padding: 0 5px; background: var(--panel); border-radius: 4px; }
+  .ladder-mean { position: absolute; top: -20px; bottom: 0; border-left: 2px dashed var(--accent); pointer-events: none; }
+  .ladder-mean span { position: absolute; top: -2px; left: 6px; font-size: 12px; font-weight: 700; color: #8A5A00; white-space: nowrap; }
+  .ladder-mean.flip span { left: auto; right: 6px; }
+  .ladder-axis { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; text-align: center; font: 12.5px var(--mono); color: var(--text-dim); margin-top: 6px; }
+  .ladder-ends { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-dim); margin-top: 8px; }
+  .cal-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
+  .cal-stats div { background: var(--brand-tint); border-radius: 10px; padding: 8px 10px; }
+  .cal-stats b { display: block; font-size: 22px; color: var(--brand); }
+  .cal-stats span { font-size: 12px; color: var(--text-dim); }
+  .cal { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 4px 6px; max-width: calc(36px + var(--weeks) * 24px); }
+  .cal-months { grid-column: 2; display: grid; grid-template-columns: repeat(var(--weeks), 1fr); gap: 3px; font-size: 11.5px; color: var(--text-dim); }
+  .cal-months span { white-space: nowrap; }
+  .cal-days { grid-column: 1; grid-row: 2; display: grid; grid-template-rows: repeat(7, 1fr); gap: 3px; font-size: 10.5px; color: var(--text-dim); align-items: center; }
+  .cal-grid { grid-column: 2; grid-row: 2; display: grid; grid-template-rows: repeat(7, auto); grid-auto-flow: column; grid-auto-columns: 1fr; gap: 3px; }
+  .cal-cell { display: block; aspect-ratio: 1; border-radius: 3px; background: var(--grid); }
+  .cal-cell.l1 { background: #C9D3EA; } .cal-cell.l2 { background: #8FA2D2; } .cal-cell.l3 { background: #4F65A8; } .cal-cell.l4 { background: var(--brand); }
+  .cal-cell.future { background: transparent; box-shadow: inset 0 0 0 1px var(--grid); }
+  .cal-grid .cal-cell:not(.future):hover { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .cal-key { display: flex; align-items: center; gap: 4px; margin-top: 12px; font-size: 12px; color: var(--text-dim); }
+  .cal-key .cal-cell { width: 12px; height: 12px; aspect-ratio: auto; }
+  @media (max-width: 900px) { .seen-grid, .seen-mix { grid-template-columns: 1fr; } }
+  @media (prefers-reduced-motion: reduce) { .donut-arc, .lolli-stem, .ladder-bar { animation: none; } }
   /* Signal Pipeline: a failed run, in a sentence */
   .run-error { display: flex; flex-direction: column; gap: 4px; border: 1px solid #E8C4BF; border-left: 4px solid #B0281A;
     background: #FBEFED; border-radius: 8px; padding: 10px 14px; font-size: 15px; }
@@ -1001,22 +1054,6 @@
         <div id="histSummary"></div>
       </div>
 
-      <div class="panels">
-        <div class="block">
-          <div class="block-label">Captures containing each class</div>
-          <div id="histClassBars"></div>
-        </div>
-        <div class="block">
-          <div class="block-label">Captures by SNR band (dB)</div>
-          <div id="histSnrBars"></div>
-        </div>
-      </div>
-
-      <div class="block">
-        <div class="block-label">Captures per day</div>
-        <div id="histDayBars"></div>
-      </div>
-
       <div class="block">
         <div class="block-label">Stored analyses</div>
         <div class="table-wrap" id="histTable"></div>
@@ -1044,6 +1081,17 @@
     <section id="page-performance" hidden>
       <h3 class="page-title">Performance</h3>
       <div class="block" id="currentModelBox"><div class="note">Loading the current model's results…</div></div>
+
+      <!-- Moved from History: what the stored captures contain (web/seen.js). -->
+      <div class="block" id="seenBlock">
+        <div class="block-label">What NEXA has seen</div>
+        <div class="note" id="seenNote">Every capture stored so far, live or uploaded.</div>
+        <div class="seen-grid">
+          <div class="seen-card seen-wide"><h4 class="seen-h">Which classes keep turning up</h4><div id="seenClasses"></div></div>
+          <div class="seen-card"><h4 class="seen-h">How strong the signals were (SNR, dB)</h4><div id="seenSnr"></div></div>
+          <div class="seen-card"><h4 class="seen-h">Captures per day</h4><div id="seenDays"></div></div>
+        </div>
+      </div>
       <details id="perfOlder" style="margin-top:14px;">
         <summary style="font-size:1.05rem;cursor:pointer;">Older results: September 5-model ensemble (earlier class list), kept for comparison</summary>
       <div id="perfProvenance" style="margin-bottom:12px;"></div>
@@ -1230,9 +1278,8 @@
     setTimeout(sync);
   });
   const label = b => b.querySelector(":scope > .block-label");
-  // Short names for the outline; the three small charts share one entry.
+  // Short names for the outline.
   const SHORT = [["Report builder", "Report"], ["Everything analysed", "Summary"],
-    ["Captures containing", "Charts"], ["Captures by SNR", "Charts"], ["Captures per day", "Charts"],
     ["Review required", "Review queue"], ["Stored analyses", "Stored analyses"], ["Human corrections", "Corrections"]];
   const shortName = full => (SHORT.find(([k]) => full.startsWith(k)) || [, full.split(":")[0]])[1];
   let entries = [];

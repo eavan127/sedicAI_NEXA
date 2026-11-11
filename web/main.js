@@ -30,7 +30,8 @@ import {
   saveAnalysis, setOperatorName, submitCorrection, supportsCorrections, usingSupabase, verifyAudit,
   ROLE_LABEL, createUser, currentAuth, listUsers, loadAuth, signOut, switchDemoPerson, updateUser,
 } from "./storage.js";
-import { applyFilters, barsHtml, canView, flagsHtml, summarise, summaryHtml as histSummaryHtml, tableHtml } from "./history.js";
+import { classMixHtml, snrLadderHtml, calendarHtml } from "./seen.js";
+import { applyFilters, canView, flagsHtml, summarise, summaryHtml as histSummaryHtml, tableHtml } from "./history.js";
 import { buildReport, buildSingle } from "./report.js";
 import { installZoom, registerZoom } from "./zoom.js";
 import { renderIntelDetail, listDecoded, decodedTableHtml, filterRows } from "./intel.js";
@@ -1342,7 +1343,24 @@ function currentModelHtml(d) {
     </div>`;
 }
 
+/** Performance: "What NEXA has seen", from every stored capture (not History's filters). */
+async function renderSeen() {
+  const note = el("seenNote");
+  try {
+    const { records } = await listAnalyses();
+    const s = summarise(records);
+    note.textContent = `${s.total} capture${s.total === 1 ? "" : "s"} stored `
+      + `${readConfig().backend === "server" ? "on this machine" : "in this browser"}, live or uploaded.`;
+    el("seenClasses").innerHTML = classMixHtml(s, TIER_OF);
+    el("seenSnr").innerHTML = snrLadderHtml(s);
+    el("seenDays").innerHTML = calendarHtml(s);
+  } catch (e) {
+    note.textContent = `Could not read the stored captures: ${e.message}`;
+  }
+}
+
 async function renderPerformance() {
+  renderSeen();
   const cm = el("currentModelBox");
   if (cm) {
     try {
@@ -1720,8 +1738,7 @@ init();
 // ---------------------------------------------------------------------------
 
 const histStatus = el("histStatus"), histSummary = el("histSummary");
-const histClassBars = el("histClassBars"), histSnrBars = el("histSnrBars");
-const histDayBars = el("histDayBars"), histTable = el("histTable");
+const histTable = el("histTable");
 const histTier = el("histTier"), histClassSel = el("histClass");
 const histSource = el("histSource"), histQuery = el("histQuery");
 const histFrom = el("histFrom"), histTo = el("histTo");
@@ -1757,14 +1774,6 @@ function paintHistory() {
   });
   const s = summarise(filtered);
   histSummary.innerHTML = histSummaryHtml(s);
-  histClassBars.innerHTML = barsHtml(Object.entries(s.byClass),
-    { empty: "No class has been detected in a stored capture yet.",
-      colorOf: c => TIER_COLOR[TIER_OF[c]] || "var(--brand)" })
-    + `<div class="tier-legend" style="margin-top:14px">${["Hostile", "Military", "Civilian"].map(t =>
-      `<span class="tier-key"><i style="background:${TIER_COLOR[t]}"></i>${t}</span>`).join("")}</div>`;
-  histSnrBars.innerHTML = barsHtml(s.snr.map(b => [b.label, b.count]),
-    { empty: "No capture carries a known SNR.", sort: false });
-  histDayBars.innerHTML = barsHtml(s.byDay, { empty: "Nothing stored yet.", sort: false });
   // Deleting needs the analyst role on the local server (serve_local.py:required_role).
   const role = currentAuth().user?.role;
   const mayDelete = canDelete() && (readConfig().backend !== "server" || role === "analyst");
