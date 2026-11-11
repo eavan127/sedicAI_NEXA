@@ -32,7 +32,98 @@ const Q_MEANING = {
   QRZ: "Who is calling me?", QTH: "My location is…", QRM: "There is interference", QRN: "There is static noise",
   QSY: "Change frequency", QRT: "Stop sending", QRX: "Wait", QSA: "Your signal strength is…", QRK: "How readable am I?",
 };
+// Standard Morse words and procedure signals, in plain words (no AI: a fixed list).
+const MORSE_WORDS = {
+  VVV: "test signal", VV: "test signal", VVVV: "test signal", CQ: "calling anyone", DE: "from", K: "over",
+  KN: "over (only you reply)", ")": "over (only you reply)", AR: "end of message", "+": "end of message",
+  SK: "end of contact", BT: "pause", "=": "pause", R: "received", TU: "thank you", "73": "best regards",
+  QSL: "received OK", RPT: "repeat", NR: "number", IMI: "repeat please", "?": "question / repeat",
+};
+const norm = t => t.toUpperCase().replace(/0/g, "O");
 const BIG = "font-size:16px;line-height:1.55;";
+
+/** Call signs the decoder heard more than once (the rest are usually misreads). */
+export function realCallSigns(facts) {
+  const all = (facts?.call_sign_like || []);
+  return { solid: all.filter(([, n]) => n > 1), once: all.filter(([, n]) => n <= 1) };
+}
+
+/** One Morse message in plain words, from the fixed list above (exported for tests).
+ *  "VVV VVV VVV P50 P50 P50 1/2/3/4 ))" -> "test signal · station P5O · numbers 1/2/3/4 · over (only you reply)" */
+export function plainMorse(text, calls = []) {
+  const known = new Set(calls.map(norm));
+  const words = [];
+  for (const raw of String(text || "").trim().split(/\s+/).filter(Boolean)) {
+    // ")" is the KN prosign; a run of them is one signal
+    const tok = /^\)+$/.test(raw) ? ")" : raw;
+    const t = norm(tok);
+    let w;
+    if (MORSE_WORDS[tok.toUpperCase()]) w = MORSE_WORDS[tok.toUpperCase()];
+    else if (Q_MEANING[t]) w = `${t} (${Q_MEANING[t].toLowerCase()})`;
+    else if (known.has(t)) w = `station ${t}`;
+    else if (/^[\d/]+$/.test(tok)) w = `numbers ${tok}`;
+    else if (/\*/.test(tok) || tok.length <= 2) w = "unclear";
+    else if (/^[A-Z\d]{5}$/i.test(tok)) w = "code group";
+    else w = "unclear";
+    const last = words[words.length - 1];
+    if (last && last.w === w) last.n++;                   // a word said 3 times in a row is still one idea
+    else if (last && w.startsWith("numbers ") && last.w.startsWith("numbers ")) last.w += ` ${tok}`;
+    else words.push({ w, n: 1 });
+  }
+  return words.filter((x, i, a) => !(x.w === "unclear" && a.length > 1))
+    .map(({ w, n }) => w === "code group" && n > 1 ? `${n} code groups` : w).join(" · ");
+}
+
+/** True when most of text's words were already said in one of `said`. */
+export function repeats(text, said) {
+  const words = t => new Set(String(t).toLowerCase().match(/[a-z0-9]{4,}/g) || []);
+  const w = words(text);
+  if (!w.size) return true;
+  return said.some(o => { const ow = words(o); return [...w].filter(x => ow.has(x)).length / w.size >= 0.5; });
+}
+
+/** A whole message: each loop (ended by "over") in plain words, repeats counted (exported for tests). */
+function loops(text) {
+  // A loop ends at "over" ())) or where a new run of the test signal (VVV) starts.
+  const parts = [[]];
+  let prevV = false;
+  for (const tok of String(text || "").trim().split(/\s+/)) {
+    const v = /^V{2,4}$/i.test(tok);
+    if ((v && !prevV && parts.at(-1).length) || /^\)+$/.test(tok)) parts.push([]);
+    if (!/^\)+$/.test(tok)) parts.at(-1).push(tok);
+    prevV = v;
+  }
+  return parts.map(p => p.join(" "));
+}
+
+export function messageMeaning(text, calls = []) {
+  const said = loops(text).map(part => plainMorse(part, calls)).filter(p => p && p !== "unclear");
+  if (!said.length) return "";
+  const counts = new Map();
+  for (const p of said) counts.set(p, (counts.get(p) || 0) + 1);
+  const [top, n] = [...counts].sort((a, b) => b[1] - a[1])[0];
+  // A station repeating one loop: say it once, with how often (variants are misreads of it).
+  if (n >= 3 && n >= said.length / 2) {
+    const other = said.length - n;
+    return `${top}, repeated ${n}×${other ? ` (+${other} with misread letters)` : ""}`;
+  }
+  const out = said.slice(0, 6).join(" · ");
+  return said.length > 6 ? `${out} · …` : out;
+}
+
+/** The message the station sends most often, in plain words (exported for tests). */
+export function commonPattern(rec) {
+  const calls = realCallSigns(rec.reading?.facts).solid.map(([c]) => c);
+  const counts = new Map();
+  for (const s of rec.segments || []) {
+    for (const part of loops(s.text)) {
+      const p = plainMorse(part, calls);
+      if (p) counts.set(p, (counts.get(p) || 0) + 1);
+    }
+  }
+  const top = [...counts].sort((a, b) => b[1] - a[1])[0];
+  return top && top[1] >= 3 ? { text: top[0], times: top[1] } : null;
+}
 const H = "font-size:18px;font-weight:700;margin:26px 0 8px;";
 
 function plainDate(iso) {
@@ -52,15 +143,17 @@ function plainHours(sec) {
 export function inShort(rec) {
   const r = rec.reading || {}, f = r.facts || {};
   const lines = [];
-  const top = (f.call_sign_like || [])[0];
+  const top = realCallSigns(f).solid[0] || (f.call_sign_like || [])[0];
   const kind = rec.kind === "morse" ? "Morse code (beeps)" : rec.kind === "voice" ? "people speaking" : "no clear signal";
   lines.push(["What it is", `${kind}${top ? `, mostly from a station calling itself <b>${esc(top[0])}</b>` : ""}`]);
   const n = (rec.segments || []).length;
   lines.push(["How much", `${n} message${n === 1 ? "" : "s"} found in ${plainHours(rec.analysed_s)} of listening`]);
   const coded = /cod|group|cipher/i.test(`${r.category || ""} ${r.summary || ""}`) || (f.five_char_groups_share || 0) > 0.2;
   if (rec.reading && !r.error) {
-    lines.push(["What it says", coded
-      ? "Mostly short codes, call signs and numbers, not normal sentences. Professional stations send coded traffic, so this is expected."
+    const loop = rec.kind === "morse" ? commonPattern(rec) : null;
+    lines.push(["What it says", loop
+      ? `Mostly repeats: <b>${esc(loop.text)}</b> (${loop.times}×)`
+      : coded ? "Mostly short codes, call signs and numbers, not sentences."
       : esc(r.translation_en || r.summary || "")]);
     if (r.confidence) lines.push(["How sure", SURE_TEXT[r.confidence] || esc(r.confidence)]);
   }
@@ -112,11 +205,8 @@ function draw(root, data) {
   root.innerHTML = `
     <div class="block">
       <div class="block-label">Decoded recordings</div>
-      <div class="note">Receiver audio decoded on this machine: Morse by the CW decoder, speech by Whisper, then
-        read by a local language model (Ollama). <b>The model's reading is a suggestion.</b> Every quote it gives
-        was checked against the decoded text, and anything it could not back up was removed. The decode itself can
-        contain errors (<code>*</code> = unreadable letter). Everything Whisper or the Morse decoder analyses in Signal
-        Pipeline, live or from a file, is added here by itself.</div>
+      <div class="note">Morse and speech decoded on this machine, then read by a local AI.
+        <b>The AI reading is a suggestion</b>; <code>*</code> = a letter that could not be read.</div>
       ${rows.length ? `<div class="note" style="margin-top:6px;">${rows.length} recordings · ${totalH.toFixed(1)} h analysed ·
         ${Math.round(sigMin)} min with signal · ${tx} transmissions</div>` : `<div class="note" style="margin-top:6px;">
         Nothing decoded yet in <code>${esc(data.folder)}</code>. ${esc(data.hint || "")}</div>`}
@@ -177,6 +267,14 @@ async function openRecording(root, id) {
   const LIMIT = 400;
   const pct = v => v != null ? Math.round(v * 100) + "%" : "—";
   const decoded = rec.kind === "voice" ? "transcribed speech" : "Morse text";
+  const calls = realCallSigns(f);
+  // Only call signs the decoder really heard: the AI sometimes copies a misread one.
+  const aiCalls = (r.call_signs || []).filter(c => calls.solid.some(([k]) => norm(k) === norm(c)));
+  const isMorse = rec.kind === "morse";
+  // The small AI often says the same thing three ways: keep each idea once.
+  const said = [r.translation_en || r.summary || ""];
+  const points = (r.key_points || []).filter(p => !repeats(p, said) && said.push(p));
+  const caveat = r.caveats && !repeats(r.caveats, said) ? r.caveats : "";
   const qCodes = (f.q_codes || []).map(([c, n]) =>
     `<div><b>${esc(c)}</b> = “${esc(Q_MEANING[c] || "a standard radio short code")}” <span class="note">(${n}×)</span></div>`).join("");
   box.innerHTML = `
@@ -197,8 +295,7 @@ async function openRecording(root, id) {
     <div style="${H}">When the station was sending</div>
     <div style="margin-bottom:10px;">${activitySummary(rec)}</div>
     <canvas id="intelStrip" height="104" style="width:100%;display:block;background:var(--panel);border:1px solid var(--grid);border-radius:6px;"></canvas>
-    <div class="note" style="margin-top:8px;">Time runs left to right. Dark bars: ${rec.kind === "voice" ? "someone speaking" : "the Morse key pressed"}; a darker
-      bar is a clearer signal. Light bands mark each message. Click anywhere to jump to that moment in the messages below.</div>
+    <div class="note" style="margin-top:8px;">Dark bars: ${rec.kind === "voice" ? "speech" : "Morse sent"}. Click to jump to that moment.</div>
 
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:22px;margin-top:6px;">
       <div>
@@ -206,23 +303,23 @@ async function openRecording(root, id) {
         ${r.error ? `<div style="color:#9B2C2C;">The AI could not read this one: ${esc(r.error)}</div>` : !rec.reading
           ? `<div class="note">No AI reading for this recording.</div>` : `
         ${r.translation_en ? `<div><b>In plain English:</b> ${esc(r.translation_en)}</div>` : `<div>${esc(r.summary)}</div>`}
-        ${(r.call_signs || []).length ? `<div style="margin-top:8px;"><b>Station names (call signs):</b> ${r.call_signs.map(c => chip(c, "#172152")).join(" ")}</div>` : ""}
+        ${aiCalls.length ? `<div style="margin-top:8px;" title="A call sign is the name a station sends to identify itself"><b>Call signs (station names):</b> ${aiCalls.map(c => chip(c, "#172152")).join(" ")}</div>` : ""}
         ${(r.places || []).length ? `<div style="margin-top:6px;"><b>Places mentioned:</b> ${r.places.map(c => chip(c, "#2B6CB0")).join(" ")}</div>` : ""}
-        ${(r.key_points || []).length ? `<ul style="margin:8px 0 0 20px;padding:0;">${r.key_points.map(p => `<li>${esc(p)}</li>`).join("")}</ul>` : ""}
-        ${(r.evidence || []).length ? `<div style="margin-top:12px;font-weight:700;">Proof: the exact ${decoded} the AI based this on</div>
+        ${points.length ? `<ul style="margin:8px 0 0 20px;padding:0;">${points.map(p => `<li>${esc(p)}</li>`).join("")}</ul>` : ""}
+        ${(r.evidence || []).length ? `<div style="margin-top:12px;font-weight:700;">Based on this ${decoded}</div>
           ${r.evidence.map(e => `<div style="margin-top:6px;"><code>${esc(e.quote)}</code><div class="note">${esc(e.why)}</div></div>`).join("")}` : ""}
-        ${r.caveats ? `<div style="margin-top:10px;"><b>Be careful:</b> ${esc(r.caveats)}</div>` : ""}
-        <div class="note" style="margin-top:10px;">Type: ${esc(r.category || "—")}${r.language ? ` · language: ${esc(r.language)}` : ""} · AI model ${esc(r.model || "—")}
-          ${r.removed_ungrounded ? ` · ${r.removed_ungrounded} detail${r.removed_ungrounded > 1 ? "s" : ""} the AI made up (not in the ${decoded}) ${r.removed_ungrounded > 1 ? "were" : "was"} removed` : ""}</div>`}
+        ${caveat ? `<div style="margin-top:10px;"><b>Be careful:</b> ${esc(caveat)}</div>` : ""}
+        <div class="note" style="margin-top:10px;">AI ${esc(r.model || "—")}${r.removed_ungrounded ? ` · ${r.removed_ungrounded} unsupported detail${r.removed_ungrounded > 1 ? "s" : ""} removed` : ""}</div>`}
       </div>
       <div>
         <div style="${H}">Facts measured from the signal <span class="note" style="font-weight:400;">(no AI)</span></div>
         <table><tbody>
           <tr><td>Sending speed</td><td>${f.wpm_range ? `${Math.round(f.wpm_range[0])}–${Math.round(f.wpm_range[1])} words per minute` : rec.wpm_median ? `${Math.round(rec.wpm_median)} words per minute` : "—"}</td></tr>
-          <tr><td>Station names heard</td><td>${esc((f.call_sign_like || []).slice(0, 4).map(([c, n]) => `${c} (${n}×)`).join(", ") || "—")}</td></tr>
+          <tr><td title="A call sign is the name a station sends to identify itself">Call signs heard</td><td>${esc(calls.solid.slice(0, 4).map(([c, n]) => `${c} (${n}×)`).join(", ") || "—")}
+            ${calls.once.length ? `<div class="note">once only, probably misread: ${esc(calls.once.slice(0, 4).map(([c]) => c).join(", "))}</div>` : ""}</td></tr>
           <tr><td>Radio short codes</td><td>${qCodes || "none"}</td></tr>
           <tr><td>“Calling anyone” (CQ)</td><td>${f.cq_calls ? `${f.cq_calls}×` : "none"}</td></tr>
-          <tr><td>Secret-code groups <span class="note">(blocks of 5 letters/digits)</span></td><td>${pct(f.five_char_groups_share)} of words</td></tr>
+          <tr><td>Code groups <span class="note">(5-character blocks)</span></td><td>${pct(f.five_char_groups_share)} of words</td></tr>
           <tr><td>Letters that could not be read</td><td>${pct(f.unreadable_share)}</td></tr>
         </tbody></table>
         <div class="note" style="margin-top:8px;">Listened to ${plainHours(rec.analysed_s)} · ${segs.length} messages
@@ -253,11 +350,12 @@ async function openRecording(root, id) {
     const hl = t => Q ? esc(t).split(esc(Q)).join(`<mark>${esc(Q)}</mark>`) : esc(t);
     const strength = db => db == null ? "—" : db >= 25 ? "strong" : db >= 15 ? "clear" : db >= 8 ? "weak" : "very weak";
     segBox.innerHTML = `<table><thead><tr><th style="white-space:nowrap;">Time in recording</th>
-      <th>Signal</th><th>Speed</th><th style="width:60%;">What was sent</th></tr></thead><tbody>`
+      <th>Signal</th><th>Speed</th><th style="width:${isMorse ? 40 : 60}%;">What was sent</th>${isMorse ? `<th>Meaning</th>` : ""}</tr></thead><tbody>`
       + list.slice(0, LIMIT).map(s => `<tr style="vertical-align:top;"><td style="white-space:nowrap;"><code>${clock(s.start_s)}</code></td>
         <td style="white-space:nowrap;" title="${s.snr_db != null ? Math.round(s.snr_db) + " dB above the noise" : ""}">${strength(s.snr_db)}</td>
         <td style="white-space:nowrap;">${s.wpm ? `${Math.round(s.wpm)} wpm` : "—"}</td>
-        <td style="font-family:var(--mono);word-break:break-word;">${hl(s.text)}</td></tr>`).join("") + `</tbody></table>`;
+        <td style="font-family:var(--mono);word-break:break-word;">${hl(s.text)}</td>${isMorse
+          ? `<td>${esc(messageMeaning(s.text, calls.solid.map(([c]) => c)))}</td>` : ""}</tr>`).join("") + `</tbody></table>`;
   };
   box.querySelector("#intelSegSearch").addEventListener("input", e => paintSegs(e.target.value));
   paintSegs();

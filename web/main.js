@@ -446,8 +446,8 @@ function openCorrection({ predicted, startS, endS, missed, suggested = null, rea
   corrSubmit.disabled = false;
   corrDialog.showModal();
   el("corrRule").textContent = isAnalyst()
-    ? "As an analyst, your correction is approved directly and can be used for retraining (recorded in the audit trail)."
-    : "Your correction waits for an analyst to approve it before it can be used to retrain the model.";
+    ? "As an analyst, your correction is approved directly."
+    : "An analyst approves your correction before it is used for training.";
   corrReason.focus({ preventScroll: true });
   corrReason.setSelectionRange(corrReason.value.length, corrReason.value.length);   // type straight after a pre-filled start
   pinCorrectionSpan();
@@ -712,16 +712,13 @@ function renderSuggestions() {
   suggestStatus.textContent = "";
   if (source === "truth") {
     suggestNote.textContent = items.length
-      ? `${items.length} stretch${items.length === 1 ? "" : "es"} where the model disagrees with the ground truth `
-        + "(the dashed boxes). Review opens the correction form pre-filled; you check it and submit. "
-        + "A dashed box marks when an emitter was switched on: a pulsed radar is silent between pulses, "
-        + "so a short \"miss\" inside a radar box can be correct."
-      : "The model agrees with the ground truth everywhere in this capture. Nothing to correct.";
+      ? `${items.length} place${items.length === 1 ? "" : "s"} where the model disagrees with the true answer `
+        + "(dashed boxes). A pulsed radar is silent between pulses, so a short gap there can be right."
+      : "The model matches the true answer everywhere. Nothing to correct.";
   } else {
     suggestNote.textContent = items.length
-      ? "No ground truth for this capture, so nothing can say the model is wrong. These are the "
-        + "detections it was least sure about (below 40%): check them against the waterfall."
-      : "No ground truth for this capture, and every detection is confident (40% or more).";
+      ? "No true answer for this capture. These are the least confident detections (below 40%): check them on the waterfall."
+      : "No true answer for this capture, and every detection is confident (40% or more).";
   }
   // Bulk submit needs a recommended answer: an "unsure" row has none, so a
   // person must still say what is there.
@@ -729,8 +726,7 @@ function renderSuggestions() {
   const nBulk = items.slice(0, SUGGEST_SHOWN).filter(bulkable).length;
   suggBulk.hidden = !nBulk;
   suggBulk.innerHTML = nBulk ? `<label><input type="checkbox" id="suggAll"> Select all with a recommended answer</label>`
-    + `<button class="mini" id="suggSubmitSel" disabled>Submit selected</button><span class="bulk-n" id="suggN">0 selected</span>`
-    + `<span class="bulk-n">Each is filed with its recommended answer and reason, as if reviewed one by one.</span>` : "";
+    + `<button class="mini" id="suggSubmitSel" disabled>Submit selected</button><span class="bulk-n" id="suggN">0 selected</span>` : "";
   suggestList.innerHTML = items.slice(0, SUGGEST_SHOWN).map((s, i) =>
     `<div class="sugg${i === session.suggFocus ? " sel" : ""}" data-sugg="${i}" tabindex="0" `
     + `title="Show this stretch on the timeline">`
@@ -926,15 +922,11 @@ async function rxStart(source) {
     dwell_ms: Number(rxDwellSel.value) * 1000, model: modelSel.value, hop: Number(hopSel.value) });
   rxSetState("on", `RECEIVER · STREAMING · ${rx.info.name}${rx.info.simulated ? " (SIMULATED)" : ""}`);
   rxNote.textContent = rx.info.kind === "sim"
-    ? "Each dwell is a fresh slice of simulated air. Change the scenario case or SNR below at any "
-      + "time and the next dwell follows. A dwell is stored only when what is detected changes."
+    ? "Simulated air. Change the scenario or SNR below and the next dwell follows."
     : rx.info.kind === "sdr"
-    ? "Live from the antenna: each dwell is the newest slice of what SDRconnect receives, classified "
-      + "as it arrives (the air between dwells is not examined). In the background the server records "
-      + "each transmission until the air goes quiet, then decodes it; results appear in this log, "
-      + "Signal Pipeline and Comms Intel."
-    : "Streaming the recording dwell by dwell, every sample in order. A dwell is stored only when "
-      + "what is detected changes.";
+    ? "Live from the antenna. Each transmission is also recorded and decoded; results appear in this "
+      + "log and in Comms Intel."
+    : "Playing the recording dwell by dwell.";
   rxPaint();
   rxLoop();
 }
@@ -1360,7 +1352,7 @@ async function renderPerformance() {
   const figs = perfData.figures ?? {};
   for (const [key, block, img, cap, what] of [
     ["confusion_matrix.png", "figConfusion", "imgConfusion", "capConfusion",
-     "Counts of true versus predicted class per window, so a false positive is the off-diagonal cell in that class's column."],
+     "True class (rows) against predicted class (columns). Off the diagonal = a mistake."],
     ["accuracy_vs_snr.png", "figSnr", "imgSnr", "capSnr",
      "Per-class recall across the SNR sweep, as written by the evaluation."],
   ]) {
@@ -1765,7 +1757,7 @@ function paintQueue() {
   queueList.innerHTML = !waiting.length
     ? `<div class="note">Nothing waiting: every low-confidence detection has been reviewed.</div>`
     : `<div class="note">${waiting.length} waiting${waiting.length > QUEUE_SHOWN ? `, newest ${QUEUE_SHOWN} shown` : ""}.`
-      + (analyst ? "" : " View one and correct it; an analyst decides whether the model was right.") + `</div>`
+      + `</div>`
       + (analyst ? `<div class="bulkbar"><label><input type="checkbox" id="queueAll"> Select all shown</label>`
         + `<button class="mini" id="queueRightSel" disabled>Mark selected: model is right</button><span class="bulk-n" id="queueN">0 selected</span></div>` : "")
       + `<table><tbody>` + waiting.slice(0, QUEUE_SHOWN).map(r => `<tr>`
@@ -1832,15 +1824,12 @@ async function renderHistory() {
   await detectServer();
   const cfg = readConfig();
   histBackendNote.textContent = cfg.server?.demo_in_browser
-    ? "Phone demo: everything is kept in this browser only, with the same rules as the laptop version "
-      + "(roles, retention, audit trail). Nothing is sent anywhere. Retraining is simulated here."
+    ? "Phone demo: kept in this browser only. Retraining is simulated."
     : cfg.backend === "server"
-    ? `Stored in the local NEXA database (${cfg.server.db}) on this machine, with uploaded raw IQ `
-      + "beside it. Nothing leaves this machine, and every change is written to the audit trail below."
+    ? `Stored on this machine (${cfg.server.db}). Nothing leaves it.`
     : usingSupabase(cfg)
       ? `Every analysis is stored in ${cfg.url} and read back from it.`
-      : "No local server and no Supabase key, so analyses are kept in this browser only. "
-        + "Start the page with scripts/serve_local.py (web/start_demo.bat) to use the local database.";
+      : "No local server: kept in this browser only. Start scripts/serve_local.py to use the database.";
   renderAudit();
   renderCorrections();
   histStatus.textContent = "Loading…";
@@ -2320,8 +2309,8 @@ function showReviewBanner() {
     const a = r.rec;
     reviewBanner.innerHTML = `<div><strong>Stored capture</strong> ${esc(r.capture)}, analysed `
       + `${esc(new Date(a.created_at).toLocaleString())} as <strong>${esc(a.verdict)}</strong>. `
-      + (a.needs_review && !a.reviewed_by ? "It was flagged as a low-confidence detection: inspect it, then correct it "
-         + "(click or drag on the timeline)" + (isAnalyst() ? " or mark the model right." : "; an analyst decides whether the model was right.") : "")
+      + (a.needs_review && !a.reviewed_by ? "Low confidence: correct it on the timeline"
+         + (isAnalyst() ? " or mark the model right." : ".") : "")
       + `<div class="note">Raw signal: ${esc(a.retention?.why || "")}. The model shown is the one in use now.`
       + (session.truth?.length ? " Dashed boxes are the known true answer." : "") + `</div></div>`
       + `<div class="row-actions">`
@@ -2334,9 +2323,8 @@ function showReviewBanner() {
     + `Model said <s>${esc(r.predicted_labels.join(" + ") || "nothing")}</s> → human says `
     + `<strong>${esc(r.corrected_labels.join(" + "))}</strong>.`
     + `<div class="note">Reason: ${esc(r.reason)}</div>`
-    + `<div class="note">The model shown is the one in use now, so its detections may differ from what the operator saw.`
-    + (session.truth?.length ? " Dashed boxes are the known true answer." :
-       " No true answer was saved with this capture (dashed boxes are only kept for captures analysed after 2 Oct 2026), so judge it from the waterfall.")
+    + `<div class="note">Shown with the current model, which may differ from what the operator saw.`
+    + (session.truth?.length ? " Dashed boxes are the true answer." : " No true answer saved: judge from the waterfall.")
     + `</div></div>`
     + `<button class="mini" id="reviewBack">← Back to corrections</button>`;
 }
