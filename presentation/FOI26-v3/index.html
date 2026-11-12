@@ -146,7 +146,7 @@ body{background:var(--paper);color:var(--ink);font-family:var(--font);overflow:h
 </section>
 
 <!-- ================= PAGE 2 · DATASETS AND ACCURACY (sessions 1 + 2) ================= -->
-<section class="page" id="pg2" data-min="5" data-title="Datasets and accuracy" data-notes="<b>2:00 · 5 min.</b> What it learned: 1.2 million 160 µs windows, 60 classes, 16 noise levels, real recordings for testing only. How well: 80.6 percent exact per tracked emitter at 10 dB or better, 89 percent right family. Read the conditions. A longer look gives a surer answer. Then families and members: the weak ones show in red.">
+<section class="page" id="pg2" data-min="5" data-title="Datasets and accuracy" data-notes="<b>2:00 · 5 min.</b> What it learned: 1.2 million 160 µs windows, 60 classes, 16 noise levels, real recordings for testing only. How well: 79.4 percent exact per tracked emitter at 10 dB or better, 90 percent right family. Read the conditions. A longer look gives a surer answer. Then families and members: the weak ones show in red.">
   <div class="abs title-pill">Datasets and accuracy: what NEXA learned, and how well</div>
   <div class="abs question">1.2 M labelled 160 µs windows · 60 classes · conditions under every number</div>
   <div class="tourbox touring">
@@ -175,16 +175,16 @@ body{background:var(--paper);color:var(--ink);font-family:var(--font);overflow:h
         <svg style="position:absolute;inset:0;width:1300px;height:332px;pointer-events:none"><path d="M322 10 V 322 M647 10 V 322 M972 10 V 322" stroke="#D7DADD" stroke-width="2" stroke-dasharray="6 7"/></svg>
         <div class="k" data-k="ring" style="--c:var(--blue);position:absolute;left:0;top:0;width:312px;text-align:center"><div id="ring1"></div>
           <div class="note" style="font-size:15px;line-height:1.35">per tracked emitter · all 60 classes · SNR ≥ 10 dB · vote over 16 windows (2.6 ms) · fixed test set, 120,000 windows</div></div>
-        <div class="k" data-k="f89" style="--c:var(--teal);position:absolute;left:332px;top:0;width:305px;text-align:center"><div id="ring2"></div>
+        <div class="k" data-k="f90" style="--c:var(--teal);position:absolute;left:332px;top:0;width:305px;text-align:center"><div id="ring2"></div>
           <div class="note" style="font-size:15px;line-height:1.35">all 60 classes at 15 dB · vote over 8 windows · 32 fresh tracks per class</div></div>
-        <div class="k" data-k="c46" style="--c:var(--purple);position:absolute;left:668px;top:0;width:290px">
-          <div><span class="big" style="font-size:50px;color:var(--purple)">46</span><span class="big" style="font-size:28px;color:#9AA3AB"> / 60</span></div>
+        <div class="k" data-k="c48" style="--c:var(--purple);position:absolute;left:668px;top:0;width:290px">
+          <div><span class="big" style="font-size:50px;color:var(--purple)">48</span><span class="big" style="font-size:28px;color:#9AA3AB"> / 60</span></div>
           <div style="font-size:18px;font-weight:800;margin:2px 0 8px">classes named exactly <span style="white-space:nowrap">≥ 50%</span></div>
           <div id="waffle" style="display:grid;grid-template-columns:repeat(10,18px);gap:5px"></div>
-          <div class="note" style="font-size:15px;margin-top:8px;display:flex;gap:4px 14px;flex-wrap:wrap"><span><i style="display:inline-block;width:12px;height:12px;border-radius:50%;background:var(--purple)"></i> <b>≥ 90%: 38</b></span><span><i style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#C7B6E2"></i> <b>50–89%: 8</b></span><span>15 dB · 8-window vote</span></div>
+          <div class="note" style="font-size:15px;margin-top:8px;display:flex;gap:4px 14px;flex-wrap:wrap"><span><i style="display:inline-block;width:12px;height:12px;border-radius:50%;background:var(--purple)"></i> <b>≥ 90%: 37</b></span><span><i style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#C7B6E2"></i> <b>50–89%: 11</b></span><span>15 dB · 8-window vote</span></div>
         </div>
         <div class="k" data-k="gain" style="--c:var(--red);position:absolute;left:992px;top:0;width:308px">
-          <div class="big" style="font-size:52px;color:var(--red)">+8.7</div>
+          <div class="big" style="font-size:52px;color:var(--red)">+9.5</div>
           <div style="font-size:18px;font-weight:800;margin-top:2px">points over the previous model</div>
           <div id="slopes" style="margin-top:6px"></div>
           <div class="note" style="font-size:13.5px;line-height:1.3">same fixed test set · fixed FSK / PSK / QAM data + the new physics branch</div>
@@ -202,7 +202,7 @@ body{background:var(--paper);color:var(--ink);font-family:var(--font);overflow:h
       <h2>A LONGER LOOK</h2>
       <div class="body k" data-k="vote">
         <img src="../FOI26/assets/img/vote_curve.png" alt="Accuracy rises as more windows are averaged" style="display:block;width:420px;margin-top:2px">
-        <div class="note" style="font-size:16px;margin-top:4px">The tracker averages every window of one emitter: <b>8 windows (1.3 ms) already reach 79%</b> at ≥ 10 dB.</div>
+        <div class="note" style="font-size:16px;margin-top:4px">The tracker averages every window of one emitter: <b>8 windows (1.3 ms) already reach 77%</b> at ≥ 10 dB.</div>
       </div>
     </section>
     <section class="panel" style="left:900px;top:560px;width:980px;height:430px">
@@ -372,7 +372,7 @@ body{background:var(--paper);color:var(--ink);font-family:var(--font);overflow:h
     <section class="panel" style="left:1220px;top:150px;width:660px;height:420px">
       <h2>BY THE NUMBERS</h2>
       <div class="body" style="display:grid;grid-template-columns:1fr 1fr;gap:40px 30px;padding:20px 6px 0">
-<div class="k" data-k="n1" style="--c:var(--blue)"><div class="big" style="font-size:70px;color:var(--blue)">60<span style="font-size:34px"></span></div><div class="note" style="font-size:18.5px;line-height:1.35;margin-top:6px">signal classes, incl. radar and jamming</div></div><div class="k" data-k="n2" style="--c:var(--purple)"><div class="big" style="font-size:70px;color:var(--purple)">80.6<span style="font-size:34px">%</span></div><div class="note" style="font-size:18.5px;line-height:1.35;margin-top:6px">exact class per tracked emitter, ≥ 10 dB</div></div><div class="k" data-k="n3" style="--c:var(--teal)"><div class="big" style="font-size:70px;color:var(--teal)">89<span style="font-size:34px">%</span></div><div class="note" style="font-size:18.5px;line-height:1.35;margin-top:6px">right family, 15 dB</div></div><div class="k" data-k="n4" style="--c:var(--green)"><div class="big" style="font-size:70px;color:var(--green)">1<span style="font-size:34px"> laptop</span></div><div class="note" style="font-size:18.5px;line-height:1.35;margin-top:6px">everything analysed offline, nothing leaves it</div></div>
+<div class="k" data-k="n1" style="--c:var(--blue)"><div class="big" style="font-size:70px;color:var(--blue)">60<span style="font-size:34px"></span></div><div class="note" style="font-size:18.5px;line-height:1.35;margin-top:6px">signal classes, incl. radar and jamming</div></div><div class="k" data-k="n2" style="--c:var(--purple)"><div class="big" style="font-size:70px;color:var(--purple)">79.4<span style="font-size:34px">%</span></div><div class="note" style="font-size:18.5px;line-height:1.35;margin-top:6px">exact class per tracked emitter, ≥ 10 dB</div></div><div class="k" data-k="n3" style="--c:var(--teal)"><div class="big" style="font-size:70px;color:var(--teal)">90<span style="font-size:34px">%</span></div><div class="note" style="font-size:18.5px;line-height:1.35;margin-top:6px">right family, 15 dB</div></div><div class="k" data-k="n4" style="--c:var(--green)"><div class="big" style="font-size:70px;color:var(--green)">1<span style="font-size:34px"> laptop</span></div><div class="note" style="font-size:18.5px;line-height:1.35;margin-top:6px">everything analysed offline, nothing leaves it</div></div>
       </div>
     </section>
     <section class="panel" style="left:40px;top:590px;width:1840px;height:400px">
@@ -431,7 +431,7 @@ const C={blue:"var(--blue)",orange:"var(--orange)",amber:"var(--amber)",red:"var
 /* ---------- menu (M) ---------- */
 const PARTS=[
   ["The problem · before and after","the raw air, and what NEXA sees",2,C.red],
-  ["Datasets and accuracy","1.2 M windows · 80.6% per track",5,C.blue],
+  ["Datasets and accuracy","1.2 M windows · 79.4% per track",5,C.blue],
   ["Data processing pipeline","from IQ samples to a named emitter",4,C.teal],
   ["System architecture · human in the loop","listen, read, show, record · people decide",6,C.purple],
   ["Live demos 1, 2 and 3","recorded · walkie-talkie · KiwiSDR",11,C.orange],
@@ -515,28 +515,29 @@ document.getElementById("menuList").innerHTML=PARTS.map(([t,s,m,c],i)=>`<div cla
 
 /* ---------- page 2: rings, dots, slopes, families + members ---------- */
 function ring(el,pct,col,label,size){document.getElementById(el).innerHTML=`<svg viewBox="0 0 200 200" style="width:${size}px;height:${size}px"><circle cx="100" cy="100" r="82" fill="none" stroke="#F1F1F1" stroke-width="20"/><circle cx="100" cy="100" r="82" fill="none" stroke="${col}" stroke-width="20" stroke-linecap="round" transform="rotate(-90 100 100)" stroke-dasharray="${(pct/100*515.2).toFixed(1)} 515.2"/><text x="100" y="104" text-anchor="middle" font-size="40" font-weight="800" fill="#1A1A1A" font-family="Montserrat">${pct}%</text><text x="100" y="132" text-anchor="middle" font-size="14.5" font-weight="800" fill="${col}" font-family="Montserrat" letter-spacing="1">${label}</text></svg>`;}
-ring("ring1",80.6,"#2E7DB9","EXACT CLASS",196); ring("ring2",89,"#1D7A68","RIGHT FAMILY",196);
-document.getElementById("waffle").innerHTML=Array.from({length:60},(_,i)=>`<i style="display:block;width:18px;height:18px;border-radius:50%;background:${i<38?"var(--purple)":i<46?"#C7B6E2":"#E3E3E3"}"></i>`).join("");
-const SL=[["one window ≥ 10 dB",52.9,61.6],["FSK family",20,61],["PSK family",11,32]];
+ring("ring1",79.4,"#2E7DB9","EXACT CLASS",196); ring("ring2",90,"#1D7A68","RIGHT FAMILY",196);
+document.getElementById("waffle").innerHTML=Array.from({length:60},(_,i)=>`<i style="display:block;width:18px;height:18px;border-radius:50%;background:${i<37?"var(--purple)":i<48?"#C7B6E2":"#E3E3E3"}"></i>`).join("");
+const SL=[["one window ≥ 10 dB",52.9,62.4],["FSK family",20,61],["PSK family",11,35]];
 document.getElementById("slopes").innerHTML=SL.map(([n,a,b])=>`<div style="margin-bottom:4px"><div style="font-size:15.5px;font-weight:800">${n}</div><div style="display:grid;grid-template-columns:62px 1fr 66px;align-items:center;gap:8px;font-size:17px;font-weight:800"><span style="color:#8A9096">${a}%</span><div style="height:6px;border-radius:3px;background:linear-gradient(90deg,#D7DADD,var(--red));position:relative"><i style="position:absolute;right:-6px;top:-6px;width:17px;height:17px;border-radius:50%;background:var(--red)"></i></div><span style="color:var(--red);text-align:right">${b}%</span></div></div>`).join("");
-const FM=[["Radar",C.orange,99,[["Pulse",100],["LFM",100],["Barker",100],["Poly-Barker",100],["Frank",100],["Costas",100],["FMCW",100],["CW",94]]],
- ["Jammers",C.red,91,[["Barrage",100],["Spot",100],["Multitone",100],["Swept",100],["Chirp",100],["Pulsed",100],["Partial-band",100],["Reactive",100],["DRFM",91]]],
- ["FSK",C.teal,100,[["2FSK",100],["8FSK",100],["GFSK",100],["MSK",100],["CPFSK",100],["4FSK",94],["GMSK",91]]],
- ["Spread spectrum",C.navy,94,[["FHSS",100],["DSSS",94],["LoRa",88]]],
+const FM=[["Radar",C.orange,95,[["Pulse",100],["LFM",100],["Barker",100],["Frank",100],["Costas",100],["FMCW",100],["Poly-Barker",97],["CW",62]]],
+ ["Jammers",C.red,93,[["Barrage",100],["Spot",100],["Multitone",100],["Swept",100],["Chirp",100],["Pulsed",100],["Partial-band",100],["Reactive",100],["DRFM",81],["Tone",50]]],
+ ["FSK",C.teal,100,[["2FSK",100],["4FSK",100],["8FSK",100],["GFSK",100],["MSK",100],["CPFSK",100],["GMSK",78]]],
+ ["Spread spectrum",C.navy,82,[["FHSS",100],["DSSS",94],["LoRa",53]]],
  ["ASK",C.purple,100,[["OOK",100],["4ASK",91],["8ASK",84]]],
- ["Analog voice",C.teal,86,[["AM-DSB-SC",100],["AM-SSB-WC",100],["WBFM",100],["AM-DSB-WC",91],["PM",91],["NBFM",75]]],
- ["Pulse comms",C.amber,null,[["PPM",100],["SSR / IFF",97]]],
+ ["Analog voice",C.teal,86,[["AM-DSB-WC",100],["AM-DSB-SC",100],["AM-SSB-WC",100],["WBFM",100],["PM",94],["NBFM",50]]],
+ ["Pulse comms",C.amber,null,[["PPM",100],["SSR / IFF",100]]],
  ["OFDM / LTE / NR",C.blue,93,[["NR-like",100],["LTE-like",78]]],
- ["PSK",C.blue,91,[["OQPSK",100],["QPSK",97],["32PSK",72]]],
- ["APSK",C.green,91,[["16APSK",88],["32APSK",88]]],
- ["Noise floor",C.grey,null,[["nothing on air",78]]]];
+ ["PSK",C.blue,91,[["OQPSK",100],["16PSK",100],["QPSK",97]]],
+ ["QAM",C.navy,94,[["256QAM",97]]],
+ ["APSK",C.green,null,[["32APSK",69],["16APSK",66]]],
+ ["Noise floor",C.grey,null,[["nothing on air",66]]]];
 const tile=v=>v>=95?"#457900":v>=85?"#C77A00":"#B0281A";
 document.getElementById("famMem").innerHTML=
  `<div class="note" style="display:grid;grid-template-columns:182px 104px 52px 1fr;gap:8px;font-size:14.1px;font-weight:800;letter-spacing:1px;padding:0 2px 2px"><span>FAMILY</span><span style="white-space:nowrap">% FAMILY</span><span></span><span>EXACT CLASS, MEMBER BY MEMBER</span></div>`+
  FM.map(([f,c,p,ms])=>`<div style="display:grid;grid-template-columns:182px 104px 52px 1fr;gap:8px;align-items:start;margin-bottom:2px">
    <b style="font-size:17.5px;color:${c};white-space:nowrap;padding-top:1px">${f}</b>
    ${p===null?`<span class="note" style="font-size:14.7px;padding-top:2px">not shown</span><span></span>`:`<div style="position:relative;height:13px;margin-top:5px;border-radius:5px;background:var(--pill)"><div style="position:absolute;left:0;top:0;bottom:0;width:${p}%;border-radius:5px;background:${c}"></div><div style="position:absolute;left:80%;top:-3px;bottom:-3px;width:2px;background:var(--ink)"></div></div><b style="font-size:16.9px;padding-top:1px">${p}%</b>`}
-   <div style="display:flex;gap:3px;flex-wrap:wrap">${ms.map(([n,v])=>`<span style="display:inline-flex;gap:4px;font-size:14px;font-weight:700;padding:1px 6px;border-radius:6px;background:${tile(v)};color:#fff;white-space:nowrap">${n}<b>${v}</b></span>`).join("")}</div></div>`).join("")+
+   <div style="display:flex;gap:3px;flex-wrap:wrap">${ms.map(([n,v])=>`<span style="display:inline-flex;gap:3px;font-size:13px;font-weight:700;padding:0 5px;border-radius:6px;background:${tile(v)};color:#fff;white-space:nowrap">${n}<b>${v}</b></span>`).join("")}</div></div>`).join("")+
  `<div class="note" style="font-size:15.3px;margin-top:4px;display:flex;gap:12px;align-items:center;flex-wrap:wrap"><span>15 dB · 8-window vote · bars ≥ 80% shown, line = 80% · tiles ≥ 50% shown</span><span><i style="display:inline-block;width:11px;height:11px;border-radius:3px;background:#457900"></i> ≥ 95</span><span><i style="display:inline-block;width:11px;height:11px;border-radius:3px;background:#C77A00"></i> 85–94</span><span><i style="display:inline-block;width:11px;height:11px;border-radius:3px;background:#B0281A"></i> &lt; 85</span></div>`;
 
 /* ---------- page 6: demo 1 steps, demo 2 waves, demo 3 steps ---------- */
@@ -568,12 +569,12 @@ const T={
  pg2:[[["nums"],"1.2 million labelled windows of 160 µs, 60 classes, 16 noise levels"],
       [["split"],"80% for training, the rest kept apart for validation and the fixed test"],
       [["src"],"Our own generators plus public RadioML 2018 and HisarMod; real recordings only for testing"],
-      [["ring"],"80.6% of tracked emitters named exactly: all 60 classes, SNR ≥ 10 dB, 16-window vote"],
-      [["f89"],"89% land in the right family at 15 dB"],
-      [["c46"],"46 of 60 classes named exactly at least half the time, 38 of them at least 90%"],
-      [["gain"],"+8.7 points over the previous model; FSK went from 20% to 61%"],
+      [["ring"],"79.4% of tracked emitters named exactly: all 60 classes, SNR ≥ 10 dB, 16-window vote"],
+      [["f90"],"90% land in the right family at 15 dB"],
+      [["c48"],"48 of 60 classes named exactly at least half the time, 37 of them at least 90%"],
+      [["gain"],"+9.5 points over the previous model; FSK went from 20% to 61%"],
       [["snr"],"The same radar chirp from buried to clear, so the model learns when to say \"uncertain\""],
-      [["vote"],"A longer look gives a surer answer: 8 windows (1.3 ms) already reach 79%"],
+      [["vote"],"A longer look gives a surer answer: 8 windows (1.3 ms) already reach 77%"],
       [["fam"],"Family by family, member by member: radar and jammers near 100%, NBFM 75% (confirmed later by the zoom-in)"]],
  pg3:[[["cap"],"Capture: raw radio samples from an antenna, a recording or the simulator"],
       [["spec"],"The whole band becomes a picture: every transmitter leaves its mark"],
@@ -618,7 +619,7 @@ const T={
  pg8:[[["c1"],"A recorded signal: boxed, named and read"],
       [["c2"],"Our own walkie-talkie: our voice, received and turned into text"],
       [["c3"],"Real shortwave from far away: decoded, and located"],
-      [["n1","n2","n3"],"60 classes; 80.6% exact per tracked emitter; 89% right family"],
+      [["n1","n2","n3"],"60 classes; 79.4% exact per tracked emitter; 90% right family"],
       [["n4"],"All of it on one laptop, offline"],
       [["j1","j2"],"From the air: capture, then find every transmitter"],
       [["j3","j4"],"Name it, then listen and read"],
