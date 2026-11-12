@@ -1,7 +1,7 @@
 <!doctype html>
 <!-- SESSION 2 · Accuracy by family and family members. Owner: edit this file only.
      Numbers: current classifier physics_aug_best.pt (FOI26/results/2026-11-09_physics_augment_seed4; docs/DATA_VERSIONS.md),
-     fixed test set f993d8ebc417, and results/accuracy_plan/showcase_aug.json + showcase_aug_dense.json (families, QAM and APSK as one; scripts/measure_showcase.py, 15 dB, 32 tracks x 8 windows per class).
+     fixed test set f993d8ebc417, and results/accuracy_plan/showcase_aug.json (scripts/measure_showcase.py, 15 dB, 32 tracks x 8 windows per class).
      Shown: families >= 80% right-family; members >= 50% exact class. Keep the conditions under every number. -->
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>NEXA Accuracy</title>
@@ -38,9 +38,9 @@
       <div class="card" style="--bg:#EEF6E6"><div class="big" style="color:var(--green)">79.4%</div>
         <div class="l">exact class, per tracked emitter</div>
         <div class="note">all 60 classes · SNR ≥ 10 dB · vote over 16 windows (2.6 ms) · fixed test set, 120,000 windows</div></div>
-      <div class="card"><div class="big" style="color:var(--blue)">92%</div>
+      <div class="card"><div class="big" style="color:var(--blue)">90%</div>
         <div class="l">right signal family</div>
-        <div class="note">all 60 classes at 15 dB · vote over 8 windows · 32 fresh tracks per class · QAM and APSK as one</div></div>
+        <div class="note">all 60 classes at 15 dB · vote over 8 windows · 32 fresh tracks per class from our generators</div></div>
       <div class="card" style="--bg:#FFF4E0"><div class="big" style="color:var(--amber)">+9.5</div>
         <div class="l">points over the previous model</div>
         <table class="cmp">
@@ -63,7 +63,7 @@
       <div class="bar" style="--c:var(--green)"><div class="nm">ASK</div><div class="tr"><div class="fl" style="width:100%"></div></div><div class="v">100%</div></div>
       <div class="bar" style="--c:var(--green)"><div class="nm">FSK</div><div class="tr"><div class="fl" style="width:100%"></div></div><div class="v">100%</div></div>
       <div class="bar" style="--c:var(--green)"><div class="nm">Radar</div><div class="tr"><div class="fl" style="width:95%"></div></div><div class="v">95%</div></div>
-      <div class="bar" style="--c:var(--green)"><div class="nm">QAM / APSK</div><div class="tr"><div class="fl" style="width:100%"></div></div><div class="v">100%</div></div>
+      <div class="bar" style="--c:var(--green)"><div class="nm">QAM</div><div class="tr"><div class="fl" style="width:94%"></div></div><div class="v">94%</div></div>
       <div class="bar" style="--c:var(--green)"><div class="nm">Jammers</div><div class="tr"><div class="fl" style="width:93%"></div></div><div class="v">93%</div></div>
       <div class="bar" style="--c:var(--green)"><div class="nm">OFDM / LTE / NR</div><div class="tr"><div class="fl" style="width:93%"></div></div><div class="v">93%</div></div>
       <div class="bar" style="--c:var(--green)"><div class="nm">PSK</div><div class="tr"><div class="fl" style="width:91%"></div></div><div class="v">91%</div></div>
@@ -96,7 +96,8 @@
       <div class="mem" style="--c:var(--purple)"><b>Pulse comms</b><div><span class="chip">PPM<i>100</i></span><span class="chip">SSR / IFF<i>100</i></span></div></div>
       <div class="mem" style="--c:var(--navy)"><b>OFDM / LTE / NR</b><div><span class="chip">NR-like<i>100</i></span><span class="chip">LTE-like<i>78</i></span></div></div>
       <div class="mem" style="--c:var(--teal)"><b>PSK</b><div><span class="chip">OQPSK<i>100</i></span><span class="chip">16PSK<i>100</i></span><span class="chip">QPSK<i>97</i></span></div></div>
-      <div class="mem" style="--c:var(--blue)"><b>QAM / APSK</b><div><span class="chip">256QAM<i>97</i></span><span class="chip">32APSK<i>69</i></span><span class="chip">16APSK<i>66</i></span></div></div>
+      <div class="mem" style="--c:var(--blue)"><b>QAM</b><div><span class="chip">256QAM<i>97</i></span></div></div>
+      <div class="mem" style="--c:#8A5A00"><b>APSK</b><div><span class="chip">32APSK<i>69</i></span><span class="chip">16APSK<i>66</i></span></div></div>
       <div class="mem" style="--c:#777"><b>Noise floor</b><div><span class="chip">nothing on air<i>66</i></span></div></div>
       <div class="note" style="margin-top:4px">Exact class · 15 dB · 8-window vote · ≥ 50% shown · sizes alike: a group</div>
     </div>
