@@ -591,7 +591,7 @@
     </tr></thead>
     <tbody>
       <tr><th>What it names</th><td class="nx">60 classes: comms, 8 radar, 10 jammer types, noise</td><td>Signals the user trains it on</td><td>Modulation type and transmission system, HF–UHF</td><td>Modulation types and 350+ modems</td></tr>
-      <tr><th>How</th><td class="nx">Deep learning, four views of each window</td><td>Deep learning</td><td>Classifier with rule-based processing</td><td>Multi-stage classifier library</td></tr>
+      <tr><th>How</th><td class="nx">Deep learning: three views of each window fused with physics features</td><td>Deep learning</td><td>Classifier with rule-based processing</td><td>Multi-stage classifier library</td></tr>
       <tr><th>Jammer on top of a signal</th><td class="nx">Both reported (multi-label)</td><td class="ns">not stated</td><td class="ns">not stated</td><td class="ns">not stated</td></tr>
       <tr><th>Confidence on each answer</th><td class="nx">Calibrated band: high, medium, uncertain</td><td class="ns">not stated</td><td class="ns">not stated</td><td class="ns">not stated</td></tr>
       <tr><th>Voice and Morse to text</th><td class="nx">Speech and Morse to text, local AI summary</td><td class="ns">not stated</td><td>Demodulation, decoding, content recovery</td><td>Automatic decoding</td></tr>
@@ -624,16 +624,16 @@
       <div class="step"><img src="img/foi26/t_capture.png" alt="" width="335" height="193"><div><h4><i>1</i>Capture</h4><p>Raw IQ samples from a radio receiver, a recorded file or the simulator. Seconds of the whole band at once.</p></div></div>
       <div class="step"><img src="img/foi26/t_spectrogram.png" alt="" width="335" height="193"><div><h4><i>2</i>Spectrogram</h4><p>The band as a picture: time across, frequency down. Every emitter leaves its own mark.</p></div></div>
       <div class="step"><img src="img/foi26/t_detector.png" alt="" width="335" height="193"><div><h4><i>3</i>Detector</h4><p>A YOLO model draws a box around every emitter in time and frequency, many at once.</p></div></div>
-      <div class="step"><img src="img/foi26/t_cut.png" alt="" width="335" height="193"><div><h4><i>4</i>Cut and clean</h4><p>Each box is centred, filtered and cut into 160 µs windows. Gaps between pulses are skipped.</p></div></div>
+      <div class="step"><img src="img/foi26/t_cut.png" alt="" width="335" height="193"><div><h4><i>4</i>Cut and clean</h4><p>Each box is filtered and cut into 160 µs windows at its own frequency; one per pulse for pulsed signals.</p></div></div>
     </div>
   </div>
 
   <div class="stage b">
     <h3>2 · Name it</h3>
     <div class="steps">
-      <div class="step"><img src="img/foi26/t_classifier.png" alt="" width="335" height="193"><div><h4><i>5</i>Classifier</h4><p>60 yes / no answers per window, from four views of the signal: raw samples, spectrogram, expert and physics measurements.</p></div></div>
-      <div class="step"><img src="img/foi26/t_track.png" alt="" width="335" height="193"><div><h4><i>6</i>Tracker and vote</h4><p>Joins the windows of one emitter over time and averages them, so a single miss stops mattering.</p></div></div>
-      <div class="step"><div class="mini" aria-hidden="true"><span>CW radar / tone jam <b>?</b></span><span>LoRa / swept jam <b>?</b></span><span>QAM size <b>group</b></span></div><div><h4><i>7</i>Resolver</h4><p>Settles look-alikes from behaviour over time, and names the group where sizes cannot be told apart.</p></div></div>
+      <div class="step"><img src="img/foi26/t_classifier.png" alt="" width="335" height="193"><div><h4><i>5</i>Classifier</h4><p>Multi-View Physics-Fusion Network: raw IQ, spectrogram and spectrum CNNs fused with physics features.</p></div></div>
+      <div class="step"><img src="img/foi26/t_track.png" alt="" width="335" height="193"><div><h4><i>6</i>Tracker and vote</h4><p>Joins one emitter's windows over time and averages them; a new signal in the band gets its own track.</p></div></div>
+      <div class="step"><div class="mini" aria-hidden="true"><span>CW radar / tone jam <b>?</b></span><span>LoRa / swept jam <b>?</b></span><span>jam on signal <b>reactive</b></span><span>QAM size <b>group</b></span></div><div><h4><i>7</i>Resolver</h4><p>Settles look-alikes from behaviour over time, e.g. a jammer switching on over a signal is reactive.</p></div></div>
       <div class="step"><div class="mini" aria-hidden="true"><span>PULSE + DRFM <i class="band high">HIGH</i></span><span>QAM 16–256 <i class="band med">MED</i></span><span>weak burst <i class="band unsure">UNSURE</i></span></div><div><h4><i>8</i>Dashboard</h4><p>Boxes on the spectrogram and one row per emitter: answer, confidence band, frequency, time, alerts.</p></div></div>
     </div>
   </div>
