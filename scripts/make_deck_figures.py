@@ -129,6 +129,16 @@ def fig_pipeline(net, rng):
     ax.set_xlabel("time (µs)"); ax.set_ylabel("MHz")
     fig.savefig(OUT / "pipe_2_stft.png", transparent=True); plt.close(fig)
 
+    # 3b spectrum branch input: log power spectrum of the whole window
+    P = 10 * np.log10(np.abs(np.fft.fftshift(np.fft.fft(z * np.hanning(len(z))))) ** 2 + 1e-12)
+    P = np.convolve(np.pad(P, 3, mode="edge"), np.ones(7) / 7, mode="valid"); P -= P.max()
+    f = np.linspace(-1.6, 1.6, len(z), endpoint=False)
+    fig, ax = plt.subplots(figsize=(6, 2.6))
+    ax.fill_between(f, P, -40, color=TEAL, alpha=.18, lw=0); ax.plot(f, P, color=TEAL, lw=1.4)
+    ax.set_xlim(-1.6, 1.6); ax.set_ylim(-35, 2)
+    ax.set_xlabel("frequency (MHz)"); ax.set_ylabel("power (dB)")
+    fig.savefig(OUT / "pipe_2b_spectrum.png", transparent=True); plt.close(fig)
+
     # 4 features + attention weights
     grab = {}
     net.attn_pool.register_forward_hook(lambda m, i, o: grab.update(x=i[0], power=i[1]))
