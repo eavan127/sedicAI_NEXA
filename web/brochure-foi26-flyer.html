@@ -263,7 +263,7 @@
   .people span { display: block; font-size: 5.6pt; color: var(--orange); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; margin-top: .8mm; }
   .back .rule { width: 18mm; height: .8mm; background: var(--orange); border-radius: 1mm; margin-top: 6mm; }
   .back .scan { font-size: 7pt; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; color: var(--orange); margin-top: 4mm; }
-  .qrs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5mm; margin-top: 3.4mm; width: 100%; }
+  .qrs { display: grid; grid-template-columns: repeat(2, 1fr); gap: 5mm; margin-top: 3.4mm; width: 100%; }
   .qr .code { width: 27mm; height: 27mm; margin: 0 auto; background: #fff; border-radius: 2mm; padding: 1.8mm; display: grid; place-items: center; }
   .qr .code img, .qr .code canvas { width: 100% !important; height: 100% !important; }
   .qr .code .fallback { font-size: 5.6pt; color: var(--mute); word-break: break-all; }
@@ -430,8 +430,8 @@
   .closer .who { font-size: 6.2pt; color: var(--on-dark-dim); margin-top: 1.8mm; line-height: 1.5; }
   .closer .who b { color: #fff; font-weight: 700; }
   .closer .url { font-family: var(--mono); font-size: 7.4pt; color: #fff; margin-top: 1.8mm; }
-  .closer .qrs { margin-top: 0; width: auto; grid-template-columns: repeat(3, 19mm); gap: 2.4mm; }
-  .closer .qr .code { width: 19mm; height: 19mm; padding: 1.2mm; border-radius: 1.4mm; }
+  .closer .qrs { margin-top: 0; width: auto; grid-template-columns: repeat(2, 22mm); gap: 4mm; }
+  .closer .qr .code { width: 22mm; height: 22mm; padding: 1.2mm; border-radius: 1.4mm; }
   .closer .qr b { font-size: 5.8pt; margin-top: 1.2mm; text-align: center; }
 </style>
 </head>
@@ -557,7 +557,6 @@
     </div>
     <div class="qrs">
       <div class="qr"><div class="code" id="qrDemo"></div><b>Try it</b></div>
-      <div class="qr"><div class="code" id="qrVideo"></div><b>Watch</b></div>
       <div class="qr"><div class="code" id="qrSelf"></div><b>Brochure</b></div>
     </div>
   </div>
@@ -577,8 +576,7 @@
 
   /* QR codes point at the deployed site, so the printed PDF works when built from a local file. */
   const SITE = "https://sedic-ai-nexa.vercel.app/";
-  const DEMO_VIDEO_URL = "https://canva.link/rqno27jh02rd9bz";
-  const targets = [["qrDemo", SITE], ["qrVideo", DEMO_VIDEO_URL], ["qrSelf", SITE + "brochure-foi26.html"]];
+  const targets = [["qrDemo", SITE], ["qrSelf", SITE + "brochure-foi26.html"]];
   for (const [id, url] of targets) {
     const box = document.getElementById(id);
     if (typeof QRCode === "undefined") {
