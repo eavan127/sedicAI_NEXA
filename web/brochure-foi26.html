@@ -470,7 +470,7 @@
   </div>
   <div class="facts">
     <div><b>60</b><span>signal classes in 12 families</span></div>
-    <div><b>90%</b><span>right signal family, 15 dB, 8-window vote</span></div>
+    <div><b>92%</b><span>right signal family, 15 dB, 8-window vote</span></div>
     <div><b>79.4%</b><span>exact class out of 60, SNR ≥ 10 dB, 16-window vote</span></div>
     <div><b>0</b><span>data leaves the machine</span></div>
   </div>
@@ -517,7 +517,7 @@
 
   <div class="strengths">
     <div class="st"><svg class="ring" viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="40" fill="none" stroke="rgba(255,255,255,.14)" stroke-width="10"/><circle cx="50" cy="50" r="40" fill="none" stroke="#7FB24A" stroke-width="10" stroke-linecap="round" transform="rotate(-90 50 50)" stroke-dasharray="199.6 251.3"/><text x="50" y="52" text-anchor="middle" font-size="21" font-weight="800" fill="#fff">79.4<tspan font-size="11" fill="#F0A020">%</tspan></text><text x="50" y="66" text-anchor="middle" font-size="6.4" font-weight="800" letter-spacing=".6" fill="#C5CBE0">EXACT CLASS</text></svg><h3>per emitter</h3><p>all 60 classes · SNR ≥ 10 dB · vote over 16 windows (2.6 ms) · 120,000 test windows never trained on</p></div>
-    <div class="st"><svg class="ring" viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="40" fill="none" stroke="rgba(255,255,255,.14)" stroke-width="10"/><circle cx="50" cy="50" r="40" fill="none" stroke="#5CC2AE" stroke-width="10" stroke-linecap="round" transform="rotate(-90 50 50)" stroke-dasharray="226.2 251.3"/><text x="50" y="52" text-anchor="middle" font-size="21" font-weight="800" fill="#fff">90<tspan font-size="11" fill="#F0A020">%</tspan></text><text x="50" y="66" text-anchor="middle" font-size="6.4" font-weight="800" letter-spacing=".6" fill="#C5CBE0">RIGHT FAMILY</text></svg><h3>signal family</h3><p>15 dB · vote over 8 windows · 32 fresh tracks per class</p></div>
+    <div class="st"><svg class="ring" viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="40" fill="none" stroke="rgba(255,255,255,.14)" stroke-width="10"/><circle cx="50" cy="50" r="40" fill="none" stroke="#5CC2AE" stroke-width="10" stroke-linecap="round" transform="rotate(-90 50 50)" stroke-dasharray="231.2 251.3"/><text x="50" y="52" text-anchor="middle" font-size="21" font-weight="800" fill="#fff">92<tspan font-size="11" fill="#F0A020">%</tspan></text><text x="50" y="66" text-anchor="middle" font-size="6.4" font-weight="800" letter-spacing=".6" fill="#C5CBE0">RIGHT FAMILY</text></svg><h3>signal family</h3><p>15 dB · vote over 8 windows · QAM and APSK as one</p></div>
     <div class="st"><div class="waffle-n"><b>48</b><span> / 60</span></div><div class="waffle" aria-hidden="true"><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="b"></i><i class="b"></i><i class="b"></i><i class="b"></i><i class="b"></i><i class="b"></i><i class="b"></i><i class="b"></i><i class="b"></i><i class="b"></i><i class="b"></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i></div><h3>classes named exactly</h3><p>≥ 50% of the time, 37 of them ≥ 90% · 15 dB · 8-window vote</p></div>
   </div>
 
@@ -541,24 +541,23 @@
     </div>
     <div class="card">
       <h3>It does not guess what it cannot see</h3>
-      <p>QAM, APSK and high-order PSK sizes look alike in 160 µs. NEXA names the group and offers the likeliest size as a hint. An empty channel is reported as empty.</p>
+      <p>QAM, APSK and high-order PSK sizes look alike in 160 µs. NEXA names the group and offers the likeliest class as a hint. An empty channel is reported as empty.</p>
     </div>
   </div>
 
   <div class="famacc">
-    <h3>Right family: 90% across all 12</h3>
+    <h3>Right family: 92% across 11 (QAM and APSK as one)</h3>
     <div class="fgrid">
       <div><span>ASK</span><i style="width:100%"></i><b>100%</b></div>
       <div><span>FSK</span><i style="width:100%"></i><b>100%</b></div>
+      <div><span>QAM / APSK</span><i style="width:100%"></i><b>100%</b></div>
       <div><span>Radar</span><i style="width:95%"></i><b>95%</b></div>
-      <div><span>QAM</span><i style="width:94%"></i><b>94%</b></div>
       <div><span>Jammers</span><i style="width:93%"></i><b>93%</b></div>
       <div><span>OFDM / LTE / NR</span><i style="width:93%"></i><b>93%</b></div>
       <div><span>PSK</span><i style="width:91%"></i><b>91%</b></div>
       <div><span>Analog voice</span><i style="width:86%"></i><b>86%</b></div>
       <div><span>Spread spectrum</span><i style="width:82%"></i><b>82%</b></div>
       <div><span>Pulse comms</span><i style="width:70%"></i><b>70%</b></div>
-      <div><span>APSK</span><i style="width:69%"></i><b>69%</b></div>
       <div><span>Noise floor</span><i style="width:66%"></i><b>66%</b></div>
     </div>
     <p class="cond">Answer lands in the right family · 15 dB · vote over 8 windows · 32 fresh tracks per class from our own generators, one emitter at a time (cleaner than the test set) · physics_aug_best.</p>
@@ -588,11 +587,10 @@
       <div class="cfam civ"><h4><span>ASK<u class="tier civ">Civilian</u></span><i>family 100%</i></h4><div class="chips"><span class="chip hi">OOK<b>100</b></span><span class="chip hi">4ASK<b>91</b></span><span class="chip mid">8ASK<b>84</b></span></div></div>
       <div class="cfam civ"><h4><span>OFDM / LTE / NR<u class="tier civ">Civilian</u></span><i>family 93%</i></h4><div class="chips"><span class="chip hi">NR-like<b>100</b></span><span class="chip mid">LTE-like<b>78</b></span><span class="chip lo">OFDM<b>12</b></span></div></div>
       <div class="cfam civ"><h4><span>PSK<u class="tier civ">Civilian</u></span><i>family 91%</i></h4><div class="chips"><span class="chip hi">OQPSK<b>100</b></span><span class="chip hi">16PSK<b>100</b></span><span class="chip hi">QPSK<b>97</b></span><span class="chip lo">BPSK<b>47</b></span><span class="chip lo">8PSK<b>0</b></span><span class="chip lo">32PSK<b>0</b></span></div><em>sizes answered as a group</em></div>
-      <div class="cfam civ"><h4><span>QAM<u class="tier civ">Civilian</u></span><i>family 94%</i></h4><div class="chips"><span class="chip hi">256QAM<b>97</b></span><span class="chip lo">32QAM<b>47</b></span><span class="chip lo">16QAM<b>3</b></span><span class="chip lo">64QAM<b>0</b></span><span class="chip lo">128QAM<b>0</b></span></div><em>sizes answered as a group</em></div>
-      <div class="cfam civ"><h4><span>APSK<u class="tier civ">Civilian</u></span><i>family 69%</i></h4><div class="chips"><span class="chip mid">32APSK<b>69</b></span><span class="chip mid">16APSK<b>66</b></span><span class="chip lo">64APSK<b>6</b></span><span class="chip lo">128APSK<b>0</b></span></div><em>sizes answered as a group</em></div>
+      <div class="cfam civ"><h4><span>QAM / APSK<u class="tier civ">Civilian</u></span><i>family 100%</i></h4><div class="chips"><span class="chip hi">256QAM<b>97</b></span><span class="chip mid">32APSK<b>69</b></span><span class="chip mid">16APSK<b>66</b></span><span class="chip lo">32QAM<b>47</b></span><span class="chip lo">64APSK<b>6</b></span><span class="chip lo">16QAM<b>3</b></span><span class="chip lo">64QAM<b>0</b></span><span class="chip lo">128QAM<b>0</b></span><span class="chip lo">128APSK<b>0</b></span></div><em>answered as one group</em></div>
       <div class="cfam emp"><h4><span>Noise floor<u class="tier emp">Empty</u></span><i>family 66%</i></h4><div class="chips"><span class="chip mid">Nothing on air<b>66</b></span></div></div>
   </div>
-  <p class="cond" style="margin-top:2.4mm"><span class="chip hi"><b>90+</b></span> <span class="chip mid"><b>50–89</b></span> <span class="chip lo"><b>&lt;50</b></span> exact class, % · 15 dB · vote over 8 windows · 32 fresh tracks per class from our own generators, one emitter at a time · physics_aug_best. Sizes of QAM, APSK and high-order PSK look alike in 160 µs: NEXA answers the group and gives the likeliest size as a hint, so a low size score is still a right family answer.</p>
+  <p class="cond" style="margin-top:2.4mm"><span class="chip hi"><b>90+</b></span> <span class="chip mid"><b>50–89</b></span> <span class="chip lo"><b>&lt;50</b></span> exact class, % · 15 dB · vote over 8 windows · 32 fresh tracks per class from our own generators, one emitter at a time · physics_aug_best. QAM and APSK (and their sizes) and high-order PSK sizes look alike in 160 µs: NEXA answers the group and gives the likeliest size as a hint, so a low size score is still a right family answer.</p>
   <div class="foot"><span>NEXA · SEDIC@FOI2026</span><span>04</span></div>
 </section>
 

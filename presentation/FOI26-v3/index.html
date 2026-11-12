@@ -146,7 +146,7 @@ body{background:var(--paper);color:var(--ink);font-family:var(--font);overflow:h
 </section>
 
 <!-- ================= PAGE 2 · DATASETS AND ACCURACY (sessions 1 + 2) ================= -->
-<section class="page" id="pg2" data-min="5" data-title="Datasets and accuracy" data-notes="<b>2:00 · 5 min.</b> What it learned: 1.2 million 160 µs windows, 60 classes, 16 noise levels, real recordings for testing only. How well: 79.4 percent exact per tracked emitter at 10 dB or better, 90 percent right family. Read the conditions. A longer look gives a surer answer. Then families and members: the weak ones show in red.">
+<section class="page" id="pg2" data-min="5" data-title="Datasets and accuracy" data-notes="<b>2:00 · 5 min.</b> What it learned: 1.2 million 160 µs windows, 60 classes, 16 noise levels, real recordings for testing only. How well: 79.4 percent exact per tracked emitter at 10 dB or better, 92 percent right family, counting QAM and APSK as one. Read the conditions. A longer look gives a surer answer. Then families and members: the weak ones show in red.">
   <div class="abs title-pill">Datasets and accuracy: what NEXA learned, and how well</div>
   <div class="abs question">1.2 M labelled 160 µs windows · 60 classes · conditions under every number</div>
   <div class="tourbox touring">
@@ -176,7 +176,7 @@ body{background:var(--paper);color:var(--ink);font-family:var(--font);overflow:h
         <div class="k" data-k="ring" style="--c:var(--blue);position:absolute;left:0;top:0;width:312px;text-align:center"><div id="ring1"></div>
           <div class="note" style="font-size:15px;line-height:1.35">per tracked emitter · all 60 classes · SNR ≥ 10 dB · vote over 16 windows (2.6 ms) · fixed test set, 120,000 windows</div></div>
         <div class="k" data-k="f90" style="--c:var(--teal);position:absolute;left:332px;top:0;width:305px;text-align:center"><div id="ring2"></div>
-          <div class="note" style="font-size:15px;line-height:1.35">all 60 classes at 15 dB · vote over 8 windows · 32 fresh tracks per class</div></div>
+          <div class="note" style="font-size:15px;line-height:1.35">all 60 classes at 15 dB · vote over 8 windows · 32 fresh tracks per class · QAM and APSK as one</div></div>
         <div class="k" data-k="c48" style="--c:var(--purple);position:absolute;left:668px;top:0;width:290px">
           <div><span class="big" style="font-size:50px;color:var(--purple)">48</span><span class="big" style="font-size:28px;color:#9AA3AB"> / 60</span></div>
           <div style="font-size:18px;font-weight:800;margin:2px 0 8px">classes named exactly <span style="white-space:nowrap">≥ 50%</span></div>
@@ -372,7 +372,7 @@ body{background:var(--paper);color:var(--ink);font-family:var(--font);overflow:h
     <section class="panel" style="left:1220px;top:150px;width:660px;height:420px">
       <h2>BY THE NUMBERS</h2>
       <div class="body" style="display:grid;grid-template-columns:1fr 1fr;gap:40px 30px;padding:20px 6px 0">
-<div class="k" data-k="n1" style="--c:var(--blue)"><div class="big" style="font-size:70px;color:var(--blue)">60<span style="font-size:34px"></span></div><div class="note" style="font-size:18.5px;line-height:1.35;margin-top:6px">signal classes, incl. radar and jamming</div></div><div class="k" data-k="n2" style="--c:var(--purple)"><div class="big" style="font-size:70px;color:var(--purple)">79.4<span style="font-size:34px">%</span></div><div class="note" style="font-size:18.5px;line-height:1.35;margin-top:6px">exact class per tracked emitter, ≥ 10 dB</div></div><div class="k" data-k="n3" style="--c:var(--teal)"><div class="big" style="font-size:70px;color:var(--teal)">90<span style="font-size:34px">%</span></div><div class="note" style="font-size:18.5px;line-height:1.35;margin-top:6px">right family, 15 dB</div></div><div class="k" data-k="n4" style="--c:var(--green)"><div class="big" style="font-size:70px;color:var(--green)">1<span style="font-size:34px"> laptop</span></div><div class="note" style="font-size:18.5px;line-height:1.35;margin-top:6px">everything analysed offline, nothing leaves it</div></div>
+<div class="k" data-k="n1" style="--c:var(--blue)"><div class="big" style="font-size:70px;color:var(--blue)">60<span style="font-size:34px"></span></div><div class="note" style="font-size:18.5px;line-height:1.35;margin-top:6px">signal classes, incl. radar and jamming</div></div><div class="k" data-k="n2" style="--c:var(--purple)"><div class="big" style="font-size:70px;color:var(--purple)">79.4<span style="font-size:34px">%</span></div><div class="note" style="font-size:18.5px;line-height:1.35;margin-top:6px">exact class per tracked emitter, ≥ 10 dB</div></div><div class="k" data-k="n3" style="--c:var(--teal)"><div class="big" style="font-size:70px;color:var(--teal)">92<span style="font-size:34px">%</span></div><div class="note" style="font-size:18.5px;line-height:1.35;margin-top:6px">right family, 15 dB</div></div><div class="k" data-k="n4" style="--c:var(--green)"><div class="big" style="font-size:70px;color:var(--green)">1<span style="font-size:34px"> laptop</span></div><div class="note" style="font-size:18.5px;line-height:1.35;margin-top:6px">everything analysed offline, nothing leaves it</div></div>
       </div>
     </section>
     <section class="panel" style="left:40px;top:590px;width:1840px;height:400px">
@@ -515,7 +515,7 @@ document.getElementById("menuList").innerHTML=PARTS.map(([t,s,m,c],i)=>`<div cla
 
 /* ---------- page 2: rings, dots, slopes, families + members ---------- */
 function ring(el,pct,col,label,size){document.getElementById(el).innerHTML=`<svg viewBox="0 0 200 200" style="width:${size}px;height:${size}px"><circle cx="100" cy="100" r="82" fill="none" stroke="#F1F1F1" stroke-width="20"/><circle cx="100" cy="100" r="82" fill="none" stroke="${col}" stroke-width="20" stroke-linecap="round" transform="rotate(-90 100 100)" stroke-dasharray="${(pct/100*515.2).toFixed(1)} 515.2"/><text x="100" y="104" text-anchor="middle" font-size="40" font-weight="800" fill="#1A1A1A" font-family="Montserrat">${pct}%</text><text x="100" y="132" text-anchor="middle" font-size="14.5" font-weight="800" fill="${col}" font-family="Montserrat" letter-spacing="1">${label}</text></svg>`;}
-ring("ring1",79.4,"#2E7DB9","EXACT CLASS",196); ring("ring2",90,"#1D7A68","RIGHT FAMILY",196);
+ring("ring1",79.4,"#2E7DB9","EXACT CLASS",196); ring("ring2",92,"#1D7A68","RIGHT FAMILY",196);
 document.getElementById("waffle").innerHTML=Array.from({length:60},(_,i)=>`<i style="display:block;width:18px;height:18px;border-radius:50%;background:${i<37?"var(--purple)":i<48?"#C7B6E2":"#E3E3E3"}"></i>`).join("");
 const SL=[["one window ≥ 10 dB",52.9,62.4],["FSK family",20,61],["PSK family",11,35]];
 document.getElementById("slopes").innerHTML=SL.map(([n,a,b])=>`<div style="margin-bottom:4px"><div style="font-size:15.5px;font-weight:800">${n}</div><div style="display:grid;grid-template-columns:62px 1fr 66px;align-items:center;gap:8px;font-size:17px;font-weight:800"><span style="color:#8A9096">${a}%</span><div style="height:6px;border-radius:3px;background:linear-gradient(90deg,#D7DADD,var(--red));position:relative"><i style="position:absolute;right:-6px;top:-6px;width:17px;height:17px;border-radius:50%;background:var(--red)"></i></div><span style="color:var(--red);text-align:right">${b}%</span></div></div>`).join("");
@@ -528,8 +528,7 @@ const FM=[["Radar",C.orange,95,[["Pulse",100],["LFM",100],["Barker",100],["Frank
  ["Pulse comms",C.amber,null,[["PPM",100],["SSR / IFF",100]]],
  ["OFDM / LTE / NR",C.blue,93,[["NR-like",100],["LTE-like",78]]],
  ["PSK",C.blue,91,[["OQPSK",100],["16PSK",100],["QPSK",97]]],
- ["QAM",C.navy,94,[["256QAM",97]]],
- ["APSK",C.green,null,[["32APSK",69],["16APSK",66]]],
+ ["QAM / APSK",C.navy,100,[["256QAM",97],["32APSK",69],["16APSK",66]]],
  ["Noise floor",C.grey,null,[["nothing on air",66]]]];
 const tile=v=>v>=95?"#457900":v>=85?"#C77A00":"#B0281A";
 document.getElementById("famMem").innerHTML=
@@ -570,7 +569,7 @@ const T={
       [["split"],"80% for training, the rest kept apart for validation and the fixed test"],
       [["src"],"Our own generators plus public RadioML 2018 and HisarMod; real recordings only for testing"],
       [["ring"],"79.4% of tracked emitters named exactly: all 60 classes, SNR ≥ 10 dB, 16-window vote"],
-      [["f90"],"90% land in the right family at 15 dB"],
+      [["f90"],"92% land in the right family at 15 dB (QAM and APSK as one)"],
       [["c48"],"48 of 60 classes named exactly at least half the time, 37 of them at least 90%"],
       [["gain"],"+9.5 points over the previous model; FSK went from 20% to 61%"],
       [["snr"],"The same radar chirp from buried to clear, so the model learns when to say \"uncertain\""],
@@ -619,7 +618,7 @@ const T={
  pg8:[[["c1"],"A recorded signal: boxed, named and read"],
       [["c2"],"Our own walkie-talkie: our voice, received and turned into text"],
       [["c3"],"Real shortwave from far away: decoded, and located"],
-      [["n1","n2","n3"],"60 classes; 79.4% exact per tracked emitter; 90% right family"],
+      [["n1","n2","n3"],"60 classes; 79.4% exact per tracked emitter; 92% right family"],
       [["n4"],"All of it on one laptop, offline"],
       [["j1","j2"],"From the air: capture, then find every transmitter"],
       [["j3","j4"],"Name it, then listen and read"],
