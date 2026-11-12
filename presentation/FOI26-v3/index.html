@@ -1,0 +1,725 @@
+<!doctype html>
+<!-- NEXA · FOI26 presentation, 30 minutes, 9 poster pages in the style of the finale posters (nexa-tv-poster-*.html).
+     Content: FOI26 sessions 01-05 (exact numbers kept) plus the three live demos, in the order of the
+     "NEXA FOI26 presentation flow" Google Doc. v3: reorganised after the team review (7 pages).
+     Each page plays a walkthrough that highlights one part at a time with a numbered caption, plays once and then stops (R replays).
+     Keys: ← → / PageUp PageDown pages · M menu · N speaker notes · P pause the walkthrough · R replay the page · F full screen.
+     Fonts and pictures come from ../FOI26/assets (Montserrat is embedded there, so it works offline). -->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NEXA · FOI26 · v3</title>
+<link rel="stylesheet" href="../FOI26/assets/fonts.css">
+<style>
+:root{
+  --blue:#2E7DB9; --orange:#F0A020; --amber:#C77A00; --red:#B0281A; --green:#457900; --navy:#22306B;
+  --teal:#1D7A68; --purple:#6B3FA0; --ink:#1A1A1A; --mute:#5E5E5E; --pill:#F1F1F1; --line:#E3E3E3; --paper:#FFFFFF; --soft:#EEF4FA;
+  --font:"Montserrat","Segoe UI","Helvetica Neue",Arial,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--paper);color:var(--ink);font-family:var(--font);overflow:hidden}
+.viewport{position:fixed;inset:0;background:var(--paper)}
+.stage{position:absolute;left:50%;top:50%;width:1920px;height:1080px;transform-origin:center;background:var(--paper);overflow:hidden}
+.abs{position:absolute}
+.page{position:absolute;inset:0;opacity:0;visibility:hidden;transition:opacity .4s}
+.page.active{opacity:1;visibility:visible}
+
+/* header, as on the posters */
+.logo{left:44px;top:38px}
+.logo img{display:block;height:52px}
+.logo small{display:block;font-size:14px;font-weight:700;color:var(--mute);letter-spacing:2px;margin:6px 0 0 4px}
+.title-pill{left:330px;top:24px;width:1200px;height:72px;border-radius:36px;background:var(--pill);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:28px;white-space:nowrap}
+.question{left:330px;top:104px;width:1200px;text-align:center;font-size:19px;font-style:italic;color:var(--mute);font-weight:500}
+.event{right:40px;top:14px;text-align:right}
+.event img{display:block;height:96px;margin-left:auto}
+.event span{display:block;font-size:14px;color:var(--green);font-weight:800;letter-spacing:1px;margin-top:2px}
+
+/* panels */
+.panel{position:absolute}
+.panel>h2{margin:0;height:46px;border-radius:23px;background:var(--pill);display:flex;align-items:center;justify-content:center;font-size:21px;font-weight:800;letter-spacing:1.5px;gap:12px}
+.live{font-size:12px;letter-spacing:1.5px;color:#fff;background:var(--red);border-radius:10px;padding:3px 9px;display:inline-flex;align-items:center;gap:6px}
+.live::before{content:"";width:7px;height:7px;border-radius:50%;background:#fff;animation:blink 1.2s infinite}
+@keyframes blink{50%{opacity:.2}}
+.body{position:absolute;left:0;right:0;top:58px;bottom:0}
+.cap{font-size:15px;font-weight:800;letter-spacing:1.3px;color:var(--mute);text-transform:uppercase}
+.note{font-size:17px;color:var(--mute);font-weight:600;line-height:1.45}
+.note b{color:var(--ink)}
+.zt{font-size:20px;font-weight:800;letter-spacing:1.4px;color:var(--c)}
+
+/* small parts */
+.hx{flex:none;width:38px;height:33px;display:grid;place-items:center;color:#fff;background:var(--c,var(--navy));font-size:15px;font-weight:800;clip-path:polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%)}
+.tag{display:inline-block;color:#fff;background:var(--t,var(--c));border-radius:9px;padding:3px 10px;font-size:15px;font-weight:800;letter-spacing:1px;white-space:nowrap;vertical-align:middle}
+.pl{display:inline-flex;align-items:center;gap:6px;padding:5px 13px;border-radius:999px;font-size:17px;font-weight:800;background:color-mix(in srgb,var(--c) 14%,white);color:color-mix(in srgb,var(--c) 80%,black);white-space:nowrap}
+.big{font-weight:800;line-height:1;letter-spacing:-.5px}
+.ico{width:1em;height:1em;stroke:currentColor;fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.chev{color:#9AA3AB;font-size:30px;font-weight:800;line-height:1}
+.flow{fill:none;stroke:#9AA3AB;stroke-width:3;stroke-dasharray:8 8;animation:flow 2s linear infinite}
+@keyframes flow{to{stroke-dashoffset:-32}}
+.thumb{display:block;border-radius:12px;border:3px solid color-mix(in srgb,var(--c) 45%,white)}
+.mono{font-family:Consolas,"Courier New",monospace}
+
+/* the walkthrough: unvisited parts fade, the current one lifts, then everything loops */
+.k{transition:opacity .3s,transform .3s,box-shadow .3s,filter .3s}
+.touring .k{opacity:1}
+.touring .k.on{transform:translateY(-3px);background-color:color-mix(in srgb,var(--c,var(--navy)) 9%,white);box-shadow:0 0 0 8px color-mix(in srgb,var(--c,var(--navy)) 9%,white),0 0 0 11px color-mix(in srgb,var(--c,var(--navy)) 30%,transparent),0 0 24px 6px color-mix(in srgb,var(--c,var(--navy)) 30%,transparent);border-radius:12px}
+.touring .kb.on{background-color:#fff;box-shadow:0 0 0 6px color-mix(in srgb,var(--c,var(--navy)) 22%,transparent),0 0 24px 6px color-mix(in srgb,var(--c,var(--navy)) 35%,transparent);border-radius:14px}
+.capbar{position:absolute;left:40px;right:330px;top:1000px;height:56px;display:flex;align-items:center;gap:16px;font-size:26px;line-height:1.2;font-weight:700;transition:opacity .18s}
+.capbar.fade0{opacity:0}
+.capbar .snum{flex:none;width:56px;height:48px;display:grid;place-items:center;color:#fff;background:var(--navy);font-size:20px;font-weight:800;clip-path:polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%);transition:background .4s}
+
+/* footer */
+.dots{position:absolute;right:40px;top:1018px;display:flex;align-items:center;gap:8px}
+.dots i{width:14px;height:14px;border-radius:50%;background:#D7DADD;cursor:pointer;transition:background .3s,width .3s}
+.dots i.now{background:var(--navy);width:34px;border-radius:7px}
+.dots span{font-size:14px;font-weight:800;color:var(--mute);margin-left:10px;letter-spacing:1px}
+#menu{position:absolute;inset:0;background:rgba(255,255,255,.97);z-index:20;display:none}
+#menu.open{display:block}
+#notes{position:absolute;left:0;right:0;bottom:0;z-index:15;background:#15171C;color:#F3F1EC;font-size:23px;line-height:1.5;padding:22px 60px 26px;display:none}
+#notes.open{display:block}
+#notes b{color:#FFD07A}
+.hint{position:fixed;right:12px;bottom:8px;color:#9AA3AB;font:600 11px var(--font);z-index:30;opacity:.7}
+@media (prefers-reduced-motion:reduce){.flow,.live::before{animation:none}}
+/* after a page's walkthrough has played once, all its motion stops */
+.page.done .flow,.page.done .live::before,.page.done .ping{animation:none!important}
+
+/* pages 3 and 4 walk like the system poster: unvisited parts dim, the active wire carries a dot */
+#pg3 .touring .k:not(.seen),#pg4 .touring .k:not(.seen){opacity:.32}
+#pg3 path.flow[data-to],#pg4 path.flow[data-to]{stroke:#C9CED3;transition:stroke .4s}
+#pg3 path.flow.seen,#pg4 path.flow.seen{stroke:#8A9096}
+#pg3 path.flow.on,#pg4 path.flow.on{stroke:#1A1A1A!important;stroke-width:4.5}
+</style></head><body>
+
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="i-laptop" viewBox="0 0 64 48"><rect x="10" y="6" width="44" height="30" rx="3"/><path d="M4 42h56l-4-6H8z"/></symbol>
+  <symbol id="i-walkie" viewBox="0 0 40 64"><rect x="8" y="16" width="24" height="44" rx="5"/><path d="M14 16V4"/><rect x="13" y="24" width="14" height="12" rx="2"/><path d="M14 44h12M14 50h12"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 64 64"><circle cx="32" cy="32" r="26"/><path d="M6 32h52M32 6c9 8 9 44 0 52M32 6c-9 8-9 44 0 52M11 18h42M11 46h42"/></symbol>
+  <symbol id="i-file" viewBox="0 0 48 60"><path d="M6 4h26l10 10v42H6z"/><path d="M32 4v10h10"/><path d="M12 38c3-8 5-8 7 0s4 8 7 0 5-8 7 0 3 4 4 0"/></symbol>
+  <symbol id="i-antenna" viewBox="0 0 48 64"><path d="M24 22v38M14 60h20M24 22l-12-14M24 22l12-14"/><path d="M10 34a20 20 0 0 1 0-24M38 34a20 20 0 0 0 0-24" opacity=".5"/></symbol>
+  <symbol id="i-person" viewBox="0 0 48 64"><circle cx="24" cy="14" r="9"/><path d="M8 60c0-16 7-26 16-26s16 10 16 26"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></symbol>
+  <symbol id="i-person2" viewBox="0 0 64 64"><circle cx="22" cy="18" r="8"/><path d="M8 54c0-13 6-21 14-21s14 8 14 21"/><circle cx="44" cy="22" r="7"/><path d="M34 54c1-10 5-17 10-17s12 7 12 17"/></symbol>
+</svg>
+
+<div class="viewport"><div class="stage" id="stage">
+
+<!-- ================= PAGE 1 · THE PROBLEM + THE AIR RIGHT NOW (simulated) ================= -->
+<section class="page" id="pg1" data-min="2" data-title="The problem · before and after" data-notes="<b>0:00 · 2 min.</b> Before: the air right now, many transmitters at once (the waterfall is simulated, drawn live). After: what NEXA makes of one real capture, every transmitter boxed and named. Find, name, read: that is what turns before into after.">
+  <div class="abs title-pill">NEXA: find every radio signal, name it, read what it says</div>
+  <div class="abs question">Too many transmitters share the air: how does one operator know what is out there, and what it says?</div>
+  <div class="tourbox touring">
+    <section class="panel" style="left:40px;top:150px;width:680px;height:840px">
+      <h2>BEFORE · THE AIR RIGHT NOW <span class="live">LIVE</span></h2>
+      <div class="body">
+        <div class="k kb" data-k="live" style="--c:var(--navy);position:absolute;left:0;top:0;width:680px">
+          <div id="wfLabels" style="position:relative;height:56px"></div>
+          <div style="border-radius:12px;overflow:hidden;background:#05060d">
+            <canvas id="wfSpec" width="680" height="96" style="display:block;width:680px;height:96px"></canvas>
+            <canvas id="wfScale" width="680" height="26" style="display:block;width:680px;height:26px"></canvas>
+            <canvas id="wf" width="680" height="440" style="display:block;width:680px;height:440px"></canvas>
+          </div>
+          <div class="note" style="display:flex;justify-content:space-between;font-size:14px;margin-top:4px"><span>top: signal strength</span><span>bottom: waterfall, newest at the top ↓</span><span>frequency in kHz →</span></div>
+        </div>
+        <div class="k" data-k="mix" style="--c:var(--orange);position:absolute;left:0;right:0;top:676px">
+          <div class="note" style="font-size:19px;margin-top:0"><b>Many signals at once:</b> voice, Morse, hopping radios, radar pulses, data links and a sweeping jammer. This is the mix NEXA has to sort out.</div>
+        </div>
+      </div>
+    </section>
+    <div class="abs" style="left:722px;top:540px;width:46px;height:46px;border-radius:50%;background:var(--navy);color:#fff;display:grid;place-items:center;font-size:28px;font-weight:800;z-index:2">→</div>
+    <section class="panel" style="left:770px;top:150px;width:1110px;height:840px">
+      <h2>AFTER · WHAT NEXA SEES</h2>
+      <div class="body">
+        <div class="k kb" data-k="img" style="--c:var(--blue);position:absolute;left:0;top:0;width:1110px">
+          <img src="../FOI26/assets/img/scene_boxes.png" alt="One real capture with five transmitters boxed and named" style="display:block;width:1110px;height:505px;border-radius:16px">
+        </div>
+        <div class="k" data-k="crowd" style="position:absolute;left:0;top:526px;width:1110px;font-size:22px;font-weight:600;line-height:1.5;color:var(--mute)">
+          <b style="color:var(--ink)">One real capture, five transmitters, each boxed and named.</b> An operator can follow one channel at a time; NEXA follows all of them.
+        </div>
+        <div style="position:absolute;left:0;top:640px;width:1110px;display:flex;align-items:center;justify-content:space-between">
+          <div class="k" data-k="find" style="--c:var(--red);display:flex;gap:16px;align-items:center"><span class="hx" style="--c:var(--red)">01</span><div><div class="big" style="font-size:58px;color:var(--red)">Find</div><div class="note" style="font-size:19px">box every transmitter</div></div></div>
+          <span class="chev">›</span>
+          <div class="k" data-k="name" style="--c:var(--blue);display:flex;gap:16px;align-items:center"><span class="hx" style="--c:var(--blue)">02</span><div><div class="big" style="font-size:58px;color:var(--blue)">Name</div><div class="note" style="font-size:19px">60 kinds of signal</div></div></div>
+          <span class="chev">›</span>
+          <div class="k" data-k="read" style="--c:var(--green);display:flex;gap:16px;align-items:center"><span class="hx" style="--c:var(--green)">03</span><div><div class="big" style="font-size:58px;color:var(--green)">Read</div><div class="note" style="font-size:19px">voice and Morse to text</div></div></div>
+        </div>
+      </div>
+    </section>
+  </div>
+</section>
+
+<!-- ================= PAGE 2 · DATASETS AND ACCURACY (sessions 1 + 2) ================= -->
+<section class="page" id="pg2" data-min="5" data-title="Datasets and accuracy" data-notes="<b>2:00 · 5 min.</b> What it learned: 1.2 million 160 µs windows, 60 classes, 16 noise levels, real recordings for testing only. How well: 80.6 percent exact per tracked emitter at 10 dB or better, 89 percent right family. Read the conditions. A longer look gives a surer answer. Then families and members: the weak ones show in red.">
+  <div class="abs title-pill">Datasets and accuracy: what NEXA learned, and how well</div>
+  <div class="abs question">1.2 M labelled 160 µs windows · 60 classes · conditions under every number</div>
+  <div class="tourbox touring">
+    <section class="panel" style="left:40px;top:150px;width:520px;height:390px">
+      <h2>THE DATASET</h2>
+      <div class="body">
+        <div class="k" data-k="nums" style="position:absolute;left:6px;top:2px;width:514px;display:grid;grid-template-columns:1fr 1fr;row-gap:8px;column-gap:16px">
+          <div><div class="big" style="font-size:44px;color:var(--blue)">60</div><div class="note" style="font-size:15.5px">classes in <b>11 families</b> + noise floor</div></div>
+          <div><div class="big" style="font-size:44px;color:var(--purple)">1.2 M</div><div class="note" style="font-size:15.5px"><b>windows</b>, 1,000 per class per SNR level</div></div>
+          <div><div class="big" style="font-size:44px;color:var(--teal)">160 µs</div><div class="note" style="font-size:15.5px">per <b>window</b>: 512 IQ samples at 3.2 MS/s (±1.6 MHz)</div></div>
+          <div><div class="big" style="font-size:44px;color:var(--amber)">16</div><div class="note" style="font-size:15.5px"><b>SNR levels</b>, −10 to +20 dB in 2 dB steps</div></div>
+        </div>
+        <div class="k" data-k="split" style="position:absolute;left:6px;right:2px;top:218px">
+          <div style="display:flex;height:34px;border-radius:9px;overflow:hidden;color:#fff;font-size:16px;font-weight:800">
+            <div style="width:80%;background:var(--blue);display:grid;place-items:center">TRAIN 960,000</div>
+            <div style="width:10%;background:var(--teal);display:grid;place-items:center">VAL</div>
+            <div style="width:10%;background:var(--amber);display:grid;place-items:center">TEST</div>
+          </div>
+        </div>
+        <div class="k note" data-k="src" style="position:absolute;left:6px;right:2px;top:262px;font-size:15px"><b>Sources:</b> our own generators + public <b>RadioML 2018</b> and <b>HisarMod</b>. Real recordings: <b>testing only</b>. Build f993d8ebc417: every family placed anywhere in the band.</div>
+      </div>
+    </section>
+    <section class="panel" style="left:580px;top:150px;width:1300px;height:390px">
+      <h2>HOW WELL IT NAMES THEM</h2>
+      <div class="body">
+        <svg style="position:absolute;inset:0;width:1300px;height:332px;pointer-events:none"><path d="M322 10 V 322 M647 10 V 322 M972 10 V 322" stroke="#D7DADD" stroke-width="2" stroke-dasharray="6 7"/></svg>
+        <div class="k" data-k="ring" style="--c:var(--blue);position:absolute;left:0;top:0;width:312px;text-align:center"><div id="ring1"></div>
+          <div class="note" style="font-size:15px;line-height:1.35">per tracked emitter · all 60 classes · SNR ≥ 10 dB · vote over 16 windows (2.6 ms) · fixed test set, 120,000 windows</div></div>
+        <div class="k" data-k="f89" style="--c:var(--teal);position:absolute;left:332px;top:0;width:305px;text-align:center"><div id="ring2"></div>
+          <div class="note" style="font-size:15px;line-height:1.35">all 60 classes at 15 dB · vote over 8 windows · 32 fresh tracks per class</div></div>
+        <div class="k" data-k="c46" style="--c:var(--purple);position:absolute;left:668px;top:0;width:290px">
+          <div><span class="big" style="font-size:50px;color:var(--purple)">46</span><span class="big" style="font-size:28px;color:#9AA3AB"> / 60</span></div>
+          <div style="font-size:18px;font-weight:800;margin:2px 0 8px">classes named exactly <span style="white-space:nowrap">≥ 50%</span></div>
+          <div id="waffle" style="display:grid;grid-template-columns:repeat(10,18px);gap:5px"></div>
+          <div class="note" style="font-size:15px;margin-top:8px;display:flex;gap:4px 14px;flex-wrap:wrap"><span><i style="display:inline-block;width:12px;height:12px;border-radius:50%;background:var(--purple)"></i> <b>≥ 90%: 38</b></span><span><i style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#C7B6E2"></i> <b>50–89%: 8</b></span><span>15 dB · 8-window vote</span></div>
+        </div>
+        <div class="k" data-k="gain" style="--c:var(--red);position:absolute;left:992px;top:0;width:308px">
+          <div class="big" style="font-size:52px;color:var(--red)">+8.7</div>
+          <div style="font-size:18px;font-weight:800;margin-top:2px">points over the previous model</div>
+          <div id="slopes" style="margin-top:6px"></div>
+          <div class="note" style="font-size:13.5px;line-height:1.3">same fixed test set · fixed FSK / PSK / QAM data + the new physics branch</div>
+        </div>
+      </div>
+    </section>
+    <section class="panel" style="left:40px;top:560px;width:400px;height:430px">
+      <h2>FOUR STRENGTHS</h2>
+      <div class="body k" data-k="snr">
+        <img src="../FOI26/assets/img/snr_ladder.png" alt="One radar chirp at −10, 0, +10 and +20 dB" style="display:block;width:400px;height:150px;object-fit:fill;margin-top:8px">
+        <div class="note" style="margin-top:14px;font-size:20.2px">One radar chirp from <b>−10 dB</b> (buried) to <b>+20 dB</b> (clear). Training covers it all, so the model knows when to say <b>"uncertain"</b>.</div>
+      </div>
+    </section>
+    <section class="panel" style="left:460px;top:560px;width:420px;height:430px">
+      <h2>A LONGER LOOK</h2>
+      <div class="body k" data-k="vote">
+        <img src="../FOI26/assets/img/vote_curve.png" alt="Accuracy rises as more windows are averaged" style="display:block;width:420px;margin-top:2px">
+        <div class="note" style="font-size:16px;margin-top:4px">The tracker averages every window of one emitter: <b>8 windows (1.3 ms) already reach 79%</b> at ≥ 10 dB.</div>
+      </div>
+    </section>
+    <section class="panel" style="left:900px;top:560px;width:980px;height:430px">
+      <h2>FAMILIES AND THEIR MEMBERS</h2>
+      <div class="body k" data-k="fam" style="--c:var(--blue)"><div id="famMem"></div></div>
+    </section>
+  </div>
+</section>
+
+<!-- ================= PAGE 3 · DATA PROCESSING PIPELINE (session 3 + session 4 part 1) ================= -->
+<section class="page" id="pg3" data-min="4" data-title="Data processing pipeline" data-notes="<b>7:00 · 4 min.</b> Top row: see the spectrum and cut one emitter out. Bottom row: one 160 µs window through the model, left to right. Three learned branches: IQ for timing, STFT for the picture, spectrum for the whole window. Attention looks where the signal is, expert and physics numbers join, 60 separate yes/no answers, then the track vote and the rules. Here: a jammer copying a radar, both reported.">
+  <div class="abs title-pill">Data processing pipeline: from IQ samples to a named emitter</div>
+  <div class="abs question">Real model, real signal: a jammer copying a radar</div>
+  <div class="tourbox touring">
+    <section class="panel" style="left:40px;top:150px;width:1840px;height:320px">
+      <h2>1 · SEE THE BAND, CUT OUT EACH TRANSMITTER</h2>
+      <div class="body">
+        <svg style="position:absolute;inset:0;width:1840px;height:262px;overflow:visible;pointer-events:none"><path class="flow" data-to="spec" d="M405 72 H 487"/><path class="flow" data-to="det" d="M875 72 H 957"/><path class="flow" data-to="cut" d="M1345 72 H 1427"/></svg>
+        <div class="k kb" data-k="cap" style="--c:var(--blue);position:absolute;left:-10px;top:4px;width:430px;text-align:center"><img class="thumb" src="../FOI26/assets/img/t_capture.png" alt="Capture" style="--c:var(--blue);width:236px;height:136px;margin:0 auto;object-fit:cover"><div style="font-size:21px;font-weight:800;margin-top:6px;color:var(--blue)">Capture</div><div class="note" style="font-size:15.5px;line-height:1.35;padding:0 6px">Raw radio samples (IQ) from an antenna, a recording or the simulator.</div></div>
+        <div class="k kb" data-k="spec" style="--c:var(--blue);position:absolute;left:460px;top:4px;width:430px;text-align:center"><img class="thumb" src="../FOI26/assets/img/t_spectrogram.png" alt="Wideband spectrogram" style="--c:var(--blue);width:236px;height:136px;margin:0 auto;object-fit:cover"><div style="font-size:21px;font-weight:800;margin-top:6px;color:var(--blue)">Wideband spectrogram</div><div class="note" style="font-size:15.5px;line-height:1.35;padding:0 6px">The whole band as a picture. Every transmitter leaves its own mark.</div></div>
+        <div class="k kb" data-k="det" style="--c:var(--blue);position:absolute;left:930px;top:4px;width:430px;text-align:center"><img class="thumb" src="../FOI26/assets/img/t_detector.png" alt="Detector (YOLO)" style="--c:var(--blue);width:236px;height:136px;margin:0 auto;object-fit:cover"><div style="font-size:21px;font-weight:800;margin-top:6px;color:var(--blue)">Find them (YOLO detector)</div><div class="note" style="font-size:15.5px;line-height:1.35;padding:0 6px">Draws a box around every transmitter, many at once.</div></div>
+        <div class="k kb" data-k="cut" style="--c:var(--blue);position:absolute;left:1400px;top:4px;width:430px;text-align:center"><img class="thumb" src="../FOI26/assets/img/t_cut.png" alt="Cut and clean" style="--c:var(--blue);width:236px;height:136px;margin:0 auto;object-fit:cover"><div style="font-size:21px;font-weight:800;margin-top:6px;color:var(--blue)">Cut and clean</div><div class="note" style="font-size:15.5px;line-height:1.35;padding:0 6px">Each box is cut out, cleaned and sliced into short 160 µs pieces for the classifier.</div></div>
+      </div>
+    </section>
+    <section class="panel" style="left:40px;top:490px;width:1840px;height:500px">
+      <h2>2 · NAME IT: ONE SLICE THROUGH THE MODEL <span class="live">LIVE</span></h2>
+      <div class="body" id="model">
+        <svg style="position:absolute;inset:0;width:1840px;height:442px;overflow:visible;pointer-events:none">
+          <path class="flow" data-to="iqb" d="M170 205 C 190 205, 190 62, 210 62"/><path class="flow" data-to="stb" d="M170 205 H 210"/><path class="flow" data-to="spb" d="M170 205 C 190 205, 190 352, 210 352"/>
+          <path class="flow" data-to="fuse" d="M760 62 C 785 62, 785 120, 810 120"/><path class="flow" data-to="fuse" d="M760 205 C 785 205, 785 165, 810 165"/>
+          <path class="flow" data-to="attn" d="M960 143 H 1000"/><path class="flow" data-to="sum" d="M1220 143 H 1258"/>
+          <path class="flow" data-to="sum" d="M760 352 H 1352 V 318" style="stroke:var(--teal)"/>
+          <path class="flow" data-to="dense" d="M1448 143 H 1488"/><path class="flow" data-to="vote" d="M1664 246 V 262"/>
+        </svg>
+        <div class="k kb pn" data-k="inp" style="--c:var(--ink);left:0;top:110px;width:170px;height:190px;flex-direction:column;gap:6px;padding:12px 12px;text-align:center"><b style="font-size:19px">ONE SLICE</b><div style="font-size:17px;font-weight:800">160 µs</div><div class="d" style="margin:0;font-size:15px">turned down to the same volume, so it judges <b>shape</b>, not loudness</div></div>
+        <div class="k kb pn" data-k="iqb" style="--c:var(--blue);left:210px;top:0;width:550px;height:124px;padding:8px 12px"><div style="flex:1;min-width:0"><b style="font-size:18px;color:var(--blue)">IQ BRANCH · the wave</b><div class="d" style="font-size:15px;margin-top:4px">reads the raw wave over time: <b>pulses, rhythm, on / off</b></div></div><img src="../FOI26/assets/img/pipe_1_iq.png" alt="raw and normalised I and Q" style="height:104px;flex:none;align-self:center"></div>
+        <div class="k kb pn" data-k="stb" style="--c:var(--orange);left:210px;top:143px;width:550px;height:124px;padding:8px 12px"><div style="flex:1;min-width:0"><b style="font-size:18px;color:var(--amber)">STFT BRANCH · the picture</b><div class="d" style="font-size:15px;margin-top:4px">reads time against frequency: <b>sweeps, hops, shapes</b>. Here: the chirp and its jammer copy</div></div><img src="../FOI26/assets/img/pipe_2_stft.png" alt="STFT of the window" style="height:104px;flex:none;align-self:center"></div>
+        <div class="k kb pn" data-k="spb" style="--c:var(--teal);left:210px;top:290px;width:550px;height:124px;padding:8px 12px"><div style="flex:1;min-width:0"><b style="font-size:18px;color:var(--teal)">SPECTRUM BRANCH · the band</b><div class="d" style="font-size:15px;margin-top:4px">reads where the power sits: <b>width, peaks, carrier lines</b></div></div><img src="../FOI26/assets/img/pipe_2b_spectrum.png" alt="power spectrum of the whole window" style="height:104px;width:200px;object-fit:contain;flex:none;align-self:center"></div>
+        <div class="k kb pn" data-k="fuse" style="--c:#8A9096;left:810px;top:62px;width:150px;height:162px;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:4px;background:var(--pill)"><b style="font-size:20px">COMBINE</b><div class="d" style="margin:0;font-size:15px">wave + picture, moment by moment</div></div>
+        <div class="k kb pn" data-k="attn" style="--c:var(--green);left:1000px;top:40px;width:220px;height:206px;flex-direction:column;align-items:center;text-align:center;gap:2px;padding:8px 10px"><b style="font-size:18px;color:var(--green)">ATTENTION</b><img src="../FOI26/assets/img/pipe_3_attention.png" alt="attention weights following the pulse" style="width:196px"><div class="d" style="margin:0;font-size:15px">looks where the signal is, <b>skips empty time</b></div></div>
+        <div class="k kb pn" data-k="sum" style="--c:var(--purple);left:1258px;top:30px;width:190px;height:288px;flex-direction:column;gap:8px;padding:10px 12px"><b style="font-size:18px;color:var(--purple)">FINGERPRINT</b><div class="d" style="margin:0;font-size:15px">what the <b>three branches</b> learned</div><div class="d" style="margin:0;font-size:15px"><b>+ expert checks</b> we know from radio physics: echoes, symbol clock, frequency wobble, on / off timing</div></div>
+        <div class="k kb pn" data-k="dense" style="--c:var(--ink);left:1488px;top:0;width:352px;height:246px;flex-direction:column;gap:3px;padding:8px 12px"><b style="font-size:18px">60 YES / NO SCORES</b><img src="../FOI26/assets/img/pipe_5_multilabel.png" alt="scores: LFM radar 0.73 and DRFM 0.53" style="width:326px"><div class="d" style="margin:0;font-size:14.5px">one score per signal type, so <b>two can be true</b>: radar <b>and</b> jammer</div></div>
+        <div class="k kb pn" data-k="vote" style="--c:var(--red);left:1488px;top:262px;width:352px;height:180px;flex-direction:column;gap:6px;padding:10px 12px"><b style="font-size:18px;color:var(--red)">VOTE + RULES → ANSWER</b><div style="font-size:16.5px;font-weight:800">DRFM jammer copying an LFM radar <span class="tag" style="--t:var(--green);font-size:12px;padding:1px 7px">HIGH</span></div><div class="d" style="margin:0;font-size:14.5px;line-height:1.35">all slices of one transmitter vote; simple rules settle look-alikes; confidence <b>high / medium / uncertain</b></div></div>
+        <div class="k" data-k="walkie" style="--c:var(--teal);position:absolute;left:0;top:428px;display:flex;gap:10px;align-items:center;font-size:16px;font-weight:800"><svg class="ico" style="font-size:24px;color:var(--teal);flex:none" viewBox="0 0 40 64"><use href="#i-walkie"/></svg><span>A walkie-talkie takes the same path: named <span style="color:var(--teal)">NBFM</span>, then listened to (next page)</span></div>
+      </div>
+    </section>
+  </div>
+</section>
+
+<!-- ================= PAGE 4 · SYSTEM ARCHITECTURE + HUMAN IN THE LOOP ================= -->
+<section class="page" id="pg4" data-min="6" data-title="System architecture · human in the loop" data-notes="<b>11:00 · 6 min.</b> Everything after the classifier, top to bottom. Input arrives and is named by the pipeline. Voice, Morse and data channels are zoomed, demodulated and decoded, and a local AI writes a reading kept honest. Results show on the dashboard, Signal Pipeline, Comms Intel and the Assistant. Everything is recorded locally with a tamper-evident audit trail. Then people decide: operator corrects, analyst approves, retrain, and a new model only goes live if it beats the current one. Then explain the three demo inputs in words and switch to the live system.">
+  <div class="abs title-pill">Inside NEXA: system architecture</div>
+  <div class="abs question">After a signal is named: listen, read, show, record, and people stay in control</div>
+  <div class="tourbox touring">
+    <section class="panel" style="left:40px;top:150px;width:1840px;height:840px">
+      <h2>SYSTEM ARCHITECTURE <span class="live">LIVE</span></h2>
+      <div class="body">
+        <div style="position:absolute;inset:14px 0 0 0;background:var(--soft);border:2px dashed #9AA3AB;border-radius:18px">
+          <div style="position:absolute;left:22px;top:-16px;background:var(--soft);border:2px solid #9AA3AB;border-radius:8px;padding:2px 12px;font-size:14px;font-weight:800;letter-spacing:1.5px;color:var(--mute)">OFFLINE · ONE LAPTOP · NOTHING LEAVES THE MACHINE</div>
+          <svg style="position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none"><path class="flow" data-to="src2" d="M360 83 H 390"/><path class="flow" data-to="src3" d="M720 83 H 750"/><path class="flow" data-to="named" d="M1080 83 H 1140"/><path class="flow" data-to="zoom" d="M1475 128 V 150 H 240 V 172"/><path class="flow" data-to="demod" d="M450 239 H 480"/><path class="flow" data-to="dec" d="M860 239 H 890"/><path class="flow" data-to="ai" d="M1450 239 H 1480"/><path class="flow" data-to="dash" d="M1645 306 V 328 H 310 V 350"/><path class="flow" data-to="intel" d="M590 400 H 620"/><path class="flow" data-to="asst" d="M1180 400 H 1210"/><path class="flow" data-to="db" d="M900 450 V 472 H 320 V 494"/><path class="flow" data-to="aud" d="M610 534 H 640"/><path class="flow" data-to="iq" d="M1220 534 H 1250"/><path class="flow" data-to="op" d="M1530 574 V 596 H 195 V 618"/><path class="flow" data-to="an" d="M360 684 H 390"/><path class="flow" data-to="rt" d="M720 684 H 750"/><path class="flow" data-to="gate" d="M1080 684 H 1110"/><path class="flow" data-to="yes" d="M1440 655 H 1480"/><path class="flow" data-to="no" d="M1440 715 H 1480"/></svg>
+<div class="zt" style="--c:var(--navy);position:absolute;left:30px;top:10px;background:var(--soft);padding-right:10px">1 · INPUT, NAMED BY THE PIPELINE</div><div class="k kb pn" data-k="src1" style="--c:var(--orange);left:30px;top:38px;width:330px;height:90px;padding:8px 14px"><div style="flex:1;min-width:0"><div style="font-size:21px;font-weight:800;color:var(--orange)">SDRconnect</div><div class="d" style="font-size:16.5px;margin-top:2px">our own antenna, live or recorded</div></div></div><div class="k kb pn" data-k="src2" style="--c:var(--blue);left:390px;top:38px;width:330px;height:90px;padding:8px 14px"><div style="flex:1;min-width:0"><div style="font-size:21px;font-weight:800;color:var(--blue)">KiwiSDR</div><div class="d" style="font-size:16.5px;margin-top:2px">a shortwave receiver on the internet</div></div></div><div class="k kb pn" data-k="src3" style="--c:#8A9096;left:750px;top:38px;width:330px;height:90px;padding:8px 14px"><div style="flex:1;min-width:0"><div style="font-size:21px;font-weight:800;color:#8A9096">Upload</div><div class="d" style="font-size:16.5px;margin-top:2px">drop in a recorded file</div></div></div><div class="k kb pn" data-k="named" style="--c:var(--navy);left:1140px;top:38px;width:670px;height:90px;padding:8px 14px"><div style="flex:1;min-width:0"><div style="font-size:21px;font-weight:800;color:var(--navy)">Pipeline → every signal named</div><div class="d" style="font-size:16.5px;margin-top:2px">found, named, with where, when and how sure</div></div></div><div class="zt" style="--c:var(--teal);position:absolute;left:30px;top:146px;background:var(--soft);padding-right:10px">2 · LISTEN AND READ · voice, Morse and data channels</div><div class="k kb pn" data-k="zoom" style="--c:var(--teal);left:30px;top:172px;width:420px;height:134px;padding:8px 14px"><img class="thumb" src="../FOI26/assets/img/t_zoom.png" alt="Zoom-in" style="--c:var(--teal);width:100px;height:100px;object-fit:cover;flex:none;align-self:center"><div style="flex:1;min-width:0"><div style="font-size:21px;font-weight:800;color:var(--teal)">Zoom-in</div><div class="d" style="font-size:16.5px;margin-top:2px">look closer: is it AM, FM, SSB or Morse?</div></div></div><div class="k kb pn" data-k="demod" style="--c:var(--teal);left:480px;top:172px;width:380px;height:134px;padding:8px 14px"><img class="thumb" src="../FOI26/assets/img/t_demod.png" alt="Demodulate" style="--c:var(--teal);width:100px;height:100px;object-fit:cover;flex:none;align-self:center"><div style="flex:1;min-width:0"><div style="font-size:21px;font-weight:800;color:var(--teal)">Demodulate</div><div class="d" style="font-size:16.5px;margin-top:2px">turn the radio wave back into sound</div></div></div><div class="k kb pn" data-k="dec" style="--c:var(--blue);left:890px;top:172px;width:560px;height:134px;padding:8px 14px"><div style="flex:1;min-width:0"><div style="font-size:21px;font-weight:800;color:var(--blue)">Decode to text</div><div class="d" style="font-size:16.5px;margin-top:2px"><b>Speech →</b> Whisper · <b>Morse →</b> letters · <b>RTTY / PSK31 →</b> text</div></div></div><div class="k kb pn" data-k="ai" style="--c:var(--purple);left:1480px;top:172px;width:330px;height:134px;padding:8px 14px"><div style="flex:1;min-width:0"><div style="font-size:21px;font-weight:800;color:var(--purple)">AI reading, kept honest</div><div class="d" style="font-size:16.5px;margin-top:2px">a local AI sums it up, and <b>only says what the text backs up</b></div></div></div><div class="zt" style="--c:var(--orange);position:absolute;left:30px;top:324px;background:var(--soft);padding-right:10px">3 · SHOW</div><div class="k kb pn" data-k="dash" style="--c:var(--red);left:30px;top:350px;width:560px;height:100px;padding:8px 14px"><div style="flex:1;min-width:0"><div style="font-size:21px;font-weight:800;color:var(--red)">Operator dashboard</div><div class="d" style="font-size:16.5px;margin-top:2px">live waterfall, one row per signal, alerts</div></div></div><div class="k kb pn" data-k="intel" style="--c:var(--orange);left:620px;top:350px;width:560px;height:100px;padding:8px 14px"><div style="flex:1;min-width:0"><div style="font-size:21px;font-weight:800;color:var(--orange)">Signal Pipeline + Comms Intel</div><div class="d" style="font-size:16.5px;margin-top:2px">every run kept: sound, text, AI summary</div></div></div><div class="k kb pn" data-k="asst" style="--c:var(--navy);left:1210px;top:350px;width:600px;height:100px;padding:8px 14px"><div style="flex:1;min-width:0"><div style="font-size:21px;font-weight:800;color:var(--navy)">AI Assistant</div><div class="d" style="font-size:16.5px;margin-top:2px">ask questions in plain words, offline</div></div></div><div class="zt" style="--c:var(--green);position:absolute;left:30px;top:468px;background:var(--soft);padding-right:10px">4 · RECORD · LOCAL DATABASE</div><div class="k kb pn" data-k="db" style="--c:var(--green);left:30px;top:494px;width:580px;height:80px;padding:8px 14px"><div style="flex:1;min-width:0"><div style="font-size:21px;font-weight:800;color:var(--green)">Local database</div><div class="d" style="font-size:16.5px;margin-top:2px">every result, fix and model version</div></div></div><div class="k kb pn" data-k="aud" style="--c:var(--green);left:640px;top:494px;width:580px;height:80px;padding:8px 14px"><div style="flex:1;min-width:0"><div style="font-size:21px;font-weight:800;color:var(--green)">Audit trail</div><div class="d" style="font-size:16.5px;margin-top:2px">a log nobody can quietly change</div></div></div><div class="k kb pn" data-k="iq" style="--c:var(--green);left:1250px;top:494px;width:560px;height:80px;padding:8px 14px"><div style="flex:1;min-width:0"><div style="font-size:21px;font-weight:800;color:var(--green)">Raw IQ store</div><div class="d" style="font-size:16.5px;margin-top:2px">original recordings, fingerprinted</div></div></div><div class="zt" style="--c:var(--red);position:absolute;left:30px;top:592px;background:var(--soft);padding-right:10px">5 · HUMAN IN THE LOOP · NEXA SUGGESTS, PEOPLE DECIDE</div><div class="k kb pn" data-k="op" style="--c:var(--red);left:30px;top:618px;width:330px;height:132px;padding:8px 14px"><div style="flex:1;min-width:0"><div style="font-size:21px;font-weight:800;color:var(--red)">1 · Operator checks</div><div class="d" style="font-size:16.5px;margin-top:2px">flags or fixes an answer in one click</div></div></div><div class="k kb pn" data-k="an" style="--c:var(--orange);left:390px;top:618px;width:330px;height:132px;padding:8px 14px"><div style="flex:1;min-width:0"><div style="font-size:21px;font-weight:800;color:var(--orange)">2 · Analyst approves</div><div class="d" style="font-size:16.5px;margin-top:2px">double-checks before a fix counts</div></div></div><div class="k kb pn" data-k="rt" style="--c:var(--blue);left:750px;top:618px;width:330px;height:132px;padding:8px 14px"><div style="flex:1;min-width:0"><div style="font-size:21px;font-weight:800;color:var(--blue)">3 · Retrain</div><div class="d" style="font-size:16.5px;margin-top:2px">the model learns from approved fixes</div></div></div><div class="k kb pn" data-k="gate" style="--c:var(--ink);left:1110px;top:618px;width:330px;height:132px;padding:8px 14px"><div style="flex:1;min-width:0"><div style="font-size:21px;font-weight:800;color:var(--ink)">4 · Gate</div><div class="d" style="font-size:16.5px;margin-top:2px">only a better model gets through</div></div></div><div class="k kb pn" data-k="yes" style="--c:var(--green);left:1480px;top:618px;width:330px;height:74px;padding:8px 14px"><div style="flex:1;min-width:0"><div style="font-size:21px;font-weight:800;color:var(--green)">Yes → goes live</div><div class="d" style="font-size:16.5px;margin-top:2px">roll back any time</div><div style="font-size:15px;font-weight:700;color:var(--green);display:none">▲ back to the classifier: a new model applies from the next signal</div></div></div><div class="k kb pn" data-k="no" style="--c:#8A9096;left:1480px;top:700px;width:330px;height:50px;padding:8px 14px"><div style="flex:1;min-width:0"><div style="font-size:21px;font-weight:800;color:#8A9096">No → stays out</div><div class="d" style="font-size:16.5px;margin-top:2px"></div></div></div>
+        </div>
+      </div>
+    </section>
+  </div>
+</section>
+
+<!-- ================= PAGE 6 · LIVE DEMOS 1, 2 AND 3 (section id pg7) ================= -->
+<section class="page" id="pg7" data-min="10" data-title="Live demos 1, 2 and 3" data-notes="<b>17:00 · 11 min. DEMOS.</b> Switch to the live system for each demo, then come back to this page. Demo 1: play the recording in SDRconnect, say it is recorded. Demo 2: set the language first, a teammate talks on the walkie-talkie. <b>Backup:</b> play the walkie-talkie IQ recorded at rehearsal and say it was recorded earlier. Demo 3: internet on both laptops; laptop A on the KiwiSDR website, laptop B's Live KiwiSDR panel on the same frequency; a teammate runs TDoA and types the location in. Press Stop afterwards.">
+  <div class="abs title-pill">Live demos: a recorded signal, our walkie-talkie, real shortwave</div>
+  <div class="abs question">What to watch for in each demo: the box, the name, the words and the AI reading</div>
+  <div class="tourbox touring">
+    <section class="panel" style="left:40px;top:150px;width:640px;height:400px">
+      <h2>DEMO 1 · A RECORDED SIGNAL</h2>
+      <div class="body">
+        <svg style="position:absolute;left:0;top:0;width:60px;height:300px;overflow:visible"><path class="flow" d="M30 24 V 240"/></svg>
+        <div id="d1steps"></div>
+        <div style="position:absolute;left:0;top:300px"><span class="tag" style="--t:var(--orange);font-size:16.5px;padding:5px 12px">RECORDED SIGNAL · NOT A LIVE INTERCEPT</span></div>
+      </div>
+    </section>
+    <section class="panel" style="left:710px;top:150px;width:1170px;height:400px">
+      <h2>DEMO 2 · OUR WALKIE-TALKIE <span class="live">LIVE</span></h2>
+      <div class="body">
+        <div class="k" data-k="d2path" style="--c:var(--red);position:absolute;left:0;right:0;top:0;display:flex;align-items:center;justify-content:space-between">
+          <div style="text-align:center;width:120px"><svg class="ico" style="font-size:50px;color:var(--red)" viewBox="0 0 48 64"><use href="#i-person"/></svg><div class="note" style="font-size:17.6px;font-weight:800;color:var(--ink)">we speak</div></div>
+          <span class="chev">›</span>
+          <div style="text-align:center;width:130px"><svg class="ico" style="font-size:50px;color:var(--red)" viewBox="0 0 40 64"><use href="#i-walkie"/></svg><div class="note" style="font-size:17.6px;font-weight:800;color:var(--ink)">walkie-talkie</div></div>
+          <svg style="width:70px;height:30px" viewBox="0 0 70 30"><path d="M3 15c8-12 16 12 24 0s16 12 24 0 8-8 16 0" fill="none" stroke="var(--red)" stroke-width="3.5" stroke-linecap="round"/></svg>
+          <div style="text-align:center;width:150px"><svg class="ico" style="font-size:50px;color:var(--orange)" viewBox="0 0 48 64"><use href="#i-antenna"/></svg><div class="note" style="font-size:17.6px;font-weight:800;color:var(--ink)">antenna + RSPduo</div></div>
+          <span class="chev">›</span>
+          <div style="text-align:center;width:130px"><svg class="ico" style="font-size:50px;color:var(--orange)" viewBox="0 0 64 48"><use href="#i-laptop"/></svg><div class="note" style="font-size:17.6px;font-weight:800;color:var(--ink)">laptop A</div></div>
+          <span class="chev">›</span>
+          <div style="text-align:center;width:130px"><svg class="ico" style="font-size:50px;color:var(--purple)" viewBox="0 0 64 48"><use href="#i-laptop"/></svg><div class="note" style="font-size:17.6px;font-weight:800;color:var(--ink)">laptop B · NEXA</div></div>
+        </div>
+        <div class="k" data-k="wave" style="--c:var(--teal);position:absolute;left:0;top:118px;width:1170px">
+          <div class="cap" style="color:var(--teal)">The voice</div>
+          <svg viewBox="0 0 930 56" preserveAspectRatio="none" style="width:1170px;height:34px"><path id="voicePath" fill="none" stroke="var(--teal)" stroke-width="3.5" stroke-linecap="round"/></svg>
+          <div class="cap" style="color:var(--red);margin-top:4px">Sent as narrow FM: the wave speeds up and slows down with the voice</div>
+          <svg viewBox="0 0 930 70" preserveAspectRatio="none" style="width:1170px;height:42px"><path id="fmPath" fill="none" stroke="var(--red)" stroke-width="2.6" stroke-linecap="round"/></svg>
+        </div>
+        <div class="k" data-k="nbfm" style="--c:var(--navy);position:absolute;left:0;right:0;top:252px">
+          <div style="font-size:23.1px;font-weight:800">NBFM = narrowband FM <span class="note" style="font-size:19.8px;font-weight:600">· the voice wobbles the wave's frequency inside a ~12.5 kHz channel</span></div>
+          <div style="display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap"><span class="pl" style="--c:var(--teal)">spot the channel</span><span class="chev" style="font-size:25.3px">›</span><span class="pl" style="--c:var(--orange)">name it NBFM</span><span class="chev" style="font-size:25.3px">›</span><span class="pl" style="--c:var(--purple)">back to speech</span><span class="chev" style="font-size:25.3px">›</span><span class="pl" style="--c:var(--blue)">transcript + AI reading</span></div>
+        </div>
+      </div>
+    </section>
+    <section class="panel" style="left:40px;top:570px;width:600px;height:420px">
+      <h2>DEMO 3 · ONE RECEIVER, TWO LAPTOPS</h2>
+      <div class="body">
+        <svg style="position:absolute;inset:0;width:600px;height:362px;overflow:visible;pointer-events:none">
+          <path class="flow" d="M285 112 C 285 160, 130 150, 130 196" style="stroke:var(--blue);stroke-dasharray:3 12;stroke-linecap:round;stroke-width:4.5"/>
+          <path class="flow" d="M315 112 C 315 160, 470 150, 470 196" style="stroke:var(--blue);stroke-dasharray:3 12;stroke-linecap:round;stroke-width:4.5"/>
+          <path class="flow" d="M228 296 H 368"/><path d="M356 286 l14 10 -14 10" fill="none" stroke="#9AA3AB" stroke-width="3"/>
+        </svg>
+        <div class="k" data-k="kiwi" style="--c:var(--blue);position:absolute;left:200px;top:0;width:200px;text-align:center"><svg class="ico" style="font-size:80px;color:var(--blue)" viewBox="0 0 64 64"><use href="#i-globe"/></svg><div style="font-size:19.8px;font-weight:800">KiwiSDR receiver</div></div>
+        <div class="note" style="position:absolute;left:0;top:4px;width:190px;font-size:16px">over the internet, <b>each laptop on its own</b></div>
+        <div class="note" style="position:absolute;right:0;top:4px;width:190px;font-size:16px;text-align:right">shortwave <b>0–30 MHz</b> · one <b>~12 kHz</b> channel · listen only</div>
+        <div class="k" data-k="kA" style="--c:var(--orange);position:absolute;left:10px;top:200px;width:230px;text-align:center"><svg class="ico" style="font-size:70px;color:var(--orange)" viewBox="0 0 64 48"><use href="#i-laptop"/></svg><div style="font-size:19.2px;font-weight:800">Laptop A · website</div><div class="note" style="font-size:16px">listen · waterfall · TDoA</div></div>
+        <div class="k" data-k="kB" style="--c:var(--purple);position:absolute;left:360px;top:200px;width:230px;text-align:center"><svg class="ico" style="font-size:70px;color:var(--purple)" viewBox="0 0 64 48"><use href="#i-laptop"/></svg><div style="font-size:19.2px;font-weight:800">Laptop B · NEXA</div><div class="note" style="font-size:16px">stream · name · decode</div></div>
+        <div class="k" data-k="loc" style="position:absolute;left:220px;top:262px;width:160px;text-align:center;font-size:14.3px;font-weight:800;color:var(--mute)">location, typed in</div>
+      </div>
+    </section>
+    <section class="panel" style="left:660px;top:570px;width:560px;height:420px">
+      <h2>WHAT NEXA DOES WITH IT</h2>
+      <div class="body" id="kSteps"></div>
+    </section>
+    <section class="panel" style="left:1240px;top:570px;width:640px;height:420px">
+      <h2>WHERE IS IT COMING FROM? · TDoA</h2>
+      <div class="body">
+        <div class="k" data-k="tdoa" style="--c:var(--blue);position:absolute;left:0;top:2px">
+          <svg viewBox="0 0 910 540" style="width:320px;height:190px">
+            <defs><clipPath id="tdc"><rect x="0" y="-36" width="910" height="540" rx="22"/></clipPath></defs>
+            <rect x="0" y="0" width="910" height="540" rx="22" fill="#EEF4FA"/>
+            <g transform="translate(0,36)">
+            <g clip-path="url(#tdc)" fill="none" stroke-width="3">
+              <circle cx="190" cy="120" r="309" stroke="var(--blue)" opacity=".45"/><circle cx="760" cy="110" r="270" stroke="var(--teal)" opacity=".45"/><circle cx="470" cy="430" r="134" stroke="var(--purple)" opacity=".45"/>
+              <circle class="ping" cx="190" cy="120" r="20" stroke="var(--blue)"/><circle class="ping" cx="760" cy="110" r="20" stroke="var(--teal)" style="animation-delay:.6s"/><circle class="ping" cx="470" cy="430" r="20" stroke="var(--purple)" style="animation-delay:1.2s"/>
+            </g>
+            <circle cx="190" cy="120" r="15" fill="var(--blue)"/><circle cx="760" cy="110" r="15" fill="var(--teal)"/><circle cx="470" cy="430" r="15" fill="var(--purple)"/>
+            <path d="M470 270 l11 22 24 4 -17 17 4 24 -22 -11 -22 11 4 -24 -17 -17 24 -4z" fill="var(--red)"/>
+            <text x="212" y="112" font-family="Montserrat" font-size="26" font-weight="800" fill="#2E7DB9">receiver 1</text>
+            <text x="610" y="100" font-family="Montserrat" font-size="26" font-weight="800" fill="#1D7A68">receiver 2</text>
+            <text x="500" y="300" font-family="Montserrat" font-size="26" font-weight="800" fill="#B0281A">transmitter</text>
+            </g>
+          </svg>
+        </div>
+        <div class="k" data-k="tdoaTxt" style="position:absolute;left:338px;right:0;top:0;font-size:17.1px;font-weight:600;line-height:1.42;color:var(--mute)"><b style="color:var(--ink)">Three or more GPS-timed receivers</b> hear the same signal; the tiny differences in arrival time point to the transmitter. A teammate runs it on the KiwiSDR website and types the location into NEXA's <b style="color:var(--ink)">Locate on KiwiSDR</b> panel.</div>
+        <div class="k" data-k="facts" style="position:absolute;left:0;right:0;top:250px;display:flex;flex-wrap:wrap;gap:7px">
+          <span class="pl" style="--c:var(--blue);font-size:16px">needs internet on both laptops</span><span class="pl" style="--c:var(--teal);font-size:16px">all receivers must hear it clearly</span><span class="pl" style="--c:var(--purple);font-size:16px">a likely area, not an exact point</span><span class="pl" style="--c:var(--red);font-size:16px">press Stop afterwards: frees the slot</span>
+        </div>
+      </div>
+    </section>
+  </div>
+</section>
+
+<!-- ================= PAGE 7 · CONCLUSION (section id pg8) ================= -->
+<section class="page" id="pg8" data-min="2" data-title="Conclusion" data-notes="<b>28:00 · 2 min. CONCLUSION.</b> Back on the slides after the demos. Recap the three demos in one line each, read the numbers, then walk the journey once: capture, find, name, listen and read, show and record, people decide. All of it on one laptop, offline.">
+  <div class="abs title-pill">Conclusion: what we showed today</div>
+  <div class="abs question">Three live inputs, one offline system, from the raw air to an answer people can check</div>
+  <div class="tourbox touring">
+    <section class="panel" style="left:40px;top:150px;width:1150px;height:420px">
+      <h2>THREE DEMOS, ONE SYSTEM</h2>
+      <div class="body" style="display:grid;grid-template-columns:repeat(3,1fr);gap:28px;padding-top:10px">
+<div class="k" data-k="c1" style="--c:var(--orange)"><svg class="ico" style="font-size:96px;color:var(--orange)" viewBox="0 0 48 60"><use href="#i-file"/></svg><div style="font-size:29px;font-weight:800;margin-top:10px">A recorded signal</div><div class="note" style="font-size:19.5px;margin-top:6px">boxed, named NBFM, turned back into speech and read</div><div style="margin-top:18px;display:flex;flex-wrap:wrap;gap:8px"><span class="pl" style="--c:var(--orange);font-size:17px">box</span><span class="pl" style="--c:var(--orange);font-size:17px">name</span><span class="pl" style="--c:var(--orange);font-size:17px">transcript</span></div></div><div class="k" data-k="c2" style="--c:var(--red)"><svg class="ico" style="font-size:96px;color:var(--red)" viewBox="0 0 40 64"><use href="#i-walkie"/></svg><div style="font-size:29px;font-weight:800;margin-top:10px">Our own walkie-talkie</div><div class="note" style="font-size:19.5px;margin-top:6px">our voice, caught by the antenna, turned into text with an AI reading</div><div style="margin-top:18px;display:flex;flex-wrap:wrap;gap:8px"><span class="pl" style="--c:var(--red);font-size:17px">live</span><span class="pl" style="--c:var(--red);font-size:17px">NBFM</span><span class="pl" style="--c:var(--red);font-size:17px">AI reading</span></div></div><div class="k" data-k="c3" style="--c:var(--blue)"><svg class="ico" style="font-size:96px;color:var(--blue)" viewBox="0 0 64 64"><use href="#i-globe"/></svg><div style="font-size:29px;font-weight:800;margin-top:10px">Real shortwave</div><div class="note" style="font-size:19.5px;margin-top:6px">a station far away, decoded, and located with KiwiSDR TDoA</div><div style="margin-top:18px;display:flex;flex-wrap:wrap;gap:8px"><span class="pl" style="--c:var(--blue);font-size:17px">real world</span><span class="pl" style="--c:var(--blue);font-size:17px">decoded</span><span class="pl" style="--c:var(--blue);font-size:17px">located</span></div></div>
+      </div>
+    </section>
+    <section class="panel" style="left:1220px;top:150px;width:660px;height:420px">
+      <h2>BY THE NUMBERS</h2>
+      <div class="body" style="display:grid;grid-template-columns:1fr 1fr;gap:40px 30px;padding:20px 6px 0">
+<div class="k" data-k="n1" style="--c:var(--blue)"><div class="big" style="font-size:70px;color:var(--blue)">60<span style="font-size:34px"></span></div><div class="note" style="font-size:18.5px;line-height:1.35;margin-top:6px">signal classes, incl. radar and jamming</div></div><div class="k" data-k="n2" style="--c:var(--purple)"><div class="big" style="font-size:70px;color:var(--purple)">80.6<span style="font-size:34px">%</span></div><div class="note" style="font-size:18.5px;line-height:1.35;margin-top:6px">exact class per tracked emitter, ≥ 10 dB</div></div><div class="k" data-k="n3" style="--c:var(--teal)"><div class="big" style="font-size:70px;color:var(--teal)">89<span style="font-size:34px">%</span></div><div class="note" style="font-size:18.5px;line-height:1.35;margin-top:6px">right family, 15 dB</div></div><div class="k" data-k="n4" style="--c:var(--green)"><div class="big" style="font-size:70px;color:var(--green)">1<span style="font-size:34px"> laptop</span></div><div class="note" style="font-size:18.5px;line-height:1.35;margin-top:6px">everything analysed offline, nothing leaves it</div></div>
+      </div>
+    </section>
+    <section class="panel" style="left:40px;top:590px;width:1840px;height:400px">
+      <h2>FROM THE AIR TO AN ANSWER</h2>
+      <div class="body" style="display:flex;justify-content:space-between;align-items:flex-start;padding-top:12px">
+<div class="k kb" data-k="j1" style="--c:var(--orange);width:262px;flex:none;text-align:center;padding-top:14px"><img class="thumb" src="../FOI26/assets/img/t_capture.png" alt="Capture" style="--c:var(--orange);width:250px;height:170px;object-fit:cover;margin:0 auto"><div style="font-size:22px;font-weight:800;color:var(--orange);margin-top:10px">Capture</div><div class="note" style="font-size:17px;line-height:1.35">a recorded file, our antenna or KiwiSDR</div><div class="note" style="font-size:13px;margin-top:4px;color:#9AA3AB">demos 1, 2, 3</div></div><span class="chev" style="align-self:center;margin-top:-60px">›</span><div class="k kb" data-k="j2" style="--c:var(--blue);width:262px;flex:none;text-align:center;padding-top:14px"><img class="thumb" src="../FOI26/assets/img/t_detector.png" alt="Find" style="--c:var(--blue);width:250px;height:170px;object-fit:cover;margin:0 auto"><div style="font-size:22px;font-weight:800;color:var(--blue);margin-top:10px">Find</div><div class="note" style="font-size:17px;line-height:1.35">every transmitter boxed, many at once</div><div class="note" style="font-size:13px;margin-top:4px;color:#9AA3AB">page 3</div></div><span class="chev" style="align-self:center;margin-top:-60px">›</span><div class="k kb" data-k="j3" style="--c:var(--teal);width:262px;flex:none;text-align:center;padding-top:14px"><img class="thumb" src="../FOI26/assets/img/t_classifier.png" alt="Name" style="--c:var(--teal);width:250px;height:170px;object-fit:cover;margin:0 auto"><div style="font-size:22px;font-weight:800;color:var(--teal);margin-top:10px">Name</div><div class="note" style="font-size:17px;line-height:1.35">60 classes, three learned branches</div><div class="note" style="font-size:13px;margin-top:4px;color:#9AA3AB">pages 2 and 3</div></div><span class="chev" style="align-self:center;margin-top:-60px">›</span><div class="k kb" data-k="j4" style="--c:var(--purple);width:262px;flex:none;text-align:center;padding-top:14px"><img class="thumb" src="../FOI26/assets/img/t_demod.png" alt="Listen and read" style="--c:var(--purple);width:250px;height:170px;object-fit:cover;margin:0 auto"><div style="font-size:22px;font-weight:800;color:var(--purple);margin-top:10px">Listen and read</div><div class="note" style="font-size:17px;line-height:1.35">Whisper, Morse, RTTY / PSK31 + AI reading</div><div class="note" style="font-size:13px;margin-top:4px;color:#9AA3AB">page 4</div></div><span class="chev" style="align-self:center;margin-top:-60px">›</span><div class="k kb" data-k="j5" style="--c:var(--red);width:262px;flex:none;text-align:center;padding-top:14px"><img class="thumb" src="../FOI26/assets/img/t_track.png" alt="Show and record" style="--c:var(--red);width:250px;height:170px;object-fit:cover;margin:0 auto"><div style="font-size:22px;font-weight:800;color:var(--red);margin-top:10px">Show and record</div><div class="note" style="font-size:17px;line-height:1.35">dashboard, Assistant, audit trail</div><div class="note" style="font-size:13px;margin-top:4px;color:#9AA3AB">page 4</div></div><span class="chev" style="align-self:center;margin-top:-60px">›</span><div class="k kb" data-k="j6" style="--c:var(--green);width:262px;flex:none;text-align:center;padding-top:14px"><div style="width:250px;height:170px;margin:0 auto;border-radius:12px;border:3px solid color-mix(in srgb,var(--green) 45%,white);display:grid;place-items:center;color:var(--green)"><svg class="ico" style="font-size:92px" viewBox="0 0 64 64"><use href="#i-person2"/></svg></div><div style="font-size:22px;font-weight:800;color:var(--green);margin-top:10px">People decide</div><div class="note" style="font-size:17px;line-height:1.35">operator corrects, analyst approves</div><div class="note" style="font-size:13px;margin-top:4px;color:#9AA3AB">page 5</div></div>
+      </div>
+    </section>
+  </div>
+</section>
+
+<!-- shared header and footer -->
+<div class="abs logo"><img src="../FOI26/assets/nexa-logo.png" alt="NEXA"><small id="pgLabel">TRACK I · RF / SIGNAL · PAGE 1 / 9</small></div>
+<div class="abs event"><img src="../FOI26/assets/sedic-logo.png" alt="SEDIC 26"><span>NOVEMBER 2026 UPDATE</span></div>
+<div class="capbar" id="capbar"><span class="snum" id="capNum">1</span><span id="capText"></span></div>
+<div class="dots" id="dots"></div>
+<div id="menu">
+  <div class="abs title-pill">NEXA · 30-minute presentation</div>
+  <div class="abs question">Press M or Esc to close · click a page to open it</div>
+  <div id="menuList" style="position:absolute;left:330px;top:170px;width:1260px;display:grid;grid-template-columns:1fr 1fr;gap:14px 60px"></div>
+</div>
+<div id="notes"></div>
+
+</div></div>
+<div class="hint">← → page · M menu · N notes · P pause · R replay page · F full screen</div>
+
+<style>
+  [data-k="facts"] .pl{font-size:15.5px;padding:4px 11px}
+  .pn{position:absolute;background:#fff;border:3px solid var(--c);border-radius:16px;padding:12px 16px;display:flex;gap:18px}
+  .pn .ttl{display:flex;gap:10px;align-items:center;white-space:nowrap;font-size:21px;font-weight:800;letter-spacing:.8px;color:var(--c)}
+  .pn .ttl small{font-size:16px;font-weight:700;letter-spacing:0;color:var(--mute)}
+  .pn .d{font-size:17px;font-weight:600;color:var(--mute);line-height:1.4;margin-top:5px}
+  .pn .d b{color:var(--ink)}
+  .pn .fx{display:inline-block;margin-top:6px;font:700 16.5px Consolas,"Courier New",monospace;color:var(--navy);background:#F6F7F9;border-radius:8px;padding:3px 9px}
+  .pn .pic{flex:none;align-self:center;display:block;object-fit:contain;max-width:400px}
+  .touring #famTiles .k.on{box-shadow:0 0 0 6px var(--c),0 14px 26px rgba(0,0,0,.18)!important;border-radius:10px}
+  .qs{flex:1;text-align:center;font-size:16px;font-weight:800;padding:4px 0;border-radius:7px;background:#ECE5F6;color:var(--purple)}
+  #waffle i{width:20px;height:20px;border-radius:50%}
+  .wfl{position:absolute;transform:translateX(-50%);font-size:13px;font-weight:800;white-space:nowrap;padding:1px 7px;border-radius:7px;background:color-mix(in srgb,var(--c) 14%,white);color:color-mix(in srgb,var(--c) 85%,black)}
+  .ping{animation:ping 2.4s ease-out infinite;transform-box:fill-box;transform-origin:center}
+  @keyframes ping{0%{opacity:.9;transform:scale(.4)}100%{opacity:0;transform:scale(5)}}
+  .arow{display:flex;align-items:center;gap:16px;padding:12px 6px;border-bottom:1px solid var(--line);cursor:pointer}
+  .arow:hover{background:#F7F9FB}
+  .arow b{font-size:22px;font-weight:800}
+  .arow .note{font-size:15.5px}
+  .arow .mins{margin-left:auto;font-size:16px;font-weight:800;color:var(--mute);white-space:nowrap}
+</style>
+
+<script>
+(() => {
+const pages=[...document.querySelectorAll(".page")];
+const IMG="../FOI26/assets/img/";
+const HOOK={};   /* optional per-page extra work on each walkthrough step */
+const C={blue:"var(--blue)",orange:"var(--orange)",amber:"var(--amber)",red:"var(--red)",green:"var(--green)",navy:"var(--navy)",teal:"var(--teal)",purple:"var(--purple)",grey:"#8A9096"};
+
+/* ---------- menu (M) ---------- */
+const PARTS=[
+  ["The problem · before and after","the raw air, and what NEXA sees",2,C.red],
+  ["Datasets and accuracy","1.2 M windows · 80.6% per track",5,C.blue],
+  ["Data processing pipeline","from IQ samples to a named emitter",4,C.teal],
+  ["System architecture · human in the loop","listen, read, show, record · people decide",6,C.purple],
+  ["Live demos 1, 2 and 3","recorded · walkie-talkie · KiwiSDR",11,C.orange],
+  ["Conclusion","what we showed today",2,C.navy],
+];
+document.getElementById("menuList").innerHTML=PARTS.map(([t,s,m,c],i)=>`<div class="arow" data-go="${i}"><span class="hx" style="--c:${c}">${String(i+1).padStart(2,"0")}</span><div><b>${t}</b><div class="note">${s}</div></div><span class="mins">${m} min</span></div>`).join("");
+
+/* ---------- page 1: simulated live waterfall (clearly labelled as simulated on the slide) ---------- */
+(function(){
+  /* Drawn the way a KiwiSDR web receiver shows the band: spectrum trace on top, kHz scale,
+     waterfall below with the newest line at the top. Power is computed in dB over a speckled
+     noise floor (as a real FFT looks), signals fade slowly, and the Kiwi colour map is used:
+     black / deep blue noise, blue → cyan → green → yellow → red as the signal gets stronger. */
+  const cv=document.getElementById("wf"), ctx=cv.getContext("2d"), W=cv.width, H=cv.height;
+  const sp=document.getElementById("wfSpec"), sx=sp.getContext("2d"), SH=sp.height;
+  const sc=document.getElementById("wfScale"), scx=sc.getContext("2d");
+  const SIG=[["CW carrier",34,C.grey],["Morse",88,C.navy],["NBFM voice",150,C.teal],["AM voice",232,C.green],["FHSS hopping",336,C.blue],["LFM radar",448,C.orange],["OFDM data",510,C.purple],["QPSK link",592,C.blue],["swept jammer",646,C.red]];
+  document.getElementById("wfLabels").innerHTML=SIG.map(([n,x,c],i)=>`<span class="wfl" style="--c:${c};left:${x}px;top:${i%2?28:2}px">${n}</span>`).join("");
+  /* keep every label inside the waterfall's width (the edge labels would otherwise hang over) */
+  const clampLabels=()=>document.querySelectorAll("#wfLabels .wfl").forEach((el,i)=>{const w=el.offsetWidth,x=SIG[i][1];el.style.left=Math.min(Math.max(x,w/2+4),W-w/2-4)+"px";});
+  clampLabels(); (document.fonts?document.fonts.ready:Promise.resolve()).then(clampLabels);
+  const MORSE=".-.. --- --- -.-  -. . -..- .-  ";           /* "LOOK NEXA" */
+  const keyed=[];for(const ch of MORSE){if(ch==="."){keyed.push(1,0);}else if(ch==="-"){keyed.push(1,1,1,0);}else{keyed.push(0,0);}}
+  /* colour map (KiwiSDR style) as a 256-entry table */
+  const CM=[[0,2,2,10],[.14,8,14,58],[.3,20,40,140],[.45,28,100,215],[.58,30,190,230],[.69,110,228,120],[.8,245,235,60],[.9,255,150,30],[1,255,45,35]];
+  const LUT=new Uint8ClampedArray(256*3);
+  for(let i=0;i<256;i++){const v=i/255;let k=1;while(k<CM.length-1&&v>CM[k][0])k++;const a=CM[k-1],b=CM[k],f=Math.min(1,Math.max(0,(v-a[0])/(b[0]-a[0])));for(let j=0;j<3;j++)LUT[i*3+j]=a[j+1]+(b[j+1]-a[j+1])*f;}
+  const DB0=1, DB1=33;                                /* colour range in dB above the noise floor */
+  const F0=7000, F1=7500, kHz=x=>F0+(F1-F0)*x/W;
+  /* frequency scale, drawn once */
+  scx.fillStyle="#1B1F27";scx.fillRect(0,0,W,26);scx.strokeStyle="#8C96A6";scx.fillStyle="#D9DEE6";scx.font="700 12px Montserrat,Segoe UI,sans-serif";scx.textAlign="center";
+  for(let f=F0;f<=F1;f+=10){const x=Math.round((f-F0)/(F1-F0)*(W-1))+.5,big=f%50===0;scx.beginPath();scx.moveTo(x,0);scx.lineTo(x,big?9:4);scx.stroke();if(f%100===0&&f>F0&&f<F1)scx.fillText(f,x,22);}
+  const g=(x,c,w)=>Math.exp(-((x-c)*(x-c))/(2*w*w));
+  const soft=(x,a,b,e)=>1/(1+Math.exp(-(x-a)/e))/(1+Math.exp((x-b)/e));   /* flat top, soft edges */
+  const ex=()=>-Math.log(Math.random()+1e-9);           /* speckle: power of complex noise */
+  const db=v=>10*Math.log10(v), lin=d=>Math.pow(10,d/10);
+  const WEAK=[[61,9],[118,7],[268,10],[402,8],[476,9],[628,7]];           /* faint carriers, as on any real band */
+  let t=0, hop=330;
+  const row=ctx.createImageData(W,1), NL=new Float32Array(W), TN=new Float32Array(W), AVG=new Float32Array(W).fill(0);
+  const amSide=new Float32Array(16);
+  function line(){
+    t++;
+    const fade=(p,ph)=>0.35+0.65*Math.pow(Math.sin(t/p+ph),2);           /* slow fading */
+    for(let x=0;x<W;x++){NL[x]=1+0.35*Math.exp(-x/160);TN[x]=0;}           /* noise floor, a little higher at the low end */
+    for(const [c,d] of WEAK)TN[c]+=lin(d)*fade(70+c%40,c);
+    TN[34]+=lin(29)*fade(400,0); TN[33]+=lin(20); TN[35]+=lin(20);         /* steady carrier */
+    if(keyed[Math.floor(t/7)%keyed.length]){TN[88]+=lin(24)*fade(90,1);TN[87]+=lin(12);TN[89]+=lin(12);}   /* Morse */
+    const syl=Math.max(0,Math.sin(t/9)*Math.sin(t/31)), wob=Math.sin(t/4)*3;                 /* NBFM voice */
+    for(let x=136;x<165;x++)NL[x]+=lin(17+8*syl)*Math.exp(-Math.pow((x-150-wob)/(3+6*syl),2)/2);
+    const sp2=0.3+0.7*Math.max(0,Math.sin(t/7)*Math.sin(t/23)+.2);                           /* AM: carrier + mirrored voice sidebands */
+    for(let d=1;d<16;d++)amSide[d]=lin(25-d*1.1)*sp2*ex();
+    TN[232]+=lin(31)*fade(300,2); TN[231]+=lin(22); TN[233]+=lin(22);
+    for(let d=2;d<16;d++){TN[232-d]+=amSide[d];TN[232+d]+=amSide[d];}
+    if(t%22===0)hop=296+Math.floor(Math.random()*8)*12;                                      /* FHSS: dwell, short gap, jump */
+    if(t%22<19)for(let x=hop-8;x<hop+8;x++)NL[x]+=lin(24)*soft(x,hop-5,hop+5,1);
+    const pr=t%48; if(pr<10){const c=424+pr*4.2;for(let x=Math.floor(c-6);x<c+6;x++)TN[x]+=lin(24)*g(x,c,1.8);}  /* radar chirp pulses */
+    if((t%140)<100)for(let x=488;x<558;x++)NL[x]+=lin(21)*soft(x,492,552,1.2);                /* OFDM bursts: noise-like flat block */
+    for(let x=570;x<615;x++)NL[x]+=lin(23)*soft(x,580,604,2.5);                             /* QPSK: rounded shoulders */
+    const sw=360+((t*1.3)%300); for(let x=Math.floor(sw-4);x<sw+4&&x<W;x++)TN[x]+=lin(25)*g(x,sw,1.3);   /* swept jammer */
+    for(let x=0;x<W;x++){
+      const d=db(NL[x]*ex()+TN[x]*(0.8+0.4*Math.random()));
+      AVG[x]=AVG[x]*0.82+d*0.18;
+      const i=Math.max(0,Math.min(255,Math.round((d-DB0)/(DB1-DB0)*255)))*3,o=x*4;
+      row.data[o]=LUT[i];row.data[o+1]=LUT[i+1];row.data[o+2]=LUT[i+2];row.data[o+3]=255;
+    }
+    ctx.drawImage(cv,0,0,W,H-1,0,1,W,H-1); ctx.putImageData(row,0,0);
+  }
+  function spectrum(){
+    sx.fillStyle="#05060d";sx.fillRect(0,0,W,SH);
+    sx.strokeStyle="rgba(140,150,166,.18)";sx.lineWidth=1;
+    for(let d=0;d<=30;d+=10){const y=Math.round(SH-4-(d-DB0)/(DB1-DB0+4)*(SH-8))+.5;sx.beginPath();sx.moveTo(0,y);sx.lineTo(W,y);sx.stroke();}
+    const y=x=>SH-4-Math.max(0,(AVG[x]-DB0)/(DB1-DB0+4))*(SH-8);
+    const gr=sx.createLinearGradient(0,0,0,SH);gr.addColorStop(0,"rgba(255,220,60,.75)");gr.addColorStop(.45,"rgba(40,190,230,.55)");gr.addColorStop(1,"rgba(20,40,140,.25)");
+    sx.beginPath();sx.moveTo(0,SH);for(let x=0;x<W;x++)sx.lineTo(x,y(x));sx.lineTo(W,SH);sx.closePath();sx.fillStyle=gr;sx.fill();
+    sx.beginPath();for(let x=0;x<W;x++)sx[x?"lineTo":"moveTo"](x,y(x));sx.strokeStyle="#E8F1FF";sx.lineWidth=1.2;sx.stroke();
+  }
+  for(let k=0;k<H;k++)line(); spectrum();               /* start with a full screen */
+  /* runs only while page 1 is on screen and its walkthrough has not finished */
+  if(!matchMedia("(prefers-reduced-motion: reduce)").matches){const tick=()=>{if(wfRunning()){line();spectrum();}requestAnimationFrame(tick);};requestAnimationFrame(tick);}
+})();
+
+/* ---------- page 2: rings, dots, slopes, families + members ---------- */
+function ring(el,pct,col,label,size){document.getElementById(el).innerHTML=`<svg viewBox="0 0 200 200" style="width:${size}px;height:${size}px"><circle cx="100" cy="100" r="82" fill="none" stroke="#F1F1F1" stroke-width="20"/><circle cx="100" cy="100" r="82" fill="none" stroke="${col}" stroke-width="20" stroke-linecap="round" transform="rotate(-90 100 100)" stroke-dasharray="${(pct/100*515.2).toFixed(1)} 515.2"/><text x="100" y="104" text-anchor="middle" font-size="40" font-weight="800" fill="#1A1A1A" font-family="Montserrat">${pct}%</text><text x="100" y="132" text-anchor="middle" font-size="14.5" font-weight="800" fill="${col}" font-family="Montserrat" letter-spacing="1">${label}</text></svg>`;}
+ring("ring1",80.6,"#2E7DB9","EXACT CLASS",196); ring("ring2",89,"#1D7A68","RIGHT FAMILY",196);
+document.getElementById("waffle").innerHTML=Array.from({length:60},(_,i)=>`<i style="display:block;width:18px;height:18px;border-radius:50%;background:${i<38?"var(--purple)":i<46?"#C7B6E2":"#E3E3E3"}"></i>`).join("");
+const SL=[["one window ≥ 10 dB",52.9,61.6],["FSK family",20,61],["PSK family",11,32]];
+document.getElementById("slopes").innerHTML=SL.map(([n,a,b])=>`<div style="margin-bottom:4px"><div style="font-size:15.5px;font-weight:800">${n}</div><div style="display:grid;grid-template-columns:62px 1fr 66px;align-items:center;gap:8px;font-size:17px;font-weight:800"><span style="color:#8A9096">${a}%</span><div style="height:6px;border-radius:3px;background:linear-gradient(90deg,#D7DADD,var(--red));position:relative"><i style="position:absolute;right:-6px;top:-6px;width:17px;height:17px;border-radius:50%;background:var(--red)"></i></div><span style="color:var(--red);text-align:right">${b}%</span></div></div>`).join("");
+const FM=[["Radar",C.orange,99,[["Pulse",100],["LFM",100],["Barker",100],["Poly-Barker",100],["Frank",100],["Costas",100],["FMCW",100],["CW",94]]],
+ ["Jammers",C.red,91,[["Barrage",100],["Spot",100],["Multitone",100],["Swept",100],["Chirp",100],["Pulsed",100],["Partial-band",100],["Reactive",100],["DRFM",91]]],
+ ["FSK",C.teal,100,[["2FSK",100],["8FSK",100],["GFSK",100],["MSK",100],["CPFSK",100],["4FSK",94],["GMSK",91]]],
+ ["Spread spectrum",C.navy,94,[["FHSS",100],["DSSS",94],["LoRa",88]]],
+ ["ASK",C.purple,100,[["OOK",100],["4ASK",91],["8ASK",84]]],
+ ["Analog voice",C.teal,86,[["AM-DSB-SC",100],["AM-SSB-WC",100],["WBFM",100],["AM-DSB-WC",91],["PM",91],["NBFM",75]]],
+ ["Pulse comms",C.amber,null,[["PPM",100],["SSR / IFF",97]]],
+ ["OFDM / LTE / NR",C.blue,93,[["NR-like",100],["LTE-like",78]]],
+ ["PSK",C.blue,91,[["OQPSK",100],["QPSK",97],["32PSK",72]]],
+ ["APSK",C.green,91,[["16APSK",88],["32APSK",88]]],
+ ["Noise floor",C.grey,null,[["nothing on air",78]]]];
+const tile=v=>v>=95?"#457900":v>=85?"#C77A00":"#B0281A";
+document.getElementById("famMem").innerHTML=
+ `<div class="note" style="display:grid;grid-template-columns:182px 104px 52px 1fr;gap:8px;font-size:14.1px;font-weight:800;letter-spacing:1px;padding:0 2px 2px"><span>FAMILY</span><span style="white-space:nowrap">% FAMILY</span><span></span><span>EXACT CLASS, MEMBER BY MEMBER</span></div>`+
+ FM.map(([f,c,p,ms])=>`<div style="display:grid;grid-template-columns:182px 104px 52px 1fr;gap:8px;align-items:start;margin-bottom:2px">
+   <b style="font-size:17.5px;color:${c};white-space:nowrap;padding-top:1px">${f}</b>
+   ${p===null?`<span class="note" style="font-size:14.7px;padding-top:2px">not shown</span><span></span>`:`<div style="position:relative;height:13px;margin-top:5px;border-radius:5px;background:var(--pill)"><div style="position:absolute;left:0;top:0;bottom:0;width:${p}%;border-radius:5px;background:${c}"></div><div style="position:absolute;left:80%;top:-3px;bottom:-3px;width:2px;background:var(--ink)"></div></div><b style="font-size:16.9px;padding-top:1px">${p}%</b>`}
+   <div style="display:flex;gap:3px;flex-wrap:wrap">${ms.map(([n,v])=>`<span style="display:inline-flex;gap:4px;font-size:14px;font-weight:700;padding:1px 6px;border-radius:6px;background:${tile(v)};color:#fff;white-space:nowrap">${n}<b>${v}</b></span>`).join("")}</div></div>`).join("")+
+ `<div class="note" style="font-size:15.3px;margin-top:4px;display:flex;gap:12px;align-items:center;flex-wrap:wrap"><span>15 dB · 8-window vote · bars ≥ 80% shown, line = 80% · tiles ≥ 50% shown</span><span><i style="display:inline-block;width:11px;height:11px;border-radius:3px;background:#457900"></i> ≥ 95</span><span><i style="display:inline-block;width:11px;height:11px;border-radius:3px;background:#C77A00"></i> 85–94</span><span><i style="display:inline-block;width:11px;height:11px;border-radius:3px;background:#B0281A"></i> &lt; 85</span></div>`;
+
+/* ---------- page 6: demo 1 steps, demo 2 waves, demo 3 steps ---------- */
+document.getElementById("d1steps").innerHTML=[
+ ["d1a",C.orange,"The waterfall moves","on laptop A, and we hear the recording"],
+ ["d1b",C.teal,"NEXA boxes the channel","on laptop B's Signal Pipeline page"],
+ ["d1c",C.purple,"Names the type","for a voice radio: NBFM"],
+ ["d1d",C.blue,"Words + AI reading","about 30 s to 1 min after the audio"]].map(([k,c,b,s],i)=>
+ `<div class="k" data-k="${k}" style="--c:${c};position:absolute;left:0;top:${i*76}px;right:0;display:flex;gap:18px;align-items:center"><span class="hx" style="--c:${c};margin-left:11px">${i+1}</span><div><div style="font-size:24.6px;font-weight:800;color:${c}">${b}</div><div class="note" style="font-size:19px">${s}</div></div></div>`).join("");
+(function(){let v="",f="",ph=0;for(let x=0;x<=930;x+=2){const m=Math.sin(x/62)*.7+Math.sin(x/23)*.3;v+=(x?"L":"M")+x+" "+(28-m*22).toFixed(1);ph+=.30+.16*m;f+=(x?"L":"M")+x+" "+(35-Math.sin(ph)*28).toFixed(1);}
+ document.getElementById("voicePath").setAttribute("d",v);document.getElementById("fmPath").setAttribute("d",f);})();
+document.getElementById("kSteps").innerHTML=`<svg style="position:absolute;left:0;top:0;width:60px;height:340px;overflow:visible"><path class="flow" d="M27 22 V 300"/></svg>`+[
+ ["k1",C.blue,"Type a frequency","e.g. 15295 kHz, press Start"],
+ ["k2",C.teal,"30 s clips","streamed with kiwiclient"],
+ ["k3",C.orange,"Names the kind","AM · USB · CW Morse · RTTY · PSK31"],
+ ["k4",C.purple,"Decodes it","Morse, RTTY / PSK31 text, or speech + AI reading"],
+ ["k5",C.green,"Saves it","Signal Pipeline · Comms Intel · audit trail"]].map(([k,c,b,s],i)=>
+ `<div class="k" data-k="${k}" style="--c:${c};position:absolute;left:0;right:0;top:${i*72}px;display:flex;gap:16px;align-items:center"><span class="hx" style="--c:${c};margin-left:8px">${i+1}</span><div><div style="font-size:21.8px;font-weight:800;color:${c}">${b}</div><div class="note" style="font-size:17.4px">${s}</div></div></div>`).join("");
+
+/* ---------- walkthrough scripts (one per page, each loops) ---------- */
+const T={
+ pg1:[[["live"],"Before: the air right now, many signals flowing at once (simulated, drawn live)"],
+      [["mix"],"Voice, Morse, hopping radios, radar, data and a sweeping jammer, all at the same time"],
+      [["img"],"After: one real capture, every transmitter boxed and named by NEXA"],
+      [["crowd"],"An operator can follow one channel at a time; NEXA follows all of them"],
+      [["find"],"Find: a box around every transmitter in the band"],
+      [["name"],"Name: which of 60 kinds of signal each one is"],
+      [["read"],"Read: voice and Morse become text, right on this machine"]],
+ pg2:[[["nums"],"1.2 million labelled windows of 160 µs, 60 classes, 16 noise levels"],
+      [["split"],"80% for training, the rest kept apart for validation and the fixed test"],
+      [["src"],"Our own generators plus public RadioML 2018 and HisarMod; real recordings only for testing"],
+      [["ring"],"80.6% of tracked emitters named exactly: all 60 classes, SNR ≥ 10 dB, 16-window vote"],
+      [["f89"],"89% land in the right family at 15 dB"],
+      [["c46"],"46 of 60 classes named exactly at least half the time, 38 of them at least 90%"],
+      [["gain"],"+8.7 points over the previous model; FSK went from 20% to 61%"],
+      [["snr"],"The same radar chirp from buried to clear, so the model learns when to say \"uncertain\""],
+      [["vote"],"A longer look gives a surer answer: 8 windows (1.3 ms) already reach 79%"],
+      [["fam"],"Family by family, member by member: radar and jammers near 100%, NBFM 75% (confirmed later by the zoom-in)"]],
+ pg3:[[["cap"],"Capture: raw radio samples from an antenna, a recording or the simulator"],
+      [["spec"],"The whole band becomes a picture: every transmitter leaves its mark"],
+      [["det"],"The detector boxes every transmitter, many at once"],
+      [["cut"],"Each box is cut out, cleaned and sliced into short pieces"],
+      [["inp"],"One slice goes in, turned to the same volume so the model judges shape, not loudness"],
+      [["iqb"],"Branch 1 reads the wave: pulses, rhythm, on and off"],
+      [["stb"],"Branch 2 reads the picture: here the radar chirp and its jammer copy"],
+      [["spb"],"Branch 3 reads the band: where the power sits, how wide, which peaks"],
+      [["fuse"],"The wave and the picture are combined, moment by moment"],
+      [["attn"],"Attention looks where the signal is and ignores empty time"],
+      [["sum"],"Everything joins one fingerprint, plus expert checks from radio physics"],
+      [["dense"],"60 yes / no scores: radar and jammer both score high, so both are there"],
+      [["vote"],"All slices vote and the rules settle it: a jammer copying a radar, high confidence"],
+      [["walkie"],"A walkie-talkie takes the same path, is named NBFM, then is listened to"]],
+ pg4:[[["src1","src2","src3"],"Input from SDRconnect, KiwiSDR or an uploaded recording"],
+      [["named"],"The pipeline names every emitter, with its frequency, time and confidence"],
+      [["zoom"],"Voice and Morse channels are zoomed in: AM, FM, SSB or Morse?"],
+      [["demod"],"The right demodulator turns the radio wave back into audio"],
+      [["dec"],"Turned into text: Whisper for speech, our own Morse decoder, RTTY and PSK31"],
+      [["ai"],"A local AI sums it up, and only says what the text backs up"],
+      [["dash"],"The operator dashboard: one row per emitter, with alerts"],
+      [["intel"],"Every run is kept in Signal Pipeline and Comms Intel"],
+      [["asst"],"The AI Assistant answers questions about the results, offline"],
+      [["db"],"Everything is recorded in a local database"],
+      [["aud","iq"],"with a log nobody can quietly change, and the original recordings"],
+      [["op"],"People decide: an operator flags or corrects an answer"],
+      [["an"],"An analyst sees the signal again before the correction counts"],
+      [["rt"],"Approved corrections are added, and a person starts retraining"],
+      [["gate"],"Only a model that does better gets through"],
+      [["yes","no"],"Better: it goes live from the next signal, and can be rolled back. Not better: it stays out"]],
+ pg7:[[["d1a","d1b"],"Demo 1: a recording plays, and NEXA boxes the channel"],
+      [["d1c","d1d"],"It names the type, then the words and the AI reading arrive"],
+      [["d2path"],"Demo 2: we speak into the walkie-talkie; the antenna and RSPduo pick it up"],
+      [["wave"],"The voice is sent as narrow FM: the radio wave speeds up and slows down with it"],
+      [["nbfm"],"NEXA spots the channel, names it NBFM, turns it back into speech and transcribes it"],
+      [["kiwi","kA","kB"],"Demo 3: both laptops reach the same KiwiSDR receiver on their own"],
+      [["k1","k2","k3"],"Type the frequency and press Start: NEXA streams 30 s clips and names the kind"],
+      [["k4","k5"],"It decodes them, adds the AI reading and saves every result"],
+      [["tdoa","tdoaTxt","loc"],"Three receivers hear the same signal; arrival-time differences point to the transmitter"],
+      [["facts"],"It needs internet and clear reception; press Stop to free the slot"]],
+ pg8:[[["c1"],"A recorded signal: boxed, named and read"],
+      [["c2"],"Our own walkie-talkie: our voice, received and turned into text"],
+      [["c3"],"Real shortwave from far away: decoded, and located"],
+      [["n1","n2","n3"],"60 classes; 80.6% exact per tracked emitter; 89% right family"],
+      [["n4"],"All of it on one laptop, offline"],
+      [["j1","j2"],"From the air: capture, then find every transmitter"],
+      [["j3","j4"],"Name it, then listen and read"],
+      [["j5","j6"],"Show and record, and people decide"]],
+};
+
+/* ---------- the walkthrough engine: one step every few seconds, loops forever ---------- */
+const reduce=matchMedia("(prefers-reduced-motion: reduce)").matches;
+const capbar=document.getElementById("capbar"),capNum=document.getElementById("capNum"),capText=document.getElementById("capText");
+let cur=0,si=-1,timer=null,paused=false;
+/* Walkthrough speed: one part every 2 s, a short hold on the last part before it loops. */
+const STEP_MS=2000, STEP_LAST=3000;
+function fitCap(){capText.style.fontSize="";const room=capbar.clientWidth-capNum.offsetWidth-16;let fs=26;capText.style.whiteSpace="nowrap";while(capText.offsetWidth>room&&fs>17)capText.style.fontSize=(--fs)+"px";capText.style.whiteSpace="";}
+
+/* ---------- running dots on the active wires (pages 3 and 4, as nexa-tv-poster-2-system) ---------- */
+let flowPts=[],dotT0=0;
+function flowDots(pg){
+  flowPts.forEach(d=>d.c.remove()); flowPts=[]; dotT0=performance.now();
+  pg.querySelectorAll("path.flow.on").forEach(w=>{
+    const c=document.createElementNS("http://www.w3.org/2000/svg","circle");
+    c.setAttribute("r","8"); c.setAttribute("fill","#22306B"); w.parentNode.appendChild(c);
+    flowPts.push({c,w,len:w.getTotalLength()});
+  });
+}
+(function frame(now){
+  flowPts.forEach(d=>{const dur=d.len>300?2200:1200,pt=d.w.getPointAtLength(((now-dotT0)%dur)/dur*d.len);d.c.setAttribute("cx",pt.x);d.c.setAttribute("cy",pt.y);});
+  requestAnimationFrame(frame);
+})(performance.now());
+/* Each page plays its walkthrough once, then everything on it stops and stays stopped,
+   also when you come back to it later. R replays the current page. */
+const done=new Set();
+function wfRunning(){return !!pages[cur]&&pages[cur].id==="pg1"&&!done.has("pg1")&&!paused;}
+function finish(){
+  clearTimeout(timer);
+  const pg=pages[cur];
+  done.add(pg.id); pg.classList.add("done");
+  pg.querySelectorAll(".k").forEach(n=>{n.classList.remove("on");n.classList.add("seen");});
+  pg.querySelectorAll("path.flow[data-to]").forEach(w=>{w.classList.remove("on");w.classList.add("seen");});
+  flowDots(pg);
+  capbar.classList.add("fade0");
+}
+function step(){
+  const pg=pages[cur],tour=T[pg.id],box=pg.querySelector(".tourbox");
+  if(si>=tour.length-1){finish();return;}
+  si++;
+  if(si===0)pg.querySelectorAll(".k").forEach(n=>n.classList.remove("seen","on"));
+  const [ks,txt]=tour[si];
+  pg.querySelectorAll(".k").forEach(n=>{const hit=ks.includes(n.dataset.k);n.classList.toggle("on",hit);if(hit)n.classList.add("seen");});
+  /* wires into the current part: dark, with a running dot (pages 3 and 4) */
+  if(si===0)pg.querySelectorAll("path.flow[data-to]").forEach(w=>w.classList.remove("on","seen"));
+  pg.querySelectorAll("path.flow[data-to]").forEach(w=>{const hit=ks.includes(w.dataset.to);w.classList.toggle("on",hit);if(hit)w.classList.add("seen");});
+  flowDots(pg);
+  if(HOOK[pg.id])HOOK[pg.id](ks);
+  const first=pg.querySelector(`.k[data-k="${ks[0]}"]`);
+  const col=first?(first.style.getPropertyValue("--c")||"var(--navy)"):"var(--navy)";
+  capbar.classList.add("fade0");
+  setTimeout(()=>{capNum.textContent=si+1;capNum.style.background=col;capText.textContent=txt;fitCap();capbar.classList.remove("fade0");},180);
+  clearTimeout(timer);
+  if(!paused)timer=setTimeout(step,si===tour.length-1?STEP_LAST:STEP_MS);
+}
+/* Jump the walkthrough to part i (clicking a step on page 5). */
+function jumpTo(i){clearTimeout(timer);const pg=pages[cur];pg.querySelectorAll(".k").forEach(n=>n.classList.remove("seen"));si=i-1;pages[cur].querySelectorAll(".k").forEach(n=>{const t=T[pg.id].findIndex(x=>x[0].includes(n.dataset.k));if(t>=0&&t<i)n.classList.add("seen");});step();}
+function startTour(){
+  clearTimeout(timer);si=-1;
+  const pg=pages[cur],box=pg.querySelector(".tourbox");
+  if(done.has(pg.id)){box.classList.add("touring");finish();return;}
+  if(reduce){box.classList.remove("touring");capNum.textContent="↻";capText.textContent=T[pg.id][0][1];return;}
+  box.classList.add("touring");step();
+}
+
+/* ---------- navigation ---------- */
+const dots=document.getElementById("dots");
+dots.innerHTML=pages.map((_,i)=>`<i data-go="${i}" title="Page ${i+1}"></i>`).join("")+`<span id="pgn"></span>`;
+document.querySelectorAll("[data-go]").forEach(el=>el.addEventListener("click",()=>{closeMenu();go(+el.dataset.go)}));
+const notes=document.getElementById("notes"),menu=document.getElementById("menu");
+function go(i){
+  cur=Math.max(0,Math.min(pages.length-1,i));
+  pages.forEach((p,k)=>p.classList.toggle("active",k===cur));
+  dots.querySelectorAll("i").forEach((d,k)=>d.classList.toggle("now",k===cur));
+  document.getElementById("pgn").textContent=`${cur+1} / ${pages.length}`;
+  document.getElementById("pgLabel").textContent=`TRACK I · RF / SIGNAL · PAGE ${cur+1} / ${pages.length}`;
+  notes.innerHTML=pages[cur].dataset.notes||"";
+  history.replaceState(null,"","#"+(cur+1));
+  startTour();
+}
+function closeMenu(){menu.classList.remove("open")}
+addEventListener("keydown",e=>{
+  if(["ArrowRight","PageDown"," "].includes(e.key)){e.preventDefault();closeMenu();go(cur+1)}
+  else if(["ArrowLeft","PageUp","Backspace"].includes(e.key)){e.preventDefault();closeMenu();go(cur-1)}
+  else if(e.key==="Home")go(0); else if(e.key==="End")go(pages.length-1);
+  else if(e.key==="m"||e.key==="M")menu.classList.toggle("open"); else if(e.key==="Escape")closeMenu();
+  else if(e.key==="n"||e.key==="N")notes.classList.toggle("open");
+  else if(e.key==="p"||e.key==="P"){paused=!paused;clearTimeout(timer);if(!paused&&!done.has(pages[cur].id))timer=setTimeout(step,600);}
+  else if(e.key==="r"||e.key==="R"){const pg=pages[cur];done.delete(pg.id);pg.classList.remove("done");startTour();}
+  else if(e.key==="f"||e.key==="F"){try{document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen()}catch(err){}}
+});
+capbar.addEventListener("click",()=>{if(done.has(pages[cur].id))return;clearTimeout(timer);step();});
+function fit(){const s=Math.min(innerWidth/1920,innerHeight/1080);document.getElementById("stage").style.transform=`translate(-50%,-50%) scale(${s})`;}
+addEventListener("resize",fit);fit();
+(document.fonts?document.fonts.ready:Promise.resolve()).then(()=>go((parseInt(location.hash.slice(1))||1)-1));
+window.__go=go;
+})();
+</script>
+</body></html>
