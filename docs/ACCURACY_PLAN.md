@@ -50,6 +50,7 @@ jamming, a few APSK rings look like a jammer band.
 ### P2. Sizes inside QAM / APSK / PSK / ASK (9.6% of all windows)
 - **Cause:** 10-60 symbols per window; the perfect-receiver ceiling is ~74% (PSK) / ~45% (QAM).
 - **Fix:** answer the group with the likeliest size (Eileen, `resolve.SIZE_GROUPS`) ✅.
+- **Also merged (2026-11-12):** QAM and APSK are one answer, "QAM / APSK": 32% of APSK windows at >= 10 dB were called QAM. As one group, family right per window 89-90% (was APSK 56%, QAM 48%); pipeline 286 -> 295 of 542 found emitters right, no new wrong answers.
 - **Checked here: would a longer-window model help?** `scripts/probe_window_length.py`, same expert features, same classifier, 15 dB, 300 windows per class:
 
 | Group | chance | one 512 window | **vote 4 x 512** | one 2048 window |

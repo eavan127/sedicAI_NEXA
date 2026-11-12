@@ -35,7 +35,13 @@ def main():
     p.add_argument("--snr", type=float, nargs="+", default=[10.0, 15.0, 20.0])
     p.add_argument("--classifier", default="results/classifier/physics_aug_best.pt")
     p.add_argument("--out", default="results/accuracy_plan/showcase.json")
+    p.add_argument("--merge-dense", action="store_true",
+                   help="count QAM and APSK as one family, as the resolver answers them (\"QAM / APSK\")")
     a = p.parse_args()
+    if a.merge_dense:
+        for c, g in FAM.items():
+            if g in ("QAM", "APSK"):
+                FAM[c] = "QAM / APSK"
     from src.pipeline.classify import Classifier
     clf = Classifier([a.classifier])
     fam_of = np.array([FAM[c] for c in C])

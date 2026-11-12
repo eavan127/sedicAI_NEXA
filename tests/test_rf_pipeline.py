@@ -200,7 +200,9 @@ def test_size_groups_answer_the_group_not_a_size():
     p = probs_for("256QAM", p=0.6)
     p[:, IDX["64QAM"]] = 0.5
     a = resolve.resolve(one(det(0, 32768, 0, 200e3, p)))
-    assert a.label == "QAM" and a.classes == resolve.SIZE_GROUPS["QAM"]
+    assert a.label == "QAM / APSK" and a.classes == resolve.SIZE_GROUPS["QAM / APSK"]
+    apsk = resolve.resolve(one(det(0, 32768, 0, 200e3, probs_for("32APSK"))))
+    assert apsk.label == "QAM / APSK" and "32APSK" in apsk.reason   # QAM and APSK look alike too
     assert "256QAM" in a.reason and a.confidence == pytest.approx(0.6, abs=1e-3)
     assert resolve.resolve(one(det(0, 32768, 0, 200e3, probs_for("16PSK")))).label == "8PSK / 16PSK / 32PSK"
     assert resolve.resolve(one(det(0, 32768, 0, 200e3, probs_for("8ASK")))).classes == ("4ASK", "8ASK")
@@ -286,7 +288,7 @@ def test_noise_jammer_switching_on_over_a_signal_is_reactive():
     dense = _jam_track(3, lead, 30000, "64APSK")
     assert resolve.resolve(dense, [sig, dense]).label == "JAM_REACTIVE"
     real_qam = _jam_track(4, lead, 30000, "64APSK", m4=1.55)
-    assert resolve.resolve(real_qam, [sig, real_qam]).label == "APSK"
+    assert resolve.resolve(real_qam, [sig, real_qam]).label == "QAM / APSK"
     # on from the start with the signal, or alone: not reactive
     both = _jam_track(5, 0, 30000, "JAM_PARTIAL_BAND")
     assert resolve.resolve(both, [sig, both]).label == "JAM_PARTIAL_BAND"

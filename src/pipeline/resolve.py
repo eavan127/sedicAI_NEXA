@@ -33,6 +33,8 @@ behaviour features of src/pipeline/extract.py, which can:
                           inside these groups is no better than chance, so
                           the answer names the group and gives the likeliest
                           size only as a hint (SIZE_GROUPS below; SED-39).
+  QAM vs APSK             not settled either: dense APSK reads as dense QAM
+                          in 160 us, so both are one group, "QAM / APSK".
 
 Each rule only fires when the classifier's own answer points at that pair, and
 every answer carries a plain-language reason for the UI.
@@ -62,9 +64,13 @@ TONE_LIKE = ("NBFM", "PM", "WBFM", "AFSK", "AM_DSB_WC")
 #   4ASK / 8ASK            54% / 87% / 50%
 # Not here because the size IS informative: BPSK / QPSK / OQPSK (72% exact)
 # and 2FSK / 4FSK / 8FSK (88% exact).
+# QAM and APSK are one group: the model mixes them up as well (physics_aug_best,
+# f993d8ebc417, >= 10 dB, 2026-11-12: 32% of APSK windows called QAM, family right
+# APSK 56% / QAM 48% per window, 60% / 84% after a 16-window vote; as one group
+# 89% / 90% per window, 100% / 100% voted). Pipeline, 200 captures (seed 9000):
+# 286 -> 295 of 542 found emitters right, no other class newly answered QAM / APSK.
 SIZE_GROUPS = {
-    "QAM": ("16QAM", "32QAM", "64QAM", "128QAM", "256QAM"),
-    "APSK": ("16APSK", "32APSK", "64APSK", "128APSK"),
+    "QAM / APSK": ("16QAM", "32QAM", "64QAM", "128QAM", "256QAM", "16APSK", "32APSK", "64APSK", "128APSK"),
     "8PSK / 16PSK / 32PSK": ("8PSK", "16PSK", "32PSK"),
     "4ASK / 8ASK": ("4ASK", "8ASK"),
 }
