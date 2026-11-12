@@ -1,7 +1,7 @@
 <!doctype html>
 <!-- SESSION 2 · Accuracy by family and family members. Owner: edit this file only.
-     Numbers: fixed test set f993d8ebc417 (Colab 2026-11-07, FOI26/results/2026-11-07_physics_seed4) and
-     results/accuracy_plan/showcase.json (scripts/measure_showcase.py, 15 dB, 32 tracks x 8 windows per class).
+     Numbers: current classifier physics_aug_best.pt (FOI26/results/2026-11-09_physics_augment_seed4; docs/DATA_VERSIONS.md),
+     fixed test set f993d8ebc417, and results/accuracy_plan/showcase_aug.json (scripts/measure_showcase.py, 15 dB, 32 tracks x 8 windows per class).
      Shown: families >= 80% right-family; members >= 50% exact class. Keep the conditions under every number. -->
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>NEXA Accuracy</title>
@@ -35,24 +35,24 @@
   <section class="panel rv" style="left:40px;top:150px;width:530px;height:910px;--c:var(--green);--d:.1">
     <h2><span class="no">A</span>HEADLINE</h2>
     <div class="pbody">
-      <div class="card" style="--bg:#EEF6E6"><div class="big" style="color:var(--green)">80.6%</div>
+      <div class="card" style="--bg:#EEF6E6"><div class="big" style="color:var(--green)">79.4%</div>
         <div class="l">exact class, per tracked emitter</div>
         <div class="note">all 60 classes · SNR ≥ 10 dB · vote over 16 windows (2.6 ms) · fixed test set, 120,000 windows</div></div>
-      <div class="card"><div class="big" style="color:var(--blue)">89%</div>
+      <div class="card"><div class="big" style="color:var(--blue)">90%</div>
         <div class="l">right signal family</div>
         <div class="note">all 60 classes at 15 dB · vote over 8 windows · 32 fresh tracks per class from our generators</div></div>
-      <div class="card" style="--bg:#FFF4E0"><div class="big" style="color:var(--amber)">+8.7</div>
+      <div class="card" style="--bg:#FFF4E0"><div class="big" style="color:var(--amber)">+9.5</div>
         <div class="l">points over the previous model</div>
         <table class="cmp">
           <tr><th>same fixed test set</th><th>previous</th><th>now</th></tr>
-          <tr><td>one window, ≥ 10 dB</td><td>52.9%</td><td class="up">61.6%</td></tr>
+          <tr><td>one window, ≥ 10 dB</td><td>52.9%</td><td class="up">62.4%</td></tr>
           <tr><td>FSK family</td><td>20%</td><td class="up">61%</td></tr>
-          <tr><td>PSK family</td><td>11%</td><td class="up">32%</td></tr>
+          <tr><td>PSK family</td><td>11%</td><td class="up">35%</td></tr>
         </table>
         <div class="note">fixed FSK / PSK / QAM data + the new physics branch</div></div>
-      <div class="card" style="--bg:#F6F2FB;margin-bottom:0"><div class="big" style="color:var(--purple);font-size:52px">46 / 60</div>
+      <div class="card" style="--bg:#F6F2FB;margin-bottom:0"><div class="big" style="color:var(--purple);font-size:52px">48 / 60</div>
         <div class="l">classes named exactly ≥ 50% of the time</div>
-        <div class="note">15 dB · 8-window vote. 38 of them ≥ 90%.</div></div>
+        <div class="note">15 dB · 8-window vote. 37 of them ≥ 90%.</div></div>
     </div>
   </section>
 
@@ -62,13 +62,13 @@
     <div class="pbody" style="--nw:190px">
       <div class="bar" style="--c:var(--green)"><div class="nm">ASK</div><div class="tr"><div class="fl" style="width:100%"></div></div><div class="v">100%</div></div>
       <div class="bar" style="--c:var(--green)"><div class="nm">FSK</div><div class="tr"><div class="fl" style="width:100%"></div></div><div class="v">100%</div></div>
-      <div class="bar" style="--c:var(--green)"><div class="nm">Radar</div><div class="tr"><div class="fl" style="width:99%"></div></div><div class="v">99%</div></div>
-      <div class="bar" style="--c:var(--green)"><div class="nm">Spread spectrum</div><div class="tr"><div class="fl" style="width:94%"></div></div><div class="v">94%</div></div>
+      <div class="bar" style="--c:var(--green)"><div class="nm">Radar</div><div class="tr"><div class="fl" style="width:95%"></div></div><div class="v">95%</div></div>
+      <div class="bar" style="--c:var(--green)"><div class="nm">QAM</div><div class="tr"><div class="fl" style="width:94%"></div></div><div class="v">94%</div></div>
+      <div class="bar" style="--c:var(--green)"><div class="nm">Jammers</div><div class="tr"><div class="fl" style="width:93%"></div></div><div class="v">93%</div></div>
       <div class="bar" style="--c:var(--green)"><div class="nm">OFDM / LTE / NR</div><div class="tr"><div class="fl" style="width:93%"></div></div><div class="v">93%</div></div>
-      <div class="bar" style="--c:var(--green)"><div class="nm">Jammers</div><div class="tr"><div class="fl" style="width:91%"></div></div><div class="v">91%</div></div>
       <div class="bar" style="--c:var(--green)"><div class="nm">PSK</div><div class="tr"><div class="fl" style="width:91%"></div></div><div class="v">91%</div></div>
-      <div class="bar" style="--c:var(--green)"><div class="nm">APSK</div><div class="tr"><div class="fl" style="width:91%"></div></div><div class="v">91%</div></div>
       <div class="bar" style="--c:var(--blue)"><div class="nm">Analog voice</div><div class="tr"><div class="fl" style="width:86%"></div></div><div class="v">86%</div></div>
+      <div class="bar" style="--c:var(--blue)"><div class="nm">Spread spectrum</div><div class="tr"><div class="fl" style="width:82%"></div></div><div class="v">82%</div></div>
       <div class="note" style="margin-top:6px">Answer lands in the right family · 15 dB · vote over 8 windows · 32 tracks per class.
         Families at ≥ 80% shown.</div>
     </div>
@@ -79,7 +79,7 @@
     <h2><span class="no">C</span>A LONGER LOOK, A SURER ANSWER</h2>
     <div class="pbody">
       <img class="fig" src="assets/img/vote_curve.png" alt="Accuracy against number of windows voted" style="width:94%;margin:0 auto">
-      <div class="note" style="margin-top:4px">The tracker averages every window of one emitter. 8 windows (1.3 ms) already reach 79% at ≥ 10 dB · fixed test set.</div>
+      <div class="note" style="margin-top:4px">The tracker averages every window of one emitter. 8 windows (1.3 ms) already reach 77% at ≥ 10 dB · fixed test set.</div>
     </div>
   </section>
 
@@ -87,18 +87,19 @@
   <section class="panel rv" style="left:1200px;top:150px;width:680px;height:745px;--c:var(--navy);--d:.3">
     <h2><span class="no">D</span>FAMILY MEMBERS: EXACT CLASS</h2>
     <div class="pbody" style="padding:10px 16px">
-      <div class="mem" style="--c:var(--amber)"><b>Radar</b><div><span class="chip">Pulse<i>100</i></span><span class="chip">LFM<i>100</i></span><span class="chip">Barker<i>100</i></span><span class="chip">Poly-Barker<i>100</i></span><span class="chip">Frank<i>100</i></span><span class="chip">Costas<i>100</i></span><span class="chip">FMCW<i>100</i></span><span class="chip">CW<i>94</i></span></div></div>
-      <div class="mem" style="--c:var(--red)"><b>Jammers</b><div><span class="chip">Barrage<i>100</i></span><span class="chip">Spot<i>100</i></span><span class="chip">Multitone<i>100</i></span><span class="chip">Swept<i>100</i></span><span class="chip">Chirp<i>100</i></span><span class="chip">Pulsed<i>100</i></span><span class="chip">Partial-band<i>100</i></span><span class="chip">Reactive<i>100</i></span><span class="chip">DRFM<i>91</i></span></div></div>
-      <div class="mem" style="--c:var(--blue)"><b>FSK</b><div><span class="chip">2FSK<i>100</i></span><span class="chip">8FSK<i>100</i></span><span class="chip">GFSK<i>100</i></span><span class="chip">MSK<i>100</i></span><span class="chip">CPFSK<i>100</i></span><span class="chip">4FSK<i>94</i></span><span class="chip">GMSK<i>91</i></span></div></div>
-      <div class="mem" style="--c:var(--teal)"><b>Spread</b><div><span class="chip">FHSS<i>100</i></span><span class="chip">DSSS<i>94</i></span><span class="chip">LoRa<i>88</i></span></div></div>
+      <div class="mem" style="--c:var(--amber)"><b>Radar</b><div><span class="chip">Pulse<i>100</i></span><span class="chip">LFM<i>100</i></span><span class="chip">Barker<i>100</i></span><span class="chip">Frank<i>100</i></span><span class="chip">Costas<i>100</i></span><span class="chip">FMCW<i>100</i></span><span class="chip">Poly-Barker<i>97</i></span><span class="chip">CW<i>62</i></span></div></div>
+      <div class="mem" style="--c:var(--red)"><b>Jammers</b><div><span class="chip">Barrage<i>100</i></span><span class="chip">Spot<i>100</i></span><span class="chip">Multitone<i>100</i></span><span class="chip">Swept<i>100</i></span><span class="chip">Chirp<i>100</i></span><span class="chip">Pulsed<i>100</i></span><span class="chip">Partial-band<i>100</i></span><span class="chip">Reactive<i>100</i></span><span class="chip">DRFM<i>81</i></span><span class="chip">Tone<i>50</i></span></div></div>
+      <div class="mem" style="--c:var(--blue)"><b>FSK</b><div><span class="chip">2FSK<i>100</i></span><span class="chip">4FSK<i>100</i></span><span class="chip">8FSK<i>100</i></span><span class="chip">GFSK<i>100</i></span><span class="chip">MSK<i>100</i></span><span class="chip">CPFSK<i>100</i></span><span class="chip">GMSK<i>78</i></span></div></div>
+      <div class="mem" style="--c:var(--teal)"><b>Spread</b><div><span class="chip">FHSS<i>100</i></span><span class="chip">DSSS<i>94</i></span><span class="chip">LoRa<i>53</i></span></div></div>
       <div class="mem" style="--c:var(--blue)"><b>ASK</b><div><span class="chip">OOK<i>100</i></span><span class="chip">4ASK<i>91</i></span><span class="chip">8ASK<i>84</i></span></div></div>
-      <div class="mem" style="--c:var(--green)"><b>Analog voice</b><div><span class="chip">AM-DSB-SC<i>100</i></span><span class="chip">AM-SSB-WC<i>100</i></span><span class="chip">WBFM<i>100</i></span><span class="chip">AM-DSB-WC<i>91</i></span><span class="chip">PM<i>91</i></span><span class="chip">NBFM<i>75</i></span></div></div>
-      <div class="mem" style="--c:var(--purple)"><b>Pulse comms</b><div><span class="chip">PPM<i>100</i></span><span class="chip">SSR / IFF<i>97</i></span></div></div>
+      <div class="mem" style="--c:var(--green)"><b>Analog voice</b><div><span class="chip">AM-DSB-WC<i>100</i></span><span class="chip">AM-DSB-SC<i>100</i></span><span class="chip">AM-SSB-WC<i>100</i></span><span class="chip">WBFM<i>100</i></span><span class="chip">PM<i>94</i></span><span class="chip">NBFM<i>50</i></span></div></div>
+      <div class="mem" style="--c:var(--purple)"><b>Pulse comms</b><div><span class="chip">PPM<i>100</i></span><span class="chip">SSR / IFF<i>100</i></span></div></div>
       <div class="mem" style="--c:var(--navy)"><b>OFDM / LTE / NR</b><div><span class="chip">NR-like<i>100</i></span><span class="chip">LTE-like<i>78</i></span></div></div>
-      <div class="mem" style="--c:var(--teal)"><b>PSK</b><div><span class="chip">OQPSK<i>100</i></span><span class="chip">QPSK<i>97</i></span><span class="chip">32PSK<i>72</i></span></div></div>
-      <div class="mem" style="--c:#8A5A00"><b>APSK</b><div><span class="chip">16APSK<i>88</i></span><span class="chip">32APSK<i>88</i></span></div></div>
-      <div class="mem" style="--c:#777"><b>Noise floor</b><div><span class="chip">nothing on air<i>78</i></span></div></div>
-      <div class="note" style="margin-top:4px">Exact class · 15 dB · 8-window vote · ≥ 50% shown · look-alike sizes answered as a group</div>
+      <div class="mem" style="--c:var(--teal)"><b>PSK</b><div><span class="chip">OQPSK<i>100</i></span><span class="chip">16PSK<i>100</i></span><span class="chip">QPSK<i>97</i></span></div></div>
+      <div class="mem" style="--c:var(--blue)"><b>QAM</b><div><span class="chip">256QAM<i>97</i></span></div></div>
+      <div class="mem" style="--c:#8A5A00"><b>APSK</b><div><span class="chip">32APSK<i>69</i></span><span class="chip">16APSK<i>66</i></span></div></div>
+      <div class="mem" style="--c:#777"><b>Noise floor</b><div><span class="chip">nothing on air<i>66</i></span></div></div>
+      <div class="note" style="margin-top:4px">Exact class · 15 dB · 8-window vote · ≥ 50% shown · sizes alike: a group</div>
     </div>
   </section>
 

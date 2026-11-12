@@ -182,8 +182,9 @@ def fig_pipeline(net, rng):
 
 def fig_vote():
     n = [1, 2, 4, 8, 16, 32, 64]
-    all_snr = [45.4, 57.0, 65.2, 71.4, 72.8, 74.1, 74.9]
-    high = [59.7, 69.9, 75.7, 79.3, 80.6, 81.4, 81.6]
+    # physics_aug_best (current classifier) on f993d8ebc417, calibrate_week1 vote proxy, 2026-11-10
+    all_snr = [47.3, 58.4, 66.5, 70.7, 73.0, 74.2, 74.8]
+    high = [61.7, 69.9, 76.8, 77.5, 79.4, 79.9, 79.1]
     fig, ax = plt.subplots(figsize=(5.6, 2.8))
     ax.plot(n, high, "o-", color=GREEN, lw=2.2, label="≥ 10 dB")
     ax.plot(n, all_snr, "o-", color=BLUE, lw=2.2, label="all SNR")

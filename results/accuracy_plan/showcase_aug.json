@@ -1,0 +1,511 @@
+{
+ "classifier": "results/classifier/physics_aug_best.pt",
+ "n": 256,
+ "vote": 8,
+ "snr": {
+  "15": {
+   "overall": {
+    "top1": 0.583984375,
+    "family_right": 0.7647786458333333,
+    "vote_top1": 0.7552083333333334,
+    "vote_family_right": 0.8979166666666667
+   },
+   "family": {
+    "ANALOG": {
+     "top1": 0.5797991071428571,
+     "family_right": 0.7896205357142857,
+     "vote_top1": 0.7767857142857143,
+     "vote_family_right": 0.8571428571428571
+    },
+    "APSK": {
+     "top1": 0.208984375,
+     "family_right": 0.5888671875,
+     "vote_top1": 0.3515625,
+     "vote_family_right": 0.6875
+    },
+    "ASK": {
+     "top1": 0.69921875,
+     "family_right": 0.9700520833333334,
+     "vote_top1": 0.9166666666666666,
+     "vote_family_right": 1.0
+    },
+    "FSK": {
+     "top1": 0.7912946428571429,
+     "family_right": 0.9447544642857143,
+     "vote_top1": 0.96875,
+     "vote_family_right": 1.0
+    },
+    "JAMMING": {
+     "top1": 0.7921875,
+     "family_right": 0.80625,
+     "vote_top1": 0.93125,
+     "vote_family_right": 0.93125
+    },
+    "MULTICARRIER": {
+     "top1": 0.3736979166666667,
+     "family_right": 0.6940104166666666,
+     "vote_top1": 0.6354166666666666,
+     "vote_family_right": 0.9270833333333334
+    },
+    "NOISE": {
+     "top1": 0.22265625,
+     "family_right": 0.22265625,
+     "vote_top1": 0.65625,
+     "vote_family_right": 0.65625
+    },
+    "PSK": {
+     "top1": 0.4720052083333333,
+     "family_right": 0.8040364583333334,
+     "vote_top1": 0.5729166666666666,
+     "vote_family_right": 0.9114583333333334
+    },
+    "PULSE_COMMS": {
+     "top1": 0.5833333333333334,
+     "family_right": 0.5846354166666666,
+     "vote_top1": 0.6979166666666666,
+     "vote_family_right": 0.6979166666666666
+    },
+    "QAM": {
+     "top1": 0.1078125,
+     "family_right": 0.53046875,
+     "vote_top1": 0.29375,
+     "vote_family_right": 0.94375
+    },
+    "RADAR": {
+     "top1": 0.75146484375,
+     "family_right": 0.84326171875,
+     "vote_top1": 0.94921875,
+     "vote_family_right": 0.953125
+    },
+    "SPREAD": {
+     "top1": 0.703125,
+     "family_right": 0.7122395833333334,
+     "vote_top1": 0.8229166666666666,
+     "vote_family_right": 0.8229166666666666
+    }
+   },
+   "class": {
+    "JAM_BARRAGE": {
+     "family": "JAMMING",
+     "top1": 0.9375,
+     "family_right": 0.96484375,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "JAM_SPOT": {
+     "family": "JAMMING",
+     "top1": 0.71875,
+     "family_right": 0.76171875,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "JAM_TONE": {
+     "family": "JAMMING",
+     "top1": 0.3203125,
+     "family_right": 0.3359375,
+     "vote_top1": 0.5,
+     "vote_family_right": 0.5
+    },
+    "JAM_MULTITONE": {
+     "family": "JAMMING",
+     "top1": 0.94921875,
+     "family_right": 0.9609375,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "JAM_SWEPT": {
+     "family": "JAMMING",
+     "top1": 0.984375,
+     "family_right": 0.984375,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "JAM_CHIRP": {
+     "family": "JAMMING",
+     "top1": 0.99609375,
+     "family_right": 1.0,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "JAM_PULSED": {
+     "family": "JAMMING",
+     "top1": 0.97265625,
+     "family_right": 0.9765625,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "JAM_PARTIAL_BAND": {
+     "family": "JAMMING",
+     "top1": 0.89453125,
+     "family_right": 0.8984375,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "JAM_REACTIVE": {
+     "family": "JAMMING",
+     "top1": 0.9921875,
+     "family_right": 1.0,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "JAM_DRFM": {
+     "family": "JAMMING",
+     "top1": 0.15625,
+     "family_right": 0.1796875,
+     "vote_top1": 0.8125,
+     "vote_family_right": 0.8125
+    },
+    "NOISE_FLOOR": {
+     "family": "NOISE",
+     "top1": 0.22265625,
+     "family_right": 0.22265625,
+     "vote_top1": 0.65625,
+     "vote_family_right": 0.65625
+    },
+    "PPM": {
+     "family": "PULSE_COMMS",
+     "top1": 0.98046875,
+     "family_right": 0.984375,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "AFSK": {
+     "family": "PULSE_COMMS",
+     "top1": 0.15234375,
+     "family_right": 0.15234375,
+     "vote_top1": 0.09375,
+     "vote_family_right": 0.09375
+    },
+    "SSR_IFF": {
+     "family": "PULSE_COMMS",
+     "top1": 0.6171875,
+     "family_right": 0.6171875,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "FHSS": {
+     "family": "SPREAD",
+     "top1": 0.97265625,
+     "family_right": 0.97265625,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "DSSS": {
+     "family": "SPREAD",
+     "top1": 0.6875,
+     "family_right": 0.6875,
+     "vote_top1": 0.9375,
+     "vote_family_right": 0.9375
+    },
+    "LORA_CSS": {
+     "family": "SPREAD",
+     "top1": 0.44921875,
+     "family_right": 0.4765625,
+     "vote_top1": 0.53125,
+     "vote_family_right": 0.53125
+    },
+    "RADAR_PULSE": {
+     "family": "RADAR",
+     "top1": 0.7265625,
+     "family_right": 0.7421875,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "LFM_RADAR": {
+     "family": "RADAR",
+     "top1": 0.9375,
+     "family_right": 0.9609375,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "RADAR_BARKER": {
+     "family": "RADAR",
+     "top1": 0.75390625,
+     "family_right": 0.8203125,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "RADAR_POLY_BARKER": {
+     "family": "RADAR",
+     "top1": 0.56640625,
+     "family_right": 0.93359375,
+     "vote_top1": 0.96875,
+     "vote_family_right": 1.0
+    },
+    "RADAR_FRANK": {
+     "family": "RADAR",
+     "top1": 0.76953125,
+     "family_right": 0.98046875,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "RADAR_COSTAS": {
+     "family": "RADAR",
+     "top1": 0.94921875,
+     "family_right": 0.9921875,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "RADAR_FMCW": {
+     "family": "RADAR",
+     "top1": 0.9765625,
+     "family_right": 0.98046875,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "RADAR_CW": {
+     "family": "RADAR",
+     "top1": 0.33203125,
+     "family_right": 0.3359375,
+     "vote_top1": 0.625,
+     "vote_family_right": 0.625
+    },
+    "AM_DSB_WC": {
+     "family": "ANALOG",
+     "top1": 0.6875,
+     "family_right": 0.88671875,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "AM_DSB_SC": {
+     "family": "ANALOG",
+     "top1": 0.83203125,
+     "family_right": 0.8359375,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "AM_SSB_WC": {
+     "family": "ANALOG",
+     "top1": 0.66015625,
+     "family_right": 0.828125,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "AM_SSB_SC": {
+     "family": "ANALOG",
+     "top1": 0.046875,
+     "family_right": 0.171875,
+     "vote_top1": 0.0,
+     "vote_family_right": 0.0
+    },
+    "WBFM": {
+     "family": "ANALOG",
+     "top1": 0.8828125,
+     "family_right": 0.95703125,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "NBFM": {
+     "family": "ANALOG",
+     "top1": 0.37109375,
+     "family_right": 0.91796875,
+     "vote_top1": 0.5,
+     "vote_family_right": 1.0
+    },
+    "PM": {
+     "family": "ANALOG",
+     "top1": 0.578125,
+     "family_right": 0.9296875,
+     "vote_top1": 0.9375,
+     "vote_family_right": 1.0
+    },
+    "OOK": {
+     "family": "ASK",
+     "top1": 0.875,
+     "family_right": 0.953125,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "4ASK": {
+     "family": "ASK",
+     "top1": 0.578125,
+     "family_right": 0.99609375,
+     "vote_top1": 0.90625,
+     "vote_family_right": 1.0
+    },
+    "8ASK": {
+     "family": "ASK",
+     "top1": 0.64453125,
+     "family_right": 0.9609375,
+     "vote_top1": 0.84375,
+     "vote_family_right": 1.0
+    },
+    "OFDM": {
+     "family": "MULTICARRIER",
+     "top1": 0.375,
+     "family_right": 0.87109375,
+     "vote_top1": 0.125,
+     "vote_family_right": 1.0
+    },
+    "LTE_LIKE": {
+     "family": "MULTICARRIER",
+     "top1": 0.13671875,
+     "family_right": 0.390625,
+     "vote_top1": 0.78125,
+     "vote_family_right": 0.78125
+    },
+    "NR_LIKE": {
+     "family": "MULTICARRIER",
+     "top1": 0.609375,
+     "family_right": 0.8203125,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "16APSK": {
+     "family": "APSK",
+     "top1": 0.390625,
+     "family_right": 0.6328125,
+     "vote_top1": 0.65625,
+     "vote_family_right": 0.71875
+    },
+    "32APSK": {
+     "family": "APSK",
+     "top1": 0.37109375,
+     "family_right": 0.578125,
+     "vote_top1": 0.6875,
+     "vote_family_right": 0.71875
+    },
+    "64APSK": {
+     "family": "APSK",
+     "top1": 0.0703125,
+     "family_right": 0.53125,
+     "vote_top1": 0.0625,
+     "vote_family_right": 0.71875
+    },
+    "128APSK": {
+     "family": "APSK",
+     "top1": 0.00390625,
+     "family_right": 0.61328125,
+     "vote_top1": 0.0,
+     "vote_family_right": 0.59375
+    },
+    "2FSK": {
+     "family": "FSK",
+     "top1": 0.77734375,
+     "family_right": 0.88671875,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "4FSK": {
+     "family": "FSK",
+     "top1": 0.73046875,
+     "family_right": 0.94140625,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "8FSK": {
+     "family": "FSK",
+     "top1": 0.96484375,
+     "family_right": 0.99609375,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "GFSK": {
+     "family": "FSK",
+     "top1": 0.85546875,
+     "family_right": 0.94921875,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "GMSK": {
+     "family": "FSK",
+     "top1": 0.46484375,
+     "family_right": 0.96875,
+     "vote_top1": 0.78125,
+     "vote_family_right": 1.0
+    },
+    "MSK": {
+     "family": "FSK",
+     "top1": 0.88671875,
+     "family_right": 0.94140625,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "CPFSK": {
+     "family": "FSK",
+     "top1": 0.859375,
+     "family_right": 0.9296875,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "BPSK": {
+     "family": "PSK",
+     "top1": 0.515625,
+     "family_right": 0.5390625,
+     "vote_top1": 0.46875,
+     "vote_family_right": 0.46875
+    },
+    "QPSK": {
+     "family": "PSK",
+     "top1": 0.6796875,
+     "family_right": 0.8828125,
+     "vote_top1": 0.96875,
+     "vote_family_right": 1.0
+    },
+    "OQPSK": {
+     "family": "PSK",
+     "top1": 0.7578125,
+     "family_right": 0.80859375,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "8PSK": {
+     "family": "PSK",
+     "top1": 0.09375,
+     "family_right": 0.89453125,
+     "vote_top1": 0.0,
+     "vote_family_right": 1.0
+    },
+    "16PSK": {
+     "family": "PSK",
+     "top1": 0.6328125,
+     "family_right": 0.859375,
+     "vote_top1": 1.0,
+     "vote_family_right": 1.0
+    },
+    "32PSK": {
+     "family": "PSK",
+     "top1": 0.15234375,
+     "family_right": 0.83984375,
+     "vote_top1": 0.0,
+     "vote_family_right": 1.0
+    },
+    "16QAM": {
+     "family": "QAM",
+     "top1": 0.04296875,
+     "family_right": 0.57421875,
+     "vote_top1": 0.03125,
+     "vote_family_right": 1.0
+    },
+    "32QAM": {
+     "family": "QAM",
+     "top1": 0.1640625,
+     "family_right": 0.453125,
+     "vote_top1": 0.46875,
+     "vote_family_right": 0.875
+    },
+    "64QAM": {
+     "family": "QAM",
+     "top1": 0.0,
+     "family_right": 0.55859375,
+     "vote_top1": 0.0,
+     "vote_family_right": 0.9375
+    },
+    "128QAM": {
+     "family": "QAM",
+     "top1": 0.0,
+     "family_right": 0.54296875,
+     "vote_top1": 0.0,
+     "vote_family_right": 0.9375
+    },
+    "256QAM": {
+     "family": "QAM",
+     "top1": 0.33203125,
+     "family_right": 0.5234375,
+     "vote_top1": 0.96875,
+     "vote_family_right": 0.96875
+    }
+   }
+  }
+ }
+}
