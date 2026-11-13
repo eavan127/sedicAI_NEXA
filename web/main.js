@@ -35,7 +35,7 @@ import { applyFilters, canView, flagsHtml, summarise, summaryHtml as histSummary
 import { buildReport, buildSingle } from "./report.js";
 import { installZoom, registerZoom } from "./zoom.js";
 import { renderIntelDetail, listDecoded, decodedTableHtml, filterRows, typeLabel } from "./intel.js";
-import { renderPipeline } from "./pipeline.js";
+import { analyseFile, renderPipeline } from "./pipeline.js";
 import { renderKiwiLive } from "./kiwi_live.js";
 
 installZoom();
@@ -1093,6 +1093,20 @@ rxFileInput.addEventListener("change", async () => {
   const files = [...(rxFileInput.files || [])];
   rxFileInput.value = "";
   if (!files.length) return;
+  // An IQ WAV (SDRconnect / SDR# recordings, the demo files) goes to the full pipeline
+  // on the Recording Analysis page: detection, 60-class names, Morse / speech decoding,
+  // AI reading, waterfall and Intercepts. The quick replay below runs the fast model
+  // only and reads raw files.
+  const wav = files.find(f => /\.wav$/i.test(f.name));
+  if (wav) {
+    await showPage("recording");              // draws that page's file box first
+    window.scrollTo({ top: 0, behavior: "instant" });
+    if (!analyseFile(wav)) {
+      showPage("replay");
+      rxNote.textContent = "IQ WAV files are analysed by the local server (python scripts/serve_local.py); it is not running.";
+    }
+    return;
+  }
   try {
     const rec = await readUpload(files);
     rec.note = rec.warnings.length ? `${rec.note} · WARNING: ${rec.warnings.join(" ")}` : rec.note;
@@ -1257,7 +1271,7 @@ function showPage(page) {
     pollLatestIntercept();
   }
   if (page === "kiwi") renderKiwiLive(el("kiwiLiveRoot"), { server });
-  if (page === "recording") renderPipeline(el("pipelineFileRoot"), { server, mode: "file" });
+  if (page === "recording") return renderPipeline(el("pipelineFileRoot"), { server, mode: "file" });
   // Captures and Reports share one filter bar: it moves to the page that is open.
   if (page === "captures" || page === "reports") {
     el(`page-${page}`).querySelector(".filter-slot").append(el("histFilters"));

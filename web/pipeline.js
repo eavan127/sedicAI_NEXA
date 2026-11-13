@@ -32,6 +32,21 @@ function chip(text, color) {
   return `<span class="chip" style="background:${color}1f;color:${color};">${esc(text)}</span>`;
 }
 
+/** Analyse a file with the full pipeline (detect, name, decode Morse / speech, AI
+ * reading, waterfall, Comms Intel), as if it had been chosen in this section's file
+ * box. Used by the receiver's "Replay a file" for IQ WAV recordings. -> false when the
+ * section is not ready (no local server). */
+export function analyseFile(file) {
+  const input = state.root?.querySelector("#pipeFile");
+  if (!input || !state.start) return false;
+  const dt = new DataTransfer();
+  dt.items.add(file);
+  input.files = dt.files;
+  state.root.scrollIntoView({ behavior: "smooth", block: "start" });
+  state.start(false);
+  return true;
+}
+
 // Two places use it: mode "live" (SDR Receiver page: the intercept feed of the live
 // receiver) and mode "file" (Recording Analysis page: analyse a recording).
 export async function renderPipeline(root, { server, mode = "file" }) {
@@ -70,14 +85,14 @@ export async function renderPipeline(root, { server, mode = "file" }) {
       <div class="note">The whole chain on one recording: <b>find</b> each transmitter (YOLO boxes), <b>name</b> it
         (60-class model, voted over the whole transmission), and for voice or Morse <b>listen</b>: zoom in, demodulate,
         Morse decoder or Whisper, then a local AI reading. Record in SDRconnect with <b>Recording type = IQ</b>.
-        On this PC the analysis takes about 50 s per second of recording, so start with 1 s.</div>
+        The detector scans the first <b>Seconds to scan</b>; the zoom-in listens to the <b>whole file</b> (up to 2 min), so a full Morse or voice message is decoded. About 30-90 s per file on this PC. Then open it in Intercepts to translate.</div>
       <div class="note" style="margin-top:6px;">Models: classifier ${info.classifiers.length
         ? info.classifiers.map(c => `<code>${esc(c)}</code>`).join(" ") + (info.classifiers.length > 1 ? " (averaged)" : "")
         : `<b style="color:#9B2C2C;">none: put a best.pt in results/classifier/</b>`} ·
         detector ${info.detector ? "<code>emitter_detector.pt</code> (YOLO)" : "<b>energy fallback</b> (no YOLO file)"}</div>
       <div class="filters" style="margin-top:10px;">
         <input type="file" id="pipeFile" accept=".wav,.npy,.bin,.raw,.cf32,.cs16,.cs8,.cu8,.iq">
-        <label class="note" style="margin:0;">Seconds <input id="pipeSec" type="number" min="0.05" max="10" step="0.25" value="1" style="width:70px;"></label>
+        <label class="note" style="margin:0;" title="How much of the file the detector and 60-class model scan at 3.2 MS/s. The zoom-in (Morse / speech / AI) always listens to the whole file, up to 2 minutes.">Seconds to scan <input id="pipeSec" type="number" min="0.05" max="10" step="0.25" value="2" style="width:70px;"></label>
         <label class="note" style="margin:0;" title="Only for raw files without a header">Sample rate <input id="pipeFs" placeholder="from file" style="width:90px;"></label>
         <select id="pipeDtype" title="Only for raw files"><option value="">raw type</option><option>int16</option><option>float32</option><option>int8</option><option>uint8</option></select>
       </div>
@@ -140,6 +155,8 @@ export async function renderPipeline(root, { server, mode = "file" }) {
       msg.textContent = `Could not start: ${e.message}`;
     }
   };
+  state.root = root;
+  state.start = start;
   root.querySelector("#pipeRun").addEventListener("click", () => start(false));
   root.querySelector("#pipeDemo").addEventListener("click", () => start(true));
   await listRuns(root, info.runs);
@@ -230,6 +247,33 @@ async function openRun(root, id) {
   drawResult(box, id, r);
 }
 
+/** Tracks the zoom-in heard as ONE transmission (Morse keyed on and off, speech with
+ * pauses: the tracker cuts them into many) shown as one row: first-last track, whole
+ * time span, the strongest confidence. Other tracks are shown as they are. */
+function mergeTracks(tracks) {
+  const out = [], byGroup = new Map();
+  for (const t of tracks) {
+    const key = t.listen ? (t.listen.tracks || [t.track]).join(",") : null;
+    if (!key || (t.listen.tracks || []).length < 2) { out.push(t); continue; }
+    const g = byGroup.get(key);
+    if (!g) {
+      const row = { ...t, merged: 1, track: t.track };
+      byGroup.set(key, row);
+      out.push(row);
+      continue;
+    }
+    g.merged += 1;
+    g.t_start_ms = Math.min(g.t_start_ms, t.t_start_ms);
+    g.t_end_ms = Math.max(g.t_end_ms, t.t_end_ms);
+    g.f_lo_khz = Math.min(g.f_lo_khz, t.f_lo_khz);
+    g.f_hi_khz = Math.max(g.f_hi_khz, t.f_hi_khz);
+    if (t.confidence > g.confidence) Object.assign(g, { confidence: t.confidence, band: t.band });
+    g.track = `${(t.listen.tracks || [])[0]}–${(t.listen.tracks || []).slice(-1)[0]}`;
+  }
+  for (const g of byGroup.values()) if (g.merged < 2) delete g.merged;
+  return out;
+}
+
 function freqText(a, centreHz) {
   const lo = a.f_lo_khz, hi = a.f_hi_khz;
   if (centreHz) {
@@ -260,7 +304,7 @@ function drawResult(box, id, r) {
       the signal (e.g. RADAR_CW / JAM_TONE) both are shown with the reason. Confidence band from the track probability: high (≥ 0.40), medium (≥ 0.10), uncertain (below: shown as 'uncertain' with the likeliest class). Voice / Morse tracks on a clear signal are named by the zoom-in, which listens to the whole track.</div>
     <div class="table-wrap"><table><thead><tr><th>#</th><th>Time (ms)</th><th>Frequency</th><th>Answer</th>
       <th>Confidence</th><th>Why</th><th>Other candidates</th><th>Zoom</th></tr></thead><tbody>
-    ${tracks.map(t => `<tr><td>${t.track}</td><td>${t.t_start_ms.toFixed(1)}–${t.t_end_ms.toFixed(1)}</td>
+    ${mergeTracks(tracks).map(t => `<tr><td>${t.track}${t.merged ? `<div class="note">${t.merged} bursts</div>` : ""}</td><td>${t.t_start_ms.toFixed(1)}–${t.t_end_ms.toFixed(1)}</td>
       <td style="white-space:nowrap;">${esc(freqText(t, centre))}</td><td>${t.band === 'uncertain' ? `<span class="note">uncertain</span><div class="note">likeliest ${esc(t.answer)}</div>` : `<b>${esc(t.answer)}</b>`}${t.decided_by === 'zoom' ? `<div class="note">by zoom-in (classifier: ${esc(t.classifier_answer)})</div>` : ''}</td>
       <td>${chip(t.band || t.confidence.toFixed(2), BAND_COL[t.band] || CONF(t.confidence))}<div class="note">${t.confidence.toFixed(2)}</div></td><td class="note">${esc(t.reason)}</td>
       <td class="note">${esc((t.top5 || []).slice(1, 4).map(([c, p]) => `${c} ${p.toFixed(2)}`).join(", "))}</td>

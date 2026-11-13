@@ -105,6 +105,32 @@ def ask(prompt, model=DEFAULT_MODEL, url=DEFAULT_URL, timeout=600):
         return json.loads(r.read())["message"]["content"]
 
 
+TRANSLATE_PROMPT = """You translate radio traffic into English for an analyst.
+Translate the transcript below into plain English, line by line, keeping the same order.
+Keep call signs, numbers, grid references, times and names exactly as written.
+Do not add, explain or guess anything that is not in the text. If a line is already
+English, copy it unchanged. If a line cannot be understood, write [unclear].
+Answer only with JSON: {{"language": "the language of the original (e.g. Malay)",
+"english": "the translation"}}
+
+TRANSCRIPT{lang}:
+{text}"""
+
+
+def translate(text, language=None, model=DEFAULT_MODEL, url=DEFAULT_URL, timeout=300):
+    """English translation of a decoded transcript by the local model (Ollama).
+    -> {"english", "language", "model"}; raises on an unreachable model or an empty answer."""
+    text = (text or "").strip()
+    if not text:
+        raise ValueError("nothing to translate: this recording has no decoded text")
+    lang = f" (speech-to-text said the language is {language})" if language else ""
+    reply = json.loads(ask(TRANSLATE_PROMPT.format(text=text[:MAX_CHARS], lang=lang), model, url, timeout))
+    english = str(reply.get("english") or "").strip()
+    if not english:
+        raise ValueError("the model gave no translation")
+    return {"english": english, "language": str(reply.get("language") or language or ""), "model": model}
+
+
 def _norm(s):
     return " ".join(str(s).upper().split())
 
