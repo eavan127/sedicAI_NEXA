@@ -85,6 +85,7 @@ export async function renderPipeline(root, { server, mode = "file" }) {
       <div class="note">The whole chain on one recording: <b>find</b> each transmitter (YOLO boxes), <b>name</b> it
         (60-class model, voted over the whole transmission), and for voice or Morse <b>listen</b>: zoom in, demodulate,
         Morse decoder or Whisper, then a local AI reading. Record in SDRconnect with <b>Recording type = IQ</b>.
+        <b>Replay a file</b> on the SDR Receiver page does the same, with the settings here.
         The detector scans the first <b>Seconds to scan</b>; the zoom-in listens to the <b>whole file</b> (up to 2 min), so a full Morse or voice message is decoded. About 30-90 s per file on this PC. Then open it in Intercepts to translate.</div>
       <div class="note" style="margin-top:6px;">Models: classifier ${info.classifiers.length
         ? info.classifiers.map(c => `<code>${esc(c)}</code>`).join(" ") + (info.classifiers.length > 1 ? " (averaged)" : "")
