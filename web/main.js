@@ -188,7 +188,7 @@ function render() {
     occupancyValue: capture.occupancy, nEvents: events.length,
     nWindows: result.nWindows, hop: result.hop, durationMs, emptyPct,
   });
-  latestBox.innerHTML = latestBlock(events, emptyPct, capture);
+  latestBox.innerHTML = liveZoomHtml() + latestBlock(events, emptyPct, capture);
 
   const consoleOpts = {
     spectro: capture.spectro, spectrum: capture.spectrum,
@@ -854,6 +854,33 @@ function rxLogLine(text) {
 // null when disconnected; otherwise the running stream's state.
 let rx = null;
 
+/** Live SDRconnect only: what the server's zoom-in made of the last transmission.
+ * The fast 60-class model looks at 0.16 ms at a time, so a narrow HF signal (Morse,
+ * RTTY, AM voice) is invisible to it and the panels below say EMPTY; the zoom-in
+ * listens to the whole transmission at 50 kS/s and names it (OOK (Morse CW), 2FSK
+ * (RTTY), AM_DSB_WC ...). Shown above the fast model's verdict. */
+function liveZoomHtml() {
+  if (!rx || rx.info.kind !== "sdr") return "";
+  const st = rx.source.st || {}, d = rx.zoomLast;
+  const h = t => String(t ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  let body;
+  if (d && d.tracks?.length) {
+    body = d.tracks.map(t => `<div style="font-size:22px;font-weight:700;color:#22306B;margin:4px 0;">${h(t.answer || t.kind)}</div>`
+      + `<div style="color:#5E6673;font-size:13px;">${t.f_lo_khz >= 0 ? "+" : ""}${t.f_lo_khz.toFixed(1)} kHz from centre · ${h(d.seconds)} s heard at ${h(d.at)}`
+      + `${t.text ? ` · <code>${h(t.text.slice(0, 80))}</code>` : ""}</div>`).join("");
+  } else if (d) {
+    body = `<div style="color:#5E6673;">Last recording (${h(d.seconds)} s): ${d.error ? h(d.error) : "nothing above the noise"}</div>`;
+  } else {
+    body = `<div style="color:#5E6673;">No transmission named yet.</div>`;
+  }
+  const now = st.on_air ? `<div style="margin-top:6px;color:#2E7D32;font-size:13px;">● on air · recording ${h(st.recording_s)} s · named when it goes quiet (or every ${h(st.clip_s || 20)} s)</div>`
+    : st.analysing ? `<div style="margin-top:6px;color:#2B6CB0;font-size:13px;">naming the last transmission…</div>` : "";
+  return `<div style="background:#FFFFFF;padding:16px;border-radius:6px;margin-bottom:10px;border-left:4px solid #22306B;">`
+    + `<div style="color:#5E6673;font-size:12.5px;">ZOOM-IN · WHOLE TRANSMISSION (narrow signals: Morse, RTTY, voice)</div>${body}${now}`
+    + `<div style="margin-top:8px;color:#5E6673;font-size:12px;">The fast model below looks at 0.16 ms at a time and cannot see narrow signals; `
+    + `"EMPTY" there means no wideband emitter, not an empty band.</div></div>`;
+}
+
 function rxSetState(state, text) {
   rxLight.className = `rx-light ${state}`;
   rxState.textContent = text;
@@ -1056,7 +1083,7 @@ rxConnectBtn.addEventListener("click", () => {
     dwellS: Number(rxDwellSel.value), host: el("rxSdrHost").value.trim() || "127.0.0.1",
     port: Number(el("rxSdrPort").value) || 5454, decode: el("rxSdrDecode").checked,
     llm: el("rxSdrDecode").checked && el("rxSdrLlm").checked, timeoutS: 12,
-    onDecode: d => rxLogLine(decodeLine(d)),
+    onDecode: d => { rxLogLine(decodeLine(d)); if (rx) rx.zoomLast = d; },
   }));
 });
 

@@ -733,7 +733,7 @@ class Handler(SimpleHTTPRequestHandler):
             if Handler._sdr_hub is None:
                 sys.path.insert(0, str(Path(__file__).resolve().parent))
                 from sdr_hub import SdrHub
-                hub = SdrHub(jobs_dir=PIPELINE_DIR, intel_dir=self.intel_dir)
+                hub = SdrHub(jobs_dir=PIPELINE_DIR, intel_dir=self.intel_dir, max_s=20.0)   # a signal that never goes quiet is named every 20 s
                 # Each decoded transmission goes into the audit trail as soon as it is
                 # done (live.result + intel.recording), not only when a page next opens
                 # Signal Pipeline. _audit_results only reads class-level state.
