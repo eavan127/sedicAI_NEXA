@@ -210,7 +210,7 @@ class SdrHub:
             "total_samples": buf.total if buf is not None else 0,
             "decode": dict(self.opts), "on_air": self.on_air, "recording_s": round(self.rec_s, 1),
             "analysing": self.analysing, "skipped": getattr(self, "skipped", 0), "label": getattr(self, "label", None),
-            "decodes": list(self.decodes),
+            "decodes": list(self.decodes), "clip_s": self.max_s,
         }
 
     def dwell(self, seconds=0.05, after=None):
