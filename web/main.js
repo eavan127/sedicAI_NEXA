@@ -1093,16 +1093,20 @@ rxFileInput.addEventListener("change", async () => {
   const files = [...(rxFileInput.files || [])];
   rxFileInput.value = "";
   if (!files.length) return;
-  // An IQ WAV (SDRconnect / SDR# recordings, the demo files) goes to the full pipeline:
-  // detection, 60-class names, Morse / speech decoding, AI reading, waterfall and
-  // Comms Intel. The quick replay below runs the fast model only and reads raw files.
-  const wav = files.find(f => /\.wav$/i.test(f.name));
-  if (wav) {
-    if (analyseFile(wav)) {
-      rxNote.textContent = `${wav.name}: sent to Signal Pipeline for the full analysis (decode, diagram, Comms Intel). Results below.`;
-    } else {
-      rxNote.textContent = "IQ WAV files are analysed by the local server (python scripts/serve_local.py); it is not running.";
-    }
+  // "Replay a file" = "Analyse a recording": one IQ file (WAV from SDRconnect / SDR#,
+  // or raw .bin / .cf32 / .iq ...) goes to the full pipeline with that section's settings
+  // (language, seconds to scan, sample rate and raw type for raw files): 60-class names,
+  // waterfall, audio, Morse / speech decoding, AI reading, Comms Intel. Only a SigMF
+  // pair (two files), or the page without the local server, gets the quick replay
+  // below (fast model only, no decoding).
+  const one = files.length === 1 && !/\.sigmf(-meta|-data)?$/i.test(files[0].name) ? files[0] : null;
+  if (one && analyseFile(one)) {
+    rxNote.textContent = `${one.name}: analysing (names, diagram, decode, AI reading). The result appears below `
+      + "under Analyse a recording, and in History → Decoded review.";
+    return;
+  }
+  if (/\.wav$/i.test(files[0].name)) {
+    rxNote.textContent = "IQ WAV files are analysed by the local server (python scripts/serve_local.py); it is not running.";
     return;
   }
   try {
