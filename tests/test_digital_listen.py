@@ -57,6 +57,24 @@ def test_noise_and_voice_like_signals_stay_untouched():
         assert k == kind and r is None
 
 
+def test_voice_or_morse_is_not_taken_over_by_a_chance_rtty_framing():
+    """2026-11-13: an overloaded walkie-talkie and a Morse file each framed
+    as RTTY and lost their text. The model's clear 'not digital', or text that
+    is two letters repeating, must keep the original kind."""
+    assert digital.model_says_not_digital({"probs": {"NBFM": 0.545, "LSB": 0.179, "NOISE": 0.222, "RTTY": 0.0}})
+    assert digital.model_says_not_digital({"probs": {"CW": 1.0, "RTTY": 0.0}})
+    assert not digital.model_says_not_digital({"probs": {"AFSK": 0.6, "USB": 0.3}})
+    assert not digital.model_says_not_digital(None)
+    assert not digital.looks_like_text("FFDDFDDFDDFFDDFDDFDDFDDFDDFFF / FF / FSSS")
+    assert not digital.looks_like_text("K / VYV / K / QV / K / QVV / K / Q")
+    assert digital.looks_like_text("RYRYRY CQ CQ DE NEXA RTTY TEST K") and digital.looks_like_text("RYRYRYRY")
+    fs = 50e3
+    t = np.arange(int(3 * fs)) / fs
+    tone = np.exp(2j * np.pi * 1000 * t)                     # a held carrier: framing it as RTTY is pure chance
+    k, r = digital.read("USB", tone, fs, slow={"probs": {"NBFM": 0.6, "RTTY": 0.0}})
+    assert k == "USB" and r is None
+
+
 def test_morse_is_not_overridden_by_a_data_decode():
     """Morse keys its tone fully off; a tidy-looking RTTY / PSK31 'decode' of it
     (gibberish that frames) must not turn it into teleprinter (13 Nov 2026)."""

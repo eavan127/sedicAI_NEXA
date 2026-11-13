@@ -32,7 +32,6 @@ export function renderKiwiLive(root, { server }) {
   if (!server) { root.innerHTML = ""; return; }
   if (mounted !== root) {
     mounted = root;
-    lastListKey = null;
     root.innerHTML = `
     <div class="block" id="kiwiBlock">
       <div class="block-label">Live listening</div>
@@ -199,7 +198,6 @@ function paintTdoa(t) {
 // The newest location on record for the frequency in the box (computed by NEXA, or typed in by the analyst).
 let locKhz = null;
 let locMissing = null;           // the frequency the box last found NO location for
-let lastListKey = null;          // what the clip list shows now (paint redraws it only when this changes)
 async function showLocation(root, force = false) {
   const box = root.querySelector("#kwLoc"), khz = Number(root.querySelector("#kwFreq").value);
   if (!box) return;
@@ -249,34 +247,75 @@ function paint(st) {
   $("kwState").innerHTML = st.state === "off" ? "Not listening."
     : st.state === "connecting" ? `Connecting to ${esc(kiwi)}…`
     : st.state === "error" ? `<span style="color:#9B2C2C;">Stopped: ${esc(st.error)}</span>`
-    : `<b>Listening</b> to ${esc(kiwi)}${st.on_air ? ` · signal on air, clip ${st.recording_s} s` : " · quiet"}`
-      + (st.analysing ? ` · decoding ${st.analysing}` : "")
-      + (st.skipped ? ` · ${st.skipped} clip${st.skipped > 1 ? "s" : ""} skipped while busy` : "") + tdoa;
+    : `<b>Listening</b> to ${esc(kiwi)}${st.on_air
+        ? ` · signal on air, recording clip ${Math.round(st.recording_s)} / ${Math.round(st.clip_s || 30)} s
+           <progress max="1" value="${Math.min(1, st.recording_s / (st.clip_s || 30))}" style="width:110px;vertical-align:middle;"></progress>`
+        : " · quiet"}`
+      + (st.analysing ? ` · ${st.analysing} clip${st.analysing > 1 ? "s" : ""} being decoded` : "")
+      + (st.skipped ? ` · ${st.skipped} not transcribed while busy (audio kept)` : "") + tdoa;
+  // One row per clip, newest first, updated in place: the audio player is made once
+  // (as soon as the clip's audio exists) and never redrawn, so playback is not cut
+  // off while the clip's text is still being worked out.
+  const list = $("kwList");
   const rows = [...(st.decodes || [])].reverse();
-  // Redraw only when a clip arrives: redrawing every tick would cut off an audio player that is playing.
-  const listKey = JSON.stringify([st.state === "streaming", rows.map(d => d.id || d.at)]);
-  if (listKey === lastListKey) return;
-  lastListKey = listKey;
-  // Each clip's demodulated audio (results/pipeline/jobs/<id>/track_N.wav): play it here or save the .wav.
-  const players = d => [...new Set(d.tracks.map(t => t.audio).filter(Boolean))].map(a => {
+  const keys = rows.map(d => d.id || `err-${d.at}`);
+  [...list.querySelectorAll(":scope > .kwRow")].forEach(el => { if (!keys.includes(el.dataset.key)) el.remove(); });
+  list.querySelector(":scope > .kwEmpty")?.remove();
+  let prev = null;
+  rows.forEach((d, i) => {
+    let el = list.querySelector(`:scope > .kwRow[data-key="${CSS.escape(keys[i])}"]`);
+    if (!el) {
+      el = document.createElement("div");
+      el.className = "kwRow";
+      el.dataset.key = keys[i];
+      el.style.cssText = "padding:10px 0;border-top:1px solid var(--grid);";
+      el.innerHTML = `<div class="kwInfo"></div><div class="kwAudio"></div>`;
+    }
+    if ((prev ? prev.nextSibling : list.firstChild) !== el) list.insertBefore(el, prev ? prev.nextSibling : list.firstChild);
+    prev = el;
+    const info = clipInfo(d);
+    if (el.dataset.info !== info) { el.querySelector(".kwInfo").innerHTML = info; el.dataset.info = info; }
+    const box = el.querySelector(".kwAudio");
+    if (!box.firstChild && d.id && d.tracks?.some(t => t.audio)) box.innerHTML = players(d);
+  });
+  if (!rows.length) {
+    list.insertAdjacentHTML("beforeend", `<div class="note kwEmpty">${st.state === "streaming"
+      ? `Each clip appears here as soon as it is recorded (every ${Math.round(st.clip_s || 30)} s, or when a transmission
+         ends): audio first, then what was said.`
+      : "No clips yet. Choose a frequency and press Start listening."}</div>`);
+  }
+}
+
+// Each clip's demodulated audio (results/pipeline/jobs/<id>/track_N.wav): play it here or save the .wav.
+function players(d) {
+  return [...new Set(d.tracks.map(t => t.audio).filter(Boolean))].map(a => {
     const src = `/api/pipeline/${encodeURIComponent(d.id)}/${encodeURIComponent(a)}`;
     return `<div style="display:flex;gap:10px;align-items:center;margin-top:6px;flex-wrap:wrap;">
       <audio controls preload="none" style="flex:1;min-width:220px;max-width:480px;" src="${src}"></audio>
       <a href="${src}" download="kiwi_${esc(d.id)}_${esc(a)}">save .wav</a></div>`;
   }).join("");
-  $("kwList").innerHTML = rows.map(d => d.error
-    ? `<div class="note" style="color:#9B2C2C;">${esc(d.at)} · decode failed: ${esc(d.error)}</div>`
-    : `<div style="padding:10px 0;border-top:1px solid var(--grid);">
-        <div><b>${esc(d.at)}</b> · ${d.seconds} s · ${d.tracks.length ? d.tracks.map(t =>
-          `${esc(KIND[t.kind] || t.kind)} ${d.centre_hz ? ((d.centre_hz / 1e3 + (t.f_lo_khz + t.f_hi_khz) / 2)).toFixed(1) + " kHz" : ""}`).join(", ")
-          : "nothing above the noise"}${d.warning ? ` <span class="note">(${esc(d.warning)})</span>` : ""}</div>
-        ${d.tracks.filter(t => t.text).map(t => `<div style="margin-top:6px;"><b>${t.kind === "CW" ? "Morse" : ["RTTY", "PSK31"].includes(t.kind) ? "Text" : "Said"}${t.language ? ` (${esc(t.language)})` : ""}:</b>
-            <span style="font-family:var(--mono);">${esc(t.text)}</span></div>
-          ${t.reading ? `<div style="margin-top:4px;"><b>AI reading:</b> ${esc(t.reading)}</div>` : ""}`).join("")}
-        ${d.tracks.filter(t => t.text_error && !t.text).map(t => `<div class="note" style="margin-top:6px;color:#9B2C2C;">
-            ${esc(KIND[t.kind] || t.kind)}: not decoded (${esc(t.text_error)})${/memory|alloc/i.test(t.text_error)
-              ? ". This laptop ran out of memory: choose a smaller speech model (small or base), or close other programs." : ""}</div>`).join("")}
-        ${players(d)}
-      </div>`).join("") || (st.state === "streaming" ? `<div class="note">First result after the first clip (about ${Math.round(st.decode?.whisper_model === "medium" ? 90 : 60)} s).</div>`
-    : `<div class="note">No clips yet. Choose a frequency and press Start listening.</div>`);
+}
+
+// What a clip row says: kinds and frequencies, where it is in the decoding (with
+// how long it has been there), then the text and the AI reading once done.
+const STAGE_HINT = { "saving audio": "demodulating", "waiting for speech-to-text": "the audio is ready below" };
+function clipInfo(d) {
+  if (d.error) return `<div class="note" style="color:#9B2C2C;">${esc(d.at)} · decode failed: ${esc(d.error)}</div>`;
+  const tracks = d.tracks || [];
+  const busy = d.stage && !["done", "not transcribed"].includes(d.stage);
+  const head = `<div><b>${esc(d.at)}</b> · ${d.seconds} s · ${tracks.length ? tracks.map(t =>
+      `${esc(KIND[t.kind] || t.kind)} ${d.centre_hz ? ((d.centre_hz / 1e3 + (t.f_lo_khz + t.f_hi_khz) / 2)).toFixed(1) + " kHz" : ""}`).join(", ")
+      : busy ? "" : "nothing above the noise"}${d.warning ? ` <span class="note">(${esc(d.warning)})</span>` : ""}</div>`;
+  const stage = busy ? `<div class="note" style="margin-top:4px;display:flex;gap:8px;align-items:center;">
+      <progress style="width:90px;"></progress> ${esc(d.stage)}${STAGE_HINT[d.stage] ? ` (${STAGE_HINT[d.stage]})` : ""}
+      · ${Number(d.stage_s) || 0} s</div>` : "";
+  const said = tracks.filter(t => t.text).map(t => `<div style="margin-top:6px;"><b>${t.kind === "CW" ? "Morse" : ["RTTY", "PSK31"].includes(t.kind) ? "Text" : "Said"}${t.language ? ` (${esc(t.language)})` : ""}:</b>
+      <span style="font-family:var(--mono);">${esc(t.text)}</span></div>
+    ${t.reading ? `<div style="margin-top:4px;"><b>AI reading:</b> ${esc(t.reading)}</div>` : ""}`).join("");
+  const skipped = d.stage === "not transcribed"
+    ? `<div class="note" style="margin-top:6px;">Not transcribed: a newer clip came in while the laptop was busy. The audio is kept.</div>` : "";
+  const failed = d.stage === "not transcribed" ? "" : tracks.filter(t => t.text_error && !t.text).map(t => `<div class="note" style="margin-top:6px;color:#9B2C2C;">
+      ${esc(KIND[t.kind] || t.kind)}: not decoded (${esc(t.text_error)})${/memory|alloc/i.test(t.text_error)
+        ? ". This laptop ran out of memory: choose a smaller speech model (small or base), or close other programs." : ""}</div>`).join("");
+  return head + stage + said + skipped + failed;
 }

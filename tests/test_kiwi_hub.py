@@ -124,3 +124,49 @@ def test_demodulate_as_is_checked_and_kept(fake_kiwi):
         assert hub2.connect(freq_khz=7040, use_llm=False, demod="auto")["decode"]["force_kind"] is None
     finally:
         hub2.disconnect()
+
+
+def test_every_clip_gets_audio_at_once_and_only_the_newest_waits_for_text(tmp_path, monkeypatch):
+    """Speech-to-text slower than the air (as on a laptop): every clip still gets its
+    audio within seconds and is kept; only the newest is transcribed, older ones are
+    marked "not transcribed". Each entry shows its stage while it waits."""
+    import numpy as np
+    monkeypatch.setattr(sdr_hub.bridge, "SPOOL", tmp_path / "spool")
+    (tmp_path / "spool").mkdir()
+    (tmp_path / "jobs").mkdir()
+    slow = []
+
+    def slow_text(tracks, extra, out_dir, *a, progress=None, **k):
+        progress and progress("transcribing (Whisper small)", 1)
+        slow.append(out_dir.name)
+        time.sleep(3)
+        for t in tracks:
+            t["listen"]["transcript"] = "selamat pagi"
+        return tracks
+    monkeypatch.setattr(sdr_hub.bridge, "voice_text", slow_text)
+    hub = sdr_hub.KiwiHub(jobs_dir=tmp_path / "jobs", intel_dir=tmp_path / "intel")
+    hub.opts = {"whisper_model": "small", "language": None, "use_whisper": True, "use_llm": False,
+                "llm_model": None, "force_kind": "AM"}
+    fs, t = 12000.0, np.arange(24000) / 12000.0
+    am = (1 + 0.6 * np.sin(2 * np.pi * 700 * t)) * 0.3                 # 2 s of AM tone at the centre
+    raw = np.empty(2 * len(t), "<i2")
+    raw[0::2], raw[1::2] = np.round(am * 32767), 0
+    for i in range(3):                                                   # three clips back to back
+        p = tmp_path / "spool" / f"clip{i}.iq"
+        raw.tofile(p)
+        hub.work.put((p, fs, 15295e3, "30 s limit", "KiwiSDR test 15295 kHz", None, dict(hub.opts)))
+        with hub.lock:
+            hub.analysing += 1
+    assert wait_for(lambda: len(hub.status()["decodes"]) == 3 and all(
+        e["tracks"] and e["tracks"][0]["audio"] for e in hub.status()["decodes"]), 15), hub.status()["decodes"]
+    for e in hub.status()["decodes"]:                                    # playable before any text
+        assert (tmp_path / "jobs" / e["id"] / e["tracks"][0]["audio"]).is_file()
+        assert e["stage"] in ("waiting for speech-to-text", "transcribing (Whisper small)", "done", "not transcribed")
+    assert wait_for(lambda: hub.status()["analysing"] == 0, 30), hub.status()
+    st = hub.status()
+    stages = [e["stage"] for e in st["decodes"]]
+    assert stages[-1] == "done" and st["decodes"][-1]["tracks"][0]["text"] == "selamat pagi", stages
+    assert "not transcribed" in stages and st["skipped"] == stages.count("not transcribed")
+    for e in st["decodes"]:                                              # every run is complete on disk
+        assert (tmp_path / "jobs" / e["id"] / "tracks.json").is_file()
+    assert not list((tmp_path / "spool").glob("*.iq")), "the IQ is deleted once the audio is made"

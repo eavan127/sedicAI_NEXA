@@ -488,10 +488,20 @@ def voice_snapshot(iq, fs, out_dir, whisper_model, language, use_whisper, use_ll
     """-> tracks (dashboard schema) for one recording, audio files written.
     force_kind (one of FORCE_KINDS): the analyst knows what the signal is (e.g. AM
     for a short-wave broadcast), so it is demodulated that way whatever the
-    measurement says; the measured kind is kept in the reason."""
+    measurement says; the measured kind is kept in the reason.
+    The two halves can also run apart: voice_audio (seconds) then voice_text (slow)."""
+    tracks, extra = voice_audio(iq, fs, out_dir, force_kind=force_kind)
+    voice_text(tracks, extra, out_dir, whisper_model, language, use_whisper, use_llm, llm_model)
+    return tracks
+
+
+def voice_audio(iq, fs, out_dir, force_kind=None):
+    """The fast half of voice_snapshot: find each channel, name its kind, read
+    RTTY / PSK31, demodulate and write track_<k>.wav. No Morse, Whisper or AI
+    reading yet. -> (tracks, extra): extra[k] keeps what voice_text needs."""
     if force_kind is not None and force_kind not in FORCE_KINDS:
         raise ValueError(f"force_kind must be one of {list(FORCE_KINDS)}")
-    tracks = []
+    tracks, extra = [], {}
     spectra = spectrum_blocks(iq, fs)
     f, blocks, edges = spectra
     for k, (lo, hi, peak) in enumerate(find_channels(iq, fs, spectra=spectra), 1):
@@ -513,7 +523,7 @@ def voice_snapshot(iq, fs, out_dir, whisper_model, language, use_whisper, use_ll
         else:
             from src.intel import digital
             was = kind
-            kind, dig = digital.read(kind, y, ZOOM_FS)      # RTTY / PSK31 text (and a clean decode names the kind)
+            kind, dig = digital.read(kind, y, ZOOM_FS, slow)  # RTTY / PSK31 text (and a clean decode names the kind)
             if kind != was:
                 why, demod_kind = dig["why"], "USB"
         L = {"kind": kind, "why": why, "duration_s": round(len(y) / ZOOM_FS, 3), "tracks": [k],
@@ -527,42 +537,61 @@ def voice_snapshot(iq, fs, out_dir, whisper_model, language, use_whisper, use_ll
                 wav = out_dir / f"track_{k}.wav"
                 wavio.write_wav(wav, sound, demod.AUDIO_FS, bits=16)
                 L["audio"] = wav.name
-                segments, text_kind = [], None
-                try:
-                    if dig is not None:
-                        L.update(digital.listen_fields(dig))
-                        segments, text_kind = dig["segments"], "digital"
-                    elif kind == "CW":
-                        from src.intel import morse
-                        m = morse.analyse(wavio.wav_info(wav))
-                        segments, text_kind = m["segments"], "morse"
-                        L["morse"] = " / ".join(s["text"] for s in segments)
-                        L["morse_detail"] = m
-                    # Speech only: RTTY / PSK31 / AFSK are typed data, and Whisper on them gives
-                    # made-up words (and loads a multi-GB model for nothing).
-                    elif kind in VOICE_KINDS and use_whisper and L["duration_s"] >= 1.0:
-                        from src.intel import voice
-                        tr = voice.transcribe(wavio.wav_info(wav), model=whisper_model,
-                                              max_minutes=L["duration_s"] / 60 + 1, language=language)
-                        L["transcript"], L["language"] = tr.get("text", ""), tr.get("language")
-                        segments = [{"start_s": s["clip_start_s"], "end_s": s["clip_end_s"], "text": s["text"]}
-                                    for s in tr.get("segments", [])]
-                        L["speech_segments"], L["snr_db"] = segments, peak
-                        text_kind = "voice"
-                except Exception as e:                     # noqa: BLE001 -- keep the audio
-                    L["text_error"] = f"{type(e).__name__}: {e}"
-                if segments and use_llm:
-                    from src.intel import reason
-                    kw = {"model": llm_model} if llm_model else {}
-                    L["reading"] = reason.read_recording(f"live track {k}", segments, kind=text_kind,
-                                                         duration=f"{L['duration_s']:.1f} s",
-                                                         active_min=L.get("morse_detail", {}).get("active_minutes", 0), **kw)
+                extra[k] = {"dig": dig, "peak": peak}
         conf = 0.9 if kind not in ("UNKNOWN",) else 0.1
         tracks.append({"track": k, "t_start_ms": t_on_ms, "t_end_ms": t_off_ms, "f_lo_khz": lo / 1e3, "f_hi_khz": hi / 1e3,
                        "answer": kind_answer(kind, feats), "confidence": conf,
                        "band": "high" if kind != "UNKNOWN" else "uncertain",
                        "reason": f"live zoom-in, {peak:.0f} dB above the noise: {why}",
                        "decided_by": "zoom", "classifier_answer": "not run (voice mode)", "top5": [], "listen": L})
+    return tracks, extra
+
+
+def voice_text(tracks, extra, out_dir, whisper_model, language, use_whisper, use_llm, llm_model, progress=None):
+    """The slow half of voice_snapshot, on the audio voice_audio wrote: Morse,
+    RTTY / PSK31 text, Whisper for speech, then the AI reading. Fills each
+    track's listen in place. progress(stage, track_number) is told each step."""
+    from src.intel import audio as wavio
+    for t in tracks:
+        k, L = t["track"], t["listen"]
+        if k not in extra or not L.get("audio"):
+            continue
+        dig, peak, kind = extra[k]["dig"], extra[k]["peak"], L["kind"]
+        wav = out_dir / L["audio"]
+        segments, text_kind = [], None
+        try:
+            if dig is not None:
+                from src.intel import digital
+                L.update(digital.listen_fields(dig))
+                segments, text_kind = dig["segments"], "digital"
+            elif kind == "CW":
+                from src.intel import morse
+                progress and progress("reading Morse", k)
+                m = morse.analyse(wavio.wav_info(wav))
+                segments, text_kind = m["segments"], "morse"
+                L["morse"] = " / ".join(s["text"] for s in segments)
+                L["morse_detail"] = m
+            # Speech only: RTTY / PSK31 / AFSK are typed data, and Whisper on them gives
+            # made-up words (and loads a multi-GB model for nothing).
+            elif kind in VOICE_KINDS and use_whisper and L["duration_s"] >= 1.0:
+                from src.intel import voice
+                progress and progress(f"transcribing (Whisper {whisper_model})", k)
+                tr = voice.transcribe(wavio.wav_info(wav), model=whisper_model,
+                                      max_minutes=L["duration_s"] / 60 + 1, language=language)
+                L["transcript"], L["language"] = tr.get("text", ""), tr.get("language")
+                segments = [{"start_s": s["clip_start_s"], "end_s": s["clip_end_s"], "text": s["text"]}
+                            for s in tr.get("segments", [])]
+                L["speech_segments"], L["snr_db"] = segments, peak
+                text_kind = "voice"
+        except Exception as e:                     # noqa: BLE001 -- keep the audio
+            L["text_error"] = f"{type(e).__name__}: {e}"
+        if segments and use_llm:
+            from src.intel import reason
+            progress and progress(f"AI reading ({llm_model or 'local'})", k)
+            kw = {"model": llm_model} if llm_model else {}
+            L["reading"] = reason.read_recording(f"live track {k}", segments, kind=text_kind,
+                                                 duration=f"{L['duration_s']:.1f} s",
+                                                 active_min=L.get("morse_detail", {}).get("active_minutes", 0), **kw)
     return tracks
 
 

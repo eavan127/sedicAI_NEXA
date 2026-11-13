@@ -8,10 +8,45 @@ and the slow-path model named (src/pipeline/narrowband.py):
 When the kind is unsure (CW / carrier / unknown / AFSK), both decoders are
 tried and a clean decode wins: a high share of correctly framed characters
 does not happen by chance, so it is stronger evidence than the classifier.
+
+Two exceptions, both seen on real captures (2026-11-13): an overloaded
+walkie-talkie voice and a Morse file each "framed" as RTTY and lost their
+transcript / Morse text. A regular signal (a held tone, a steady FM hum, keyed
+Morse) can line up with RTTY's start and stop bits by chance, and then
+decodes to the same two or three letters over and over ("FFDDFDDFDD"). So the
+override is refused when
+  * the slow-path model is clearly sure it is NOT a digital mode (voice or
+    Morse ahead of RTTY / PSK31 / AFSK by OVERRIDE_MARGIN), or
+  * the "text" is one or two letters repeating, not text (fewer than
+    MIN_DISTINCT different characters; RTTY's own RYRY test pattern excepted).
 """
+import re
+
 from src.intel import psk31, rtty
 
 UNSURE = ("CW", "CARRIER", "UNKNOWN", "AFSK", "USB", "LSB")   # SSB: a narrow data signal often looks like it
+DIGITAL = ("RTTY", "PSK31", "AFSK")
+OVERRIDE_MARGIN = 0.3        # the slow-path model's lead for "not digital" that the override may not overrule
+MIN_DISTINCT = 6             # different characters a real decoded message has at least
+RYRY = re.compile(r"^(?:RY|YR|\s)+$")
+
+
+def model_says_not_digital(slow):
+    """The slow-path model (narrowband.refine's info) is clearly sure this is
+    voice, Morse or a carrier, not RTTY / PSK31 / AFSK."""
+    probs = (slow or {}).get("probs") or {}
+    if not probs:
+        return False
+    best_other = max((p for k, p in probs.items() if k not in DIGITAL and k != "NOISE"), default=0.0)
+    best_digital = max((probs.get(k, 0.0) for k in DIGITAL), default=0.0)
+    return best_other - best_digital >= OVERRIDE_MARGIN
+
+
+def looks_like_text(text):
+    """Real decoded traffic uses many different characters; a chance framing
+    of a regular signal repeats two or three."""
+    chars = set(re.sub(r"[\s/]", "", text or "").upper())
+    return len(chars) >= MIN_DISTINCT or bool(RYRY.match((text or "").strip().upper()) and len(text.strip()) >= 6)
 
 
 def _rtty(y, fs):
@@ -23,13 +58,14 @@ def _psk(y, fs):
     return dict(r, mode=r.get("mode") or "PSK31")
 
 
-def read(kind, y, fs):
-    """-> (kind, decode result or None). y: the zoomed complex channel."""
+def read(kind, y, fs, slow=None):
+    """-> (kind, decode result or None). y: the zoomed complex channel; slow:
+    the slow-path model's opinion (narrowband.refine), when there is one."""
     if kind == "RTTY":
         return kind, _rtty(y, fs)
     if kind == "PSK31":
         return kind, _psk(y, fs)
-    if kind in UNSURE:
+    if kind in UNSURE and not model_says_not_digital(slow):
         if kind == "CW" and keyed_off_share(y, fs) >= KEYED_OFF:
             # Morse switches its tone fully off between dots and dashes; RTTY and PSK31
             # keep a tone up the whole time they send. A signal that keeps going silent
@@ -44,7 +80,7 @@ def read(kind, y, fs):
             # not a stretch of noise elsewhere in the channel that happens to frame
             on_it = (min(abs(r.get("mark_hz", 1e9) - peak), abs(r.get("space_hz", 1e9) - peak)) <= ON_SIGNAL_HZ
                      if name == "RTTY" else abs(r.get("carrier_hz", 1e9) - peak) <= ON_SIGNAL_HZ)
-            if r["readable"] and on_it:
+            if r["readable"] and on_it and looks_like_text(r.get("text")):
                 r["why"] = f"{r['why']} (the classifier had said {kind}; the clean decode wins)"
                 return name, r
     return kind, None

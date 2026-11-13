@@ -89,11 +89,13 @@ class SdrHub:
         self.on_air = False
         self.rec_s = 0.0
         self.label, self.skipped, self.fixed_fs = None, 0, None
-        self.decodes = deque(maxlen=20)    # newest last
-        self.analysing = 0
-        self.work = queue.Queue()
+        self.decodes = deque(maxlen=20)    # newest last; each shows its stage until its text is done
+        self.analysing = 0                 # clips recorded but not finished (audio, then text)
+        self.work = queue.Queue()          # recorded clips -> audio (every one: seconds each)
+        self.text_work = queue.Queue()     # clips with audio -> text (only the newest: Whisper is slow)
         self.on_result = None              # serve_local sets this to write the audit entry
-        threading.Thread(target=self._analyse_worker, daemon=True, name="sdr-decode").start()
+        threading.Thread(target=self._audio_worker, daemon=True, name="sdr-audio").start()
+        threading.Thread(target=self._text_worker, daemon=True, name="sdr-text").start()
 
     # ---------- control ----------
 
@@ -210,7 +212,8 @@ class SdrHub:
             "total_samples": buf.total if buf is not None else 0,
             "decode": dict(self.opts), "on_air": self.on_air, "recording_s": round(self.rec_s, 1),
             "analysing": self.analysing, "skipped": getattr(self, "skipped", 0), "label": getattr(self, "label", None),
-            "decodes": list(self.decodes), "clip_s": self.max_s,
+            "clip_s": self.max_s,
+            "decodes": [self._entry_copy(e) for e in self.decodes], "clip_s": self.max_s,
         }
 
     def dwell(self, seconds=0.05, after=None):
@@ -288,90 +291,147 @@ class SdrHub:
             return
         centre, _ = bridge.centre_of(buf, fs)
         problem = bridge.delivery_problem(n, fs, **buf.ended)
-        while True:                                      # slower than the air: only the newest clip waits
-            try:
-                old = self.work.get_nowait()
-            except queue.Empty:
-                break
-            old[0].unlink(missing_ok=True)
-            with self.lock:
-                self.analysing -= 1
-                self.skipped += 1
         with self.lock:
             self.analysing += 1
             opts = dict(self.opts)
-        self.work.put((path, fs, centre, why, label, problem, opts))
+        self.work.put((path, fs, centre, why, label, problem, opts))   # never dropped: its audio is always kept
 
-    def _analyse_worker(self):
+    @staticmethod
+    def _entry_copy(e):
+        """A decode entry as the page gets it: a copy (the workers keep updating
+        the original), with how long it has been in its current stage."""
+        c = dict(e, tracks=[dict(t) for t in e.get("tracks", [])])
+        since = c.pop("_since", None)
+        if since is not None:
+            c["stage_s"] = round(time.monotonic() - since)
+        return c
+
+    def _stage(self, entry, stage, **kw):
+        with self.lock:
+            entry.update(stage=stage, _since=time.monotonic(), **kw)
+
+    # Every recorded clip is turned into audio straight away (seconds): the page can
+    # play it at once. Speech-to-text and the AI reading take far longer than the
+    # clip on a laptop, so only the newest clip waits for them; an older one keeps
+    # its audio and is marked "not transcribed".
+
+    def _audio_worker(self):
         while True:
             job = self.work.get()
             try:
-                if not self.work.empty():                # analysis is slower than the air: always take the newest
-                    with self.lock:
-                        self.skipped += 1
-                    continue
-                self._analyse(*job)
+                self._make_audio(*job)
             except Exception as e:                       # noqa: BLE001 -- the next transmission must still be decoded
                 with self.lock:
+                    self.analysing -= 1
                     self.decodes.append({"id": None, "at": time.strftime("%H:%M:%S"), "error": f"{type(e).__name__}: {e}"})
             finally:
                 job[0].unlink(missing_ok=True)
-                with self.lock:
-                    self.analysing -= 1
 
-    def _analyse(self, path, fs, centre, why, label, problem, opts):
-        from src.intel import store
+    def _make_audio(self, path, fs, centre, why, label, problem, opts):
         rec = bridge.DiskIq(path)
         try:
             rid = datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(2)
             d = self.jobs_dir / rid
             d.mkdir(parents=True)
-            meta = {"id": rid, "source": "live", "file": f"LIVE · {label}", "max_s": round(len(rec) / fs, 1),
+            seconds = len(rec) / fs
+            meta = {"id": rid, "source": "live", "file": f"LIVE · {label}", "max_s": round(seconds, 1),
                     "detector": "live voice path", "status": "running", "live": True, "who": "live receiver"}
             (d / "job.json").write_text(json.dumps(meta, indent=1), encoding="utf-8")
-            done = threading.Event()
-            threading.Thread(target=bridge.touch_until, args=(d / "alive", done), daemon=True).start()
-            t0 = time.monotonic()
-            try:
-                tracks = bridge.voice_snapshot(rec, fs, d, opts["whisper_model"], opts["language"],
-                                               opts["use_whisper"], opts["use_llm"], opts.get("llm_model"),
-                                               force_kind=opts.get("force_kind"))
-                bridge.plot_snapshot(rec, fs, tracks, d / "tracks.png", centre)
-                source = {"file": f"LIVE · {label}",
-                          "format": f"{label} IQ stream (dashboard receiver)" + (f" · WARNING: {problem}" if problem else ""),
-                          "fs_in": fs, "centre_hz": centre, "resampled": False, "live": True, "snapshot_at": rid,
-                          "delivery_problem": problem, "ended_because": why}
-                doc = bridge.finite({"n_samples": len(rec), "duration_ms": len(rec) / fs * 1e3, "source": source,
-                                     "tracks": tracks, "truth": None})
-                (d / "tracks.tmp").write_text(json.dumps(doc, indent=1, default=float, allow_nan=False), encoding="utf-8")
-                (d / "tracks.tmp").replace(d / "tracks.json")
-                kw = {"out": self.intel_dir} if self.intel_dir else {}
-                saved = store.save_decoded_tracks(rid, doc["source"], doc["tracks"], d, keep_empty=True, **kw)
-            finally:
-                done.set()
-            took = time.monotonic() - t0
-            (d / "run.log").write_text(f"{label} recording {len(rec) / fs:.1f} s at {fs / 1e3:.1f} kS/s "
-                                       f"({why}), analysed in {took:.1f} s\n", encoding="utf-8")
-            def reading(L):
-                r = L.get("reading") or {}
-                return (r.get("translation_en") or r.get("summary") or "")[:300] if not r.get("error") else ""
-            entry = {"id": rid, "at": time.strftime("%H:%M:%S"), "seconds": round(len(rec) / fs, 1), "why": why,
-                     "centre_hz": centre, "intel_ids": list(saved or []), "warning": problem,
-                     "tracks": [{"kind": t["listen"]["kind"], "answer": t["answer"],
-                                 "f_lo_khz": round(t["f_lo_khz"], 2), "f_hi_khz": round(t["f_hi_khz"], 2),
-                                 "text": (t["listen"].get("transcript") or t["listen"].get("morse")
-                                          or t["listen"].get("digital_text") or "")[:300],
-                                 "language": t["listen"].get("language"), "reading": reading(t["listen"]),
-                                 "text_error": (t["listen"].get("text_error") or "")[:400],
-                                 "audio": t["listen"].get("audio")}
-                                for t in tracks]}
+            entry = {"id": rid, "at": time.strftime("%H:%M:%S"), "seconds": round(seconds, 1), "why": why,
+                     "centre_hz": centre, "intel_ids": [], "warning": problem, "tracks": []}
+            self._stage(entry, "saving audio")
             with self.lock:
                 self.decodes.append(entry)
+            t0 = time.monotonic()
+            try:
+                tracks, extra = bridge.voice_audio(rec, fs, d, force_kind=opts.get("force_kind"))
+                bridge.plot_snapshot(rec, fs, tracks, d / "tracks.png", centre)
+            except Exception as e:                       # noqa: BLE001 -- say so on this clip, go on with the next
+                self._stage(entry, "failed", error=f"{type(e).__name__}: {e}")
+                with self.lock:
+                    self.analysing -= 1
+                return
+            n_samples = len(rec)
+        finally:
+            rec.close()
+        source = {"file": f"LIVE · {label}",
+                  "format": f"{label} IQ stream (dashboard receiver)" + (f" · WARNING: {problem}" if problem else ""),
+                  "fs_in": fs, "centre_hz": centre, "resampled": False, "live": True, "snapshot_at": rid,
+                  "delivery_problem": problem, "ended_because": why}
+        job = {"d": d, "rid": rid, "label": label, "why": why, "seconds": seconds, "fs": fs, "n": n_samples,
+               "source": source, "tracks": tracks, "extra": extra, "opts": opts, "entry": entry,
+               "audio_s": time.monotonic() - t0}
+        texted = [t for t in tracks if t["track"] in extra]
+        with self.lock:
+            entry["tracks"] = self._entry_tracks(tracks)
+        if not texted:                                   # nothing to read (a carrier, noise): done now
+            self._finish(job, None)
+            return
+        self._stage(entry, "waiting for speech-to-text")
+        self.text_work.put(job)
+
+    def _text_worker(self):
+        while True:
+            job = self.text_work.get()
+            if not self.text_work.empty():               # a newer clip is waiting: it gets the text, this keeps its audio
+                self._finish(job, "not transcribed: a newer clip came in while the laptop was busy (the audio is kept)")
+                continue
+            job["t_text"] = time.monotonic()
+            try:
+                o = job["opts"]
+                bridge.voice_text(job["tracks"], job["extra"], job["d"], o["whisper_model"], o["language"],
+                                  o["use_whisper"], o["use_llm"], o.get("llm_model"),
+                                  progress=lambda stage, k, e=job["entry"]: self._stage(e, stage))
+                self._finish(job, None)
+            except Exception as e:                       # noqa: BLE001 -- keep the audio, say why there is no text
+                self._finish(job, f"{type(e).__name__}: {e}")
+
+    @staticmethod
+    def _entry_tracks(tracks):
+        def reading(L):
+            r = L.get("reading") or {}
+            return (r.get("translation_en") or r.get("summary") or "")[:300] if not r.get("error") else ""
+        return [{"kind": t["listen"]["kind"], "answer": t["answer"],
+                 "f_lo_khz": round(t["f_lo_khz"], 2), "f_hi_khz": round(t["f_hi_khz"], 2),
+                 "text": (t["listen"].get("transcript") or t["listen"].get("morse")
+                          or t["listen"].get("digital_text") or "")[:300],
+                 "language": t["listen"].get("language"), "reading": reading(t["listen"]),
+                 "text_error": (t["listen"].get("text_error") or "")[:400],
+                 "audio": t["listen"].get("audio")} for t in tracks]
+
+    def _finish(self, job, no_text):
+        """Write the run (tracks.json: the pipeline page and the audit trail read it
+        once it exists), save text to Comms Intel, update the page's entry."""
+        from src.intel import store
+        d, tracks, entry = job["d"], job["tracks"], job["entry"]
+        try:
+            if no_text:
+                for t in tracks:
+                    if t["track"] in job["extra"]:
+                        t["listen"].setdefault("text_error", no_text)
+            doc = bridge.finite({"n_samples": job["n"], "duration_ms": job["seconds"] * 1e3, "source": job["source"],
+                                 "tracks": tracks, "truth": None})
+            (d / "tracks.tmp").write_text(json.dumps(doc, indent=1, default=float, allow_nan=False), encoding="utf-8")
+            (d / "tracks.tmp").replace(d / "tracks.json")
+            kw = {"out": self.intel_dir} if self.intel_dir else {}
+            saved = store.save_decoded_tracks(job["rid"], doc["source"], doc["tracks"], d, keep_empty=True, **kw)
+            took = time.monotonic() - job.get("t_text", time.monotonic())
+            (d / "run.log").write_text(f"{job['label']} recording {job['seconds']:.1f} s at {job['fs'] / 1e3:.1f} kS/s "
+                                       f"({job['why']}), audio in {job['audio_s']:.1f} s"
+                                       + (f", not transcribed" if no_text and "not transcribed" in no_text
+                                          else f", text in {took:.1f} s") + "\n", encoding="utf-8")
+            with self.lock:
+                entry.update(tracks=self._entry_tracks(tracks), intel_ids=list(saved or []),
+                             stage="not transcribed" if no_text and "not transcribed" in no_text else "done")
+                entry.pop("_since", None)
+                if entry["stage"] == "not transcribed":
+                    self.skipped += 1
             if self.on_result:
                 self.on_result(entry)
             self._prune()
         finally:
-            rec.close()
+            with self.lock:
+                self.analysing -= 1
 
     def _prune(self):
         live = []

@@ -109,8 +109,9 @@ def test_hub_streams_dwells_and_decodes_a_transmission(fake_sdrconnect, tmp_path
     again, _ = hub.dwell(0.05, after=meta["total"] + 10**9)   # nothing new since then: no dwell
     assert again is None
 
-    # The NBFM burst is recorded until 1 s of quiet, then analysed.
-    entry = wait_for(lambda: hub.status()["decodes"], timeout=40)
+    # The NBFM burst is recorded until 1 s of quiet, then analysed: its audio first
+    # (the entry appears, playable), then its text (stage "done").
+    entry = wait_for(lambda: [e for e in hub.status()["decodes"] if e.get("stage") == "done"], timeout=40)
     assert entry, hub.status()
     d = entry[-1]
     assert "error" not in d, d
