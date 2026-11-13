@@ -3,13 +3,18 @@
 // KiwiSDR without stopping. Every clip (30 s, or when a transmission ends) is
 // decoded -- Morse, RTTY, PSK31 or speech (Whisper) -- and read by the local AI,
 // then saved as a live Signal Pipeline run and a Comms Intel recording.
-// No command line needed. Mounted above the Signal Pipeline runs (main.js).
+// No command line needed. The KiwiSDR page (main.js).
 
 const HDR = { "X-NEXA-Client": "1", "Content-Type": "application/json" };
 const DEFAULT_RX = "21439.proxy2.kiwisdr.com:8073";      // 9M2AMH, Kuala Lumpur (GPS-timed: TDoA works)
 const esc = t => String(t ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const KIND = { AM: "AM voice", USB: "USB voice", LSB: "LSB voice", NBFM: "FM voice", CW: "Morse", RTTY: "RTTY",
   PSK31: "PSK31", CARRIER: "carrier only", UNKNOWN: "unclear" };
+
+// Saved frequencies: pick one to fill in the frequency, demodulation and language.
+const PRESETS = [
+  { id: "rtm15295", label: "RTM · 15295 kHz", khz: 15295, demod: "AM", lang: "ms" },
+];
 
 let timer = null;
 let mounted = null;
@@ -30,12 +35,15 @@ export function renderKiwiLive(root, { server }) {
     lastListKey = null;
     root.innerHTML = `
     <div class="block" id="kiwiBlock">
-      <div class="block-label">Live KiwiSDR listening</div>
+      <div class="block-label">Live listening</div>
       <div class="note">Listens to one shortwave frequency without stopping. Every clip is decoded (Morse, RTTY,
-        PSK31 or speech) and read by the local AI. Results appear here, in the runs below and in Comms Intel.</div>
+        PSK31 or speech) and read by the local AI. Results appear below and in Intercepts.</div>
       <div class="filters" style="margin-top:12px;flex-wrap:wrap;gap:12px 18px;align-items:flex-end;">
         <label class="field" style="min-width:230px;">Receiver
           <input id="kwRx" value="${DEFAULT_RX}" spellcheck="false"></label>
+        <label class="field">Saved frequencies
+          <select id="kwPreset"><option value="">Custom</option>
+            ${PRESETS.map(p => `<option value="${p.id}">${esc(p.label)}</option>`).join("")}</select></label>
         <label class="field" style="width:130px;">Frequency (kHz)
           <input id="kwFreq" inputmode="decimal" placeholder="e.g. 15295"></label>
         <label class="field">Language
@@ -60,6 +68,13 @@ export function renderKiwiLive(root, { server }) {
         <button class="secondary" id="kwStop" disabled>Stop</button>
       </div>
       <div id="kwState" class="note" role="status" style="margin-top:10px;"></div>
+    </div>
+    <div class="block">
+      <div class="block-label">Decoded clips</div>
+      <div id="kwList"></div>
+    </div>
+    <div class="block">
+      <div class="block-label">Transmitter location</div>
       <div id="kwLoc" style="margin-top:14px;padding:12px 14px;border:1px solid var(--grid);border-radius:6px;"></div>
       <div class="filters" style="margin-top:10px;flex-wrap:wrap;gap:10px 16px;align-items:flex-end;">
         <button class="secondary" id="kwLocate" title="Records this frequency on 3 GPS-timed KiwiSDRs at once and
@@ -83,7 +98,6 @@ export function renderKiwiLive(root, { server }) {
           <button class="secondary" id="kwSaveLoc">Record location</button>
           <span class="note" id="kwLocMsg"></span>
         </div></details>
-      <div id="kwList" style="margin-top:8px;"></div>
     </div>`;
     const $ = id => root.querySelector(`#${id}`);
     $("kwStart").addEventListener("click", async () => {
@@ -99,7 +113,19 @@ export function renderKiwiLive(root, { server }) {
       }
     });
     $("kwStop").addEventListener("click", async () => paint(await call("stop", {}).catch(() => null)));
-    $("kwFreq").addEventListener("change", () => showLocation(root, true));
+    $("kwFreq").addEventListener("change", () => {
+      const p = PRESETS.find(p => p.id === $("kwPreset").value);
+      if (p && Number($("kwFreq").value) !== p.khz) $("kwPreset").value = "";   // typed over it: custom now
+      showLocation(root, true);
+    });
+    $("kwPreset").addEventListener("change", () => {
+      const p = PRESETS.find(p => p.id === $("kwPreset").value);
+      if (!p) return;
+      $("kwFreq").value = p.khz;
+      $("kwDemod").value = p.demod;
+      $("kwLang").value = p.lang;
+      showLocation(root, true);
+    });
     $("kwLocate").addEventListener("click", () => locate(Number($("kwFreq").value)));
     $("kwSaveLoc").addEventListener("click", async () => {
       const khz = Number($("kwFreq").value), lat = Number($("kwLat").value), lon = Number($("kwLon").value);
@@ -251,5 +277,6 @@ function paint(st) {
             ${esc(KIND[t.kind] || t.kind)}: not decoded (${esc(t.text_error)})${/memory|alloc/i.test(t.text_error)
               ? ". This laptop ran out of memory: choose a smaller speech model (small or base), or close other programs." : ""}</div>`).join("")}
         ${players(d)}
-      </div>`).join("") || (st.state === "streaming" ? `<div class="note">First result after the first clip (about ${Math.round(st.decode?.whisper_model === "medium" ? 90 : 60)} s).</div>` : "");
+      </div>`).join("") || (st.state === "streaming" ? `<div class="note">First result after the first clip (about ${Math.round(st.decode?.whisper_model === "medium" ? 90 : 60)} s).</div>`
+    : `<div class="note">No clips yet. Choose a frequency and press Start listening.</div>`);
 }

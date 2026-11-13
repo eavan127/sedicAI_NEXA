@@ -72,36 +72,76 @@
   .lockup .tag b { font-family: var(--mono); font-weight: 600; font-size: 12px; color: #0E1622; background: var(--accent); border-radius: 999px; padding: 1px 8px; margin-left: 8px; vertical-align: 2px; }
 
   .layout { display: flex; gap: 22px; align-items: flex-start; }
-  nav { width: 180px; flex-shrink: 0; display: flex; flex-direction: column; gap: 8px; }
-  nav .menu-label { font-size: 17px; font-weight: 700; margin: 4px 0; }
+  /* Side menu: a dark panel. Group headings are plain small text (not clickable);
+     every page is a tile you can click, lighter on hover, with an accent bar and
+     accent text when open. Review and System fold, with a caret on the right
+     (main.js: nav groups). */
+  nav { width: 214px; flex-shrink: 0; display: flex; flex-direction: column; gap: 4px;
+        background: var(--slate); border-radius: 12px; padding: 8px 10px 12px; color: #C9D1DC; }
+  nav .menu-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.14em;
+    color: #6F7A89; padding: 16px 6px 4px; margin: 0; cursor: default; user-select: none; }
+  nav .menu-label:first-child { padding-top: 8px; }
   nav button {
-    font-family: var(--font); font-size: 16px; font-weight: 600;
-    border-radius: 6px; border: 1px solid var(--grid); padding: 10px 12px;
-    text-align: left; cursor: pointer; background: var(--panel); color: var(--text);
+    font-family: var(--font); font-size: 15px; font-weight: 600; line-height: 1.25;
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    border: 1px solid rgba(255,255,255,.08); border-radius: 8px;
+    padding: 11px 14px; text-align: left; cursor: pointer; background: #1A2433; color: #F1F4F8;
+    transition: background .15s ease, border-color .15s ease, color .15s ease, box-shadow .2s ease, transform .15s ease;
   }
-  nav button.active { background: var(--brand); border-color: var(--brand-dark); color: #fff; box-shadow: inset 4px 0 0 var(--accent); }
-  nav button:not(.active):not(:disabled):hover { border-color: var(--brand); background: var(--brand-tint); }
-  nav .menu-label { text-transform: uppercase; letter-spacing: 0.12em; font-size: 13px !important; color: var(--text-dim); }
-  nav button:disabled { color: var(--text-dim); cursor: not-allowed; opacity: 0.75; }
-  /* The menu stays in view while a long page scrolls, so the History outline below stays usable. */
+  nav button:not(:disabled):active { transform: scale(.98); }
+  nav button:not(.active):not(:disabled):hover { background: #243145; border-color: rgba(255,255,255,.22); color: #fff; transform: translateX(3px); }
+  nav button.active { color: var(--accent); background: #2A2418; border-color: rgba(240,160,32,.45);
+    box-shadow: inset 4px 0 0 var(--accent); }
+  nav button:disabled { color: #7F8A99; cursor: not-allowed; }
+  /* The menu stays in view while a long page scrolls. */
   nav { position: sticky; top: calc(var(--header-h) + 20px); max-height: calc(100vh - var(--header-h) - 40px);
-        overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--grid) transparent; padding: 2px; }
+        overflow-y: auto; scrollbar-width: thin; scrollbar-color: #2A3443 transparent; }
   nav::-webkit-scrollbar { display: none; }
-  /* History outline: one link per section, like a Google Docs document outline */
-  .subnav { display: flex; flex-direction: column; gap: 1px; margin: -2px 0 4px 12px; padding-left: 8px; border-left: 2px solid var(--grid); }
-  .subnav[hidden] { display: none; }
-  .subnav a { font-size: 14px; line-height: 1.3; color: var(--text-dim); text-decoration: none; padding: 5px 8px; border-radius: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .subnav a:hover { background: var(--brand-tint); color: var(--text); }
-  .subnav a.on { color: var(--brand-dark); font-weight: 700; background: var(--brand-tint); box-shadow: inset 3px 0 0 var(--brand); }
-  /* jump links clear the pinned header through html's scroll-padding-top (a scroll-margin here would add to it) */
-  /* More room between the History page's sections (screen only; print keeps its own layout) */
-  @media screen {
-    #page-history > .block, #page-history > .panels { margin-bottom: 32px; }
-    #page-history > .panels { gap: 20px; }
-    #page-history > .panels > .block { margin-bottom: 0; }
+  nav .nav-group, nav .nav-sub { display: flex; flex-direction: column; gap: 4px; }
+  nav .nav-group[hidden], nav .nav-sub[hidden], nav [data-page][hidden] { display: none; }
+  /* A folding tile: caret on the right, turning to point up while open. The group
+     itself slides open and shut (main.js: setNavGroupOpen). */
+  nav button.nav-fold::after { content: ""; margin-left: auto; border: 5px solid transparent;
+    border-top-color: currentColor; border-bottom-width: 0; opacity: .85; transition: transform .22s ease; }
+  nav button.nav-fold[aria-expanded="true"]::after { transform: rotate(180deg); }
+  nav .nav-count { transition: transform .2s ease; }
+  nav .nav-count.bump { animation: navBump .35s ease; }
+  @keyframes navBump { 40% { transform: scale(1.3); } }
+  /* A page fades in when it opens. */
+  @media screen { main > section:not([hidden]) { animation: pageIn .22s ease-out; } }
+  @keyframes pageIn { from { opacity: 0; transform: translateY(6px); } }
+  @media (prefers-reduced-motion: reduce) {
+    nav button, nav button.nav-fold::after, main > section:not([hidden]) { transition: none !important; animation: none !important; }
+    nav button:not(.active):not(:disabled):hover { transform: none; }
   }
-  nav button[data-page="history"]::after { content: "▾"; float: right; opacity: .8; }
-  nav button[data-page="history"].collapsed::after { content: "▸"; }
+  nav button.nav-fold.has-active { color: var(--accent); }
+  nav button.nav-fold.has-active:not([aria-expanded="true"]) { box-shadow: inset 4px 0 0 var(--accent); }
+  /* System is a whole menu group: its fold is a heading like MONITOR, with a small
+     caret, and its pages are ordinary tiles under it. */
+  nav button.nav-fold.as-label { background: none; border: none; box-shadow: none; transform: none;
+    padding: 16px 6px 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.14em;
+    color: #6F7A89; }
+  nav button.nav-fold.as-label::after { border-width: 4px; border-bottom-width: 0; }
+  nav button.nav-fold.as-label:hover { background: none; border: none; color: #C9D1DC; transform: none; }
+  nav button.nav-fold.as-label.has-active, nav button.nav-fold.as-label.has-active:not([aria-expanded="true"]) {
+    color: var(--accent); box-shadow: none; }
+  /* Review's pages: indented under it with a guide line, slightly smaller. */
+  nav .in-group .nav-sub { margin-left: 12px; padding-left: 10px; border-left: 2px solid #2A3443; }
+  nav .in-group .nav-sub button { font-size: 14px; font-weight: 500; padding: 9px 12px; }
+  nav .in-group .nav-sub button.active { font-weight: 700; }
+  nav .nav-count { margin-left: auto; font-size: 11px; font-weight: 700; line-height: 1; padding: 3px 7px;
+    border-radius: 999px; background: var(--accent); color: var(--slate); }
+  nav .nav-count[hidden] { display: none; }
+  nav button.nav-fold:has(.nav-count:not([hidden]))::after { margin-left: 0; }
+  /* More room between a page's sections (screen only; print keeps its own layout) */
+  @media screen {
+    :is(#page-captures, #page-reports) > .block { margin-bottom: 32px; }
+  }
+  /* Latest intercept: the newest decoded transmission from the antenna, under the receiver */
+  .intercept-card { border-left: 4px solid var(--accent); }
+  .intercept-card .ic-head { display: flex; gap: 10px 16px; flex-wrap: wrap; align-items: baseline; }
+  .intercept-card .ic-type { font-size: 18px; font-weight: 700; }
+  .intercept-card .ic-text { font-family: var(--mono); font-size: 15px; margin-top: 10px; overflow-wrap: anywhere; }
 
   main { flex: 1; min-width: 0; }
   main:focus { outline: none; }
@@ -200,7 +240,7 @@
     tbody tr { break-inside: avoid; page-break-inside: avoid; }
 
     /* Other pages are not part of this report. */
-    #pipelineRoot, #page-history, #page-performance, #page-model { display: none !important; }
+    #pipelineLiveRoot, #latestIntercept, main > section:not(#page-replay) { display: none !important; }
   }
   /* History page. Bars are divs, not a canvas: they reflow with the panel and
      survive the print stylesheet that the browser-print PDF path uses. */
@@ -632,9 +672,9 @@
     .filters input[type="checkbox"], #pipeFollow { width: 18px; height: 18px; min-height: 0; padding: 0; margin: 0; flex: none; accent-color: var(--brand); }
     .filters input[type="file"] { padding: 7px 10px; }
     /* Signal Pipeline's form */
-    #pipelineRoot .filters { gap: 16px 26px; margin-bottom: 0; }
-    #pipelineRoot .note + .filters { margin-top: 24px !important; }
-    #pipelineRoot .filters + .filters { margin-top: 22px; }
+    :is(#pipelineLiveRoot, #pipelineFileRoot) .filters { gap: 16px 26px; margin-bottom: 0; }
+    :is(#pipelineLiveRoot, #pipelineFileRoot) .note + .filters { margin-top: 24px !important; }
+    :is(#pipelineLiveRoot, #pipelineFileRoot) .filters + .filters { margin-top: 22px; }
     #pipeRun, #pipeDemo {
       min-height: 46px; padding: 10px 22px; font-family: var(--font); font-size: 16px; font-weight: 600;
       color: var(--text); background: var(--panel); border: 1px solid var(--grid); border-radius: 6px; cursor: pointer;
@@ -642,7 +682,7 @@
     #pipeRun:hover, #pipeDemo:hover { background: var(--brand-tint); }
     #pipeMsg { margin: 16px 0 0; }
     #pipeMsg:empty { display: none; }
-    #pipelineRoot label:has(#pipeFollow) { display: inline-flex; align-items: center; gap: 10px; }
+    :is(#pipelineLiveRoot, #pipelineFileRoot) label:has(#pipeFollow) { display: inline-flex; align-items: center; gap: 10px; }
     button.mini { padding: 7px 13px; font-size: 14.5px; border-radius: 6px; }
 
     table { font-size: 15.5px; }
@@ -681,8 +721,7 @@
     .req-list { gap: 20px; }
     .bulkbar { gap: 14px; padding: 12px 14px; margin: 12px 0; }
     .hist-job { padding: 16px 18px; margin: 14px 0; }
-    #page-history > .block, #page-history > .panels { margin-bottom: 36px; }
-    #page-history > .panels { gap: 24px; }
+    :is(#page-captures, #page-reports) > .block { margin-bottom: 36px; }
 
     #chatLog { padding: 20px; gap: 14px; }
     .chat-msg { padding: 11px 15px; line-height: 1.55; }
@@ -700,12 +739,17 @@
     .layout { flex-direction: column; align-items: stretch; gap: 14px; }
     body { overflow-x: clip; }   /* last guard: nothing pushes the page sideways (clip keeps sticky working) */
     nav { position: sticky; top: var(--header-h); z-index: 40; width: auto; max-height: none; margin: 0 -16px;
-          flex-direction: row; gap: 8px; overflow-x: auto; overflow-y: hidden; padding: 10px 16px;
-          background: var(--bg); border-bottom: 1px solid var(--grid); scrollbar-width: none; }
+          flex-direction: row; gap: 4px; overflow-x: auto; overflow-y: hidden; padding: 8px 16px;
+          border-radius: 0; scrollbar-width: none; }
     nav::-webkit-scrollbar { display: none; }
-    nav .menu-label, nav .subnav { display: none !important; }
-    nav button { flex: none; padding: 9px 14px; white-space: nowrap; }
-    nav button[data-page="history"]::after { content: none; }
+    /* One row of tabs: the group headings go, folded groups open inline. */
+    nav .menu-label, nav button.nav-fold { display: none !important; }
+    nav .nav-group, nav .nav-sub, nav .nav-sub[hidden] { display: contents; }
+    nav .nav-group[hidden] { display: none; }
+    nav .nav-sub { margin: 0; padding: 0; border: none; }
+    nav button, nav .nav-sub button { flex: none; width: auto; padding: 9px 14px; white-space: nowrap;
+      font-size: 15px; font-weight: 600; }
+    nav button.active { box-shadow: inset 0 -3px 0 var(--accent); }
     :root { --th-top: calc(var(--header-h) + 60px); }
     html { scroll-padding-top: calc(var(--header-h) + 76px); }
     .panels { flex-direction: column; align-items: stretch; }
@@ -747,15 +791,40 @@
   </header>
 
   <div class="layout">
-    <nav>
-      <div class="menu-label">Menu</div>
-      <button class="active" data-page="replay">Signal Pipeline</button>
-      <button data-page="history">History</button>
-      <button data-page="audit">Audit trail</button>
-      <button data-page="performance">Performance</button>
-      <button data-page="model">Model</button>
-      <button data-page="assistant">Assistant</button>
-      <button data-page="users" hidden>Users</button>
+    <!-- Menu groups. Pages that need the local server carry data-server and are
+         hidden without it; Review and System fold (main.js: syncNav, nav groups). -->
+    <nav aria-label="Main menu">
+      <div class="menu-label">Monitor</div>
+      <button class="active" data-page="replay">SDR Receiver</button>
+      <button data-page="kiwi" data-server>KiwiSDR</button>
+
+      <div class="menu-label">Intelligence</div>
+      <button data-page="intercepts" data-server>Intercepts</button>
+      <button data-page="alerts" data-server>Alerts</button>
+      <button data-page="recording">Recording Analysis</button>
+
+      <div class="menu-label">Records</div>
+      <button data-page="captures">Captures</button>
+      <div class="nav-group in-group" data-group="review" data-server>
+        <button class="nav-fold" aria-expanded="false" aria-controls="navReview">Review
+          <span class="nav-count" id="reviewCount" hidden></span></button>
+        <div class="nav-sub" id="navReview" hidden>
+          <button data-page="corrections">Corrections</button>
+          <button data-page="lowconf">Low Confidence</button>
+        </div>
+      </div>
+      <button data-page="reports">Reports</button>
+      <button data-page="audit">Audit Trail</button>
+
+      <div class="nav-group" data-group="system">
+        <button class="nav-fold as-label" aria-expanded="false" aria-controls="navSystem">System</button>
+        <div class="nav-sub" id="navSystem" hidden>
+          <button data-page="performance">Performance</button>
+          <button data-page="model">Model</button>
+          <button data-page="assistant">Assistant</button>
+          <button data-page="users" hidden>Users</button>
+        </div>
+      </div>
     </nav>
 
     <main id="main" tabindex="-1">
@@ -768,7 +837,7 @@
            produced them is unreadable a week later. -->
       <div id="printHeader" class="print-only"></div>
 
-      <h3 class="page-title">Signal Pipeline</h3>
+      <h3 class="page-title">SDR Receiver</h3>
       <div class="block" id="replayControls">
         <div class="subsection">
           <h4 class="subhead">Live receiver</h4>
@@ -818,7 +887,7 @@
             </div>
             <div class="rx-log" id="rxLog" hidden aria-live="polite"></div>
             <div class="note" id="rxNote" style="margin-top:12px;">
-              Connect to listen. Voice or Morse is recorded, decoded and sent to History.
+              Connect to listen. Voice or Morse is recorded, decoded and sent to Intercepts.
             </div>
           </div>
         </div>
@@ -871,6 +940,10 @@
         </details>
         <div id="status" role="status">Loading the AI model (up to a minute the first time). These buttons switch on when it is ready.</div>
       </div>
+
+      <!-- The newest transmission the antenna decoded: what it was and what it said
+           (main.js: paintLatestIntercept, from /api/intel). -->
+      <div class="block intercept-card" id="latestIntercept" hidden aria-live="polite"></div>
 
       <div id="sigBody">
       <div id="headline"></div>
@@ -953,38 +1026,51 @@
 
       </div>
 
-      <!-- Wideband chain on a recording, and every decoded run (web/pipeline.js, /api/pipeline). -->
-      <!-- Live KiwiSDR listening (web/kiwi_live.js, /api/kiwi). -->
-      <div id="kiwiLiveRoot"></div>
-      <div id="pipelineRoot"></div>
+      <!-- The intercept feed: every transmission the live receiver decoded (web/pipeline.js, /api/pipeline). -->
+      <div id="pipelineLiveRoot"></div>
     </section>
 
-    <!-- One decoded signal, opened from History's Decoded review: no menu entry of its
+    <!-- Live KiwiSDR listening (web/kiwi_live.js, /api/kiwi). -->
+    <section id="page-kiwi" hidden>
+      <h3 class="page-title">KiwiSDR</h3>
+      <div id="kiwiLiveRoot"></div>
+    </section>
+
+    <!-- Wideband chain on a recording (web/pipeline.js, /api/pipeline). -->
+    <section id="page-recording" hidden>
+      <h3 class="page-title">Recording Analysis</h3>
+      <div id="pipelineFileRoot"></div>
+    </section>
+
+    <!-- One decoded signal, opened from Intercepts: no menu entry of its
          own (web/intel.js, /api/intel). -->
     <section id="page-intel" hidden>
       <h3 class="page-title">Decoded signal</h3>
       <div id="intelRoot"></div>
     </section>
 
-    <section id="page-history" hidden>
-      <h3 class="page-title">History</h3>
-      <div class="block" id="alertBlock" hidden>
-        <div class="block-label">Alerts</div>
-        <div class="note">Military or hostile emitters. Open one on the waterfall to approve or correct it.</div>
-        <div class="note" id="alertMsg" role="status"></div>
-        <div class="table-wrap" id="alertList"></div>
-      </div>
-
+    <section id="page-intercepts" hidden>
+      <h3 class="page-title">Intercepts</h3>
       <div class="block" id="decodedBlock" hidden>
-        <div class="block-label">Decoded review</div>
-        <div class="note">Voice and Morse decoded on this machine. Open one to read it; decodes can contain errors.</div>
+        <div class="note">Voice and Morse decoded on this machine, from the antenna and from KiwiSDR. Open one to read it; decodes can contain errors.</div>
         <div class="filters" style="margin-top:8px;"><input id="decodedSearch" placeholder="Search call sign, word, file" style="width:260px;"></div>
         <div class="note" id="decodedMsg" role="status"></div>
         <div class="table-wrap" id="decodedList"></div>
       </div>
+    </section>
 
+    <section id="page-alerts" hidden>
+      <h3 class="page-title">Alerts</h3>
+      <div class="block" id="alertBlock" hidden>
+        <div class="note">Military or hostile emitters. Open one on the waterfall to approve or correct it.</div>
+        <div class="note" id="alertMsg" role="status"></div>
+        <div class="table-wrap" id="alertList"></div>
+      </div>
+    </section>
+
+    <section id="page-corrections" hidden>
+      <h3 class="page-title">Corrections</h3>
       <div class="block" id="corrBlock" hidden>
-        <div class="block-label">Corrections review</div>
         <div class="note">An <strong>analyst</strong> approves or rejects each correction before it is used for training.</div>
         <div class="filters" style="margin-top:8px;">
           <select id="corrStatusSel">
@@ -998,15 +1084,23 @@
         <div class="note" id="corrMsg" role="status"></div>
         <div class="table-wrap" id="corrTable"></div>
       </div>
+    </section>
 
+    <section id="page-lowconf" hidden>
+      <h3 class="page-title">Low Confidence</h3>
       <div class="block" id="queueBlock" hidden>
-        <div class="block-label">Low-confidence review</div>
         <div class="note">Detections the model was unsure about, or possible jamming it did not report. Open one to correct it, or (analyst) mark it right.</div>
         <div class="note" id="queueMsg" role="status"></div>
         <div class="table-wrap" id="queueList"></div>
       </div>
+    </section>
 
-      <div class="filters">
+    <!-- Captures and Reports share one filter bar: main.js moves it to whichever
+         of the two is open, so a report covers exactly what Captures lists. -->
+    <section id="page-captures" hidden>
+      <h3 class="page-title">Captures</h3>
+      <div class="filter-slot">
+      <div class="filters" id="histFilters">
         <button class="secondary" id="histRefresh">Refresh</button>
         <select id="histTier"><option value="">Every verdict</option></select>
         <select id="histClass"><option value="">Every class</option></select>
@@ -1021,10 +1115,26 @@
         <label class="note" style="margin:0;">To <input id="histTo" type="date"></label>
         <span class="note" id="histStatus"></span>
       </div>
+      </div>
 
+      <div class="block">
+        <div class="block-label">Summary</div>
+        <div id="histSummary"></div>
+      </div>
+
+      <div class="block">
+        <div class="block-label">Stored analyses</div>
+        <div class="table-wrap" id="histTable"></div>
+      </div>
+
+      <div id="histBackendNote" hidden></div>
+    </section>
+
+    <section id="page-reports" hidden>
+      <h3 class="page-title">Reports</h3>
+      <div class="filter-slot"></div>
       <div class="block" id="reportBlock">
-        <div class="block-label">Report builder</div>
-        <div class="note">Report on the <strong id="rbCount">0 captures</strong> matching the filters above.</div>
+        <div class="note">Report on the <strong id="rbCount">0 captures</strong> matching the filters above (the same filters as Captures).</div>
         <div class="rb-grid">
           <fieldset id="rbSections"><legend>Sections</legend>
             <label><input type="checkbox" value="summary" checked> Summary: counts, verdicts, classes</label>
@@ -1051,25 +1161,11 @@
           <span class="note" id="rbMsg" role="status"></span>
         </div>
       </div>
-
-      <div class="block">
-        <div class="block-label">Everything analysed so far</div>
-        <div id="histSummary"></div>
-      </div>
-
-      <div class="block">
-        <div class="block-label">Stored analyses</div>
-        <div class="table-wrap" id="histTable"></div>
-      </div>
-
-      <div id="histBackendNote" hidden></div>
-
     </section>
 
     <section id="page-audit" hidden>
-      <h3 class="page-title">Audit trail</h3>
+      <h3 class="page-title">Audit Trail</h3>
       <div class="block" id="auditBlock" hidden>
-        <div class="block-label">Audit trail</div>
         <div class="note">Every action, newest first. Entries cannot be edited or deleted; Verify checks that none were.</div>
         <div class="filters" style="margin-top:8px;">
           <label class="note" for="operatorInput" style="margin:0;">Operator</label>
@@ -1258,66 +1354,6 @@
   </dialog>
   <script src="./vendor/ort/ort.min.js"></script>
   <script type="module" src="./main.js"></script>
-<script>
-/* History outline: under the History menu button, one link per section of the
-   History page. A link scrolls to its section; the section in view is
-   highlighted. Rebuilt whenever a section is shown or hidden, so sections that
-   only exist on the local database (review queue, corrections) appear only
-   when they are on the page. */
-(() => {
-  const page = document.getElementById("page-history");
-  const histBtn = document.querySelector('nav button[data-page="history"]');
-  if (!page || !histBtn) return;
-  const outline = document.createElement("div");
-  outline.className = "subnav"; outline.id = "historyOutline"; outline.hidden = true;
-  outline.setAttribute("aria-label", "History sections");
-  histBtn.after(outline);
-  let blocks = [], nextId = 0, collapsed = false;
-  // Clicking History while it is already open folds the outline away; clicking it again, or
-  // arriving from another tab, opens it.
-  histBtn.addEventListener("click", () => {
-    collapsed = page.hidden ? false : !collapsed;
-    histBtn.classList.toggle("collapsed", collapsed);
-    setTimeout(sync);
-  });
-  const label = b => b.querySelector(":scope > .block-label");
-  // Short names for the outline.
-  const SHORT = [["Report builder", "Report"], ["Everything analysed", "Summary"],
-    ["Review required", "Review queue"], ["Stored analyses", "Stored analyses"], ["Human corrections", "Corrections"]];
-  const shortName = full => (SHORT.find(([k]) => full.startsWith(k)) || [, full.split(":")[0]])[1];
-  let entries = [];
-  function build() {
-    blocks = [...page.querySelectorAll(".block")].filter(b => label(b) && !b.closest("[hidden]"));
-    entries = [];
-    for (const b of blocks) {
-      if (!b.id) b.id = "hist-sec-" + nextId++;
-      const name = shortName(label(b).textContent.trim());
-      const last = entries[entries.length - 1];
-      if (last && last.name === name) last.blocks.push(b); else entries.push({ name, blocks: [b] });
-    }
-    outline.replaceChildren(...entries.map(en => {
-      const a = document.createElement("a");
-      a.href = "#" + en.blocks[0].id; a.textContent = en.name;
-      a.title = en.blocks.map(b => label(b).textContent.trim()).join(" · ");
-      a.addEventListener("click", e => { e.preventDefault(); en.blocks[0].scrollIntoView({ behavior: "smooth", block: "start" }); });
-      return a;
-    }));
-    spy();
-  }
-  function spy() {
-    if (outline.hidden || !blocks.length) return;
-    let cur = blocks[0];
-    const line = (parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--header-h")) || 0) + 60;   // just below the pinned header (0 when it is not pinned)
-    for (const b of blocks) if (b.getBoundingClientRect().top <= line) cur = b;
-    if (innerHeight + scrollY >= document.documentElement.scrollHeight - 4) cur = blocks[blocks.length - 1];
-    [...outline.children].forEach((a, i) => a.classList.toggle("on", entries[i].blocks.includes(cur)));
-  }
-  function sync() { outline.hidden = page.hidden || collapsed; if (!outline.hidden) build(); }
-  new MutationObserver(sync).observe(page, { attributes: true, attributeFilter: ["hidden"], subtree: true });
-  addEventListener("scroll", spy, { passive: true });
-  sync();
-})();
-</script>
 <script>
 /* Pinned header: measure it (it wraps on narrow windows and shrinks once the page
    scrolls) so the sidebar, jump links and table headings sit just below it. */

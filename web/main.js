@@ -34,7 +34,7 @@ import { classMixHtml, snrLadderHtml, calendarHtml } from "./seen.js";
 import { applyFilters, canView, flagsHtml, summarise, summaryHtml as histSummaryHtml, tableHtml } from "./history.js";
 import { buildReport, buildSingle } from "./report.js";
 import { installZoom, registerZoom } from "./zoom.js";
-import { renderIntelDetail, listDecoded, decodedTableHtml, filterRows } from "./intel.js";
+import { renderIntelDetail, listDecoded, decodedTableHtml, filterRows, typeLabel } from "./intel.js";
 import { renderPipeline } from "./pipeline.js";
 import { renderKiwiLive } from "./kiwi_live.js";
 
@@ -158,7 +158,7 @@ function paintTriage(t) {
     const calls = t.closeCalls.slice(0, 3).map(c => `${c.cls} ${pct(c.peak)} (clear above ${pct(c.line)})`).join(", ");
     parts.push(`<div class="tri review"><strong>REVIEW REQUIRED</strong> `
       + (calls ? `low confidence: ${calls}${t.closeCalls.length > 3 ? ` and ${t.closeCalls.length - 3} more` : ""}. ` : "")
-      + `Added to the review queue (History).</div>`);
+      + `Added to Review ▸ Low Confidence.</div>`);
   }
   triageBanner.innerHTML = parts.join("");
   triageBanner.hidden = !parts.length;
@@ -549,7 +549,7 @@ corrForm.addEventListener("submit", async (ev) => {
     const done = `Correction ${isAnalyst() ? "made" : "submitted"} by ${operatorName()}: `
       + `${corrCtx.predicted.join(" + ") || "nothing"} → ${corrected.join(" + ")}. `
       + (isAnalyst() ? "As an analyst it is approved directly and can be used for retraining."
-                     : "It waits in History ▸ Human corrections until an analyst approves it.");
+                     : "It waits in Review ▸ Corrections until an analyst approves it.");
     eventsNote.textContent = done;
     // Mark the recommended rows this correction answers, so none is reviewed
     // (and submitted) a second time: the one it was opened from, and any the
@@ -812,7 +812,7 @@ suggBulk.addEventListener("click", async (ev) => {
   renderSuggestions();
   suggestStatus.className = failed.length ? "corr-error" : "note";
   suggestStatus.textContent = `${ok} correction${ok === 1 ? "" : "s"} ${isAnalyst() ? "made" : "submitted"} by ${operatorName()}; `
-    + (isAnalyst() ? "as an analyst's, they are approved directly." : "they wait in History, Human corrections, for an analyst to approve.")
+    + (isAnalyst() ? "as an analyst's, they are approved directly." : "they wait in Review ▸ Corrections for an analyst to approve.")
     + (failed.length ? ` Not submitted: ${failed.join("; ")}` : "");
 });
 
@@ -971,7 +971,7 @@ async function rxStart(source, { fallback = null } = {}) {
     ? "Simulated air. Change the scenario or SNR under More options and the next dwell follows."
     : rx.info.kind === "sdr"
     ? "Live from the antenna. Each transmission is also recorded and decoded; results appear in this "
-      + "log and in History under Decoded review."
+      + "log and in Intercepts."
     : "Playing the recording dwell by dwell.";
   rxPaint();
   rxLoop();
@@ -1227,27 +1227,175 @@ let currentPage = "replay";
 const chatLogPromise = openChatLog();
 let perfData = null, modelCard = null;
 
+const PAGE_NAME = { alerts: "Alerts", lowconf: "Low Confidence", captures: "Captures", corrections: "Corrections" };
+// Pages that show the stored records (the old History page, one menu entry each).
+// They all read the same records, so each one loads them on entry.
+const RECORD_PAGES = new Set(["intercepts", "alerts", "captures", "reports", "corrections", "lowconf"]);
+
 function showPage(page) {
   currentPage = page;
-  for (const btn of document.querySelectorAll("nav button")) {
-    const here = btn.dataset.page === (page === "intel" ? "history" : page);   // a decoded signal is part of History
+  const menuPage = page === "intel" ? "intercepts" : page;   // a decoded signal is opened from Intercepts
+  for (const btn of document.querySelectorAll("nav button[data-page]")) {
+    const here = btn.dataset.page === menuPage;
     btn.classList.toggle("active", here);
     if (here) btn.setAttribute("aria-current", "page"); else btn.removeAttribute("aria-current");
+  }
+  // A page inside a folded group opens the group, so the menu shows where you are.
+  for (const group of document.querySelectorAll("nav .nav-group")) {
+    const has = !!group.querySelector(`button[data-page="${menuPage}"]`);
+    if (has) setNavGroupOpen(group, true);
+    group.querySelector(".nav-fold")?.classList.toggle("has-active", has);
   }
   for (const sec of document.querySelectorAll("main section")) {
     sec.hidden = sec.id !== `page-${page}`;
   }
+  const server = readConfig().backend === "server";
   // Canvases cannot be sized while hidden, so each page draws on entry.
   if (page === "replay") {
     if (session) render(); else renderSignal();
-    renderPipeline(el("pipelineRoot"), { server: readConfig().backend === "server" });
-    renderKiwiLive(el("kiwiLiveRoot"), { server: readConfig().backend === "server" });
+    renderPipeline(el("pipelineLiveRoot"), { server, mode: "live" });
+    pollLatestIntercept();
   }
-  if (page === "history") return renderHistory();
+  if (page === "kiwi") renderKiwiLive(el("kiwiLiveRoot"), { server });
+  if (page === "recording") renderPipeline(el("pipelineFileRoot"), { server, mode: "file" });
+  // Captures and Reports share one filter bar: it moves to the page that is open.
+  if (page === "captures" || page === "reports") {
+    el(`page-${page}`).querySelector(".filter-slot").append(el("histFilters"));
+  }
+  if (RECORD_PAGES.has(page)) return renderHistory();
   if (page === "audit") renderAudit();
   if (page === "performance") renderPerformance();
   if (page === "model") renderModel();
   if (page === "users") renderUsers();
+}
+
+// Folding menu groups (Review, System). Folded by default; the choice is remembered.
+const NAV_FOLD_KEY = "nexa.navOpen";
+function navOpenSaved() {
+  try { return JSON.parse(localStorage.getItem(NAV_FOLD_KEY) || "{}"); } catch { return {}; }
+}
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)");
+function setNavGroupOpen(group, open, remember = false) {
+  const fold = group.querySelector(".nav-fold"), sub = group.querySelector(".nav-sub");
+  if (!fold || !sub) return;
+  const was = fold.getAttribute("aria-expanded") === "true";
+  fold.setAttribute("aria-expanded", String(open));
+  sub.getAnimations().forEach(a => a.cancel());
+  // Slide open or shut when a person clicks (remember); a page load just sets it.
+  // Only in the side menu: the narrow layout's row of tabs has nothing to slide.
+  const slide = remember && was !== open && !reduceMotion.matches && getComputedStyle(sub).display !== "contents";
+  if (open) sub.hidden = false;
+  if (slide) {
+    const h = sub.scrollHeight;
+    sub.style.overflow = "hidden";
+    const frames = [{ height: "0px", opacity: 0 }, { height: `${h}px`, opacity: 1 }];
+    const anim = sub.animate(open ? frames : frames.reverse(), { duration: open ? 220 : 180, easing: "ease-out" });
+    // Read the state again at the end: a quick second click may have reversed it meanwhile.
+    anim.onfinish = anim.oncancel = () => {
+      sub.style.overflow = "";
+      if (fold.getAttribute("aria-expanded") !== "true") sub.hidden = true;
+    };
+  } else if (!open) sub.hidden = true;
+  if (remember) {
+    const saved = navOpenSaved();
+    saved[group.dataset.group] = open;
+    try { localStorage.setItem(NAV_FOLD_KEY, JSON.stringify(saved)); } catch { /* private window: not remembered */ }
+  }
+}
+for (const group of document.querySelectorAll("nav .nav-group")) {
+  setNavGroupOpen(group, !!navOpenSaved()[group.dataset.group]);
+  group.querySelector(".nav-fold").addEventListener("click", ev => {
+    setNavGroupOpen(group, ev.currentTarget.getAttribute("aria-expanded") !== "true", true);
+  });
+}
+
+/** Menu entries that need the local server (data-server) are hidden without it. */
+function syncNav() {
+  const server = readConfig().backend === "server";
+  for (const node of document.querySelectorAll("nav [data-server]")) node.hidden = !server;
+}
+
+// Review's count: everything waiting for a person (pending corrections + low-confidence detections).
+let reviewWaiting = { corrections: 0, lowconf: 0 };
+function paintReviewCount(part) {
+  Object.assign(reviewWaiting, part);
+  const n = reviewWaiting.corrections + reviewWaiting.lowconf;
+  const badge = el("reviewCount");
+  const changed = badge.textContent !== String(n);
+  badge.hidden = !n;
+  badge.textContent = String(n);
+  if (changed && n) {                       // a new item waiting: the badge pops once
+    badge.classList.remove("bump"); void badge.offsetWidth; badge.classList.add("bump");
+  }
+  badge.title = `${reviewWaiting.corrections} correction${reviewWaiting.corrections === 1 ? "" : "s"} and `
+    + `${reviewWaiting.lowconf} low-confidence detection${reviewWaiting.lowconf === 1 ? "" : "s"} waiting`;
+}
+/** At start-up, before any record page has loaded: count what is waiting. */
+async function refreshReviewCount() {
+  if (readConfig().backend !== "server") return;
+  try {
+    const [s, { records }] = await Promise.all([correctionStats(), listAnalyses()]);
+    paintReviewCount({ corrections: s.pending || 0,
+                       lowconf: records.filter(r => r.needs_review && !r.reviewed_by).length });
+  } catch { /* the count simply stays hidden */ }
+}
+
+// Latest intercept on the SDR Receiver page: the newest transmission the antenna
+// decoded (KiwiSDR clips have their own page), refreshed while the page is open.
+let interceptTimer = null;
+async function pollLatestIntercept() {
+  clearTimeout(interceptTimer);
+  if (currentPage !== "replay") return;
+  const box = el("latestIntercept");
+  if (readConfig().backend === "server") {
+    try {
+      const rows = (await listDecoded()).filter(r => !/kiwisdr/i.test(r.file || ""));
+      paintLatestIntercept(box, rows[0]);
+    } catch { /* server restarting: try again on the next tick */ }
+  } else box.hidden = true;
+  interceptTimer = setTimeout(pollLatestIntercept, 3000);
+}
+
+let latestInterceptKey = null;
+function paintLatestIntercept(box, r) {
+  if (!r) { box.hidden = true; latestInterceptKey = null; return; }
+  const key = `${r.id}|${r.summary}|${r.category}`;
+  if (key === latestInterceptKey) return;           // unchanged: keep the text still
+  latestInterceptKey = key;
+  const esc = t => String(t ?? "").replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
+  const when = r.recorded_at ? new Date(r.recorded_at).toLocaleString() : "";
+  box.innerHTML = `<div class="block-label">Latest intercept</div>
+    <div class="ic-head">
+      <span class="ic-type">${esc(typeLabel(r))}</span>
+      ${r.category ? `<span class="chip">${esc(r.category)}</span>` : ""}
+      ${(r.call_signs || []).length ? `<span>Call signs: <b>${esc(r.call_signs.slice(0, 4).join(", "))}</b></span>` : ""}
+      <span class="note" style="margin:0;">${esc(when)}${r.duration_s ? ` · ${Number(r.duration_s).toFixed(1)} s` : ""}</span>
+    </div>
+    <div class="note" style="margin:4px 0 0;overflow-wrap:anywhere;">${esc(r.file)}</div>
+    <div class="ic-text">${esc(r.summary || r.error || "Decoded. Open it to read the text.")}</div>
+    <div class="filters" style="margin-top:12px;">
+      <button class="mini" id="icOpen">Open full decode</button>
+      <button class="mini" id="icAll">All intercepts</button>
+    </div>`;
+  box.hidden = false;
+  box.querySelector("#icOpen").addEventListener("click", () => openIntercept(r.id, "replay"));
+  box.querySelector("#icAll").addEventListener("click", () => {
+    showPage("intercepts");
+    window.scrollTo({ top: 0, behavior: "instant" });
+  });
+}
+
+/** One decoded signal, full page; Back returns to the page it was opened from. */
+function openIntercept(id, from = "intercepts") {
+  showPage("intel");
+  window.scrollTo({ top: 0, behavior: "instant" });
+  renderIntelDetail(el("intelRoot"), {
+    id, backLabel: from === "replay" ? "SDR Receiver" : "Intercepts",
+    onBack: async () => {
+      await showPage(from);
+      window.scrollTo({ top: 0, behavior: "instant" });
+    },
+  });
 }
 
 for (const btn of document.querySelectorAll("nav button[data-page]")) {
@@ -1744,11 +1892,11 @@ Promise.all([chatLogPromise, ollamaCheck]).then(([chatLog, hasOllama]) => initAs
   suggestEl: el("chatSuggest"), clearBtn: el("chatClear"), noteEl: el("chatNote"),
   rewriteFn: hasOllama ? ollamaRewrite : null,
   tierColor: TIER_COLOR, classColor: CLASS_COLOR,
-  // "Open in History": the History page, filtered down to this capture.
+  // "Open in Captures": the Captures page, filtered down to this capture.
   onOpenRecord: async (rec) => {
     for (const node of [histTier, histClassSel, histSource, histFrom, histTo]) node.value = "";
     histQuery.value = rec.file_name || rec.case_note || "";
-    await showPage("history");            // the table exists only once History has drawn
+    await showPage("captures");           // the table exists only once Captures has drawn
     el("histTable").scrollIntoView({ behavior: "smooth", block: "center" });
   },
 })).catch(e => console.error("Assistant failed to start:", e));
@@ -1758,6 +1906,7 @@ Promise.all([chatLogPromise, ollamaCheck]).then(([chatLog, hasOllama]) => initAs
 ollamaCheck.then(has => { if (has) ollamaWarmUp(); });
 
 showPage("replay");
+detectServer().then(() => { syncNav(); refreshReviewCount(); });
 init();
 
 
@@ -1866,16 +2015,7 @@ async function renderDecoded() {
 decodedSearch.addEventListener("input", paintDecoded);
 decodedList.addEventListener("click", ev => {
   const row = ev.target.closest("tr[data-decoded]");
-  if (!row) return;
-  showPage("intel");
-  window.scrollTo({ top: 0, behavior: "instant" });
-  renderIntelDetail(el("intelRoot"), {
-    id: row.dataset.decoded,
-    onBack: async () => {
-      await showPage("history");
-      decodedBlock.scrollIntoView({ block: "start" });
-    },
-  });
+  if (row) openIntercept(row.dataset.decoded, "intercepts");
 });
 
 const queueBlock = el("queueBlock"), queueList = el("queueList"), queueMsg = el("queueMsg");
@@ -1884,6 +2024,7 @@ const QUEUE_SHOWN = 15;
 function paintQueue() {
   const waiting = histRecords.filter(r => r.needs_review && !r.reviewed_by);
   const analyst = isAnalyst();               // only an analyst closes a close call as right
+  paintReviewCount({ lowconf: waiting.length });
   queueBlock.hidden = readConfig().backend !== "server";
   if (queueBlock.hidden) return;
   const esc = t => String(t ?? "").replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
@@ -2261,6 +2402,7 @@ async function renderCorrections() {
   try {
     const [rows, s] = await Promise.all([listCorrections({ status: corrStatusSel.value }), correctionStats()]);
     corrRows = rows;
+    paintReviewCount({ corrections: s.pending || 0 });
     const perClass = Object.entries(s.approved_per_class).filter(([, n]) => n)
       .map(([c, n]) => `${c} ${n}`).join(" · ") || "none yet";
     corrStats.textContent = `${s.pending} waiting for review · ${s.approved} approved · ${s.rejected} rejected. `
@@ -2432,7 +2574,9 @@ function viewCorrection(c) {
 
 function viewCapture(rec) {
   if (!rec) return;
-  return openStored(rec, () => analysisIq(rec.id), { kind: "capture", id: rec.id, rec }, histStatus);
+  // Back returns to the page the capture was opened from (Alerts, Low Confidence or Captures).
+  const from = RECORD_PAGES.has(currentPage) ? currentPage : "captures";
+  return openStored(rec, () => analysisIq(rec.id), { kind: "capture", id: rec.id, rec, from }, histStatus);
 }
 
 function showReviewBanner() {
@@ -2451,7 +2595,7 @@ function showReviewBanner() {
       + (session.truth?.length ? " Dashed boxes are the known true answer." : "") + `</div></div>`
       + `<div class="row-actions">`
       + ((a.needs_review || a.alert_level) && !a.reviewed_by && isAnalyst() ? `<button class="mini" id="reviewRight">Approve: model is right</button> ` : "")
-      + `<button class="mini" id="reviewBack">← Back to History</button></div>`;
+      + `<button class="mini" id="reviewBack">← Back to ${esc(PAGE_NAME[r.from] || "Captures")}</button></div>`;
     return;
   }
   reviewBanner.innerHTML = `<div><strong>Reviewing a correction</strong> by ${esc(r.operator)} on ${esc(r.capture)}: `
@@ -2477,7 +2621,7 @@ reviewBanner.addEventListener("click", async (ev) => {
       r.status = decide.dataset.bannerReview === "approve" ? "approved" : "rejected";
       showReviewBanner();
     } else if (corrMsg.className === "corr-error") {
-      alert(corrMsg.textContent);            // corrMsg is on History, not on this page
+      alert(corrMsg.textContent);            // corrMsg is on Corrections, not on this page
     }
     return;
   }
@@ -2491,13 +2635,8 @@ reviewBanner.addEventListener("click", async (ev) => {
     return;
   }
   if (!ev.target.closest("#reviewBack")) return;
-  if (session?.review?.kind === "capture") {
-    showPage("history");
-    renderHistory();
-    return;
-  }
-  showPage("history");
-  corrBlock.scrollIntoView({ block: "start" });
+  showPage(session?.review?.kind === "capture" ? session.review.from || "captures" : "corrections");
+  window.scrollTo({ top: 0, behavior: "instant" });
 });
 
 el("auditVerify").addEventListener("click", async () => {

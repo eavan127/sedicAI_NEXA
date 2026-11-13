@@ -363,7 +363,7 @@ export async function initAssistant({ chatLog, listRecords, logEl, formEl, input
         chip("Details", () => send(`Summary of upload ${n}`), "mini"),
         chip(picked ? "Picked: now choose another" : comparePick ? `Compare with #${comparePick}` : "Compare",
              () => pickCompare(n), "mini"),
-        onOpenRecord ? chip("Open in History ↗", () => onOpenRecord(rec), "mini") : null));
+        onOpenRecord ? chip("Open in Captures ↗", () => onOpenRecord(rec), "mini") : null));
   }
 
   function pickCompare(n) {
@@ -495,7 +495,7 @@ export async function initAssistant({ chatLog, listRecords, logEl, formEl, input
   });
   clearBtn.addEventListener("click", async () => {
     if (!confirm("Delete this assistant's saved chat log on this computer? "
-      + "Stored analyses are not affected -- delete those from the History page.")) return;
+      + "Stored analyses are not affected -- delete those from the Captures page.")) return;
     await chatLog.clearChat();
     await reload();
   });
@@ -506,7 +506,7 @@ export async function initAssistant({ chatLog, listRecords, logEl, formEl, input
     const ollamaNote = rewriteFn
       ? " A local Ollama model is helping understand differently-worded questions; it never invents facts, only picks a known question type."
       : " (Ollama not detected -- exact-phrase matching only. See the Assistant page's suggested questions.)";
-    noteEl.textContent = storageNote + " Uploads are read from wherever the History page stores them."
+    noteEl.textContent = storageNote + " Uploads are read from wherever the Captures page stores them."
       + ollamaNote + " Tip: ↑ recalls your previous question.";
   }
   await reload();
