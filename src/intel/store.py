@@ -43,6 +43,24 @@ def modulation_of(t, centre_hz=None):
             "freq_hz": centre_hz + mid_khz * 1e3 if centre_hz else None}
 
 
+def audio_of(rec, jobs_dir=JOBS_DIR):
+    """The demodulated audio (track_N.wav in its pipeline run's folder) a recording was
+    decoded from, when that run is still on disk. -> file name or None. Recordings
+    from scripts/comms_intel.py (folders of WAV files) have no run and return None."""
+    m = re.search(r"_track_(\d+)$", rec.get("id", ""))
+    run = rec.get("pipeline_run")
+    if not m or not run:
+        return None
+    d = Path(jobs_dir) / run
+    try:
+        doc = json.loads((d / "tracks.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    t = next((t for t in doc.get("tracks", []) if t.get("track") == int(m.group(1))), None)
+    name = ((t or {}).get("listen") or {}).get("audio")
+    return name if name and re.fullmatch(r"track_\d+\.wav", name) and (d / name).is_file() else None
+
+
 def backfill_modulation(rec, jobs_dir=JOBS_DIR):
     """Older recordings were saved without their modulation: read it back from
     the pipeline run they came from, when that run is still on disk. -> True if added"""

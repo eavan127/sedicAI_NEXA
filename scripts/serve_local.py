@@ -396,7 +396,12 @@ class Handler(SimpleHTTPRequestHandler):
         f = d / f"{rid}.json"
         if not f.is_file():
             return self._error(HTTPStatus.NOT_FOUND, "no such recording")
-        return self._send_json(json.loads(f.read_text(encoding="utf-8")))
+        rec = json.loads(f.read_text(encoding="utf-8"))
+        from src.intel import store
+        audio = store.audio_of(rec, PIPELINE_DIR)
+        if audio:                                # served by /api/pipeline/<run>/<file>
+            rec["audio_url"] = f"/api/pipeline/{rec['pipeline_run']}/{audio}"
+        return self._send_json(rec)
 
     def _intel_translate(self, rid):
         """Translate a decoded recording into English with the local AI (Ollama, this
@@ -549,12 +554,32 @@ class Handler(SimpleHTTPRequestHandler):
             if not PIPE_FILE.fullmatch(rest[1]) or not f.is_file():
                 return self._error(HTTPStatus.NOT_FOUND, "no such file")
             body = f.read_bytes()
-            self.send_response(HTTPStatus.OK)
+            # Byte ranges: without them the browser's audio player cannot seek (a click
+            # on the Intercepts timeline would restart the audio from 0).
+            m = re.fullmatch(r"bytes=(\d*)-(\d*)", self.headers.get("Range", "").strip())
+            status, first, last = HTTPStatus.OK, 0, len(body) - 1
+            if m and body and (m.group(1) or m.group(2)):
+                if m.group(1):
+                    first = int(m.group(1))
+                    last = min(int(m.group(2)), len(body) - 1) if m.group(2) else len(body) - 1
+                else:                                   # bytes=-N: the last N bytes
+                    first = max(0, len(body) - int(m.group(2)))
+                if first > last or first >= len(body):
+                    self.send_response(HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
+                    self.send_header("Content-Range", f"bytes */{len(body)}")
+                    self.end_headers()
+                    return None
+                status = HTTPStatus.PARTIAL_CONTENT
+            part = body[first:last + 1]
+            self.send_response(status)
             self.send_header("Content-Type", "image/png" if f.suffix == ".png" else "audio/wav")
-            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Content-Length", str(len(part)))
+            self.send_header("Accept-Ranges", "bytes")
+            if status == HTTPStatus.PARTIAL_CONTENT:
+                self.send_header("Content-Range", f"bytes {first}-{last}/{len(body)}")
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
-            self.wfile.write(body)
+            self.wfile.write(part)
             return None
         if method == "POST" and not rest:
             return self._pipeline_start(query)

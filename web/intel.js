@@ -302,7 +302,9 @@ async function openRecording(root, id) {
     <div style="${H}">When the station was sending</div>
     <div style="margin-bottom:10px;">${activitySummary(rec)}</div>
     <canvas id="intelStrip" height="104" style="width:100%;display:block;background:var(--panel);border:1px solid var(--grid);border-radius:6px;"></canvas>
-    <div class="note" style="margin-top:8px;">Dark bars: ${rec.kind === "voice" ? "speech" : "Morse sent"}. Click to jump to that moment.</div>
+    ${rec.audio_url ? `<audio id="intelAudio" controls preload="metadata" src="${esc(rec.audio_url)}" style="width:100%;margin-top:10px;"></audio>` : ""}
+    <div class="note" style="margin-top:8px;">Dark bars: ${rec.kind === "voice" ? "speech" : "Morse sent"}. Click to jump to that moment${rec.audio_url ? " and play it from there" : ""}.
+      ${rec.audio_url ? "" : "No audio kept for this recording."}</div>
 
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:22px;margin-top:6px;">
       <div>
@@ -383,7 +385,14 @@ async function openRecording(root, id) {
   };
   box.querySelector("#intelSegSearch").addEventListener("input", e => paintSegs(e.target.value));
   paintSegs();
-  drawStrip(box.querySelector("#intelStrip"), rec, t => paintSegs(box.querySelector("#intelSegSearch").value, t));
+  const player = box.querySelector("#intelAudio");
+  drawStrip(box.querySelector("#intelStrip"), rec, t => {
+    paintSegs(box.querySelector("#intelSegSearch").value, t);
+    if (player && Number.isFinite(t)) {
+      player.currentTime = Math.max(0, t - 0.3);   // a moment early, so the first beep is heard whole
+      player.play().catch(() => {});
+    }
+  });
   box.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
