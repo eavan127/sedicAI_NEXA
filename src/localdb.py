@@ -26,6 +26,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import math
 import re
 import secrets
 import sqlite3
@@ -61,19 +62,42 @@ FAMILY_LABELS = ("JAMMING",)
 LABELS = CLASSES + FAMILY_LABELS
 REVIEW_DECISIONS = {"approve": "approved", "reject": "rejected"}
 
-# When to retrain (decided 2026-09-26, see the team's HITL plan). The TRIGGER
-# is performance: experts correcting more than 15% of what they review over a
-# week means the model is struggling on what it now sees -- the same logic as
-# electronic-warfare "urgent reprogramming". The other two are safety checks:
-# enough approved labels to learn from, and a cooldown so it does not churn.
-# A human still starts every retrain; an expert may override with a reason.
+# When to retrain (decided 2026-09-26, revised 2026-11-13). The TRIGGER is
+# performance: experts correcting more than 15% of what the model analysed over
+# a week means it is struggling on what it now sees -- the same logic as
+# electronic-warfare "urgent reprogramming". Instead of waiting for a fixed 100
+# captures before the rate counts, the rate rule asks how SURE we can be that
+# the real rate is above 15%, given how many captures were seen (a binomial
+# test): 4 of 20 corrected (20%) is only 65% sure -- a 15% model often gets
+# that by chance -- while 7 of 20 is 98% and 23 of 100 is 98%. It fires at 95%,
+# so a few unlucky captures cannot trigger it but a real problem does quickly.
+# The cooldown stops the model churning. A human still starts every retrain;
+# an expert may override with a reason.
 RETRAIN_RULES = {
     "window_days": 7,          # look-back for the correction rate
-    "min_reviewed": 100,       # captures analysed in that window before the rate counts
     "max_rate": 0.15,          # corrected captures / analysed captures
-    "min_per_class": 30,       # approved corrections in at least one class
-    "cooldown_days": 7,        # since the last retrain
+    "confidence": 0.95,        # how sure we must be that the real rate is above max_rate
+    "cooldown_days": 30,       # since the last retrain (about one month)
 }
+
+
+def prob_rate_above(corrected: int, analysed: int, line: float) -> float:
+    """How sure we are that the real correction rate is above `line`, after
+    `corrected` of `analysed` captures were corrected. One-sided binomial test:
+    1 - P(a model that is wrong exactly `line` of the time gets at least this
+    many corrections by chance) = P(Binomial(analysed, line) <= corrected - 1).
+    Summed in log space so large counts do not overflow."""
+    n, k = analysed, corrected
+    if n <= 0 or k <= 0:
+        return 0.0
+    lp, lq = math.log(line), math.log1p(-line)
+    total = 0.0
+    for i in range(min(k, n + 1)):
+        total += math.exp(math.lgamma(n + 1) - math.lgamma(i + 1) - math.lgamma(n - i + 1)
+                          + i * lp + (n - i) * lq)
+    return min(1.0, total)
+
+
 JUDGED = ("LFM_RADAR", "FHSS", "JAMMING")
 
 # Sign-in. Two roles; the analyst can do everything the operator can:
@@ -781,40 +805,26 @@ class LocalDB:
                 "SELECT COUNT(DISTINCT analysis_id) FROM corrections WHERE created_at >= ?"
                 " AND status != 'rejected'", (since,)).fetchone()[0]
             last = con.execute("SELECT MAX(created_at) FROM models").fetchone()[0]
-            q = "SELECT corrected_labels FROM corrections WHERE status = 'approved'"
-            args = ()
-            if last:                       # labels not yet used by a retrain
-                q += " AND reviewed_at > ?"
-                args = (last,)
-            per_class = {c: 0 for c in LABELS}
-            for (labels,) in con.execute(q, args):
-                for c in json.loads(labels):
-                    per_class[c] += 1
         rate = corrected / analysed if analysed else 0.0
+        likely = prob_rate_above(corrected, analysed, r["max_rate"])
         days_since = None
         if last:
             then = datetime.strptime(last[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
             days_since = (now - then).total_seconds() / 86400
-        best_class = max(per_class, key=per_class.get)
         conditions = [
-            {"id": "volume", "met": analysed >= r["min_reviewed"],
-             "text": f"At least {r['min_reviewed']} captures analysed in the last {r['window_days']} days "
-                     f"(now {analysed})"},
-            {"id": "rate", "met": analysed >= r["min_reviewed"] and rate > r["max_rate"],
-             "text": f"Experts corrected more than {r['max_rate']:.0%} of them (now {rate:.1%})"},
-            {"id": "data", "met": per_class[best_class] >= r["min_per_class"],
-             "text": f"At least {r['min_per_class']} new approved corrections in one class "
-                     + (f"(most: {best_class} {per_class[best_class]})" if per_class[best_class]
-                        else "(none yet)")},
+            {"id": "rate", "met": likely >= r["confidence"],
+             "text": f"Experts corrected more than {r['max_rate']:.0%} of captures in the last "
+                     f"{r['window_days']} days, with {r['confidence']:.0%} certainty "
+                     f"(now {rate:.1%} of {analysed}, {likely:.0%} likely)"},
             {"id": "cooldown", "met": days_since is None or days_since >= r["cooldown_days"],
              "text": f"At least {r['cooldown_days']} days since the last retrain "
                      + ("(never retrained)" if days_since is None else f"({days_since:.1f} days)")},
         ]
-        triggered = conditions[0]["met"] and conditions[1]["met"]
+        triggered = conditions[0]["met"]
         ready = all(c["met"] for c in conditions)
         return {
             "rules": r, "analysed": analysed, "corrected": corrected, "rate": rate,
-            "approved_new_per_class": per_class, "last_retrain_at": last,
+            "rate_above_likelihood": likely, "last_retrain_at": last,
             "days_since_retrain": days_since, "conditions": conditions,
             "triggered": triggered, "recommended": ready,
             "summary": ("Retraining recommended: every rule is met." if ready else

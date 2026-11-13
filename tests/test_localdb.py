@@ -15,7 +15,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from src.localdb import Actor, LocalDB, now_iso  # noqa: E402
+from src.localdb import Actor, LocalDB, now_iso, prob_rate_above  # noqa: E402
 import serve_local  # noqa: E402
 
 ME = Actor("eavan", "operator", "127.0.0.1")
@@ -408,33 +408,40 @@ def test_corrections_over_http(server):
 def test_trigger_quiet_on_an_empty_database(db):
     s = db.retrain_status()
     assert not s["triggered"] and not s["recommended"] and s["analysed"] == 0
-    assert [c["id"] for c in s["conditions"]] == ["volume", "rate", "data", "cooldown"]
-    assert s["conditions"][3]["met"]            # never retrained: no cooldown
+    assert [c["id"] for c in s["conditions"]] == ["rate", "cooldown"]
+    assert s["conditions"][1]["met"]            # never retrained: no cooldown
+    assert s["rules"]["cooldown_days"] == 30
 
 
-def test_trigger_fires_on_correction_rate_and_needs_data(db):
-    rules = {"min_reviewed": 10, "min_per_class": 2}
+def test_rate_rule_needs_certainty_not_a_capture_count():
+    # 4 of 20 is 20%, but a 15% model gets that by chance often; 7 of 20 it does not.
+    assert prob_rate_above(4, 20, 0.15) < 0.95 < prob_rate_above(7, 20, 0.15)
+    assert prob_rate_above(0, 37, 0.15) == 0.0 and prob_rate_above(0, 0, 0.15) == 0.0
+    assert prob_rate_above(30, 100, 0.15) > 0.999
+    # Large counts do not overflow.
+    assert 0.0 <= prob_rate_above(1600, 10000, 0.15) <= 1.0
+
+
+def test_trigger_fires_on_a_certain_correction_rate(db):
     for i in range(10):
         db.save_analysis(record(f"t{i}", created_at=now_iso(),
                                 duration_s=0.05, file_path=f"iq/t{i}/x.f32"), ME)
-    for i in range(2):                           # 2 of 10 corrected = 20% > 15%
+    for i in range(2):                           # 2 of 10: 20%, but not certain
         db.create_correction(correction(f"t{i}"), ME)
-    s = db.retrain_status(rules=rules)
-    assert s["analysed"] == 10 and s["corrected"] == 2 and abs(s["rate"] - 0.2) < 1e-9
-    assert s["triggered"] and not s["recommended"]          # nothing approved yet
-    for c in db.list_corrections(status="pending"):
-        db.review_correction(c["id"], "approve", "", EXPERT)
-    s = db.retrain_status(rules=rules)
-    assert s["approved_new_per_class"]["FHSS"] == 2 and s["recommended"]
+    s = db.retrain_status()
+    assert s["corrected"] == 2 and abs(s["rate"] - 0.2) < 1e-9 and not s["triggered"]
+    for i in range(2, 6):                        # 6 of 10: certainly above 15%
+        db.create_correction(correction(f"t{i}"), ME)
+    s = db.retrain_status()
+    assert s["rate_above_likelihood"] > 0.95 and s["triggered"] and s["recommended"]
 
 
 def test_rejected_corrections_do_not_count_toward_the_rate(db):
-    rules = {"min_reviewed": 1}
     db.save_analysis(record("r1", created_at=now_iso(),
                             duration_s=0.05, file_path="iq/r1/x.f32"), ME)
     c = db.create_correction(correction("r1"), ME)
     db.review_correction(c["id"], "reject", "wrong", EXPERT)
-    assert db.retrain_status(rules=rules)["corrected"] == 0
+    assert db.retrain_status()["corrected"] == 0
 
 
 def test_trigger_status_over_http(server):

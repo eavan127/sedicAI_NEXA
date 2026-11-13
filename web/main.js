@@ -2188,23 +2188,19 @@ async function renderTrigger(box) {
     const st = await retrainStatus();
     const r = st.rules, cond = Object.fromEntries(st.conditions.map(c => [c.id, c]));
     const state = st.recommended ? "go" : st.triggered ? "warn" : "ok";
-    const best = Math.max(0, ...Object.values(st.approved_new_per_class || {}));
-    const bestCls = Object.entries(st.approved_new_per_class || {}).find(([, n]) => n === best && n > 0)?.[0];
     const pctOf = (v, t) => Math.max(0, Math.min(100, v / t * 100));
-    const rateMax = Math.max(r.max_rate * 2, st.rate * 1.1);
-    // One row per rule, each with its own bar: a correction rate past 15%
-    // means nothing on its own while another rule is still unmet.
+    const line = Math.round(r.max_rate * 100), need = Math.round(r.confidence * 100);
+    const likely = st.rate_above_likelihood || 0;
+    // One row per rule, each with its own bar. The rate bar shows how SURE we
+    // are that the real rate is above the line (a binomial test on the counts),
+    // so a handful of captures cannot trip it; the tick is the certainty needed.
     const reqs = [
-      { id: "volume", name: `Captures analysed in the last ${r.window_days} days`, val: `${st.analysed} / ${r.min_reviewed}`,
-        fill: pctOf(st.analysed, r.min_reviewed), note: "Enough traffic for the correction rate to mean something." },
-      { id: "rate", name: `Correction rate above ${Math.round(r.max_rate * 100)}%`, val: `${(st.rate * 100).toFixed(1)}%`,
-        fill: pctOf(st.rate, rateMax), mark: pctOf(r.max_rate, rateMax), markLabel: `${Math.round(r.max_rate * 100)}%`,
-        note: `${st.corrected} of ${st.analysed} captures had a correction that was not rejected`
-          + (cond.volume?.met ? "." : `; it only counts once ${r.min_reviewed} captures are reached.`) },
-      { id: "data", name: `Approved corrections in one class`, val: `${best} / ${r.min_per_class}`,
-        fill: pctOf(best, r.min_per_class), note: bestCls ? `Most so far: ${bestCls}.` : "None approved since the last retrain yet." },
+      { id: "rate", name: `Correction rate above ${line}%`, val: `${(st.rate * 100).toFixed(1)}% · ${Math.round(likely * 100)}% sure`,
+        fill: likely * 100, mark: need, markLabel: `${need}% certainty`,
+        note: `${st.corrected} of ${st.analysed} captures in the last ${r.window_days} days had a correction that was not rejected. `
+          + `Counts once we are ${need}% sure the real rate is above ${line}%, not just a few unlucky captures.` },
       { id: "cooldown", name: `Days since the last retrain`, val: st.days_since_retrain == null ? "never retrained" : `${st.days_since_retrain.toFixed(1)} / ${r.cooldown_days}`,
-        fill: st.days_since_retrain == null ? 100 : pctOf(st.days_since_retrain, r.cooldown_days), note: "Stops the model being retrained too often." },
+        fill: st.days_since_retrain == null ? 100 : pctOf(st.days_since_retrain, r.cooldown_days), note: `At most one retrain a month (${r.cooldown_days} days), so the model is not retrained too often.` },
     ];
     const metCount = reqs.filter(q => cond[q.id]?.met).length;
     box.innerHTML =

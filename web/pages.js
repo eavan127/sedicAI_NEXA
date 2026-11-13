@@ -237,67 +237,15 @@ export function drawAttention(canvas, session, windowIndex) {
  * hardcoded, so the page cannot go stale after someone swaps a checkpoint
  * and rebuilds. The page states what is running; it does not claim this
  * architecture is the best-performing one. */
-export function modelCardHtml(card, which) {
-  // Built from the page's own pieces (.kpi tiles, .barlist bars, .tier-chip
-  // chips, as on the History page) so it reads as part of the same console.
-  const ens = which === "ensemble";
-  const arch = ens ? card.architecture : card.member_architecture;
-  const total = ens ? card.parameters * 5 : card.parameters;
+export function modelCardHtml(card) {
+  // Only the class list: the tier chips, as on the History page.
   const judged = new Set(card.judged_classes || []);
-  const fmt = n => n.toLocaleString();
-  const branchSum = Object.values(card.branches).reduce((a, b) => a + b, 0);
-  const parts = [
-    ...Object.entries(card.branches).map(([name, n]) => [name.replace("_branch", "").toUpperCase() + " branch", n]),
-    ["Fusion, pooling and head", Math.max(0, card.parameters - branchSum)],
-  ];
-  const kpi = (label, value, sub) => `<div class="kpi"><div class="kpi-label">${label}</div>`
-    + `<div class="kpi-value mc-v">${value}</div>${sub ? `<div class="mc-sub">${sub}</div>` : ""}</div>`;
-  const bar = (label, frac, value, strong = false) => `<div class="barrow mc-barrow"><div class="barlabel"${strong ? ' style="font-weight:700"' : ""}>${label}</div>`
-    + `<div class="bartrack"><div class="barfill" style="width:${(frac * 100).toFixed(1)}%"></div></div><div class="barvalue">${value}</div></div>`;
-  const head = t => `<div class="kpi-label mc-head">${t}</div>`;
-
-  const th = Object.values(card.thresholds || {});
-  const oneLine = th.length && th.every(v => v === th[0]);
-  return `<div class="kpi-row">`
-    + kpi("Model", card.name || arch, card.data_version
-      ? `data ${card.data_version} · seed ${card.seed} · epoch ${card.epoch}` : "")
-    + kpi("Architecture", arch, ens ? `5 × ${card.member_architecture}, scores averaged`
-      : "CNN + expert, spectrum and physics features")
-    + kpi("Parameters", fmt(total), ens ? `5 × ${fmt(card.parameters)}` : "")
-    + kpi("Classes", card.classes.length, `${judged.size} judged`)
-    + kpi("Window", `${(card.window_len / card.fs * 1e6).toFixed(0)} µs`, `${card.window_len} samples at ${(card.fs / 1e6).toFixed(1)} MHz`)
-    + `</div>`
-
-    + head(`One member: ${fmt(card.parameters)} parameters`)
-    + `<div class="barlist">${parts.map(([name, n]) => bar(name, n / card.parameters, `${Math.round(n / card.parameters * 100)}%`)).join("")}</div>`
-
-    + head("Specification")
-    + `<div class="kpi-row">`
-    + kpi("Input", `(2, ${card.window_len})`, "I and Q channels")
-    + kpi("Output", "Sigmoid, multi-label", "each class decided on its own")
-    + kpi("Pooling", "Energy-gated attention", "weights windows that carry signal")
-    + kpi("Sampling", "SNR-weighted", "10^(−SNR/20)")
-    + kpi("Runtime", "onnxruntime-web", "WASM, exported from .pt")
-    + `</div>`
-
-    + head("Classes")
+  return `<div class="kpi-label mc-head">Classes</div>`
     + `<div class="tier-row">${card.classes.map(c => {
       const tier = TIER_OF[c] || "Empty";
       return `<span class="tier-chip" style="border-left-color:${TIER_COLOR[tier] || GRID}"><b>${c}</b>`
         + ` <span class="dim">${tier}${judged.has(c) ? " · judged" : ""}</span></span>`;
-    }).join("")}</div>`
-
-    + head("Decision thresholds")
-    + (oneLine
-      ? `<div class="note" style="margin-bottom:6px;">Every class is reported once its score crosses `
-        + `<strong>${th[0].toFixed(2)}</strong>. This model has no per-class calibration yet `
-        + `(configs/default.yaml web_threshold).</div>`
-      : `<div class="note" style="margin-bottom:6px;">A class is reported once its score crosses its own line. `
-        + `Judged classes (bold) are tuned for at least ${Math.round((card.benchmark_recall || 0.8) * 100)}% recall.</div>`
-        + `<div class="barlist">${Object.entries(card.thresholds).map(([c, v]) => bar(c, v, v.toFixed(2), judged.has(c))).join("")}</div>`)
-
-    + `<div class="note" style="margin-top:12px;">Read from the checkpoint at build time, not hardcoded. `
-    + `Describes what is running; not a claim that this architecture is the best performing.</div>`;
+    }).join("")}</div>`;
 }
 
 // ---------------------------------------------------------------------------

@@ -21,7 +21,25 @@ const CLASSES = ["BPSK", "QPSK", "16QAM", "64QAM", "LFM_RADAR", "FHSS", "JAMMING
 const JUDGED = ["LFM_RADAR", "FHSS", "JAMMING"];
 const ROLES = ["operator", "analyst"];
 const PEOPLE = { operator: "operator", analyst: "analyst" };
-const RULES = { window_days: 7, min_reviewed: 100, max_rate: 0.15, min_per_class: 30, cooldown_days: 7 };
+const RULES = { window_days: 7, max_rate: 0.15, confidence: 0.95, cooldown_days: 30 };
+
+// localdb.py prob_rate_above: how sure we are the real correction rate is above
+// `line` (one-sided binomial test), P(Binomial(n, line) <= k - 1).
+function lgamma(z) {            // Lanczos; exact enough for counts
+  const g = 7, c = [0.99999999999980993, 676.5203681218851, -1259.1392167224028, 771.32342877765313,
+    -176.61502916214059, 12.507343278686905, -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7];
+  if (z < 0.5) return Math.log(Math.PI / Math.sin(Math.PI * z)) - lgamma(1 - z);
+  z -= 1; let x = c[0]; for (let i = 1; i < g + 2; i++) x += c[i] / (z + i);
+  const t = z + g + 0.5; return 0.5 * Math.log(2 * Math.PI) + (z + 0.5) * Math.log(t) - t + Math.log(x);
+}
+function probRateAbove(k, n, line) {
+  if (n <= 0 || k <= 0) return 0;
+  const lp = Math.log(line), lq = Math.log1p(-line);
+  let total = 0;
+  for (let i = 0; i < Math.min(k, n + 1); i++)
+    total += Math.exp(lgamma(n + 1) - lgamma(i + 1) - lgamma(n - i + 1) + i * lp + (n - i) * lq);
+  return Math.min(1, total);
+}
 const ROLLING_IQ_BYTES = 100 * 1024 ** 2;        // a phone, not a laptop: 100 MB
 const THREAT_VERDICTS = ["Hostile", "Military"];
 const SHIPPED = { single: "shipped best_model.pt", ensemble: "shipped 5-model submission" };
@@ -157,21 +175,17 @@ function retrainStatus() {
   const analysed = S.analyses.filter(a => a.created_at >= since).length;
   const corrected = new Set(S.corrections.filter(c => c.created_at >= since && c.status !== "rejected").map(c => c.analysis_id)).size;
   const last = S.models.reduce((m, x) => (!m || x.created_at > m ? x.created_at : m), null);
-  const perClass = Object.fromEntries(CLASSES.map(c => [c, 0]));
-  for (const c of S.corrections) if (c.status === "approved" && (!last || (c.reviewed_at || "") > last)) c.corrected_labels.forEach(l => perClass[l]++);
   const rate = analysed ? corrected / analysed : 0;
+  const likely = probRateAbove(corrected, analysed, RULES.max_rate);
   const daysSince = last ? (Date.now() - new Date(last).getTime()) / 864e5 : null;
-  const best = Object.keys(perClass).reduce((a, b) => (perClass[b] > perClass[a] ? b : a));
   const conditions = [
-    { id: "volume", met: analysed >= RULES.min_reviewed, text: `At least ${RULES.min_reviewed} captures analysed in the last ${RULES.window_days} days (now ${analysed})` },
-    { id: "rate", met: analysed >= RULES.min_reviewed && rate > RULES.max_rate, text: `Experts corrected more than ${RULES.max_rate * 100}% of them (now ${(rate * 100).toFixed(1)}%)` },
-    { id: "data", met: perClass[best] >= RULES.min_per_class, text: `At least ${RULES.min_per_class} new approved corrections in one class `
-      + (perClass[best] ? `(most: ${best} ${perClass[best]})` : "(none yet)") },
+    { id: "rate", met: likely >= RULES.confidence, text: `Experts corrected more than ${RULES.max_rate * 100}% of captures in the last ${RULES.window_days} days, `
+      + `with ${RULES.confidence * 100}% certainty (now ${(rate * 100).toFixed(1)}% of ${analysed}, ${Math.round(likely * 100)}% likely)` },
     { id: "cooldown", met: daysSince === null || daysSince >= RULES.cooldown_days, text: `At least ${RULES.cooldown_days} days since the last retrain `
       + (daysSince === null ? "(never retrained)" : `(${daysSince.toFixed(1)} days)`) },
   ];
-  const triggered = conditions[0].met && conditions[1].met, ready = conditions.every(c => c.met);
-  return { rules: RULES, analysed, corrected, rate, approved_new_per_class: perClass, last_retrain_at: last,
+  const triggered = conditions[0].met, ready = conditions.every(c => c.met);
+  return { rules: RULES, analysed, corrected, rate, rate_above_likelihood: likely, last_retrain_at: last,
            days_since_retrain: daysSince, conditions, triggered, recommended: ready,
            summary: ready ? "Retraining recommended: every rule is met." : triggered ? "Triggered, but not every safety check is met yet."
              : "Not triggered: the model is not being corrected often enough to need it." };
