@@ -36,12 +36,14 @@ export class SdrConnectReceiver {
   /**
    * host/port: the laptop running SDRconnect (127.0.0.1 = this one).
    * decode: also record + decode each transmission on the server (Morse / Whisper).
+   * llm: and have the local AI (Ollama) read what was decoded.
    * onDecode(entry): called once for every new decoded transmission.
    */
   constructor({ dwellS, host = "127.0.0.1", port = 5454, device = "primary", decode = true,
-                whisperModel = "small", language = null, onDecode = () => {}, timeoutS = 25 }) {
+                whisperModel = "small", language = null, llm = false, onDecode = () => {}, timeoutS = 25 }) {
     this.dwellS = dwellS;
-    this.opts = { host, port, device, decode, whisper_model: whisperModel, language };
+    // llm: the local AI (Ollama) reads each decoded transmission, as on the KiwiSDR page
+    this.opts = { host, port, device, decode, whisper_model: whisperModel, language, llm };
     this.onDecode = onDecode;
     this.timeoutS = timeoutS;
     this.index = 0;
@@ -153,7 +155,8 @@ export class SdrConnectReceiver {
 export function decodeLine(d) {
   if (d.error) return `Decode failed: ${d.error}`;
   if (!d.tracks?.length) return `Recording ${d.seconds} s (${d.why}): nothing above the noise`;
-  const heard = d.tracks.map(t => `${t.kind} ${t.f_lo_khz >= 0 ? "+" : ""}${t.f_lo_khz.toFixed(1)} kHz`
-    + (t.text ? ` "${t.text.slice(0, 60)}"` : "")).join("; ");
+  const heard = d.tracks.map(t => `${t.answer || t.kind} ${t.f_lo_khz >= 0 ? "+" : ""}${t.f_lo_khz.toFixed(1)} kHz`
+    + (t.text ? ` "${t.text.slice(0, 60)}"` : "")
+    + (t.reading ? ` · AI: ${t.reading.slice(0, 120)}` : "")).join("; ");
   return `Decoded ${d.seconds} s: ${heard}${d.intel_ids?.length ? " · added to Decoded review in History" : ""}`;
 }

@@ -89,6 +89,19 @@ def test_snap_rate_accepts_a_slow_start_but_not_a_stranger():
     assert live.snap_rate(434_200, dev=440_000) == 440_000        # the device's own rate comes first
 
 
+def test_played_file_uses_its_own_rate_not_the_opening_burst(monkeypatch):
+    """SDRconnect sends a file in a burst at first: 390.7 kS/s measured for a 250 kS/s file."""
+    class B:
+        t_first, error, rate_measured = 0.0, None, None
+        info = {"device_sample_rate": "250000", "active_device": "IQ File"}
+        def measured_rate(self):
+            return 390_700.0
+    monkeypatch.setattr(live.time, "sleep", lambda s: None)
+    assert live.settle_rate(B()) == 250e3
+    B.info = {"device_sample_rate": "250000", "active_device": "RSPduo"}   # a live radio: measured as before
+    assert live.settle_rate(B()) == round(390_700.0, -2)
+
+
 def test_delivery_problem_names_lost_samples_and_pauses():
     assert live.delivery_problem(6_000_000, 500e3, 12.0, 0.05) is None
     lost = live.delivery_problem(3_000_000, 500e3, 12.0, 0.05)

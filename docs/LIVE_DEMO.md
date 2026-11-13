@@ -126,6 +126,24 @@ python scripts/live_sdrconnect.py --host 192.168.137.5 --whisper-model medium
   page either, *if* their copy is up to date: `git checkout eavan-accuracy-plan` and `git pull`.
   A login page there means an old branch or download (from before 2 Oct).
 
+## Playing a recorded file: give the sample rate
+
+SDRconnect sends a played file in a fast burst at the start, so the bridge's 2-second rate measurement can
+come out far too high (390.7 kS/s measured for a 250 kS/s file, 13 Nov). With the wrong rate every Morse
+dot and dash looks too short and the decoder reads "no text", the frequencies and the auto-tune land in the
+wrong place, and a false "samples did not arrive" warning appears. The bridge now believes SDRconnect's own
+rate for an IQ file, but to be sure, give it: all dataset files are **250 kS/s**.
+
+```powershell
+python scripts/live_sdrconnect.py --fs 250000 --whisper-model medium --llm --autotune
+```
+
+Leave `--fs` out for the live RSPduo (walkie-talkie demo): there the measurement is right.
+
+Order that works: **load the file in SDRconnect → start the bridge → press play.** After loading a
+*different* file, stop the bridge (Ctrl+C) and start it again; it asks SDRconnect for the IQ stream only
+once when it connects. Asking again while nothing played crashed SDRconnect (13 Nov), so it no longer does.
+
 ## Auto-tune: the red line jumps onto the signal
 
 SDRconnect opens a file wherever it was last tuned. The bridge can tune it through the API:
