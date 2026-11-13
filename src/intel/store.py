@@ -19,6 +19,7 @@ from src.config import REPO_ROOT
 from . import audio
 
 INTEL_DIR = REPO_ROOT / "results" / "comms_intel"
+JOBS_DIR = REPO_ROOT / "results" / "pipeline" / "jobs"
 VERSION = 1
 NO_WORDS = "Whisper listened to this and recognised no words."
 NO_MORSE = "The Morse decoder listened to this and could read no text."
@@ -27,6 +28,39 @@ NO_DIGITAL = "The RTTY / PSK31 decoder could read no clean text from this signal
 
 def safe_id(stem):
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", stem).strip("_") or "recording"
+
+
+def modulation_of(t, centre_hz=None):
+    """How a pipeline track was sent over the air (NBFM, AM, USB, CW, ...), as
+    the zoom-in named it. Kept so the page can say "narrow FM (walkie-talkie)"
+    and not only "voice". -> dict or None"""
+    L = t.get("listen") or {}
+    if not L.get("kind"):
+        return None
+    mid_khz = (t["f_lo_khz"] + t["f_hi_khz"]) / 2
+    return {"kind": L["kind"], "why": L.get("why"),
+            "width_khz": round(t["f_hi_khz"] - t["f_lo_khz"], 1),
+            "freq_hz": centre_hz + mid_khz * 1e3 if centre_hz else None}
+
+
+def backfill_modulation(rec, jobs_dir=JOBS_DIR):
+    """Older recordings were saved without their modulation: read it back from
+    the pipeline run they came from, when that run is still on disk. -> True if added"""
+    if rec.get("modulation") or not rec.get("pipeline_run"):
+        return False
+    m = re.search(r"_track_(\d+)$", rec.get("id", ""))
+    f = Path(jobs_dir) / rec["pipeline_run"] / "tracks.json"
+    if not m or not f.is_file():
+        return False
+    try:
+        doc = json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    t = next((t for t in doc.get("tracks", []) if t.get("track") == int(m.group(1))), None)
+    mod = modulation_of(t, (doc.get("source") or {}).get("centre_hz")) if t else None
+    if mod:
+        rec["modulation"] = mod
+    return bool(mod)
 
 
 def summary_row(rec):
@@ -38,6 +72,7 @@ def summary_row(rec):
         "category": r.get("category"), "confidence": r.get("confidence"),
         "summary": r.get("summary") or said or rec.get("note"), "call_signs": r.get("call_signs", []),
         "error": r.get("error"), "model": r.get("model"),
+        "modulation": (rec.get("modulation") or {}).get("kind"),
     }
 
 
@@ -63,6 +98,10 @@ def write_index(out):
         try:
             rec = json.loads(p.read_text(encoding="utf-8"))
             if isinstance(rec, dict):
+                if backfill_modulation(rec):
+                    tmp = p.with_name(f"{p.stem}.{os.getpid()}.tmp")
+                    tmp.write_text(json.dumps(rec, indent=1, default=float), encoding="utf-8")
+                    _replace(tmp, p)
                 rows.append(summary_row(rec))
         except (json.JSONDecodeError, KeyError):
             continue
@@ -137,6 +176,9 @@ def save_decoded_tracks(run_id, source, tracks, run_dir, out=INTEL_DIR, keep_emp
                "chunk_s": chunk_s, "chunks": chunks, "segments": segments, "dropped_noise_segments": dropped,
                "wpm_median": float(statistics.median(wpm)) if wpm else None, "pipeline_run": run_id,
                "processed_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+        mod = modulation_of(t, centre)
+        if mod:
+            rec["modulation"] = mod
         if morse:
             rec["tone_purity"] = morse["tone_purity"]
         elif dig:

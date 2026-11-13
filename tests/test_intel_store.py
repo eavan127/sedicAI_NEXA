@@ -118,3 +118,24 @@ def test_only_tracks_whisper_heard_once_each(tmp_path):
     morse = {"track": 3, "f_lo_khz": 1.0, "f_hi_khz": 2.0, "listen": {"kind": "CW", "audio": name, "morse": "CQ"}}
     tracks = [joined, dict(joined, track=2), morse, {"track": 4, "f_lo_khz": 1, "f_hi_khz": 2}]
     assert store.save_decoded_tracks("r1", {"file": "a.wav"}, tracks, run, out) == ["r1_track_1"]
+
+
+def test_modulation_kept_so_the_page_can_say_narrow_fm(tmp_path):
+    run, out = tmp_path / "run", tmp_path / "intel"
+    run.mkdir()
+    store.save_decoded_tracks("r1", SOURCE, [track(1, wav(run), "alpha bravo", why="steady loudness: FM")], run, out)
+    rec = json.loads((out / "r1_track_1.json").read_text(encoding="utf-8"))
+    assert rec["kind"] == "voice" and rec["modulation"]["kind"] == "NBFM"
+    assert rec["modulation"]["width_khz"] == 2.0 and abs(rec["modulation"]["freq_hz"] - 145.03e6) < 1
+    row = json.loads((out / "index.json").read_text(encoding="utf-8"))["recordings"][0]
+    assert row["modulation"] == "NBFM"
+
+
+def test_older_recordings_get_their_modulation_from_the_run(tmp_path):
+    out, jobs = tmp_path / "intel", tmp_path / "jobs"
+    (jobs / "r9").mkdir(parents=True)
+    (jobs / "r9" / "tracks.json").write_text(json.dumps({"source": SOURCE, "tracks": [
+        {"track": 2, "f_lo_khz": -10.0, "f_hi_khz": -4.0, "listen": {"kind": "USB", "why": "one-sided"}}]}))
+    rec = {"id": "r9_track_2", "pipeline_run": "r9", "kind": "voice"}
+    assert store.backfill_modulation(rec, jobs) and rec["modulation"]["kind"] == "USB"
+    assert not store.backfill_modulation({"id": "x", "kind": "voice"}, jobs)     # audio-only: nothing to read

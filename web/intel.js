@@ -11,6 +11,36 @@ const KIND_LABEL = { morse: "Morse (CW)", voice: "Voice", silent: "No signal",
   rtty: "RTTY (teleprinter)", psk31: "PSK31 (keyboard chat)", psk63: "PSK63", psk125: "PSK125" };
 const isDigital = rec => /^(rtty|psk)/.test(rec.kind || "");
 
+// How the signal was sent over the air (the pipeline's zoom-in names it), in
+// plain words: the Type column and the "How it was sent" line of a recording.
+const MOD_LABEL = {
+  NBFM: "Narrow FM (NBFM, walkie-talkie)", WBFM: "Broadcast FM (WBFM)", AM: "AM (with carrier)",
+  AM_SC: "AM (no carrier)", USB: "Upper sideband (USB)", LSB: "Lower sideband (LSB)", CW: "Morse (CW)",
+  CARRIER: "Plain carrier", RTTY: "RTTY (teleprinter)", PSK31: "PSK (keyboard chat)", AFSK: "AFSK (audio tones)",
+};
+const MOD_HOW = {
+  NBFM: "The walkie-talkie sends it as narrowband FM: the voice makes the radio wave’s frequency wobble slightly, "
+    + "inside a narrow channel about 12.5 kHz wide. NEXA finds that narrow channel, recognises it as NBFM, "
+    + "turns it back into voice, and Whisper writes down the words.",
+  WBFM: "Sent as broadcast FM: the sound makes the wave’s frequency swing widely, across a channel about 200 kHz wide. "
+    + "NEXA recognises it as wide FM, turns it back into sound, and Whisper writes down the words.",
+  AM: "Sent as AM: the voice makes the radio wave grow stronger and weaker, around a steady carrier. "
+    + "NEXA recognises it as AM, turns it back into voice, and Whisper writes down the words.",
+  AM_SC: "Sent as AM without its carrier: the voice changes the wave’s strength, but the steady carrier is left out. "
+    + "NEXA recognises it, turns it back into voice, and Whisper writes down the words.",
+  USB: "Sent as single sideband (upper): only one half of an AM signal is sent, about 3 kHz wide, which needs less power. "
+    + "NEXA recognises the one-sided band, turns it back into voice, and Whisper writes down the words.",
+  LSB: "Sent as single sideband (lower): only one half of an AM signal is sent, about 3 kHz wide, which needs less power. "
+    + "NEXA recognises the one-sided band, turns it back into voice, and Whisper writes down the words.",
+  CW: "Sent as Morse code: a single tone switched on and off in dots and dashes. "
+    + "NEXA finds the tone and the Morse decoder turns the pattern into letters.",
+};
+/** "Narrow FM (NBFM, walkie-talkie)" for a recording or index row, else the old kind label. */
+export function typeLabel(rec) {
+  const mod = rec.modulation?.kind || rec.modulation;
+  return (typeof mod === "string" && MOD_LABEL[mod]) || KIND_LABEL[rec.kind] || rec.kind;
+}
+
 const esc = t => String(t ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 function clock(sec) {
@@ -145,6 +175,12 @@ export function inShort(rec) {
     : isDigital(rec) ? `${KIND_LABEL[rec.kind] || rec.kind} text${rec.decoded?.baud ? `, ${rec.decoded.baud} baud` : ""}`
     : "no clear signal";
   lines.push(["What it is", `${kind}${top ? `, mostly from a station calling itself <b>${esc(top[0])}</b>` : ""}`]);
+  const mod = rec.modulation;
+  if (mod?.kind) {
+    const where = mod.freq_hz ? ` at ${(mod.freq_hz / 1e6).toFixed(4)} MHz` : "";
+    lines.push(["How it was sent", `<b>${esc(MOD_LABEL[mod.kind] || mod.kind)}</b>${esc(where)}. `
+      + esc(MOD_HOW[mod.kind] || mod.why || "")]);
+  }
   const n = (rec.segments || []).length;
   lines.push(["How much", `${n} message${n === 1 ? "" : "s"} found in ${plainHours(rec.analysed_s)} of listening`]);
   const coded = /cod|group|cipher/i.test(`${r.category || ""} ${r.summary || ""}`) || (f.five_char_groups_share || 0) > 0.2;
@@ -186,7 +222,7 @@ export function decodedTableHtml(rows) {
     + rows.slice(0, DECODED_SHOWN).map(r => `<tr data-decoded="${esc(r.id)}" style="cursor:pointer;" title="Open this signal">
       <td style="white-space:nowrap;">${esc(r.recorded_at ? new Date(r.recorded_at).toLocaleString() : "—")}
         <div class="note" style="margin:4px 0 0;overflow-wrap:anywhere;white-space:normal;">${esc(r.file)}</div></td>
-      <td style="white-space:nowrap;">${esc(KIND_LABEL[r.kind] || r.kind)}</td>
+      <td>${esc(typeLabel(r))}${r.modulation && r.kind === "voice" ? `<div class="note" style="margin:4px 0 0;">Voice</div>` : ""}</td>
       <td>${esc((r.call_signs || []).slice(0, 4).join(", "))}</td>
       <td>${esc(r.summary || r.error || "Decoded. Open to read the text.")}</td>
       <td class="row-actions"><button class="mini">Open</button></td></tr>`).join("")
@@ -236,7 +272,7 @@ async function openRecording(root, id) {
     <div style="${BIG}">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
       <div>
-        <div style="font-size:20px;font-weight:700;">${esc(KIND_LABEL[rec.kind] || rec.kind)} recording · ${esc(plainDate(rec.recorded_at))}</div>
+        <div style="font-size:20px;font-weight:700;">${esc(typeLabel(rec))} recording · ${esc(plainDate(rec.recorded_at))}</div>
         <div class="note">File ${esc(rec.file)}</div>
       </div>
       <button class="mini" id="intelClose">Close</button>

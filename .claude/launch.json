@@ -23,7 +23,7 @@
     },
     {
       "name": "nexa-local",
-      "runtimeExecutable": "python",
+      "runtimeExecutable": ".venv/Scripts/python.exe",
       "runtimeArgs": [
         "scripts/serve_local.py",
         "--port",
