@@ -35,6 +35,21 @@ def model_dir() -> Path:
     return Path(os.getenv("XDG_CACHE_HOME", str(Path.home() / ".cache"))) / "whisper"
 
 
+def model_for_this_pc():
+    """The Whisper model to use when none is asked for: DEFAULT_MODEL (medium) needs
+    3-5 GB free and crashes Python outright when it does not get it, so a PC with
+    under 12 GB of RAM uses small (13 Nov 2026: medium segfaulted on a 7.3 GB laptop)."""
+    have = installed_models()
+    try:
+        import psutil
+        ram_gb = psutil.virtual_memory().total / 2 ** 30
+    except Exception:                       # noqa: BLE001 -- unknown: keep the default
+        ram_gb = 99.0
+    if ram_gb < 12 and "small" in have:
+        return "small"
+    return DEFAULT_MODEL if DEFAULT_MODEL in have or not have else have[-1]
+
+
 def installed_models():
     """Names of the models on this machine, e.g. ['base', 'medium']."""
     d = model_dir()

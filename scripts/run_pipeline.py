@@ -76,7 +76,16 @@ def plot(iq, answers, truth, path):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    img = scenes.spectrogram(iq)
+    if getattr(iq, "lazy", False):
+        # piece by piece, then averaged down to at most 4000 columns
+        step = scenes.SCENE_SAMPLES
+        img = np.concatenate([scenes.spectrogram(iq[s:s + step]) for s in range(0, len(iq) - step + 1, step)]
+                             or [scenes.spectrogram(iq[0:len(iq)])], axis=1)
+        k = max(1, img.shape[1] // 4000)
+        if k > 1:
+            img = img[:, :img.shape[1] // k * k].reshape(img.shape[0], -1, k).mean(axis=2)
+    else:
+        img = scenes.spectrogram(iq)
     t_ms = len(iq) / FS * 1e3
     fig, ax = plt.subplots(figsize=(max(8, min(24, t_ms / 4)), 5.5))
     ax.imshow(img, aspect="auto", origin="lower", cmap="magma", extent=[0, t_ms, -FS / 2e6, FS / 2e6])
@@ -138,7 +147,8 @@ def main():
     truth = None
     source = None
     if args.iq:
-        iq, source = iqio.load(args.iq, fs=args.fs, dtype=args.dtype, max_s=args.max_seconds, rng=rng)
+        iq, source, native_iq = iqio.load_lazy(args.iq, fs=args.fs, dtype=args.dtype, max_s=args.max_seconds,
+                                               rng=rng, max_samples=MAX_LISTEN_SAMPLES)
         print(f"{source['file']}: {source['format']}, {source['fs_in'] / 1e6:.3f} MS/s"
               + (" (resampled to 3.2)" if source["resampled"] else "")
               + (f", centre {source['centre_hz'] / 1e6:.4f} MHz" if source["centre_hz"] else "")
@@ -169,11 +179,10 @@ def main():
             # the same at 3.2 MS/s 670 MB (too much for an 8 GB laptop next to Whisper).
             native, sr = iqio.load_native(args.iq, fs=args.fs, dtype=args.dtype, max_s=args.listen_seconds,
                                           max_samples=MAX_LISTEN_SAMPLES)
-            if len(native) / sr > len(iq) / FS + 0.5:
-                heard, heard_fs = native, sr
-                source["listened_s"] = round(len(native) / sr, 2)
-                print(f"listening to {len(native) / sr:.1f} s of the file at {sr / 1e3:.1f} kS/s "
-                      f"(the detector scanned {len(iq) / FS:.1f} s)")
+            heard, heard_fs = native, sr               # the zoom-in reads the file's own samples
+            source["listened_s"] = round(len(native) / sr, 2)
+            print(f"listening to {len(native) / sr:.1f} s of the file at {sr / 1e3:.1f} kS/s "
+                  f"(the detector scanned {len(iq) / FS:.1f} s)")
             del native
         listen.listen_all(heard, answers, out, rng=rng, fs=heard_fs, use_whisper=not args.no_whisper,
                           whisper_model=args.whisper_model, language=args.language,

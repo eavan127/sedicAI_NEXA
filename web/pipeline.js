@@ -48,13 +48,20 @@ async function wavSeconds(file) {
   return null;
 }
 
-/** Seconds to scan: the whole recording, up to the server's 10 s cap (memory). */
+/** Seconds to scan: the recording's length, up to SCAN_DEFAULT_MAX_S. The scan costs about
+ * 20 s of computing per second on an 8 GB laptop (28 s took 9 min and crashed next to
+ * Whisper); the decode, name and AI reading cover the whole file anyway. A longer scan
+ * can still be typed in (up to 120 s). */
+const SCAN_DEFAULT_MAX_S = 10;
 async function fitSeconds(root, file) {
   const sec = await wavSeconds(file).catch(() => null);
   const box = root?.querySelector("#pipeSec");
   if (!box || !sec) return;
-  box.value = String(Math.min(10, Math.max(0.25, Math.ceil(sec * 4) / 4)));
-  box.title = `${file.name} is ${sec.toFixed(1)} s long` + (sec > 10 ? "; the detector scans the first 10 s, the zoom-in still hears all of it" : "");
+  box.value = String(Math.min(SCAN_DEFAULT_MAX_S, Math.max(0.25, Math.ceil(sec * 4) / 4)));
+  const note = root.querySelector("#pipeSecNote");
+  if (note) note.textContent = sec > SCAN_DEFAULT_MAX_S
+    ? `file is ${sec.toFixed(1)} s: the first ${SCAN_DEFAULT_MAX_S} s are scanned, the decode covers all ${sec.toFixed(1)} s`
+    : `whole file (${sec.toFixed(1)} s)`;
 }
 
 /** Analyse a file with the full pipeline (detect, name, decode Morse / speech, AI
@@ -119,7 +126,7 @@ export async function renderPipeline(root, { server, mode = "file" }) {
         detector ${info.detector ? "<code>emitter_detector.pt</code> (YOLO)" : "<b>energy fallback</b> (no YOLO file)"}</div>
       <div class="filters" style="margin-top:10px;">
         <input type="file" id="pipeFile" accept=".wav,.npy,.bin,.raw,.cf32,.cs16,.cs8,.cu8,.iq">
-        <label class="note" style="margin:0;" title="How much of the file the detector and 60-class model scan at 3.2 MS/s. The zoom-in (Morse / speech / AI) always listens to the whole file, up to 2 minutes.">Seconds to scan <input id="pipeSec" type="number" min="0.05" max="10" step="0.25" value="2" style="width:70px;"></label>
+        <label class="note" style="margin:0;" title="How much of the file the detector and 60-class model scan at 3.2 MS/s. The zoom-in (Morse / speech / AI) always listens to the whole file, up to 2 minutes.">Seconds to scan <input id="pipeSec" type="number" min="0.05" max="120" step="0.25" value="2" style="width:80px;"> <span class="note" id="pipeSecNote"></span></label>
         <label class="note" style="margin:0;" title="Only for raw files without a header">Sample rate <input id="pipeFs" placeholder="from file" style="width:90px;"></label>
         <select id="pipeDtype" title="Only for raw files"><option value="">raw type</option><option>int16</option><option>float32</option><option>int8</option><option>uint8</option></select>
       </div>
@@ -171,6 +178,14 @@ export async function renderPipeline(root, { server, mode = "file" }) {
       msg.textContent = `Uploading ${f.name} (${(f.size / 1e6).toFixed(1)} MB)…`;
     }
     try {
+      // One analysis at a time: say so plainly (an upload refused mid-way shows only "Failed to fetch").
+      const busy = ((await (await fetch("/api/pipeline", { credentials: "same-origin" })).json()).runs || [])
+        .find(r => r.status === "running" && !r.live);
+      if (busy) {
+        msg.textContent = `Run ${busy.id} (${busy.file || busy.source}) is still going. Wait for it, or open it below and press Stop this run.`;
+        openRun(root, busy.id);
+        return;
+      }
       const res = await fetch(`/api/pipeline?${p}`, { method: "POST", credentials: "same-origin", headers: HDR, body });
       const j = await res.json();
       if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
@@ -178,7 +193,8 @@ export async function renderPipeline(root, { server, mode = "file" }) {
       openRun(root, j.id);
       listRuns(root);
     } catch (e) {
-      msg.textContent = `Could not start: ${e.message}`;
+      msg.textContent = `Could not start: ${e.message}` + (/fetch/i.test(e.message)
+        ? " (the NEXA server did not answer: is serve_local.py running, or is another run still going?)" : "");
     }
   };
   state.root = root;
@@ -234,7 +250,7 @@ async function listRuns(root, runs) {
   box.innerHTML = runs.length ? `<table><thead><tr><th>Run</th><th>Time</th><th>Source</th><th>Seconds</th><th>Analysis took</th><th>Detector</th><th>Status</th></tr></thead><tbody>`
     + runs.map(r => `<tr data-id="${esc(r.id)}" style="cursor:pointer;"><td><code>${esc(r.id)}</code></td>
       <td>${esc(runTime(r.id))}</td><td>${esc(r.file || r.source)}</td><td>${esc(r.max_s)}</td><td>${esc(runTook(r))}</td><td>${esc(r.detector)}</td>
-      <td>${chip(r.status, r.status === "done" ? "#2E7D32" : r.status === "running" ? "#2B6CB0" : "#9B2C2C")}</td></tr>`).join("")
+      <td>${chip(r.status, r.status === "done" ? "#2E7D32" : r.status === "running" ? "#2B6CB0" : r.status === "stopped" ? "#5E6673" : "#9B2C2C")}</td></tr>`).join("")
     + `</tbody></table>` : `<div class="note">No runs yet.</div>`;
   for (const tr of box.querySelectorAll("tr[data-id]")) tr.addEventListener("click", () => openRun(root, tr.dataset.id));
 }
@@ -255,7 +271,20 @@ async function openRun(root, id) {
     const last = (r.log || "").trim().split("\n").slice(-4).join("\n");
     box.innerHTML = `<div class="block-label">Run ${esc(id)} ${chip("running", "#2B6CB0")}</div>
       <div class="note">${esc(r.file || r.source)} · ${esc(r.max_s)} s · ${esc(r.detector)} detector. This page refreshes by itself.</div>
-      <pre style="white-space:pre-wrap;max-height:180px;overflow:auto;">${esc(last || "starting…")}</pre>`;
+      <pre style="white-space:pre-wrap;max-height:180px;overflow:auto;">${esc(last || "starting…")}</pre>
+      ${r.live ? "" : `<button class="mini" id="pipeStop">Stop this run</button> <span class="note" id="pipeStopMsg"></span>`}`;
+    box.querySelector("#pipeStop")?.addEventListener("click", async ev => {
+      ev.currentTarget.disabled = true;
+      const m = box.querySelector("#pipeStopMsg");
+      m.textContent = "Stopping…";
+      try {
+        const res = await fetch(`/api/pipeline/${encodeURIComponent(id)}/stop`, { method: "POST", credentials: "same-origin", headers: HDR });
+        const j = await res.json();
+        if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+        clearTimeout(state.timer);
+        openRun(root, id).then(() => listRuns(root));
+      } catch (e) { m.textContent = `Could not stop: ${e.message}`; }
+    });
     state.timer = setTimeout(() => { if (state.open === id) openRun(root, id).then(() => listRuns(root)); }, 3000);
     return;
   }

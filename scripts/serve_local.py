@@ -462,6 +462,8 @@ class Handler(SimpleHTTPRequestHandler):
             status = "done"
         elif meta.get("live") and (d / "alive").exists() and time.time() - (d / "alive").stat().st_mtime < 60:
             status = "running"          # the live bridge is its own process, and it keeps this file fresh
+        elif (d / "stopped").exists():
+            status = "stopped"          # Stop pressed on the page
         else:
             status = "failed"           # exited without results, or started by a server that has stopped
         meta["status"] = status
@@ -583,6 +585,16 @@ class Handler(SimpleHTTPRequestHandler):
             return None
         if method == "POST" and not rest:
             return self._pipeline_start(query)
+        if method == "POST" and len(rest) == 2 and rest[1] == "stop":
+            proc = Handler._pipe_procs.get(rest[0])
+            if proc is None or proc.poll() is not None:
+                return self._error(HTTPStatus.CONFLICT, "this run is not running")
+            subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True) \
+                if os.name == "nt" else proc.kill()      # the run and its helpers (Whisper, Ollama calls)
+            proc.wait(timeout=10)
+            (PIPELINE_DIR / rest[0] / "stopped").write_text(self._actor().name, encoding="utf-8")
+            self.db.log(self._actor(), "pipeline.stop", "pipeline_run", rest[0], {})
+            return self._send_json({"stopped": rest[0]})
         return self._error(HTTPStatus.NOT_FOUND, "unknown pipeline request")
 
     def _pipeline_start(self, query):
@@ -596,7 +608,7 @@ class Handler(SimpleHTTPRequestHandler):
             return self._error(HTTPStatus.CONFLICT, f"no classifier: put a week-1 best.pt into {CLASSIFIER_DIR}")
         from src.intel import voice
         use_whisper = q("listen", "1") == "1" and q("whisper", "1") == "1"
-        model, language = q("whisper_model", voice.DEFAULT_MODEL), q("language", "auto")
+        model, language = q("whisper_model", voice.model_for_this_pc()), q("language", "auto")
         if use_whisper:
             # Checked before anything is created. These reach a command line, and a
             # model that is not on this machine must never trigger a download.
@@ -611,7 +623,7 @@ class Handler(SimpleHTTPRequestHandler):
         d = PIPELINE_DIR / rid
         d.mkdir(parents=True)
         source = q("source", "file")
-        max_s = min(max(float(q("max_s", "1.0")), 0.05), 10.0)
+        max_s = min(max(float(q("max_s", "1.0")), 0.05), 120.0)   # read in pieces: the length does not cost memory
         cmd = [self.pipeline_python(), "-u", str(ROOT / "scripts" / "run_pipeline.py"),
                "--classifier", *map(str, classifiers), "--out", str(d), "--max-seconds", str(max_s)]
         actor = self._actor()

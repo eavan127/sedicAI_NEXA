@@ -139,7 +139,8 @@ def process_capture(iq, detector, classifier, rng=None, tracker=None, cw_min_s=N
     rng = rng or np.random.default_rng(0)
     tracker = tracker or Tracker()
     edge = recorded_edge_hz(band_hz)
-    iq = np.asarray(iq)
+    if not getattr(iq, "lazy", False):     # iqio.LazyFS stays lazy: read piece by piece
+        iq = np.asarray(iq)
     for k, s in enumerate(range(0, len(iq), CHUNK)):
         chunk = iq[s:s + CHUNK]
         nv = extract.noise_variance(chunk) if len(chunk) >= scenes.N_FFT else 1.0

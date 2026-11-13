@@ -172,6 +172,62 @@ def load_native(path, fs=None, dtype="float32", max_s=None, max_samples=30_000_0
     return np.asarray(iq, np.complex64), float(sr)
 
 
+class LazyFS:
+    """A recording at its own rate, read as if it were at FS (3.2 MS/s): each slice
+    is resampled (and its band edges noise-filled, as to_fs does) only when read.
+    The whole file is scanned without the full 3.2 MS/s copy: 28 s of a 250 kS/s
+    file is 56 MB here and would be 720 MB converted, too much for an 8 GB laptop
+    next to Whisper. Supports len() and [a:b] slices, which is all the detector,
+    the cut-outs and the waterfall use."""
+    lazy = True
+    MARGIN = 64                                         # input samples past each end: the resampling filter's reach
+
+    def __init__(self, native, fs_in, rng=None):
+        self.native = np.asarray(native, np.complex64)
+        self.fs_in = float(fs_in)
+        self.ratio = Fraction(FS / self.fs_in).limit_denominator(1000)
+        self.n = int(len(self.native) * self.ratio.numerator // self.ratio.denominator)
+        self.rng = rng or np.random.default_rng(0)
+
+    def __len__(self):
+        return self.n
+
+    def __getitem__(self, key):
+        if not isinstance(key, slice):
+            raise TypeError("LazyFS supports slices only")
+        a, b, step = key.indices(self.n)
+        if step != 1:
+            raise ValueError("LazyFS supports step 1 only")
+        if b <= a:
+            return np.zeros(0, np.complex64)
+        if abs(self.fs_in - FS) < 1:
+            return self.native[a:b]
+        up, down = self.ratio.numerator, self.ratio.denominator
+        # an input start on a multiple of `down`, so its output index is a whole number
+        i0 = max(0, (a * down // up - self.MARGIN) // down * down)
+        i1 = min(len(self.native), -(-b * down // up) + self.MARGIN)
+        y = to_fs(self.native[i0:i1], self.fs_in, self.rng)
+        off = i0 * up // down
+        out = y[a - off:b - off]
+        if len(out) < b - a:                            # the very end of the file
+            out = np.concatenate([out, np.zeros(b - a - len(out), np.complex64)])
+        return out
+
+
+def load_lazy(path, fs=None, dtype="float32", max_s=None, rng=None, max_samples=30_000_000):
+    """path -> (LazyFS, info): like load(), for the whole max_s without the 3.2 MS/s copy."""
+    path = Path(path)
+    native, sr = load_native(path, fs=fs, dtype=dtype, max_s=max_s, max_samples=max_samples)
+    lazy = LazyFS(native, sr, rng)
+    centre, kind = None, f"{path.suffix.lstrip('.').lower()} file"
+    if path.suffix.lower() == ".wav":
+        _, _, centre, kind = _wav(path, 1e-3)
+    info = {"file": path.name, "format": kind, "fs_in": sr, "centre_hz": centre,
+            "duration_s": round(len(lazy) / FS, 4), "resampled": abs(sr - FS) >= 1,
+            "edge_filled": sr < FS, "scanned_in_pieces": True}
+    return lazy, info, native
+
+
 def load(path, fs=None, dtype="float32", max_s=None, rng=None):
     """path -> (iq complex64 at 3.2 MS/s, info dict)."""
     path = Path(path)
