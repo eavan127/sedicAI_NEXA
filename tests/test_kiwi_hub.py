@@ -30,6 +30,7 @@ def fake_kiwi(tmp_path, monkeypatch):
     p = tmp_path / "fake_kiwirecorder.py"
     p.write_text(FAKE, encoding="utf-8")
     monkeypatch.setattr(sdr_hub, "KIWIRECORDER", p)
+    monkeypatch.setattr(sdr_hub, "kiwi_unreachable", lambda host, port: None)   # the fake needs no network
     monkeypatch.setattr(sdr_hub.bridge, "SPOOL", tmp_path / "spool")
     (tmp_path / "jobs").mkdir()
     return tmp_path
@@ -59,6 +60,29 @@ def test_kiwi_hub_streams_and_stops(fake_kiwi):
     assert wait_for(lambda: proc.poll() is not None, 5), "Stop must end the kiwirecorder process"
 
 
+def test_blocked_network_is_named_not_waited_on(tmp_path, monkeypatch):
+    monkeypatch.setattr(sdr_hub, "KIWIRECORDER", tmp_path / "exists.py")
+    (tmp_path / "exists.py").write_text("", encoding="utf-8")
+    monkeypatch.setattr(sdr_hub, "kiwi_unreachable", lambda host, port: "cannot reach the KiwiSDR x:8073 from this network")
+    buf = sdr_hub.bridge.IqBuffer()
+    sdr_hub.kiwi_receiver(buf, "x", 8073, 15295)
+    assert "cannot reach" in buf.error and "SDRconnect" not in buf.error
+
+
+def test_kiwi_location_is_the_newest_recorded_for_that_frequency(fake_kiwi):
+    import serve_local
+    from src.localdb import Actor, LocalDB
+    db = LocalDB(fake_kiwi / "nexa.db")
+    me = Actor("analyst", "analyst", "127.0.0.1")
+    db.log(me, "client.tdoa_location", "kiwi", "15295 kHz", {"freq_khz": 15295, "lat": 1.0, "lon": 100.0})
+    db.log(me, "client.tdoa_location", "kiwi", "7040 kHz", {"freq_khz": 7040, "lat": 9.0, "lon": 99.0})
+    db.log(me, "client.tdoa_location", "kiwi", "15295 kHz", {"freq_khz": 15294.9, "lat": 2.5, "lon": 102.5,
+                                                             "receivers": "DU6/PE1NSQ, HS0ZGZ, JKT"})
+    loc = serve_local.kiwi_location(db, 15295)
+    assert (loc["lat"], loc["lon"], loc["receivers"]) == (2.5, 102.5, "DU6/PE1NSQ, HS0ZGZ, JKT") and loc["ts"]
+    assert serve_local.kiwi_location(db, 9999) is None and serve_local.kiwi_location(db, None) is None
+
+
 def test_api_kiwi_start_stop(fake_kiwi, monkeypatch):
     import serve_local
     monkeypatch.setattr(serve_local, "PIPELINE_DIR", fake_kiwi / "jobs")
@@ -86,3 +110,17 @@ def test_api_kiwi_start_stop(fake_kiwi, monkeypatch):
         if serve_local.Handler._kiwi_hub:
             serve_local.Handler._kiwi_hub.disconnect()
         srv.shutdown()
+
+
+def test_demodulate_as_is_checked_and_kept(fake_kiwi):
+    hub = sdr_hub.KiwiHub(jobs_dir=fake_kiwi / "jobs", intel_dir=fake_kiwi / "intel")
+    with pytest.raises(ValueError):
+        hub.connect(freq_khz=15295, demod="QAM")                  # not a voice-path kind
+    st = hub.connect(freq_khz=15295, use_llm=False, demod="am")   # a short-wave broadcast: AM
+    assert st["decode"]["force_kind"] == "AM"
+    hub.disconnect()
+    hub2 = sdr_hub.KiwiHub(jobs_dir=fake_kiwi / "jobs")
+    try:
+        assert hub2.connect(freq_khz=7040, use_llm=False, demod="auto")["decode"]["force_kind"] is None
+    finally:
+        hub2.disconnect()

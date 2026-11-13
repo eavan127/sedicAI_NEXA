@@ -73,3 +73,23 @@ def test_voice_or_morse_is_not_taken_over_by_a_chance_rtty_framing():
     tone = np.exp(2j * np.pi * 1000 * t)                     # a held carrier: framing it as RTTY is pure chance
     k, r = digital.read("USB", tone, fs, slow={"probs": {"NBFM": 0.6, "RTTY": 0.0}})
     assert k == "USB" and r is None
+
+
+def test_morse_is_not_overridden_by_a_data_decode():
+    """Morse keys its tone fully off; a tidy-looking RTTY / PSK31 'decode' of it
+    (gibberish that frames) must not turn it into teleprinter (13 Nov 2026)."""
+    from src.intel import morse  # noqa: F401  (the Morse path is what CW goes to next)
+    fs = 50e3
+    dot = int(0.06 * fs)
+    code = "... .. . .-. .-. .-   -... .- ... .   .-- . .- - .... . .-."   # SIERRA BASE WEATHER
+    key = []
+    for ch in code:
+        key += {".": [1] * dot + [0] * dot, "-": [1] * 3 * dot + [0] * dot, " ": [0] * 2 * dot}[ch]
+    key = np.array(key * 3, float)
+    rng = np.random.default_rng(3)
+    t = np.arange(len(key)) / fs
+    y = (key * np.exp(2j * np.pi * 700 * t)
+         + 0.05 * (rng.standard_normal(len(t)) + 1j * rng.standard_normal(len(t)))).astype(np.complex64)
+    assert digital.keyed_off_share(y, fs) > 0.3
+    k, r = digital.read("CW", y, fs)
+    assert k == "CW" and r is None

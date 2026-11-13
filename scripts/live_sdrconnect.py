@@ -481,8 +481,16 @@ def zoom_to(iq, fs, centre_hz):
     return np.concatenate(out)
 
 
-def voice_snapshot(iq, fs, out_dir, whisper_model, language, use_whisper, use_llm, llm_model):
-    """-> tracks (dashboard schema) for one recording, audio files written."""
+FORCE_KINDS = ("AM", "USB", "LSB", "NBFM", "CW")   # what an analyst can tell the voice path a signal is
+
+
+def voice_snapshot(iq, fs, out_dir, whisper_model, language, use_whisper, use_llm, llm_model, force_kind=None):
+    """-> tracks (dashboard schema) for one recording, audio files written.
+    force_kind (one of FORCE_KINDS): the analyst knows what the signal is (e.g. AM
+    for a short-wave broadcast), so it is demodulated that way whatever the
+    measurement says; the measured kind is kept in the reason."""
+    if force_kind is not None and force_kind not in FORCE_KINDS:
+        raise ValueError(f"force_kind must be one of {list(FORCE_KINDS)}")
     tracks = []
     spectra = spectrum_blocks(iq, fs)
     f, blocks, edges = spectra
@@ -497,11 +505,17 @@ def voice_snapshot(iq, fs, out_dir, whisper_model, language, use_whisper, use_ll
         y_on = np.concatenate([y[int(edges[b] * scale):int(edges[b + 1] * scale)] for b in picks])
         kind, feats, why = analog.classify(y_on, ZOOM_FS)
         kind, why, demod_kind, slow = narrowband.refine(kind, why, y_on, ZOOM_FS)
-        from src.intel import digital
-        was = kind
-        kind, dig = digital.read(kind, y, ZOOM_FS, slow)          # RTTY / PSK31 text (and a clean decode names the kind)
-        if kind != was:
-            why, demod_kind = dig["why"], "USB"
+        if force_kind:                                      # the analyst's choice wins; no RTTY / PSK31 guess
+            why = (f"set by the analyst: {force_kind}" if kind == force_kind
+                   else f"set by the analyst: {force_kind} (measured {kind}: {why})")
+            kind = demod_kind = force_kind
+            dig = None
+        else:
+            from src.intel import digital
+            was = kind
+            kind, dig = digital.read(kind, y, ZOOM_FS, slow)  # RTTY / PSK31 text (and a clean decode names the kind)
+            if kind != was:
+                why, demod_kind = dig["why"], "USB"
         L = {"kind": kind, "why": why, "duration_s": round(len(y) / ZOOM_FS, 3), "tracks": [k],
              "t_start_ms": t_on_ms, "t_end_ms": t_off_ms}
         if slow:

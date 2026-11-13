@@ -169,6 +169,34 @@ def safe_name(name: str) -> str:
     return name if name.strip("._") else "capture.bin"
 
 
+def kiwi_location(db, khz, within_khz=2.0):
+    """The newest transmitter location recorded (KiwiSDR TDoA, "Record location")
+    for a frequency within within_khz of khz, or None."""
+    if not khz:
+        return None
+    for e in db.audit(1000, "client.tdoa_location"):
+        d = e["details"] or {}
+        try:
+            if abs(float(d.get("freq_khz")) - float(khz)) <= within_khz:
+                return {"freq_khz": d.get("freq_khz"), "lat": d.get("lat"), "lon": d.get("lon"),
+                        "receivers": d.get("receivers"), "note": d.get("note"), "source": d.get("source"),
+                        "radius_km": d.get("radius_km"), "ts": e["ts"], "actor": e["actor"]}
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def tdoa_details(res):
+    """A computed TDoA result (scripts/sdr_hub.py TdoaRunner) as the audit entry
+    client.tdoa_location -- the same fields the manual "Record location" form
+    writes, so kiwi_location() finds either."""
+    return {"freq_khz": res["freq_khz"], "lat": res["lat"], "lon": res["lon"], "receivers": res["receivers"],
+            "note": (f"most likely point; 95 % area about {res['radius_km']} km radius; "
+                     f"{res['sample_s']} s recordings"),
+            "source": "NEXA TDoA (computed)", "radius_km": res["radius_km"], "area": res["area"],
+            "fit": res["fit"], "pairs": res["pairs"], "stations": res["stations"]}
+
+
 class Handler(SimpleHTTPRequestHandler):
     # The Windows registry often maps .mjs to text/plain, and browsers refuse
     # to run a module served that way -- which is exactly why the ONNX model
@@ -369,6 +397,38 @@ class Handler(SimpleHTTPRequestHandler):
         if not f.is_file():
             return self._error(HTTPStatus.NOT_FOUND, "no such recording")
         return self._send_json(json.loads(f.read_text(encoding="utf-8")))
+
+    def _intel_translate(self, rid):
+        """Translate a decoded recording into English with the local AI (Ollama, this
+        machine) and keep the translation in the recording's file, next to the original."""
+        from src.intel import reason, store
+        if not INTEL_ID.fullmatch(rid) or rid == "index":
+            return self._error(HTTPStatus.NOT_FOUND, "no such recording")
+        f = self.intel_dir / f"{rid}.json"
+        if not f.is_file():
+            return self._error(HTTPStatus.NOT_FOUND, "no such recording")
+        body = self._read_json()
+        model = str(body.get("model") or reason.DEFAULT_MODEL)
+        if not re.fullmatch(r"[A-Za-z0-9._:\-]{1,64}", model):
+            raise ValueError("model must be an Ollama model name, e.g. llama3.2:3b")
+        rec = json.loads(f.read_text(encoding="utf-8"))
+        tr = rec.get("transcript") or {}
+        text = tr.get("text") or "\n".join(s.get("text", "") for s in rec.get("segments") or [])
+        try:
+            out = reason.translate(text, tr.get("language"), model=model)
+        except (OSError, ValueError) as e:      # Ollama not running / model missing / nothing to translate
+            return self._error(HTTPStatus.BAD_GATEWAY if isinstance(e, OSError) else HTTPStatus.BAD_REQUEST,
+                               f"could not translate: {e}" + (" (is Ollama running? ollama serve)"
+                                                              if isinstance(e, OSError) else ""))
+        out["at"] = datetime.datetime.now().isoformat(timespec="seconds")
+        rec = json.loads(f.read_text(encoding="utf-8"))       # re-read: another writer may have touched it
+        rec["translation"] = out
+        tmp = f.with_suffix(".tmp")
+        tmp.write_text(json.dumps(rec, indent=1, ensure_ascii=False), encoding="utf-8")
+        store._replace(tmp, f)
+        self.db.log(self._actor(), "intel.translate", "intel", rid,
+                    {"language": out["language"], "model": model, "chars": len(text)})
+        return self._send_json(out)
 
     # -- wideband pipeline runs (scripts/run_pipeline.py, results/pipeline/jobs) --
 
@@ -603,12 +663,14 @@ class Handler(SimpleHTTPRequestHandler):
 
         if head == "intel" and method == "GET":
             return self._intel(parts[1:])
+        if head == "intel" and method == "POST" and len(parts) == 3 and parts[2] == "translate":
+            return self._intel_translate(parts[1])
         if head == "pipeline":
             return self._pipeline(method, parts[1:], query)
         if head == "sdr":            # live SDRconnect receiver -- scripts/sdr_hub.py (feat/live-sdr-console)
             return self._sdr(method, parts[1:], query)
         if head == "kiwi":           # continuous KiwiSDR listening -- scripts/sdr_hub.py KiwiHub
-            return self._kiwi(method, parts[1:])
+            return self._kiwi(method, parts[1:], query)
         if head == "auth":
             return self._auth(method, parts[1:])
         if head == "users":
@@ -733,7 +795,7 @@ class Handler(SimpleHTTPRequestHandler):
             if Handler._sdr_hub is None:
                 sys.path.insert(0, str(Path(__file__).resolve().parent))
                 from sdr_hub import SdrHub
-                hub = SdrHub(jobs_dir=PIPELINE_DIR, intel_dir=self.intel_dir)
+                hub = SdrHub(jobs_dir=PIPELINE_DIR, intel_dir=self.intel_dir, max_s=20.0)   # a signal that never goes quiet is named every 20 s
                 # Each decoded transmission goes into the audit trail as soon as it is
                 # done (live.result + intel.recording), not only when a page next opens
                 # Signal Pipeline. _audit_results only reads class-level state.
@@ -743,14 +805,22 @@ class Handler(SimpleHTTPRequestHandler):
 
     _kiwi_hub = None
 
-    def _kiwi(self, method, rest):
+    def _kiwi(self, method, rest, query=None):
         """Listen to one KiwiSDR frequency continuously: decode + AI reading every clip."""
+        if method == "GET" and rest == ["location"]:      # newest transmitter location recorded for a frequency
+            try:
+                khz = float((query or {}).get("khz", [""])[0])
+            except ValueError:
+                khz = None
+            return self._send_json({"location": kiwi_location(self.db, khz)})
         with Handler._sdr_lock:
             if Handler._kiwi_hub is None:
                 sys.path.insert(0, str(Path(__file__).resolve().parent))
                 from sdr_hub import KiwiHub
                 hub = KiwiHub(jobs_dir=PIPELINE_DIR, intel_dir=self.intel_dir)
                 hub.on_result = lambda _entry, h=self: h._audit_results()
+                hub.tdoa.on_located = lambda res, who, db=self.db: db.log(
+                    who, "client.tdoa_location", "kiwi", f"{res['freq_khz']:g} kHz", tdoa_details(res))
                 Handler._kiwi_hub = hub
         hub = Handler._kiwi_hub
         if method == "GET" and rest == ["status"]:
@@ -760,8 +830,16 @@ class Handler(SimpleHTTPRequestHandler):
             st = hub.connect(host=b.get("host"), port=b.get("port"), freq_khz=b.get("freq_khz"),
                              whisper_model=b.get("whisper_model") or "small", language=b.get("language"),
                              use_llm=b.get("llm", True), clip_s=b.get("clip_s") or 30,
-                             llm_model=b.get("llm_model") or None)
+                             llm_model=b.get("llm_model") or None, demod=b.get("demod") or None)
             self.db.log(self._actor(), "kiwi.start", "kiwi", st["url"], {"label": st["label"], "decode": st["decode"]})
+            return self._send_json(st)
+        if method == "POST" and rest == ["locate"]:       # TDoA from 3 GPS-timed KiwiSDRs, in the background
+            b = self._read_json()
+            who = self._actor()
+            st = hub.tdoa.start(b.get("freq_khz"), receivers=b.get("receivers") or None,
+                                sample_s=b.get("sample_s") or 15, who=who)
+            self.db.log(who, "kiwi.locate", "kiwi", f"{st['freq_khz']:g} kHz",
+                        {"receivers": b.get("receivers") or "default", "sample_s": st["sample_s"]})
             return self._send_json(st)
         if method == "POST" and rest == ["stop"]:
             was = hub.status()

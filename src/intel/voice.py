@@ -75,6 +75,23 @@ def active_audio(info: WavInfo, max_minutes=10.0, chunk_s=30.0):
     return audio, [starts[i] for i in keep]
 
 
+def detect_language(audio, model=DEFAULT_MODEL, among=None):
+    """The spoken language of 16 kHz audio, chosen only among `among` (default: the
+    languages NEXA offers, LANGUAGES without 'auto'). Whisper's free guess often
+    lands on a neighbour (Malay heard as Indonesian, Javanese, Tagalog ...); limited
+    to the supported set it is far steadier. -> (code, {code: probability})."""
+    import whisper
+    among = [l for l in (among or LANGUAGES) if l != "auto"]
+    m = load(model)
+    mel = whisper.log_mel_spectrogram(whisper.pad_or_trim(np.asarray(audio, np.float32)),
+                                      n_mels=m.dims.n_mels).to(m.device)
+    _, probs = m.detect_language(mel)
+    p = {l: float(probs.get(l, 0.0)) for l in among}
+    total = sum(p.values()) or 1.0
+    p = {l: round(v / total, 3) for l, v in p.items()}
+    return max(p, key=p.get), p
+
+
 def transcribe(info: WavInfo, model=DEFAULT_MODEL, max_minutes=10.0, language=None):
     """language: 'ms', 'en', ... or None / 'auto' to detect. Setting it is safer on
     short clips, but a wrong setting gives wrong-language nonsense, not an error."""
@@ -82,6 +99,9 @@ def transcribe(info: WavInfo, model=DEFAULT_MODEL, max_minutes=10.0, language=No
     audio, starts = active_audio(info, max_minutes)
     if len(audio) == 0:
         return {"text": "", "language": language, "chunks_s": [], "model": model, "segments": [], "doubtful_share": 0.0}
+    detected = None
+    if language is None:                       # "detect": Whisper picks, among the supported languages only
+        language, detected = detect_language(audio, model)
     # Each segment decoded alone: feeding text forward can repeat one invented phrase.
     res = load(model).transcribe(audio, language=language, fp16=False, condition_on_previous_text=False)
     segments, doubtful_words, words = [], 0, 0
@@ -95,5 +115,5 @@ def transcribe(info: WavInfo, model=DEFAULT_MODEL, max_minutes=10.0, language=No
         segments.append({"clip_start_s": round(s["start"], 1), "clip_end_s": round(s["end"], 1),
                          "text": text, "doubtful": doubtful})
     return {"text": res.get("text", "").strip(), "language": res.get("language"),
-            "chunks_s": starts, "model": model, "segments": segments,
+            "chunks_s": starts, "model": model, "segments": segments, "language_detected": detected,
             "doubtful_share": round(doubtful_words / words, 3) if words else 0.0}

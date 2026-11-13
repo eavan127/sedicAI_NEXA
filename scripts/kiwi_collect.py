@@ -1,8 +1,8 @@
 """
 Record a list of HF targets from a public KiwiSDR as IQ, one 30 s clip each,
 named <guess>_<kHz>_<UTC time>.wav, then pre-label them (scripts/kiwi_label.py).
-Uses kiwirecorder from the official KiwiSDR client
-(git clone https://github.com/jks-prv/kiwiclient D:/tools/kiwiclient).
+Uses kiwirecorder from the official KiwiSDR client, found by src/kiwiclient.py
+(git clone https://github.com/jks-prv/kiwiclient %USERPROFILE%/tools/kiwiclient).
 
     python scripts/kiwi_collect.py                       # the default target list, Kuala Lumpur receiver
     python scripts/kiwi_collect.py --only rtty psk31     # some classes only
@@ -20,8 +20,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.config import REPO_ROOT  # noqa: E402
+from src.kiwiclient import find_kiwirecorder, not_found  # noqa: E402
 
-KIWI = Path("D:/tools/kiwiclient/kiwirecorder.py")
+KIWI = find_kiwirecorder()
 HOST, PORT = "21439.proxy2.kiwisdr.com", 8073          # 9M2AMH, Kuala Lumpur
 # (guess, kHz the IQ is centred on). For SSB / PSK31 / RTTY the signal sits
 # within the ~12 kHz IQ window around it, so the exact spot need not be known.
@@ -50,7 +51,7 @@ def main():
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     if not Path(a.kiwirecorder).exists():
-        sys.exit(f"kiwirecorder not found at {a.kiwirecorder}: git clone https://github.com/jks-prv/kiwiclient D:/tools/kiwiclient")
+        sys.exit(not_found(a.kiwirecorder))
     targets = [(a.guess, a.freq)] if a.freq else [t for t in TARGETS if not a.only or t[0] in a.only]
     for guess, khz in targets:
         stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")

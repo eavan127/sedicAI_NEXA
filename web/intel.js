@@ -1,4 +1,4 @@
-// Decoded signals: the Decoded review list in History, and the expanded page one
+// Decoded signals: the Intercepts list, and the expanded page one
 // row opens. Receiver AUDIO recordings decoded on this machine by
 // scripts/comms_intel.py (Morse decoder, Whisper for voice, a local Ollama
 // model for the reading), served read-only by scripts/serve_local.py at
@@ -230,12 +230,28 @@ export function decodedTableHtml(rows) {
 }
 
 /** The expanded page for one decoded signal. */
-export async function renderIntelDetail(root, { id, onBack }) {
+export async function renderIntelDetail(root, { id, onBack, backLabel = "Intercepts" }) {
   state.onBack = onBack;
-  root.innerHTML = `<div class="filters"><button class="secondary" id="intelBack">← Back to History</button></div>
+  root.innerHTML = `<div class="filters"><button class="secondary" id="intelBack">← Back to ${esc(backLabel)}</button></div>
     <div class="block" id="intelDetail"></div>`;
   root.querySelector("#intelBack").addEventListener("click", onBack);
   await openRecording(root, id);
+}
+
+// Translate to English (Comms Intel): the local AI (Ollama) translates the decoded
+// text on request; the translation is kept in the recording next to the original and
+// the request is in the audit trail (intel.translate). Nothing leaves this machine.
+function translateBlock(rec, H) {
+  const text = rec.transcript?.text || (rec.segments || []).map(s => s.text).join(" ");
+  if (!text.trim()) return "";
+  const t = rec.translation;
+  return `<div style="${H}">In English</div>
+    ${t ? `<div style="white-space:pre-wrap;padding:10px 12px;border-radius:8px;background:var(--panel);border:1px solid var(--grid);">${esc(t.english)}</div>
+      <div class="note" style="margin-top:4px;">Translated from ${esc(t.language || "the original")} by the local AI (${esc(t.model)}) on ${esc(plainDate(t.at))}.
+        Machine translation: check names, numbers and grid references against the original above.</div>` : ""}
+    <div class="filters" style="margin-top:6px;">
+      <button id="intelTranslate">${t ? "Translate again" : "Translate to English"}</button>
+      <span class="note" id="intelTrMsg">${t ? "" : "Uses the local AI (Ollama); nothing leaves this machine."}</span></div>`;
 }
 
 async function openRecording(root, id) {
@@ -319,6 +335,7 @@ async function openRecording(root, id) {
     </div>
     ${rec.transcript?.text ? `<div style="${H}">What was said (speech to text, ${esc(rec.transcript.language || "?")})</div>
       <div style="white-space:pre-wrap;">${esc(rec.transcript.text)}</div>` : rec.transcript?.error ? `<div class="note">Speech to text failed: ${esc(rec.transcript.error)}</div>` : rec.note ? `<div style="${H}">What was said</div><div class="note">${esc(rec.note)}</div>` : ""}
+    ${translateBlock(rec, H)}
     <div style="${H}">Every message, word for word</div>
     <div class="filters" style="margin-top:4px;"><input id="intelSegSearch" placeholder="Search the messages" style="width:260px;">
       <span class="note" id="intelSegCount"></span></div>
@@ -327,6 +344,22 @@ async function openRecording(root, id) {
       <pre style="white-space:pre-wrap;max-height:240px;overflow:auto;">${esc(rec.recorder_log)}</pre></details>` : ""}
     </div>`;
   box.querySelector("#intelClose").addEventListener("click", () => { state.open = null; state.onBack?.(); });
+  box.querySelector("#intelTranslate")?.addEventListener("click", async ev => {
+    const btn = ev.currentTarget, msg = box.querySelector("#intelTrMsg");
+    btn.disabled = true;
+    msg.textContent = "Translating with the local AI on this machine (can take up to a minute)…";
+    try {
+      const r = await fetch(`/api/intel/${encodeURIComponent(id)}/translate`, {
+        method: "POST", credentials: "same-origin",
+        headers: { "X-NEXA-Client": "1", "Content-Type": "application/json" }, body: "{}" });
+      const out = await r.json();
+      if (!r.ok) throw new Error(out.error || `HTTP ${r.status}`);
+      if (state.open === id) await openRecording(root, id);     // shows the saved translation
+    } catch (e) {
+      msg.textContent = `Could not translate: ${e.message}`;
+      btn.disabled = false;
+    }
+  });
 
   const segBox = box.querySelector("#intelSegs");
   const count = box.querySelector("#intelSegCount");
