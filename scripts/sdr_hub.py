@@ -334,7 +334,8 @@ class SdrHub:
             t0 = time.monotonic()
             try:
                 tracks = bridge.voice_snapshot(rec, fs, d, opts["whisper_model"], opts["language"],
-                                               opts["use_whisper"], opts["use_llm"], opts.get("llm_model"))
+                                               opts["use_whisper"], opts["use_llm"], opts.get("llm_model"),
+                                               force_kind=opts.get("force_kind"))
                 bridge.plot_snapshot(rec, fs, tracks, d / "tracks.png", centre)
                 source = {"file": f"LIVE · {label}",
                           "format": f"{label} IQ stream (dashboard receiver)" + (f" · WARNING: {problem}" if problem else ""),
@@ -361,7 +362,7 @@ class SdrHub:
                                  "text": (t["listen"].get("transcript") or t["listen"].get("morse")
                                           or t["listen"].get("digital_text") or "")[:300],
                                  "language": t["listen"].get("language"), "reading": reading(t["listen"]),
-                                 "text_error": (t["listen"].get("text_error") or "")[:200],
+                                 "text_error": (t["listen"].get("text_error") or "")[:400],
                                  "audio": t["listen"].get("audio")}
                                 for t in tracks]}
             with self.lock:
@@ -459,7 +460,7 @@ class KiwiHub(SdrHub):
         self.tdoa = TdoaRunner()                     # "Locate transmitter": runs beside the listening stream
 
     def connect(self, host=KIWI_DEFAULT[0], port=KIWI_DEFAULT[1], freq_khz=None, whisper_model="small",
-                language=None, use_llm=True, clip_s=30.0, llm_model=None):
+                language=None, use_llm=True, clip_s=30.0, llm_model=None, demod=None):
         host = str(host or KIWI_DEFAULT[0]).strip()
         if not HOST_RE.fullmatch(host):
             raise ValueError("host must be a KiwiSDR address, e.g. 21439.proxy2.kiwisdr.com")
@@ -477,10 +478,13 @@ class KiwiHub(SdrHub):
             raise ValueError(f"language must be one of {list(voice.LANGUAGES)}")
         if llm_model is not None and llm_model not in LLM_MODELS:
             raise ValueError(f"llm_model must be one of {list(LLM_MODELS)}")
+        demod = None if demod in (None, "", "auto") else str(demod).upper()   # "Demodulate as" (None: measured)
+        if demod is not None and demod not in bridge.FORCE_KINDS:
+            raise ValueError(f"demod must be auto or one of {list(bridge.FORCE_KINDS)}")
         self.max_s = min(max(float(clip_s or 30), 10.0), 120.0)
         opts = {"decode": True, "whisper_model": whisper_model, "language": language,
                 "use_whisper": True, "use_llm": bool(use_llm), "freq_khz": khz,
-                "llm_model": llm_model}
+                "llm_model": llm_model, "force_kind": demod}
         key = f"kiwi://{host}:{port}/{khz:g}"
         return self._open(key, "kiwi", f"KiwiSDR {host} {khz:g} kHz", kiwi_receiver, (host, port, khz), opts,
                           fixed_fs=KIWI_FS)

@@ -50,6 +50,11 @@ export function renderKiwiLive(root, { server }) {
             <option value="qwen2.5:1.5b">qwen2.5:1.5b (lighter, ~1 GB)</option></select></label>
         <label class="field">Clip
           <select id="kwClip"><option value="30" selected>30 s</option><option value="60">60 s</option></select></label>
+        <label class="field" title="Auto measures each signal. If you know what it is (a short-wave broadcast is AM,
+          amateur voice is USB or LSB), choose it: the audio is then demodulated that way.">Demodulate as
+          <select id="kwDemod"><option value="auto" selected>Auto (measured)</option>
+            <option value="AM">AM (broadcast)</option><option value="USB">USB</option><option value="LSB">LSB</option>
+            <option value="NBFM">FM (narrow)</option><option value="CW">CW (Morse)</option></select></label>
         <label style="display:inline-flex;gap:6px;align-items:center;"><input type="checkbox" id="kwLlm" checked> AI reading</label>
         <button class="primary" id="kwStart">Start listening</button>
         <button class="secondary" id="kwStop" disabled>Stop</button>
@@ -87,7 +92,7 @@ export function renderKiwiLive(root, { server }) {
       try {
         paint(await call("start", { host, port: Number(port) || 8073, freq_khz: Number($("kwFreq").value),
           language: $("kwLang").value, whisper_model: $("kwModel").value, clip_s: Number($("kwClip").value),
-          llm: $("kwLlm").checked, llm_model: $("kwLlmModel").value }));
+          llm: $("kwLlm").checked, llm_model: $("kwLlmModel").value, demod: $("kwDemod").value }));
       } catch (e) {
         $("kwState").textContent = `Could not start: ${e.message}`;
         $("kwStart").disabled = false;

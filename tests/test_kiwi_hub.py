@@ -110,3 +110,17 @@ def test_api_kiwi_start_stop(fake_kiwi, monkeypatch):
         if serve_local.Handler._kiwi_hub:
             serve_local.Handler._kiwi_hub.disconnect()
         srv.shutdown()
+
+
+def test_demodulate_as_is_checked_and_kept(fake_kiwi):
+    hub = sdr_hub.KiwiHub(jobs_dir=fake_kiwi / "jobs", intel_dir=fake_kiwi / "intel")
+    with pytest.raises(ValueError):
+        hub.connect(freq_khz=15295, demod="QAM")                  # not a voice-path kind
+    st = hub.connect(freq_khz=15295, use_llm=False, demod="am")   # a short-wave broadcast: AM
+    assert st["decode"]["force_kind"] == "AM"
+    hub.disconnect()
+    hub2 = sdr_hub.KiwiHub(jobs_dir=fake_kiwi / "jobs")
+    try:
+        assert hub2.connect(freq_khz=7040, use_llm=False, demod="auto")["decode"]["force_kind"] is None
+    finally:
+        hub2.disconnect()
