@@ -6,7 +6,9 @@ generator.
 
 ## 1. Collect (about 15 minutes)
 
-One time: `git clone https://github.com/jks-prv/kiwiclient D:\tools\kiwiclient`
+One time: `git clone https://github.com/jks-prv/kiwiclient $env:USERPROFILE\tools\kiwiclient`
+(NEXA also finds it in `D:\tools\kiwiclient`, `C:\tools\kiwiclient` or the repo's `tools\kiwiclient`;
+elsewhere, set `NEXA_KIWIRECORDER` to its `kiwirecorder.py`).
 
 ```powershell
 .\.venv\Scripts\Activate.ps1

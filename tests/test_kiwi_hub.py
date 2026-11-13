@@ -30,6 +30,7 @@ def fake_kiwi(tmp_path, monkeypatch):
     p = tmp_path / "fake_kiwirecorder.py"
     p.write_text(FAKE, encoding="utf-8")
     monkeypatch.setattr(sdr_hub, "KIWIRECORDER", p)
+    monkeypatch.setattr(sdr_hub, "kiwi_unreachable", lambda host, port: None)   # the fake needs no network
     monkeypatch.setattr(sdr_hub.bridge, "SPOOL", tmp_path / "spool")
     (tmp_path / "jobs").mkdir()
     return tmp_path
@@ -57,6 +58,29 @@ def test_kiwi_hub_streams_and_stops(fake_kiwi):
     proc = hub.buf.proc
     hub.disconnect()
     assert wait_for(lambda: proc.poll() is not None, 5), "Stop must end the kiwirecorder process"
+
+
+def test_blocked_network_is_named_not_waited_on(tmp_path, monkeypatch):
+    monkeypatch.setattr(sdr_hub, "KIWIRECORDER", tmp_path / "exists.py")
+    (tmp_path / "exists.py").write_text("", encoding="utf-8")
+    monkeypatch.setattr(sdr_hub, "kiwi_unreachable", lambda host, port: "cannot reach the KiwiSDR x:8073 from this network")
+    buf = sdr_hub.bridge.IqBuffer()
+    sdr_hub.kiwi_receiver(buf, "x", 8073, 15295)
+    assert "cannot reach" in buf.error and "SDRconnect" not in buf.error
+
+
+def test_kiwi_location_is_the_newest_recorded_for_that_frequency(fake_kiwi):
+    import serve_local
+    from src.localdb import Actor, LocalDB
+    db = LocalDB(fake_kiwi / "nexa.db")
+    me = Actor("analyst", "analyst", "127.0.0.1")
+    db.log(me, "client.tdoa_location", "kiwi", "15295 kHz", {"freq_khz": 15295, "lat": 1.0, "lon": 100.0})
+    db.log(me, "client.tdoa_location", "kiwi", "7040 kHz", {"freq_khz": 7040, "lat": 9.0, "lon": 99.0})
+    db.log(me, "client.tdoa_location", "kiwi", "15295 kHz", {"freq_khz": 15294.9, "lat": 2.5, "lon": 102.5,
+                                                             "receivers": "DU6/PE1NSQ, HS0ZGZ, JKT"})
+    loc = serve_local.kiwi_location(db, 15295)
+    assert (loc["lat"], loc["lon"], loc["receivers"]) == (2.5, 102.5, "DU6/PE1NSQ, HS0ZGZ, JKT") and loc["ts"]
+    assert serve_local.kiwi_location(db, 9999) is None and serve_local.kiwi_location(db, None) is None
 
 
 def test_api_kiwi_start_stop(fake_kiwi, monkeypatch):
