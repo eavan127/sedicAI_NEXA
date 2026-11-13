@@ -1054,7 +1054,8 @@ rxConnectBtn.addEventListener("click", () => {
   // feat/live-sdr-console (SDR connection)
   rxStart(new SdrConnectReceiver({
     dwellS: Number(rxDwellSel.value), host: el("rxSdrHost").value.trim() || "127.0.0.1",
-    port: Number(el("rxSdrPort").value) || 5454, decode: el("rxSdrDecode").checked, timeoutS: 12,
+    port: Number(el("rxSdrPort").value) || 5454, decode: el("rxSdrDecode").checked,
+    llm: el("rxSdrDecode").checked && el("rxSdrLlm").checked, timeoutS: 12,
     onDecode: d => rxLogLine(decodeLine(d)),
   }));
 });

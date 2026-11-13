@@ -73,9 +73,15 @@ COMMON_RATES = [48e3, 62.5e3, 96e3, 125e3, 192e3, 250e3, 500e3, 1e6, 1.536e6, 2e
                 4e6, 5e6, 6e6, 8e6, 10e6]
 ZOOM_FS = analog.FA                       # 50 kS/s, what the zoom rules and the demodulator expect
 VOICE_KINDS = {"NBFM", "WBFM", "AM", "AM_SC", "USB", "LSB"}   # what Whisper is run on (as src/pipeline/listen.py)
-KIND_CLASS = {"NBFM": "NBFM", "WBFM": "WBFM", "AM": "AM_DSB_WC", "AM_SC": "AM_DSB_SC",
-              "USB": "AM_SSB_SC", "LSB": "AM_SSB_SC", "CW": "CW", "CARRIER": "CARRIER",
-              "RTTY": "2FSK (RTTY)", "PSK31": "BPSK (PSK31-type)", "AFSK": "AFSK"}
+
+
+def kind_answer(kind, feats):
+    """The zoom's kind as a 60-class answer, the same table as Signal Pipeline
+    (src/pipeline/listen.py zoom_answer): CW -> "OOK (Morse CW)", a bare carrier ->
+    "RADAR_CW / JAM_TONE", USB with a carrier -> AM_SSB_WC ..."""
+    from src.pipeline import listen
+    z = listen.zoom_answer(kind, feats or {})
+    return z[0] if z else kind
 
 
 # ---------- IQ sources ----------
@@ -539,7 +545,7 @@ def voice_snapshot(iq, fs, out_dir, whisper_model, language, use_whisper, use_ll
                                                          active_min=L.get("morse_detail", {}).get("active_minutes", 0), **kw)
         conf = 0.9 if kind not in ("UNKNOWN",) else 0.1
         tracks.append({"track": k, "t_start_ms": t_on_ms, "t_end_ms": t_off_ms, "f_lo_khz": lo / 1e3, "f_hi_khz": hi / 1e3,
-                       "answer": KIND_CLASS.get(kind, kind), "confidence": conf,
+                       "answer": kind_answer(kind, feats), "confidence": conf,
                        "band": "high" if kind != "UNKNOWN" else "uncertain",
                        "reason": f"live zoom-in, {peak:.0f} dB above the noise: {why}",
                        "decided_by": "zoom", "classifier_answer": "not run (voice mode)", "top5": [], "listen": L})
