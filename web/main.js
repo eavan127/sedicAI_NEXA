@@ -35,7 +35,7 @@ import { applyFilters, canView, flagsHtml, summarise, summaryHtml as histSummary
 import { buildReport, buildSingle } from "./report.js";
 import { installZoom, registerZoom } from "./zoom.js";
 import { renderIntelDetail, listDecoded, decodedTableHtml, filterRows } from "./intel.js";
-import { renderPipeline } from "./pipeline.js";
+import { analyseFile, renderPipeline } from "./pipeline.js";
 import { renderKiwiLive } from "./kiwi_live.js";
 
 installZoom();
@@ -1093,6 +1093,18 @@ rxFileInput.addEventListener("change", async () => {
   const files = [...(rxFileInput.files || [])];
   rxFileInput.value = "";
   if (!files.length) return;
+  // An IQ WAV (SDRconnect / SDR# recordings, the demo files) goes to the full pipeline:
+  // detection, 60-class names, Morse / speech decoding, AI reading, waterfall and
+  // Comms Intel. The quick replay below runs the fast model only and reads raw files.
+  const wav = files.find(f => /\.wav$/i.test(f.name));
+  if (wav) {
+    if (analyseFile(wav)) {
+      rxNote.textContent = `${wav.name}: sent to Signal Pipeline for the full analysis (decode, diagram, Comms Intel). Results below.`;
+    } else {
+      rxNote.textContent = "IQ WAV files are analysed by the local server (python scripts/serve_local.py); it is not running.";
+    }
+    return;
+  }
   try {
     const rec = await readUpload(files);
     rec.note = rec.warnings.length ? `${rec.note} · WARNING: ${rec.warnings.join(" ")}` : rec.note;

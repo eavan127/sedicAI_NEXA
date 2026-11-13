@@ -398,6 +398,38 @@ class Handler(SimpleHTTPRequestHandler):
             return self._error(HTTPStatus.NOT_FOUND, "no such recording")
         return self._send_json(json.loads(f.read_text(encoding="utf-8")))
 
+    def _intel_translate(self, rid):
+        """Translate a decoded recording into English with the local AI (Ollama, this
+        machine) and keep the translation in the recording's file, next to the original."""
+        from src.intel import reason, store
+        if not INTEL_ID.fullmatch(rid) or rid == "index":
+            return self._error(HTTPStatus.NOT_FOUND, "no such recording")
+        f = self.intel_dir / f"{rid}.json"
+        if not f.is_file():
+            return self._error(HTTPStatus.NOT_FOUND, "no such recording")
+        body = self._read_json()
+        model = str(body.get("model") or reason.DEFAULT_MODEL)
+        if not re.fullmatch(r"[A-Za-z0-9._:\-]{1,64}", model):
+            raise ValueError("model must be an Ollama model name, e.g. llama3.2:3b")
+        rec = json.loads(f.read_text(encoding="utf-8"))
+        tr = rec.get("transcript") or {}
+        text = tr.get("text") or "\n".join(s.get("text", "") for s in rec.get("segments") or [])
+        try:
+            out = reason.translate(text, tr.get("language"), model=model)
+        except (OSError, ValueError) as e:      # Ollama not running / model missing / nothing to translate
+            return self._error(HTTPStatus.BAD_GATEWAY if isinstance(e, OSError) else HTTPStatus.BAD_REQUEST,
+                               f"could not translate: {e}" + (" (is Ollama running? ollama serve)"
+                                                              if isinstance(e, OSError) else ""))
+        out["at"] = datetime.datetime.now().isoformat(timespec="seconds")
+        rec = json.loads(f.read_text(encoding="utf-8"))       # re-read: another writer may have touched it
+        rec["translation"] = out
+        tmp = f.with_suffix(".tmp")
+        tmp.write_text(json.dumps(rec, indent=1, ensure_ascii=False), encoding="utf-8")
+        store._replace(tmp, f)
+        self.db.log(self._actor(), "intel.translate", "intel", rid,
+                    {"language": out["language"], "model": model, "chars": len(text)})
+        return self._send_json(out)
+
     # -- wideband pipeline runs (scripts/run_pipeline.py, results/pipeline/jobs) --
 
     _pipe_procs: dict = {}
@@ -631,6 +663,8 @@ class Handler(SimpleHTTPRequestHandler):
 
         if head == "intel" and method == "GET":
             return self._intel(parts[1:])
+        if head == "intel" and method == "POST" and len(parts) == 3 and parts[2] == "translate":
+            return self._intel_translate(parts[1])
         if head == "pipeline":
             return self._pipeline(method, parts[1:], query)
         if head == "sdr":            # live SDRconnect receiver -- scripts/sdr_hub.py (feat/live-sdr-console)

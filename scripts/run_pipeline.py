@@ -98,6 +98,9 @@ def plot(iq, answers, truth, path):
     plt.close(fig)
 
 
+MAX_LISTEN_SAMPLES = 30_000_000     # what the zoom-in may load at the file's own rate (240 MB)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     src = p.add_mutually_exclusive_group(required=True)
@@ -108,6 +111,9 @@ def main():
     p.add_argument("--max-seconds", type=float, default=1.0,
                    help="analyse at most this much of a recording (CPU: ~50 s of work per second of capture)")
     p.add_argument("--listen", action="store_true", help="zoom, demodulate and transcribe voice / Morse tracks")
+    p.add_argument("--listen-seconds", type=float, default=120.0,
+                   help="with --iq: the zoom-in listens to this much of the file at its own rate (whole "
+                        "messages), while the detector scans only --max-seconds at 3.2 MS/s; 0 = only that part")
     p.add_argument("--no-whisper", action="store_true")
     p.add_argument("--whisper-model", default=voice.DEFAULT_MODEL,
                    help="Whisper model already on this machine (it never downloads): base is fast but poor on Malay")
@@ -157,7 +163,19 @@ def main():
     if args.listen:
         for old in out.glob("track_*.wav"):              # audio of an earlier run in this folder
             old.unlink()
-        listen.listen_all(iq, answers, out, rng=rng, use_whisper=not args.no_whisper,
+        heard, heard_fs = iq, FS
+        if args.iq and args.listen_seconds > 0:
+            # The whole message at the file's own rate: 26 s of a 250 kS/s Morse file is 52 MB,
+            # the same at 3.2 MS/s 670 MB (too much for an 8 GB laptop next to Whisper).
+            native, sr = iqio.load_native(args.iq, fs=args.fs, dtype=args.dtype, max_s=args.listen_seconds,
+                                          max_samples=MAX_LISTEN_SAMPLES)
+            if len(native) / sr > len(iq) / FS + 0.5:
+                heard, heard_fs = native, sr
+                source["listened_s"] = round(len(native) / sr, 2)
+                print(f"listening to {len(native) / sr:.1f} s of the file at {sr / 1e3:.1f} kS/s "
+                      f"(the detector scanned {len(iq) / FS:.1f} s)")
+            del native
+        listen.listen_all(heard, answers, out, rng=rng, fs=heard_fs, use_whisper=not args.no_whisper,
                           whisper_model=args.whisper_model, language=args.language,
                           use_llm=not args.no_llm, llm_model=args.llm_model)
     doc = finite({"n_samples": len(iq), "duration_ms": len(iq) / FS * 1e3,

@@ -14,6 +14,7 @@ For each track the classifier puts near the analog / tone classes:
 Every step is optional and fails soft: a missing Whisper or Ollama leaves the
 audio and the analog kind in place, with the error noted.
 """
+from fractions import Fraction
 from pathlib import Path
 
 import numpy as np
@@ -51,7 +52,7 @@ def wanted(ans):
 MIX_BLOCK = 1 << 20
 
 
-def zoomed_cut(iq, t0, t1, f_lo, f_hi, noise_var, rng, decim=WIDE_DECIM):
+def zoomed_cut(iq, t0, t1, f_lo, f_hi, noise_var, rng, decim=WIDE_DECIM, fs=FS):
     """analog.zoom(extract.cut(...).filled, decim), zoomed FIRST: the box mixed
     to 0 Hz and decimated, then everything outside it (plus extract's margin)
     replaced by noise at the floor. The same signal for 1/decim of the memory:
@@ -68,16 +69,21 @@ def zoomed_cut(iq, t0, t1, f_lo, f_hi, noise_var, rng, decim=WIDE_DECIM):
     x = np.empty(t1 - t0, np.complex64)
     for s in range(t0, t1, MIX_BLOCK):              # mix to 0 Hz block by block: no full-length phase array
         e = min(t1, s + MIX_BLOCK)
-        x[s - t0:e - t0] = iq[s:e] * np.exp(-2j * np.pi * fc * np.arange(s, e) / FS).astype(np.complex64)
-    y = resample_poly(x, 1, decim)
+        x[s - t0:e - t0] = iq[s:e] * np.exp(-2j * np.pi * fc * np.arange(s, e) / fs).astype(np.complex64)
+    # to FS / decim (400 kS/s) from whatever rate the recording has: decimate a 3.2 MS/s
+    # capture, or interpolate a 250 kS/s file the zoom-in listens to at its own rate
+    fa = FS / decim
+    r = Fraction(fa / fs).limit_denominator(1000)
+    y = resample_poly(x, r.numerator, r.denominator)
     del x
-    fa, m = FS / decim, len(y)
+    m = len(y)
     kc = half * m / fa                                # bins with |f| <= half are the box
     a, b = int(np.floor(kc)) + 1, int(np.ceil(m - kc))   # Y[a:b] lies outside it
     if b > a:
         Y = sfft.fft(y, overwrite_x=True)
-        # white noise of variance noise_var at FS keeps noise_var / decim per sample after the zoom
-        scale = np.float32(np.sqrt(m * noise_var / decim / 2))
+        # white noise of variance noise_var at fs has density noise_var / fs: at the zoom's
+        # rate fa that is noise_var * fa / fs per sample (noise_var / decim at fs = FS)
+        scale = np.float32(np.sqrt(m * noise_var * fa / fs / 2))
         Y[a:b] = (rng.standard_normal(b - a, dtype=np.float32) * scale
                   + 1j * (rng.standard_normal(b - a, dtype=np.float32) * scale))
         y = sfft.ifft(Y, overwrite_x=True)
@@ -85,14 +91,14 @@ def zoomed_cut(iq, t0, t1, f_lo, f_hi, noise_var, rng, decim=WIDE_DECIM):
 
 
 def listen_track(iq, ans, out_dir, noise_var, rng, whisper_model=None, language=None, llm_model=None,
-                 use_whisper=True, use_llm=True):
-    t0 = int(ans["t_start_ms"] * FS / 1e3)
-    t1 = int(ans["t_end_ms"] * FS / 1e3)
+                 use_whisper=True, use_llm=True, fs=FS):
+    t0 = int(ans["t_start_ms"] * fs / 1e3)
+    t1 = int(ans["t_end_ms"] * fs / 1e3)
     f_lo, f_hi = ans["f_lo_khz"] * 1e3, ans["f_hi_khz"] * 1e3
     # Two-step zoom: 400 kS/s first, find the signal itself inside the (often
     # much wider) box, then centre on it and zoom to 50 kS/s for voice / Morse.
     fa1 = FS / WIDE_DECIM
-    y1 = zoomed_cut(iq, t0, t1, f_lo, f_hi, noise_var, rng)   # noise-filled outside the box: the floor stays measurable
+    y1 = zoomed_cut(iq, t0, t1, f_lo, f_hi, noise_var, rng, fs=fs)   # noise-filled outside the box: the floor stays measurable
     m1 = analog.measure(y1, fa1)
     lo1, hi1 = m1.get("band", (-fa1 / 4, fa1 / 4))
     wide = ans["answer"] == "WBFM" or (hi1 - lo1) > analog.WBFM_HZ
@@ -188,20 +194,23 @@ def groups(answers, min_overlap=0.5):
     return out
 
 
-def listen_all(iq, answers, out_dir, rng=None, **kw):
+def listen_all(iq, answers, out_dir, rng=None, fs=FS, **kw):
     """Adds a 'listen' entry to every answer worth zooming into; tracks on the
-    same frequency share one (over their joined time span)."""
+    same frequency share one (over their joined time span). iq may be the
+    recording at its own rate fs (and longer than the part the detector saw):
+    the zoom-in then hears the whole transmission, e.g. a 26 s Morse message
+    of which only the first seconds were scanned at 3.2 MS/s."""
     rng = rng or np.random.default_rng(0)
     nv = extract.noise_variance(np.asarray(iq[:min(len(iq), 32768)]))
     for g in groups(answers):
         # The whole capture at that frequency, as an operator would listen:
         # Morse words and speech pauses split one transmission into tracks.
         span = dict(g[0])
-        span.update(track=g[0]["track"], t_start_ms=0.0, t_end_ms=len(iq) / FS * 1e3,
+        span.update(track=g[0]["track"], t_start_ms=0.0, t_end_ms=len(iq) / fs * 1e3,
                     f_lo_khz=float(np.median([a["f_lo_khz"] for a in g])),
                     f_hi_khz=float(np.median([a["f_hi_khz"] for a in g])))
         try:
-            res = listen_track(iq, span, out_dir, nv, rng, **kw)
+            res = listen_track(iq, span, out_dir, nv, rng, fs=fs, **kw)
         except Exception as e:                   # noqa: BLE001 -- one bad track must not stop the rest
             res = {"kind": "ERROR", "why": f"{type(e).__name__}: {e}"}
         res["tracks"] = [a["track"] for a in g]
@@ -219,6 +228,11 @@ def listen_all(iq, answers, out_dir, rng=None, **kw):
 # 30 dB, 65/72 at 20 dB, 62/72 at 15 dB (src/pipeline/analog.py tests).
 ZOOM_MIN_SNR_DB = 15.0
 ZOOM_HIGH_SNR_DB = 20.0
+# Kinds named by a carrier, which stays easy to see in noise: AM ("strong carrier with
+# sidebands on both sides") and Morse (one carrier keyed on and off). Their zoom answer
+# wins from 10 dB (band "medium" below 20 dB). Measured 13 Nov 2026 on the demo files:
+# a Malay AM clip at 14.6 dB stayed "4ASK / 8ASK uncertain" under the 15 dB rule.
+ZOOM_MIN_SNR_DB_KIND = {"AM": 10.0, "CW": 10.0}
 
 
 def zoom_answer(kind, feats):
@@ -245,7 +259,7 @@ def override(ans, res):
     """Replace the classifier's answer with the zoom's when the zoom is sure."""
     z = zoom_answer(res.get("kind"), res.get("features") or {})
     snr = (res.get("features") or {}).get("snr_db", -99.0)
-    if z is None or snr is None or snr < ZOOM_MIN_SNR_DB:
+    if z is None or snr is None or snr < ZOOM_MIN_SNR_DB_KIND.get(res.get("kind"), ZOOM_MIN_SNR_DB):
         return
     label, classes = z
     if label == ans["answer"]:

@@ -147,6 +147,31 @@ def to_fs(iq, fs_in, rng=None):
     return y
 
 
+def load_native(path, fs=None, dtype="float32", max_s=None, max_samples=30_000_000):
+    """path -> (iq complex64 at the recording's own rate, that rate). For the
+    zoom-in, which listens to a whole narrow recording without the 3.2 MS/s copy.
+    At most max_samples are read (30 M complex64 = 240 MB: 120 s at 250 kS/s,
+    9 s at 3.2 MS/s)."""
+    path = Path(path)
+    suffix = path.suffix.lower()
+    if suffix == ".wav":
+        sr = _wav(path, 1e-3)[1]                         # the rate first, from a few samples
+        iq, sr, _, _ = _wav(path, min(max_s or 1e9, max_samples / sr))
+    elif suffix in (".sigmf-meta", ".sigmf-data", ".sigmf"):
+        sr = _sigmf(path, 1e-3)[1]
+        iq, sr, _, _ = _sigmf(path, min(max_s or 1e9, max_samples / sr))
+    elif suffix == ".npy":
+        sr = float(fs or FS)
+        iq = np.load(path, mmap_mode="r")
+        iq = np.asarray(iq[:min(int(max_s * sr) if max_s else len(iq), max_samples)])
+    else:
+        sr = float(fs or FS)
+        iq, sr, _, _ = _raw(path, dtype, min(max_s or 1e9, max_samples / sr), sr)
+    if fs and suffix == ".wav" and abs(fs - sr) > 1:
+        sr = float(fs)
+    return np.asarray(iq, np.complex64), float(sr)
+
+
 def load(path, fs=None, dtype="float32", max_s=None, rng=None):
     """path -> (iq complex64 at 3.2 MS/s, info dict)."""
     path = Path(path)
