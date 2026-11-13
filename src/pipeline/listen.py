@@ -111,7 +111,7 @@ def listen_track(iq, ans, out_dir, noise_var, rng, whisper_model=None, language=
     if not wide:                                    # RTTY / PSK31 text (src/intel/digital.py)
         from src.intel import digital
         was = kind
-        kind, dig = digital.read(kind, y, fa)
+        kind, dig = digital.read(kind, y, fa, slow)
         if kind != was:
             why, demod_kind = dig["why"], "USB"
     out = {"kind": kind, "why": why, "duration_s": round(len(y) / fa, 3),

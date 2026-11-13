@@ -499,7 +499,7 @@ def voice_snapshot(iq, fs, out_dir, whisper_model, language, use_whisper, use_ll
         kind, why, demod_kind, slow = narrowband.refine(kind, why, y_on, ZOOM_FS)
         from src.intel import digital
         was = kind
-        kind, dig = digital.read(kind, y, ZOOM_FS)          # RTTY / PSK31 text (and a clean decode names the kind)
+        kind, dig = digital.read(kind, y, ZOOM_FS, slow)          # RTTY / PSK31 text (and a clean decode names the kind)
         if kind != was:
             why, demod_kind = dig["why"], "USB"
         L = {"kind": kind, "why": why, "duration_s": round(len(y) / ZOOM_FS, 3), "tracks": [k],
