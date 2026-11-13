@@ -830,7 +830,7 @@ class Handler(SimpleHTTPRequestHandler):
             st = hub.connect(host=b.get("host"), port=b.get("port"), freq_khz=b.get("freq_khz"),
                              whisper_model=b.get("whisper_model") or "small", language=b.get("language"),
                              use_llm=b.get("llm", True), clip_s=b.get("clip_s") or 30,
-                             llm_model=b.get("llm_model") or None)
+                             llm_model=b.get("llm_model") or None, demod=b.get("demod") or None)
             self.db.log(self._actor(), "kiwi.start", "kiwi", st["url"], {"label": st["label"], "decode": st["decode"]})
             return self._send_json(st)
         if method == "POST" and rest == ["locate"]:       # TDoA from 3 GPS-timed KiwiSDRs, in the background

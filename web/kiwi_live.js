@@ -27,6 +27,7 @@ export function renderKiwiLive(root, { server }) {
   if (!server) { root.innerHTML = ""; return; }
   if (mounted !== root) {
     mounted = root;
+    lastListKey = null;
     root.innerHTML = `
     <div class="block" id="kiwiBlock">
       <div class="block-label">Live KiwiSDR listening</div>
@@ -49,6 +50,11 @@ export function renderKiwiLive(root, { server }) {
             <option value="qwen2.5:1.5b">qwen2.5:1.5b (lighter, ~1 GB)</option></select></label>
         <label class="field">Clip
           <select id="kwClip"><option value="30" selected>30 s</option><option value="60">60 s</option></select></label>
+        <label class="field" title="Auto measures each signal. If you know what it is (a short-wave broadcast is AM,
+          amateur voice is USB or LSB), choose it: the audio is then demodulated that way.">Demodulate as
+          <select id="kwDemod"><option value="auto" selected>Auto (measured)</option>
+            <option value="AM">AM (broadcast)</option><option value="USB">USB</option><option value="LSB">LSB</option>
+            <option value="NBFM">FM (narrow)</option><option value="CW">CW (Morse)</option></select></label>
         <label style="display:inline-flex;gap:6px;align-items:center;"><input type="checkbox" id="kwLlm" checked> AI reading</label>
         <button class="primary" id="kwStart">Start listening</button>
         <button class="secondary" id="kwStop" disabled>Stop</button>
@@ -86,7 +92,7 @@ export function renderKiwiLive(root, { server }) {
       try {
         paint(await call("start", { host, port: Number(port) || 8073, freq_khz: Number($("kwFreq").value),
           language: $("kwLang").value, whisper_model: $("kwModel").value, clip_s: Number($("kwClip").value),
-          llm: $("kwLlm").checked, llm_model: $("kwLlmModel").value }));
+          llm: $("kwLlm").checked, llm_model: $("kwLlmModel").value, demod: $("kwDemod").value }));
       } catch (e) {
         $("kwState").textContent = `Could not start: ${e.message}`;
         $("kwStart").disabled = false;
@@ -167,6 +173,7 @@ function paintTdoa(t) {
 // The newest location on record for the frequency in the box (computed by NEXA, or typed in by the analyst).
 let locKhz = null;
 let locMissing = null;           // the frequency the box last found NO location for
+let lastListKey = null;          // what the clip list shows now (paint redraws it only when this changes)
 async function showLocation(root, force = false) {
   const box = root.querySelector("#kwLoc"), khz = Number(root.querySelector("#kwFreq").value);
   if (!box) return;
@@ -203,7 +210,8 @@ function paint(st) {
   const khz = st.decode?.freq_khz;
   if (on && khz && document.activeElement !== $("kwFreq")) $("kwFreq").value = khz;
   const kiwi = (st.label || "").replace(/^KiwiSDR /, "");
-  const tdoa = khz ? ` · <a href="http://${esc(DEFAULT_RX)}/?f=${Number(khz).toFixed(2)}iqz10" target="_blank"
+  const rx = (/^kiwi:\/\/([^/]+)\//.exec(st.url || "") || [])[1] || DEFAULT_RX;   // the receiver being listened to
+  const tdoa = khz ? ` · <a href="http://${esc(rx)}/?f=${Number(khz).toFixed(2)}iqz10" target="_blank"
     rel="noopener noreferrer">open on KiwiSDR for TDoA</a>` : "";
   paintTdoa(st.tdoa);
   const idle = !st.tdoa || ["idle", "done", "error"].includes(st.tdoa.state);
@@ -219,6 +227,17 @@ function paint(st) {
       + (st.analysing ? ` · decoding ${st.analysing}` : "")
       + (st.skipped ? ` · ${st.skipped} clip${st.skipped > 1 ? "s" : ""} skipped while busy` : "") + tdoa;
   const rows = [...(st.decodes || [])].reverse();
+  // Redraw only when a clip arrives: redrawing every tick would cut off an audio player that is playing.
+  const listKey = JSON.stringify([st.state === "streaming", rows.map(d => d.id || d.at)]);
+  if (listKey === lastListKey) return;
+  lastListKey = listKey;
+  // Each clip's demodulated audio (results/pipeline/jobs/<id>/track_N.wav): play it here or save the .wav.
+  const players = d => [...new Set(d.tracks.map(t => t.audio).filter(Boolean))].map(a => {
+    const src = `/api/pipeline/${encodeURIComponent(d.id)}/${encodeURIComponent(a)}`;
+    return `<div style="display:flex;gap:10px;align-items:center;margin-top:6px;flex-wrap:wrap;">
+      <audio controls preload="none" style="flex:1;min-width:220px;max-width:480px;" src="${src}"></audio>
+      <a href="${src}" download="kiwi_${esc(d.id)}_${esc(a)}">save .wav</a></div>`;
+  }).join("");
   $("kwList").innerHTML = rows.map(d => d.error
     ? `<div class="note" style="color:#9B2C2C;">${esc(d.at)} · decode failed: ${esc(d.error)}</div>`
     : `<div style="padding:10px 0;border-top:1px solid var(--grid);">
@@ -228,5 +247,9 @@ function paint(st) {
         ${d.tracks.filter(t => t.text).map(t => `<div style="margin-top:6px;"><b>${t.kind === "CW" ? "Morse" : ["RTTY", "PSK31"].includes(t.kind) ? "Text" : "Said"}${t.language ? ` (${esc(t.language)})` : ""}:</b>
             <span style="font-family:var(--mono);">${esc(t.text)}</span></div>
           ${t.reading ? `<div style="margin-top:4px;"><b>AI reading:</b> ${esc(t.reading)}</div>` : ""}`).join("")}
+        ${d.tracks.filter(t => t.text_error && !t.text).map(t => `<div class="note" style="margin-top:6px;color:#9B2C2C;">
+            ${esc(KIND[t.kind] || t.kind)}: not decoded (${esc(t.text_error)})${/memory|alloc/i.test(t.text_error)
+              ? ". This laptop ran out of memory: choose a smaller speech model (small or base), or close other programs." : ""}</div>`).join("")}
+        ${players(d)}
       </div>`).join("") || (st.state === "streaming" ? `<div class="note">First result after the first clip (about ${Math.round(st.decode?.whisper_model === "medium" ? 90 : 60)} s).</div>` : "");
 }
