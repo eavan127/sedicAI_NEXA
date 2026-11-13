@@ -360,7 +360,9 @@ class SdrHub:
                                  "f_lo_khz": round(t["f_lo_khz"], 2), "f_hi_khz": round(t["f_hi_khz"], 2),
                                  "text": (t["listen"].get("transcript") or t["listen"].get("morse")
                                           or t["listen"].get("digital_text") or "")[:300],
-                                 "language": t["listen"].get("language"), "reading": reading(t["listen"])}
+                                 "language": t["listen"].get("language"), "reading": reading(t["listen"]),
+                                 "text_error": (t["listen"].get("text_error") or "")[:200],
+                                 "audio": t["listen"].get("audio")}
                                 for t in tracks]}
             with self.lock:
                 self.decodes.append(entry)
@@ -452,7 +454,8 @@ class KiwiHub(SdrHub):
     and read by the local AI, then saved like any live run."""
 
     def __init__(self, jobs_dir=None, intel_dir=None, clip_s=30.0):
-        super().__init__(jobs_dir=jobs_dir, intel_dir=intel_dir, decode=True, quiet_s=2.0, max_s=clip_s)
+        # keep_runs: every clip's audio stays replayable for about 2 h of 30 s clips (~2 MB each)
+        super().__init__(jobs_dir=jobs_dir, intel_dir=intel_dir, decode=True, quiet_s=2.0, max_s=clip_s, keep_runs=240)
         self.tdoa = TdoaRunner()                     # "Locate transmitter": runs beside the listening stream
 
     def connect(self, host=KIWI_DEFAULT[0], port=KIWI_DEFAULT[1], freq_khz=None, whisper_model="small",
