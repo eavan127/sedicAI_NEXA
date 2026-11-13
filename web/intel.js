@@ -1,4 +1,4 @@
-// Decoded signals: the Decoded review list in History, and the expanded page one
+// Decoded signals: the Intercepts list, and the expanded page one
 // row opens. Receiver AUDIO recordings decoded on this machine by
 // scripts/comms_intel.py (Morse decoder, Whisper for voice, a local Ollama
 // model for the reading), served read-only by scripts/serve_local.py at
@@ -230,9 +230,9 @@ export function decodedTableHtml(rows) {
 }
 
 /** The expanded page for one decoded signal. */
-export async function renderIntelDetail(root, { id, onBack }) {
+export async function renderIntelDetail(root, { id, onBack, backLabel = "Intercepts" }) {
   state.onBack = onBack;
-  root.innerHTML = `<div class="filters"><button class="secondary" id="intelBack">← Back to History</button></div>
+  root.innerHTML = `<div class="filters"><button class="secondary" id="intelBack">← Back to ${esc(backLabel)}</button></div>
     <div class="block" id="intelDetail"></div>`;
   root.querySelector("#intelBack").addEventListener("click", onBack);
   await openRecording(root, id);

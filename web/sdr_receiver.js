@@ -158,5 +158,5 @@ export function decodeLine(d) {
   const heard = d.tracks.map(t => `${t.answer || t.kind} ${t.f_lo_khz >= 0 ? "+" : ""}${t.f_lo_khz.toFixed(1)} kHz`
     + (t.text ? ` "${t.text.slice(0, 60)}"` : "")
     + (t.reading ? ` · AI: ${t.reading.slice(0, 120)}` : "")).join("; ");
-  return `Decoded ${d.seconds} s: ${heard}${d.intel_ids?.length ? " · added to Decoded review in History" : ""}`;
+  return `Decoded ${d.seconds} s: ${heard}${d.intel_ids?.length ? " · added to Intercepts" : ""}`;
 }

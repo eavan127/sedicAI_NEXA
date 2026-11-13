@@ -1,4 +1,4 @@
-// Signal Pipeline page: the whole wideband chain on a recording, run by the
+// Recording Analysis page (and the SDR Receiver's intercept feed): the whole wideband chain on a recording, run by the
 // local server (scripts/serve_local.py /api/pipeline -> scripts/run_pipeline.py):
 //   IQ file -> YOLO boxes -> 60-class classifier -> tracker (vote) -> resolve
 //   -> for voice / Morse tracks: zoom, analog kind, audio, Morse / Whisper, AI reading.
@@ -47,13 +47,16 @@ export function analyseFile(file) {
   return true;
 }
 
-export async function renderPipeline(root, { server }) {
+// Two places use it: mode "live" (SDR Receiver page: the intercept feed of the live
+// receiver) and mode "file" (Recording Analysis page: analyse a recording).
+export async function renderPipeline(root, { server, mode = "file" }) {
+  const live = mode === "live";
   if (!server) {
     // The page may ask before its own server check has finished: ask the server directly.
     try { server = (await fetch("/api/health", { credentials: "same-origin" })).ok; } catch { server = false; }
   }
   if (!server) {
-    root.innerHTML = `<div class="block"><div class="note">The signal pipeline runs on this machine's local server
+    root.innerHTML = live ? "" : `<div class="block"><div class="note">Recording analysis runs on this machine's local server
       (it needs the trained models and Python). Start it with <code>python scripts/serve_local.py</code>.</div></div>`;
     return;
   }
@@ -64,14 +67,26 @@ export async function renderPipeline(root, { server }) {
     root.innerHTML = `<div class="note">Could not reach the pipeline: ${esc(e.message)}</div>`;
     return;
   }
-  root.innerHTML = `
+  root.innerHTML = live ? `
+    <div class="block">
+      <div class="block-label">Intercept feed</div>
+      <div class="note">Each transmission the receiver records and decodes is added to the runs below. With this ticked,
+        the newest finished one opens by itself.</div>
+      <label class="note" style="margin:6px 0 0;"><input type="checkbox" id="pipeFollow"> Follow live snapshots</label>
+      <span class="note" id="pipeLiveMsg" style="margin-left:8px;"></span>
+    </div>
+    <div class="block" id="pipeRunBox" hidden></div>
+    <div class="block">
+      <div class="block-label">Recent runs</div>
+      <div class="table-wrap" id="pipeRuns"></div>
+    </div>` : `
     <div class="block">
       <div class="block-label">Analyse a recording</div>
       <div class="note">The whole chain on one recording: <b>find</b> each transmitter (YOLO boxes), <b>name</b> it
         (60-class model, voted over the whole transmission), and for voice or Morse <b>listen</b>: zoom in, demodulate,
         Morse decoder or Whisper, then a local AI reading. Record in SDRconnect with <b>Recording type = IQ</b>.
-        <b>Replay a file</b> on the live receiver above does the same, with the settings here.
-        The detector scans the first <b>Seconds to scan</b>; the zoom-in listens to the <b>whole file</b> (up to 2 min), so a full Morse or voice message is decoded. About 30-90 s per file on this PC. Then open it in History → Decoded review to translate.</div>
+        <b>Replay a file</b> on the SDR Receiver page does the same, with the settings here.
+        The detector scans the first <b>Seconds to scan</b>; the zoom-in listens to the <b>whole file</b> (up to 2 min), so a full Morse or voice message is decoded. About 30-90 s per file on this PC. Then open it in Intercepts to translate.</div>
       <div class="note" style="margin-top:6px;">Models: classifier ${info.classifiers.length
         ? info.classifiers.map(c => `<code>${esc(c)}</code>`).join(" ") + (info.classifiers.length > 1 ? " (averaged)" : "")
         : `<b style="color:#9B2C2C;">none: put a best.pt in results/classifier/</b>`} ·
@@ -89,26 +104,25 @@ export async function renderPipeline(root, { server }) {
           ${(info.languages || ["auto"]).map(l => `<option value="${esc(l)}">${esc(LANG_TEXT[l] || l)}</option>`).join("")}</select>
         <label class="note" style="margin:0;"><input type="checkbox" id="pipeLlm" checked> AI reading (Ollama)</label>
         <button id="pipeRun">Analyse file</button>
-        <button class="secondary" id="pipeDemo" title="Made-up walkie-talkie speech, Morse and an AM station in a 1.2 s capture">Run voice demo</button>
+        <button class="secondary" id="pipeDemo" title="Built-in test capture: walkie-talkie speech, Morse and an AM station, 1.2 s">Run sample</button>
       </div>
       <div class="note" id="pipeMsg"></div>
     </div>
     <div class="block" id="pipeRunBox" hidden></div>
     <div class="block">
-      <div class="block-label">Live decodes</div>
-      <div class="note">Each transmission the live receiver records and decodes is added to Recent runs below. With this ticked,
-        the page opens each finished one by itself.</div>
-      <label class="note" style="margin:6px 0 0;"><input type="checkbox" id="pipeFollow"> Follow live snapshots</label>
-      <span class="note" id="pipeLiveMsg" style="margin-left:8px;"></span>
-    </div>
-    <div class="block">
       <div class="block-label">Recent runs</div>
       <div class="table-wrap" id="pipeRuns"></div>
     </div>`;
-  const follow = root.querySelector("#pipeFollow");
-  follow.checked = state.follow || false;
-  follow.addEventListener("change", () => { state.follow = follow.checked; if (follow.checked) followLive(root); });
-  if (state.follow) followLive(root);
+  if (live) {
+    const follow = root.querySelector("#pipeFollow");
+    follow.checked = state.follow || false;
+    follow.addEventListener("change", () => { state.follow = follow.checked; if (follow.checked) followLive(root); });
+    if (state.follow) followLive(root);
+    await listRuns(root, info.runs);
+    if (state.open) openRun(root, state.open);
+    else if (info.runs[0]) openRun(root, info.runs[0].id);
+    return;
+  }
   const msg = root.querySelector("#pipeMsg");
   const start = async (demo) => {
     const p = new URLSearchParams({
@@ -122,7 +136,7 @@ export async function renderPipeline(root, { server }) {
     let body = null;
     if (!demo) {
       const f = root.querySelector("#pipeFile").files[0];
-      if (!f) { msg.textContent = "Choose an IQ file first (or run the voice demo)."; return; }
+      if (!f) { msg.textContent = "Choose an IQ file first (or run the sample)."; return; }
       p.set("name", f.name);
       const fs = root.querySelector("#pipeFs").value.trim();
       if (fs) p.set("fs", String(Number(fs)));
