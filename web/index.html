@@ -675,6 +675,14 @@
     :is(#pipelineLiveRoot, #pipelineFileRoot) .filters { gap: 16px 26px; margin-bottom: 0; }
     :is(#pipelineLiveRoot, #pipelineFileRoot) .note + .filters { margin-top: 24px !important; }
     :is(#pipelineLiveRoot, #pipelineFileRoot) .filters + .filters { margin-top: 22px; }
+    :is(#pipelineLiveRoot, #pipelineFileRoot) table.pipe-tracks td, :is(#pipelineLiveRoot, #pipelineFileRoot) table.pipe-tracks th { padding: 10px 16px 10px 10px; vertical-align: top; }
+    :is(#pipelineLiveRoot, #pipelineFileRoot) table.pipe-tracks { min-width: 1000px; }   /* a narrow window scrolls sideways instead of breaking words */
+    :is(#pipelineLiveRoot, #pipelineFileRoot) table.pipe-tracks td { overflow-wrap: break-word; }
+    :is(#pipelineLiveRoot, #pipelineFileRoot) table.pipe-tracks td:nth-child(2) { min-width: 90px; }
+    :is(#pipelineLiveRoot, #pipelineFileRoot) table.pipe-tracks td:nth-child(3) { min-width: 150px; }
+    :is(#pipelineLiveRoot, #pipelineFileRoot) table.pipe-tracks td:nth-child(4) { min-width: 170px; }
+    :is(#pipelineLiveRoot, #pipelineFileRoot) table.pipe-tracks td:nth-child(5) { min-width: 90px; }
+    :is(#pipelineLiveRoot, #pipelineFileRoot) table.pipe-tracks td:nth-child(6) { min-width: 240px; }
     #pipeRun, #pipeDemo {
       min-height: 46px; padding: 10px 22px; font-family: var(--font); font-size: 16px; font-weight: 600;
       color: var(--text); background: var(--panel); border: 1px solid var(--grid); border-radius: 6px; cursor: pointer;

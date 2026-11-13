@@ -32,6 +32,31 @@ function chip(text, color) {
   return `<span class="chip" style="background:${color}1f;color:${color};">${esc(text)}</span>`;
 }
 
+/** Duration (s) of an IQ WAV from its header, or null (raw files have none). */
+async function wavSeconds(file) {
+  if (!file || !/\.wav$/i.test(file.name)) return null;
+  const v = new DataView(await file.slice(0, 4096).arrayBuffer());
+  const tag = i => String.fromCharCode(v.getUint8(i), v.getUint8(i + 1), v.getUint8(i + 2), v.getUint8(i + 3));
+  if (v.byteLength < 44 || tag(0) !== "RIFF" || tag(8) !== "WAVE") return null;
+  let pos = 12, rate = 0, align = 0;
+  while (pos + 8 <= v.byteLength) {
+    const id = tag(pos), size = v.getUint32(pos + 4, true);
+    if (id === "fmt ") { rate = v.getUint32(pos + 12, true); align = v.getUint16(pos + 20, true); }
+    if (id === "data") return rate && align ? Math.min(size, file.size - pos - 8) / (rate * align) : null;
+    pos += 8 + size + (size & 1);
+  }
+  return null;
+}
+
+/** Seconds to scan: the whole recording, up to the server's 10 s cap (memory). */
+async function fitSeconds(root, file) {
+  const sec = await wavSeconds(file).catch(() => null);
+  const box = root?.querySelector("#pipeSec");
+  if (!box || !sec) return;
+  box.value = String(Math.min(10, Math.max(0.25, Math.ceil(sec * 4) / 4)));
+  box.title = `${file.name} is ${sec.toFixed(1)} s long` + (sec > 10 ? "; the detector scans the first 10 s, the zoom-in still hears all of it" : "");
+}
+
 /** Analyse a file with the full pipeline (detect, name, decode Morse / speech, AI
  * reading, waterfall, Comms Intel), as if it had been chosen in this section's file
  * box. Used by the receiver's "Replay a file" for IQ WAV recordings. -> false when the
@@ -42,6 +67,7 @@ export function analyseFile(file) {
   const dt = new DataTransfer();
   dt.items.add(file);
   input.files = dt.files;
+  fitSeconds(state.root, file);
   state.root.scrollIntoView({ behavior: "smooth", block: "start" });
   state.start(false);
   return true;
@@ -100,8 +126,7 @@ export async function renderPipeline(root, { server, mode = "file" }) {
       <div class="filters">
         <label class="note" style="margin:0;"><input type="checkbox" id="pipeListen" checked> Listen to voice / Morse</label>
         <label class="note" style="margin:0;"><input type="checkbox" id="pipeWhisper" checked> Whisper</label>
-        <select id="pipeLang" title="Language spoken. Setting it is safer on short clips, but a wrong choice gives nonsense">
-          ${(info.languages || ["auto"]).map(l => `<option value="${esc(l)}">${esc(LANG_TEXT[l] || l)}</option>`).join("")}</select>
+        <span class="note" title="Whisper hears the language from the sound and picks among Malay, English, Indonesian and Mandarin. Translate to English on the result.">Language: detected automatically</span>
         <label class="note" style="margin:0;"><input type="checkbox" id="pipeLlm" checked> AI reading (Ollama)</label>
         <button id="pipeRun">Analyse file</button>
         <button class="secondary" id="pipeDemo" title="Built-in test capture: walkie-talkie speech, Morse and an AM station, 1.2 s">Run sample</button>
@@ -131,7 +156,7 @@ export async function renderPipeline(root, { server, mode = "file" }) {
       listen: root.querySelector("#pipeListen").checked ? "1" : "0",
       whisper: root.querySelector("#pipeWhisper").checked ? "1" : "0",
       llm: root.querySelector("#pipeLlm").checked ? "1" : "0",
-      language: root.querySelector("#pipeLang").value,
+      language: "auto",                    // Whisper detects it among the supported languages
     });
     let body = null;
     if (!demo) {
@@ -158,6 +183,7 @@ export async function renderPipeline(root, { server, mode = "file" }) {
   };
   state.root = root;
   state.start = start;
+  root.querySelector("#pipeFile").addEventListener("change", ev => fitSeconds(root, ev.target.files[0]));
   root.querySelector("#pipeRun").addEventListener("click", () => start(false));
   root.querySelector("#pipeDemo").addEventListener("click", () => start(true));
   await listRuns(root, info.runs);
@@ -303,16 +329,34 @@ function drawResult(box, id, r) {
     <div style="margin-top:14px;font-weight:700;">Every transmitter</div>
     <div class="note">Answer = the 60-class model voted over the whole transmission; when two classes cannot be told apart from
       the signal (e.g. RADAR_CW / JAM_TONE) both are shown with the reason. Confidence band from the track probability: high (≥ 0.40), medium (≥ 0.10), uncertain (below: shown as 'uncertain' with the likeliest class). Voice / Morse tracks on a clear signal are named by the zoom-in, which listens to the whole track.</div>
-    <div class="table-wrap"><table><thead><tr><th>#</th><th>Time (ms)</th><th>Frequency</th><th>Answer</th>
+    <div class="table-wrap"><table class="pipe-tracks"><thead><tr><th>#</th><th>Time (ms)</th><th>Frequency</th><th>Answer</th>
       <th>Confidence</th><th>Why</th><th>Other candidates</th><th>Zoom</th></tr></thead><tbody>
     ${mergeTracks(tracks).map(t => `<tr><td>${t.track}${t.merged ? `<div class="note">${t.merged} bursts</div>` : ""}</td><td>${t.t_start_ms.toFixed(1)}–${t.t_end_ms.toFixed(1)}</td>
-      <td style="white-space:nowrap;">${esc(freqText(t, centre))}</td><td>${t.band === 'uncertain' ? `<span class="note">uncertain</span><div class="note">likeliest ${esc(t.answer)}</div>` : `<b>${esc(t.answer)}</b>`}${t.decided_by === 'zoom' ? `<div class="note">by zoom-in (classifier: ${esc(t.classifier_answer)})</div>` : ''}</td>
+      <td>${esc(freqText(t, centre)).replace("–", "–<wbr>")}</td><td>${t.band === 'uncertain' ? `<span class="note">uncertain</span><div class="note">likeliest ${esc(t.answer)}</div>` : `<b>${esc(t.answer)}</b>`}${t.decided_by === 'zoom' ? `<div class="note">by zoom-in (classifier: ${esc(t.classifier_answer)})</div>` : ''}</td>
       <td>${chip(t.band || t.confidence.toFixed(2), BAND_COL[t.band] || CONF(t.confidence))}<div class="note">${t.confidence.toFixed(2)}</div></td><td class="note">${esc(t.reason)}</td>
       <td class="note">${esc((t.top5 || []).slice(1, 4).map(([c, p]) => `${c} ${p.toFixed(2)}`).join(", "))}</td>
       <td>${t.listen ? esc(KIND_TEXT[t.listen.kind] || t.listen.kind) : ""}</td></tr>`).join("")}
     </tbody></table></div>
     <details style="margin-top:8px;"><summary class="note">Run log</summary>
       <pre style="white-space:pre-wrap;max-height:240px;overflow:auto;">${esc(r.log || "")}</pre></details>`;
+  for (const btn of box.querySelectorAll("button[data-translate]")) {
+    btn.addEventListener("click", async () => {
+      const msg = btn.parentElement.querySelector(".tr-msg"), out = btn.parentElement.querySelector(".tr-out");
+      btn.disabled = true;
+      msg.textContent = "Translating with the local AI on this machine (up to a minute)…";
+      try {
+        const res = await fetch(`/api/intel/${encodeURIComponent(btn.dataset.translate)}/translate`, {
+          method: "POST", credentials: "same-origin", headers: { ...HDR, "Content-Type": "application/json" }, body: "{}" });
+        const j = await res.json();
+        if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+        msg.textContent = `From ${j.language || "the original"}, by ${j.model} (also saved in History → Decoded review):`;
+        out.innerHTML = `<div style="padding:8px 10px;border-radius:6px;background:var(--panel);border:1px solid var(--grid);white-space:pre-wrap;">${esc(j.english)}</div>`;
+      } catch (e) {
+        msg.textContent = `Could not translate: ${e.message}`;
+      }
+      btn.disabled = false;
+    });
+  }
   for (const form of box.querySelectorAll("form.tdoa")) {
     form.addEventListener("submit", async ev => {
       ev.preventDefault();
@@ -371,7 +415,7 @@ function locateBlock(khz) {
 function listenCard(id, L, khz = null) {
   const rd = L.reading || {};
   const said = L.morse ? `<div><b>Morse:</b> <code>${esc(L.morse)}</code></div>`
-    : L.transcript !== undefined ? `<div><b>Speech (Whisper${L.whisper_model ? ` ${esc(L.whisper_model)}` : ""}${L.language ? `, ${esc(L.language)}` : ""}):</b>
+    : L.transcript !== undefined ? `<div><b>Speech (Whisper${L.whisper_model ? ` ${esc(L.whisper_model)}` : ""}${L.language ? `, ${esc(LANG_TEXT[L.language] || L.language)}` : ""}):</b>
         ${speechText(L)}</div>
         <div class="note">Machine transcript: it can be wrong without any mark, so check names and numbers against the audio.</div>` : "";
   return `<div class="block" style="margin:8px 0;padding:10px;">
@@ -386,6 +430,9 @@ function listenCard(id, L, khz = null) {
       <div>${esc(rd.summary)}</div>
       ${(rd.evidence || []).map(e => `<div class="note"><code>${esc(e.quote)}</code> — ${esc(e.why)}</div>`).join("")}
       ${rd.removed_ungrounded ? `<div class="note">${rd.removed_ungrounded} unsupported item(s) the model made up were removed.</div>` : ""}` : ""}
+    ${(L.transcript || L.morse || L.digital_text) ? `<div style="margin-top:8px;">
+      <button class="mini" data-translate="${esc(id)}_track_${esc(Math.min(...(L.tracks || [0])))}">Translate to English</button>
+      <span class="note tr-msg"></span><div class="tr-out" style="margin-top:4px;"></div></div>` : ""}
     ${khz ? locateBlock(khz) : ""}
   </div>`;
 }
