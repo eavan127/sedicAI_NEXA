@@ -174,6 +174,8 @@ def main():
     p.add_argument("--max-s", type=float, default=12.0, help="excerpt length at most (s)")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--no-sim", action="store_true", help="archive clips only, no simulated plain-language ones")
+    p.add_argument("--snr", type=float, nargs=2, default=[12.0, 30.0],
+                   help="SNR range, dB in 3 kHz (e.g. 32 38 for a clearer demo copy)")
     args = p.parse_args()
     rng = np.random.default_rng(args.seed)
     out = Path(args.out)
@@ -198,7 +200,7 @@ def main():
         write_wav(out / "audio" / f"{rid}.wav", beep, AUDIO_FS)
         gate = key_gate(words, r["wpm"], FA, np.random.default_rng(args.seed * 1000 + i)).astype(complex)
         offset = float(np.round(rng.uniform(-80e3, 80e3), -2))
-        snr = float(np.round(rng.uniform(12, 30), 1))
+        snr = float(np.round(rng.uniform(*args.snr), 1))
         on = gate.real > 0.5
         bb = gate / np.sqrt(np.mean(np.abs(gate[on]) ** 2)) * np.sqrt(10 ** (snr / 10) * 3000 / FS_OUT)
         w = resample_poly(bb, int(FS_OUT / FA), 1)
