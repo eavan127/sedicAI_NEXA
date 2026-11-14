@@ -76,15 +76,16 @@ export function renderKiwiLive(root, { server }) {
       <div class="block-label">Transmitter location</div>
       <div id="kwLoc" style="margin-top:14px;padding:12px 14px;border:1px solid var(--grid);border-radius:6px;"></div>
       <div class="filters" style="margin-top:10px;flex-wrap:wrap;gap:10px 16px;align-items:flex-end;">
-        <button class="secondary" id="kwLocate" title="Records this frequency on 3 GPS-timed KiwiSDRs at once and
+        <button class="secondary" id="kwLocate" title="Records this frequency on up to 5 GPS-timed KiwiSDRs at once and
           works out where the transmitter is from the arrival-time differences (TDoA)">Locate transmitter</button>
         <label class="field">Sample
-          <select id="kwTdoaS"><option value="10">10 s</option><option value="15">15 s</option>
-            <option value="30" selected>30 s</option></select></label>
-        <label class="field" title="Repeat the recording and use the median of each pair: an ionospheric path that
-          comes and goes in one run is outvoted by the others">Runs
-          <select id="kwTdoaRuns"><option value="1" selected>1</option><option value="2">2</option>
-            <option value="3">3</option></select></label>
+          <select id="kwTdoaS"><option value="10">10 s</option><option value="15" selected>15 s</option>
+            <option value="30">30 s</option></select></label>
+        <label class="field" title="Repeat the recording and combine: a far receiver often switches between one and two
+          ionospheric hops, and any run that catches the direct path corrects the others (14 Nov: one run 440 km off,
+          three runs 11 km)">Runs
+          <select id="kwTdoaRuns"><option value="1">1 (quickest)</option><option value="2">2</option>
+            <option value="3" selected>3 (most accurate)</option></select></label>
         <label class="field" style="min-width:300px;">TDoA receivers (host:port, comma-separated)
           <input id="kwTdoaRx" spellcheck="false" placeholder="empty: NEXA picks (Jakarta, Bangkok, Taiwan, … and further if needed)"></label>
         <label style="display:inline-flex;gap:6px;align-items:center;"><input type="checkbox" id="kwAuto" checked>

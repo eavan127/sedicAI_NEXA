@@ -316,9 +316,28 @@ def solve(recordings, max_dt_extra_s=0.003):
     return combine(*measure(recordings, max_dt_extra_s))
 
 
+def to_rate(t, z, fs, target):
+    """One recording brought down to the sample rate `target` (KiwiSDRs differ: most
+    give 12 kS/s IQ, some 6 kS/s), filtered against aliasing, with the GPS time of
+    every new sample interpolated from the old ones. -> (t, z, fs)"""
+    if fs <= target * 1.01:
+        return t, z, fs
+    from fractions import Fraction
+    from scipy.signal import resample_poly
+    r = Fraction(target / fs).limit_denominator(64)
+    y = resample_poly(z, r.numerator, r.denominator).astype(np.complex64)
+    pos = np.arange(len(y)) * (r.denominator / r.numerator)          # where each new sample sits, in old samples
+    keep = pos <= len(z) - 1
+    return np.interp(pos[keep], np.arange(len(z)), t), y[keep], fs * r.numerator / r.denominator
+
+
 def measure(recordings, max_dt_extra_s=0.003):
-    """The arrival-time difference of every pair of one recording set.
+    """The arrival-time difference of every pair of one recording set. Receivers
+    with different sample rates are first brought to the lowest one; a pair that
+    still cannot be compared is left out, never the whole run.
     -> (stations [{"id", "lat", "lon"}], pairs [{"i", "j", "a", "b", "lag_s", ...}])"""
+    low = min(r["fs"] for r in recordings)
+    recordings = [dict(r, **dict(zip(("t", "z", "fs"), to_rate(r["t"], r["z"], r["fs"], low)))) for r in recordings]
     pairs = []
     # how far each receiver is from the others (mean distance): the further one of a
     # pair is the one more likely to hear an extra ionospheric hop
@@ -328,10 +347,14 @@ def measure(recordings, max_dt_extra_s=0.003):
         for j in range(i + 1, len(recordings)):
             a, b = recordings[i], recordings[j]
             base_km = float(great_circle_km(a["lat"], a["lon"], b["lat"], b["lon"]))
-            r = pair_lag((a["t"], a["z"], a["fs"]), (b["t"], b["z"], b["fs"]),
-                         max_dt_s=base_km / C_KM_S + max_dt_extra_s, far="a" if spread[i] > spread[j] else "b")
+            try:
+                r = pair_lag((a["t"], a["z"], a["fs"]), (b["t"], b["z"], b["fs"]),
+                             max_dt_s=base_km / C_KM_S + max_dt_extra_s, far="a" if spread[i] > spread[j] else "b")
+            except ValueError:                                   # e.g. rates still apart: skip this pair only
+                r = None
             if r:
                 pairs.append({"i": i, "j": j, "a": a["id"], "b": b["id"], **r,
+                              "far": "a" if spread[i] > spread[j] else "b",
                               "lag_us": round(r["lag_s"] * 1e6, 1), "sigma_us": round(r["sigma_s"] * 1e6, 1)})
     stations = [{"id": r["id"], "lat": r["lat"], "lon": r["lon"]} for r in recordings]
     return stations, pairs
@@ -340,8 +363,11 @@ def measure(recordings, max_dt_extra_s=0.003):
 def merge_runs(runs):
     """Several measure() results of the same frequency (one per run) -> one
     (stations, pairs): each pair's lag is the median over the runs that have it,
-    its spread the larger of the runs' own and their disagreement. A wrong peak or
-    a passing ionospheric path in one run is outvoted by the others."""
+    its spread the larger of the runs' own and their disagreement. A wrong peak in
+    one run is outvoted by the others. But when the runs split into two lags a
+    sky-wave hop apart (a far receiver on one hop in some runs, two in others:
+    Taiwan on 14 Nov), the one where the far receiver heard it EARLIEST is kept,
+    as within one run: any run that caught the direct path wins."""
     stations, index, by_pair = [], {}, {}
     for st, ps in runs:
         for s in st:
@@ -349,13 +375,19 @@ def merge_runs(runs):
                 index[s["id"]] = len(stations)
                 stations.append(dict(s))
         for p in ps:
-            a, b, lag = p["a"], p["b"], p["lag_s"]
+            a, b, lag, far = p["a"], p["b"], p["lag_s"], p.get("far")
             if index[a] > index[b]:
-                a, b, lag = b, a, -lag
-            by_pair.setdefault((a, b), []).append({**p, "lag_s": lag})
+                a, b, lag, far = b, a, -lag, {"a": "b", "b": "a"}.get(far)
+            by_pair.setdefault((a, b), []).append({**p, "lag_s": lag, "far": far})
     pairs = []
     for (a, b), got in by_pair.items():
         lags = np.array([g["lag_s"] for g in got])
+        far = next((g["far"] for g in got if g.get("far")), None)
+        two = False
+        if far and np.ptp(lags) > RUN_HOP_S:                       # runs disagree by a hop: earliest at the far one
+            pick = lags.max() if far == "b" else lags.min()        # lag = t_a - t_b
+            near = np.abs(lags - pick) <= RUN_HOP_S / 2
+            lags, got, two = lags[near], [g for g, n in zip(got, near) if n], True
         lag = float(np.median(lags))
         mad = 1.4826 * float(np.median(np.abs(lags - lag))) if len(lags) > 2 else float(np.ptp(lags)) / 2
         sigma = max(float(np.median([g["sigma_s"] for g in got])), mad)
@@ -363,12 +395,13 @@ def merge_runs(runs):
                       "lag_us": round(lag * 1e6, 1), "sigma_us": round(sigma * 1e6, 1), "runs": len(got),
                       "blocks": sum(g.get("blocks", 0) for g in got), "used": sum(g.get("used", 0) for g in got),
                       "agree": round(float(np.median([g.get("agree", 0) for g in got])), 2),
-                      "paths": max(g.get("paths", 1) for g in got),
+                      "paths": 2 if two else max(g.get("paths", 1) for g in got),
                       "peak": round(float(np.median([g.get("peak", 0) for g in got])), 3)})
     return stations, pairs
 
 
 CLOSURE_TOL_S = 500e-6       # a pair this far from what the other pairs imply: a wrong correlation peak
+RUN_HOP_S = 300e-6           # runs that disagree by more than this on a pair heard different sky-wave paths
 FIT_BAD = 4.0                # h at the best point above this (4+ receivers): they disagree (~95 %, 1 degree of freedom)
 FIT_GAIN = 4.0               # leaving one receiver out must fit this many times better to be believed
 

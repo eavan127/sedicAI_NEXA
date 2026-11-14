@@ -106,7 +106,20 @@ folder), so the demo database and any test database each get every result.
     a recording (Taiwan on 14 Nov: 20 s on the two-hop path, then 9 s direct). When at least 15 % of the blocks
     support a second lag, the one where the receiver further from the others hears the signal earliest is kept:
     an extra hop only adds path.
-  * Runs: with "Runs" 2–3 the recording is repeated and each pair's median lag is used (`merge_runs`).
+  * Runs (page default 3 x 15 s): the recording is repeated and each pair's median lag is used (`merge_runs`);
+    when the runs disagree on a pair by more than a hop's worth (300 µs), the run where the far receiver heard it
+    earliest wins, as within one run. Kept recordings of 14 Nov (A, B: Taiwan direct; C: Taiwan two hops):
+
+    | Combined | From Kajang |
+    |---|---|
+    | C alone | 440 km |
+    | A + C | 24 km |
+    | B + C | 31 km |
+    | A + B + C | 11 km |
+
+  * Tried and not used: calibrating each receiver's delay on the known transmitter (Kajang) and applying it to
+    later runs. Calibrated on A or B, run C stayed ~430 km off; calibrated on C, A and B went from 13 to ~290 km.
+    The delays are not steady: Taiwan changes hops within minutes.
   * When a far receiver (> 2500 km) heard only one path, NEXA cannot tell whether it was the direct one or a
     two-hop one, so it also works out where the transmitter would be if that receiver had heard it one hop
     earlier (sky-wave path model, layer at 300 km) and shows it as "Other possible place" (`_other_hop`).

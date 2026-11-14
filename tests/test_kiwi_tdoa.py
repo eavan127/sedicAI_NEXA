@@ -335,3 +335,35 @@ def test_a_far_receiver_on_two_hops_gives_a_second_possible_place():
     assert K.great_circle_km(alt["lat"], alt["lon"], *TX) < 40, alt
     seen_both = K.combine(st, [dict(p, paths=2) if tw in (p["i"], p["j"]) else dict(p, paths=1) for p in _pairs(st, TX)])
     assert seen_both["alternative"] is None              # both paths seen: the direct one was already kept
+
+
+def test_runs_that_disagree_by_a_hop_keep_the_earliest_at_the_far_receiver():
+    """14 Nov: Taiwan was on its direct path in two recordings and two hops in a third;
+    merged, the direct one must win (11 km from Kajang), not the median."""
+    st = FIVE[1:5]
+    tw = next(i for i, x in enumerate(st) if x["id"] == "jplin53c")
+    direct = [dict(p, far="b" if p["j"] == tw else "a" if p["i"] == tw else None) for p in _pairs(st, TX)]
+    hop = 0.0007
+    late = [dict(p, lag_s=p["lag_s"] + (hop if p["i"] == tw else -hop if p["j"] == tw else 0.0)) for p in direct]
+    for runs in ([late, direct], [late, late, direct]):          # even when the late path is the majority
+        stations, merged = K.merge_runs([(st, ps) for ps in runs])
+        res = K.combine(stations, merged)
+        assert K.great_circle_km(res["lat"], res["lon"], *TX) < 20, res
+        assert res["alternative"] is None
+
+
+def test_a_receiver_at_half_the_sample_rate_still_counts(tmp_path):
+    """Some KiwiSDRs send 6 kS/s IQ, most 12 kS/s ("sample rates differ (11999 vs
+    6000 S/s)" stopped a whole run on 14 Nov). It is brought down to the common rate."""
+    from scipy.signal import resample_poly
+    recs = []
+    for i, host in enumerate(["dx6ran.ddns.net", "21023.proxy.kiwisdr.com", "rajawali.proxy.kiwisdr.com"]):
+        sid, lat, lon = STATIONS[host]
+        t0, z, fs = synth(lat, lon, seconds=8, seed=i)
+        if i == 1:                                          # this one at half rate
+            z, fs = resample_poly(z, 1, 2).astype(np.complex64), fs / 2
+        K.write_kiwi_wav(tmp_path / f"{i}.wav", t0, z, fs)
+        t, zz, fs2 = K.read_kiwi_wav(tmp_path / f"{i}.wav")
+        recs.append({"id": sid, "lat": lat, "lon": lon, "t": t, "z": zz, "fs": fs2})
+    res = K.solve(recs)
+    assert len(res["pairs"]) == 3 and K.great_circle_km(res["lat"], res["lon"], *TX) < 40, res
