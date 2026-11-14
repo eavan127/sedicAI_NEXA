@@ -191,10 +191,15 @@ def tdoa_details(res):
     client.tdoa_location -- the same fields the manual "Record location" form
     writes, so kiwi_location() finds either."""
     return {"freq_khz": res["freq_khz"], "lat": res["lat"], "lon": res["lon"], "receivers": res["receivers"],
-            "note": (f"most likely point; 95 % area about {res['radius_km']} km radius; "
-                     f"{res['sample_s']} s recordings"),
+            "note": "; ".join([f"most likely point; 95 % area about {res['radius_km']} km radius",
+                               f"{len(res['stations'])} receivers, {res.get('runs', 1)} x {res['sample_s']} s recordings"]
+                              + [f"{x['id']} left out: {x['why']} (about {x['offset_us']} µs)"
+                                 for x in res.get("excluded") or []]
+                              + ([res["warning"]] if res.get("warning") else [])),
             "source": "NEXA TDoA (computed)", "radius_km": res["radius_km"], "area": res["area"],
-            "fit": res["fit"], "pairs": res["pairs"], "stations": res["stations"]}
+            "fit": res["fit"], "pairs": res["pairs"], "stations": res["stations"],
+            "excluded": res.get("excluded") or [], "dropped_pairs": res.get("dropped_pairs") or [],
+            "warning": res.get("warning")}
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -926,9 +931,9 @@ class Handler(SimpleHTTPRequestHandler):
             b = self._read_json()
             who = self._actor()
             st = hub.tdoa.start(b.get("freq_khz"), receivers=b.get("receivers") or None,
-                                sample_s=b.get("sample_s") or 15, who=who)
+                                sample_s=b.get("sample_s") or 30, who=who, runs=b.get("runs") or 1)
             self.db.log(who, "kiwi.locate", "kiwi", f"{st['freq_khz']:g} kHz",
-                        {"receivers": b.get("receivers") or "default", "sample_s": st["sample_s"]})
+                        {"receivers": b.get("receivers") or "default", "sample_s": st["sample_s"], "runs": st["runs"]})
             return self._send_json(st)
         if method == "POST" and rest == ["stop"]:
             was = hub.status()

@@ -79,8 +79,12 @@ export function renderKiwiLive(root, { server }) {
         <button class="secondary" id="kwLocate" title="Records this frequency on 3 GPS-timed KiwiSDRs at once and
           works out where the transmitter is from the arrival-time differences (TDoA)">Locate transmitter</button>
         <label class="field">Sample
-          <select id="kwTdoaS"><option value="10">10 s</option><option value="15" selected>15 s</option>
-            <option value="30">30 s</option></select></label>
+          <select id="kwTdoaS"><option value="10">10 s</option><option value="15">15 s</option>
+            <option value="30" selected>30 s</option></select></label>
+        <label class="field" title="Repeat the recording and use the median of each pair: an ionospheric path that
+          comes and goes in one run is outvoted by the others">Runs
+          <select id="kwTdoaRuns"><option value="1" selected>1</option><option value="2">2</option>
+            <option value="3">3</option></select></label>
         <label class="field" style="min-width:300px;">TDoA receivers (host:port, comma-separated)
           <input id="kwTdoaRx" spellcheck="false" placeholder="default: DU6/PE1NSQ, HS0ZGZ, JKT (9M2AMH spare)"></label>
         <label style="display:inline-flex;gap:6px;align-items:center;"><input type="checkbox" id="kwAuto" checked>
@@ -168,7 +172,7 @@ async function locate(khz) {
   if (!(khz > 0)) { $("kwTdoa").textContent = "Type a frequency first."; return; }
   $("kwLocate").disabled = true;
   try {
-    paintTdoa(await call("locate", { freq_khz: khz, sample_s: Number($("kwTdoaS").value),
+    paintTdoa(await call("locate", { freq_khz: khz, sample_s: Number($("kwTdoaS").value), runs: Number($("kwTdoaRuns").value),
       receivers: $("kwTdoaRx").value.trim() || null }));
   } catch (e) {
     $("kwTdoa").innerHTML = `<span style="color:#9B2C2C;">Could not locate: ${esc(e.message)}</span>`;
@@ -187,8 +191,14 @@ function paintTdoa(t) {
        <progress max="1" value="${Number(t.progress) || 0}" style="width:160px;vertical-align:middle;"></progress>`
       + (skipped.length ? `<div>Skipped: ${skipped.join("; ")}.</div>` : "")
     : t.state === "error" ? `<span style="color:#9B2C2C;">Locating ${esc(t.freq_khz)} kHz failed: ${esc(t.error)}</span>`
-    : t.state === "done" && t.result ? `Located ${esc(t.freq_khz)} kHz at ${esc(t.result.at)} with ${esc(t.result.receivers)}
+    : t.state === "done" && t.result ? `Located ${esc(t.freq_khz)} kHz at ${esc(t.result.at)} with ${esc(t.result.receivers)}${
+       t.result.runs > 1 ? `, median of ${t.result.runs} runs` : ""}
        (arrival-time differences: ${t.result.pairs.map(p => `${esc(p.a)}−${esc(p.b)} ${p.lag_us} ± ${p.sigma_us} µs`).join(", ")}).`
+      + (t.result.further?.length ? ` Found further away: ${t.result.further.map(esc).join(", ")}.` : "")
+      + (t.result.excluded || []).map(x => ` <b>${esc(x.id)} left out</b>: ${esc(x.why)} (about ${x.offset_us} µs).`).join("")
+      + (t.result.dropped_pairs?.length ? ` Ignored ${t.result.dropped_pairs.map(p => `${esc(p.a)}−${esc(p.b)}`).join(", ")}
+         (contradicted the other pairs).` : "")
+      + (t.result.warning ? ` <span style="color:#9B2C2C;">Caution: ${esc(t.result.warning)}.</span>` : "")
       + (skipped.length ? ` Skipped: ${skipped.join("; ")}.` : "")
     : "";
   const key = t.state === "done" && t.result ? t.result.at : null;

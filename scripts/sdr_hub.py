@@ -561,14 +561,30 @@ class KiwiHub(SdrHub):
 # src/kiwi_tdoa.py (the hcab14/TDoA method). Public receivers are shared: one run
 # at a time, short samples, 3 receivers, and a pause between runs.
 
-TDOA_RECEIVERS = (                                  # GPS-timed KiwiSDRs round Malaysia, wide geometry, in order of use
-    ("dx6ran.ddns.net", 8073, "DU6/PE1NSQ"),        # Negros, Philippines
-    ("21023.proxy.kiwisdr.com", 8073, "HS0ZGZ"),    # Thailand
-    ("rajawali.proxy.kiwisdr.com", 8073, "JKT"),    # Jakarta, Indonesia
-    ("21439.proxy2.kiwisdr.com", 8073, "9M2AMH"),   # Kuala Lumpur (spare)
+TDOA_RECEIVERS = (                                  # GPS-timed KiwiSDRs round Malaysia, in order of use
+    ("rajawali.proxy.kiwisdr.com", 8073, "JKT"),    # Jakarta, Indonesia (south)
+    ("hs0zqs.proxy.kiwisdr.com", 8073, "HS0ZQS"),   # Bangkok, Thailand (north)
+    ("jplin53c.proxy.kiwisdr.com", 8073, "jplin53c"),   # Taiwan (north-east)
+    ("21023.proxy.kiwisdr.com", 8073, "HS0ZGZ"),    # Khon Kaen, Thailand (north)
+    ("ptlen.proxy.kiwisdr.com", 8073, "ptlen"),     # Bandung, Indonesia (south; cross-checks JKT)
+    ("la6lutha.proxy.kiwisdr.com", 8073, "LA6LU"),  # Hua Hin, Thailand (north-west)
+    ("21439.proxy2.kiwisdr.com", 8073, "9M2AMH"),   # Kuala Lumpur
 )
-TDOA_MAX_RX = 3                                     # 4 often timed out on KiwiSDR's own TDoA page
-TDOA_SAMPLE_S = (10, 15, 30)
+# Receivers whose time stamps disagreed with all the others, run after run: left out
+# unless the analyst types them in. Evidence in docs/SYSTEM_ARCHITECTURE.md.
+TDOA_AVOID = {
+    "dx6ran.ddns.net": "its timing was 0.6-0.8 ms early against every other receiver in 3 runs (13-14 Nov 2026)",
+}
+TDOA_MAX_RX = 5      # recorded at once: 3 are needed; 4 show a timing error, 5 show which receiver has it
+TDOA_CENTRE = (4.0, 102.0)          # where the defaults look from (Peninsular Malaysia) when widening the search
+TDOA_MAX_KM = 3500                  # further receivers: within this of TDOA_CENTRE (beyond, multi-hop sky-wave
+                                    # paths add milliseconds: SW Australia, 4300 km, was 3 ms late on 14 Nov)
+SAME_SITE_KM = 150                  # receivers closer than this count as one site
+TDOA_MAX_EXTRA = 12                 # at most this many further receivers checked per run (each ~1 s of a channel)
+RX_LIST_URL = "http://rx.linkfanel.net/kiwisdr_com.js"   # public KiwiSDR list (from kiwisdr.com/public, which
+                                                          # is often unreachable); refreshed every few minutes
+TDOA_SAMPLE_S = (10, 15, 30)       # 30 s by default: paths come and go, more blocks outvote them
+TDOA_MAX_RUNS = 3                   # "runs": repeat the recording, the median of each pair is used
 TDOA_PAUSE_S = 60.0                                 # between runs: these receivers are shared
 TDOA_WHY = {1: "connection failed", 2: "busy (no free channel)", 3: "no GPS time stamps"}   # kiwirecorder --kiwi-tdoa
 
@@ -578,6 +594,135 @@ def kiwi_status(host, port, timeout=8):
     import urllib.request
     with urllib.request.urlopen(f"http://{host}:{int(port)}/status", timeout=timeout) as r:
         return r.read(20000).decode("utf-8", "replace")
+
+
+def kiwi_stream_host(host, port, timeout=8):
+    """Does a KiwiSDR's audio stream actually work from this machine? Its /status
+    page can answer while the stream does not: some proxied KiwiSDRs redirect the
+    stream to another proxy server (proxy2.kiwisdr.com), or accept it and then send
+    nothing. Opens the stream as kiwirecorder does (WebSocket, anonymous login),
+    waits for the receiver's first message, and closes it (about a second of one
+    channel). Follows one redirect.
+    -> (host to record from, None) or (None, why not in words)."""
+    import os
+    import socket
+    from urllib.parse import urlparse
+
+    def talk(h):
+        """-> (HTTP status, Location or None, whether the KiwiSDR said anything)"""
+        with socket.create_connection((h, int(port)), timeout=timeout) as sk:
+            sk.sendall((f"GET /{int(time.time())}/SND HTTP/1.1\r\nHost: {h}:{port}\r\nUpgrade: websocket\r\n"
+                        "Connection: Upgrade\r\nSec-WebSocket-Version: 13\r\n"
+                        "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n").encode())
+            head = b""
+            while b"\r\n\r\n" not in head and len(head) < 8192:
+                part = sk.recv(2048)
+                if not part:
+                    break
+                head += part
+            top, _, rest = head.partition(b"\r\n\r\n")
+            lines = top.decode("latin-1").split("\r\n")
+            code = (lines[0].split(" ") + ["", ""])[1]
+            loc = next((ln.split(":", 1)[1].strip() for ln in lines if ln.lower().startswith("location:")), None)
+            if code != "101":
+                return code, loc, False
+            msg, mask = b"SET auth t=kiwi p=", os.urandom(4)
+            sk.sendall(bytes([0x81, 0x80 | len(msg)]) + mask + bytes(c ^ mask[i % 4] for i, c in enumerate(msg)))
+            try:
+                rest += sk.recv(4096)
+            except socket.timeout:
+                pass
+            return code, None, b"MSG" in rest
+
+    try:
+        code, loc, said = talk(host)
+        if code == "101":
+            return (host, None) if said else (None, "its audio stream opens but sends nothing to this network")
+        other = urlparse(loc).hostname if code in ("301", "302", "307", "308") and loc else None
+        if other and HOST_RE.fullmatch(other) and other != host:
+            code2, _, said2 = talk(other)
+            if code2 == "101" and said2:
+                return other, None
+            return None, f"its proxy sends the audio stream to {other}, which does not deliver it to this network"
+        return None, f"its audio stream does not open (HTTP {code or '?'})"
+    except OSError as e:
+        return None, f"its audio stream does not open from this network ({type(e).__name__})"
+
+
+_rx_list = {"at": 0.0, "rows": []}
+
+
+def public_tdoa_receivers(timeout=20):
+    """Every public KiwiSDR that can take part in TDoA now: GPS fixes in the last
+    minute, TDoA allowed, a free channel. -> [{"host", "port", "id", "lat", "lon"}].
+    Cached for an hour; [] when the list cannot be fetched."""
+    import json as _json
+    import urllib.request
+    if time.monotonic() - _rx_list["at"] < 3600 and _rx_list["rows"]:
+        return _rx_list["rows"]
+    try:
+        with urllib.request.urlopen(RX_LIST_URL, timeout=timeout) as r:
+            text = r.read(8_000_000).decode("utf-8", "replace")
+        text = re.sub(r",\s*([\]}])", r"\1", text[text.index("["):text.rindex("]") + 1])
+        rows = _json.loads(text)
+    except (OSError, ValueError):
+        return []
+    out = []
+    for r in rows:
+        st = kiwi_tdoa.parse_status("\n".join(f"{k}={v}" for k, v in r.items() if isinstance(v, str)))
+        m = re.fullmatch(r"https?://([^/:]+)(?::(\d+))?/?", str(r.get("url", "")).strip())
+        if not m or not HOST_RE.fullmatch(m.group(1)) or kiwi_tdoa.status_problem(st):
+            continue
+        out.append({"host": m.group(1), "port": int(m.group(2) or 8073), "lat": st["lat"], "lon": st["lon"],
+                    "id": st["tdoa_id"] or m.group(1).split(".")[0]})
+    _rx_list.update(at=time.monotonic(), rows=out)
+    return out
+
+
+def further_receivers(rows, have_hosts, centre=TDOA_CENTRE, n=TDOA_MAX_EXTRA, max_km=TDOA_MAX_KM, have_at=()):
+    """Up to n receivers from rows not already tried, nearest first but spread round
+    the compass (8 sectors seen from centre, nearest of each sector in turn), so the
+    receivers surround the transmitter. None within SAME_SITE_KM of another, or of
+    have_at ((lat, lon) of the receivers already in use): two receivers at one site
+    measure the same thing (jplin53a/c in Taiwan: 0.1 us apart). -> [(host, port, id)]"""
+    import math as _m
+    seen = {h.split(".")[0] for h in list(have_hosts) + list(TDOA_AVOID)}   # 21023.proxy and .proxy2 are one
+    sectors = {}
+    for r in rows:
+        if r["host"].split(".")[0] in seen:
+            continue
+        d = float(kiwi_tdoa.great_circle_km(centre[0], centre[1], r["lat"], r["lon"]))
+        if d > max_km:
+            continue
+        p1, p2, dl = _m.radians(centre[0]), _m.radians(r["lat"]), _m.radians(r["lon"] - centre[1])
+        brg = _m.degrees(_m.atan2(_m.sin(dl) * _m.cos(p2), _m.cos(p1) * _m.sin(p2) - _m.sin(p1) * _m.cos(p2) * _m.cos(dl)))
+        sectors.setdefault(int(((brg + 360 + 22.5) % 360) // 45), []).append((d, r))
+    for v in sectors.values():
+        v.sort(key=lambda x: x[0])
+    out, picked = [], [{"lat": a, "lon": b} for a, b in have_at]
+    while len(out) < n and any(sectors.values()):
+        for k in sorted(sectors, key=lambda k: sectors[k][0][0] if sectors[k] else 1e9):
+            while sectors[k] and len(out) < n:
+                r = sectors[k].pop(0)[1]
+                near = any(float(kiwi_tdoa.great_circle_km(r["lat"], r["lon"], q["lat"], q["lon"])) < SAME_SITE_KM
+                           for q in picked)
+                if r["host"].split(".")[0] in seen or near:   # same site twice adds nothing
+                    continue
+                seen.add(r["host"].split(".")[0])
+                picked.append(r)
+                out.append((r["host"], r["port"], r["id"]))
+                break
+    return out
+
+
+def plain_recorder_error(line):
+    """A kiwirecorder log line in words, without its time stamp and process id."""
+    line = re.sub(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d+ pid \d+ ", "", str(line or "")).strip()
+    if re.search(r"HTTP 30\d redirect", line):
+        return "a receiver's proxy kept redirecting its audio stream and it never started"
+    if "timed out" in line.lower():
+        return "a receiver's audio stream timed out"
+    return line
 
 
 def parse_receivers(text):
@@ -593,7 +738,7 @@ def parse_receivers(text):
             raise ValueError(f"not a KiwiSDR address: {item!r} (use host:port, comma-separated)")
         out.append((host, int(port or 8073), None))
     if not 3 <= len(out) <= 6:
-        raise ValueError("give 3 to 6 KiwiSDRs (3 are used; the rest are spares)")
+        raise ValueError("give 3 to 6 KiwiSDRs (the first 4 that work are used)")
     return out
 
 
@@ -613,28 +758,34 @@ class TdoaRunner:
         with self.lock:
             st = dict(self.st)
         t0 = st.pop("rec_started", None)
-        if st.get("state") == "recording" and t0:
-            st["progress"] = round(min(0.95, (time.monotonic() - t0) / (st["sample_s"] + 8)), 2)
+        if st.get("state") == "recording" and t0:                # over all runs
+            part = min(1.0, (time.monotonic() - t0) / (st["sample_s"] + 8))
+            st["progress"] = round(min(0.95, (st.get("run", 1) - 1 + part) / st.get("runs", 1)), 2)
         return st
 
-    def start(self, freq_khz, receivers=None, sample_s=15, who=None):
+    def start(self, freq_khz, receivers=None, sample_s=30, who=None, runs=1):
         khz = float(freq_khz or 0)
         if not 10 <= khz <= 30000:
             raise ValueError("frequency must be 10..30000 kHz")
-        sample_s = int(sample_s or 15)
+        sample_s = int(sample_s or 30)
+        runs = int(runs or 1)
+        if not 1 <= runs <= TDOA_MAX_RUNS:
+            raise ValueError(f"runs must be 1 to {TDOA_MAX_RUNS}")
         if sample_s not in TDOA_SAMPLE_S:
             raise ValueError(f"sample must be one of {list(TDOA_SAMPLE_S)} s")
         cands = parse_receivers(receivers)
+        widen = not receivers                            # the analyst's own list is used as given
         with self.lock:
             if self.st.get("state") in ("checking", "recording", "computing"):
                 raise ValueError("a location run is already going: wait for it to finish")
             wait = TDOA_PAUSE_S - (time.monotonic() - self.finished_at) if self.finished_at else 0
             if wait > 0:
                 raise ValueError(f"the public receivers are shared: wait {wait:.0f} s before the next run")
-            self.st = {"state": "checking", "freq_khz": khz, "sample_s": sample_s, "progress": 0.0,
-                       "message": f"checking {len(cands)} KiwiSDRs (GPS, free channel)…",
+            self.st = {"state": "checking", "freq_khz": khz, "sample_s": sample_s, "runs": runs, "run": 0, "progress": 0.0,
+                       "message": f"checking {len(cands)} KiwiSDRs (GPS, free channel, audio stream)…",
                        "started": time.strftime("%H:%M:%S"), "receivers": []}
-        threading.Thread(target=self._run, args=(khz, cands, sample_s, who), daemon=True, name="kiwi-tdoa").start()
+        threading.Thread(target=self._run, args=(khz, cands, sample_s, who, widen, runs), daemon=True,
+                         name="kiwi-tdoa").start()
         return self.status()
 
     def _set(self, **kw):
@@ -650,41 +801,65 @@ class TdoaRunner:
         except Exception as e:                       # noqa: BLE001 -- any failure: this receiver is skipped
             return {"host": host, "port": port, "id": name, "ok": False, "why": f"no /status ({type(e).__name__})"}
         why = kiwi_tdoa.status_problem(st)
-        return {"host": host, "port": port, "id": st["tdoa_id"] or name, "ok": why is None,
+        record_from = host
+        if why is None:                              # the page answers; does the audio stream?
+            record_from, why = kiwi_stream_host(host, port)
+        return {"host": record_from or host, "port": port, "id": st["tdoa_id"] or name, "ok": why is None,
                 "why": why, "lat": st["lat"], "lon": st["lon"], "name": st["name"]}
 
     def _record(self, use, khz, sample_s, tmp):
-        """kiwirecorder records every receiver at once, GPS-stamped. -> {index: problem}"""
+        """Record every receiver at the same time, GPS-stamped: one kiwirecorder
+        process per receiver, started together. (In one process, a receiver that
+        stops -- "too busy" a few seconds in -- stops all the others too: on
+        14 Nov that cut every 30 s recording to 9 s.) -> ({index: problem}, last error)"""
         import subprocess
         recorder = KIWIRECORDER if KIWIRECORDER.exists() else find_kiwirecorder()
         if not recorder.exists():
             raise RuntimeError(kiwi_not_found(recorder))
-        cmd = [sys.executable, str(recorder), "-s", ",".join(c["host"] for c in use),
-               "-p", ",".join(str(c["port"]) for c in use), "-f", f"{khz:g}", "-m", "iq",
-               "--kiwi-wav", "--kiwi-tdoa", "--tlimit", str(sample_s), "-d", str(tmp),
-               "--station", ",".join(c["sid"] for c in use), "--user", "NEXA-TDoA",
-               "--connect-timeout", "10", "--connect-retries", "1", "--busy-retries", "1"]
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=flags, cwd=str(tmp))
-        try:
-            out, err = proc.communicate(timeout=sample_s + 60)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            out, err = proc.communicate()
-        codes = {int(m.group(1)): int(m.group(2))
-                 for m in re.finditer(r"status=(\d+),(\d+)", out.decode("utf-8", "replace"))}
-        last = (err.decode("utf-8", "replace").strip().splitlines() or [""])[-1]
-        return {i: TDOA_WHY[c] for i, c in codes.items() if c in TDOA_WHY}, last
+        procs = []
+        for c in use:
+            cmd = [sys.executable, str(recorder), "-s", c["host"], "-p", str(c["port"]), "-f", f"{khz:g}", "-m", "iq",
+                   "--kiwi-wav", "--kiwi-tdoa", "--tlimit", str(sample_s), "-d", str(tmp),
+                   "--station", c["sid"], "--user", "NEXA-TDoA",
+                   "--connect-timeout", "10", "--connect-retries", "1", "--busy-retries", "1"]
+            procs.append(subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                          creationflags=flags, cwd=str(tmp)))
+        problems, last, end = {}, "", time.monotonic() + sample_s + 40
+        for i, proc in enumerate(procs):
+            try:
+                out, err = proc.communicate(timeout=max(1.0, end - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                out, err = proc.communicate()
+            code = next((int(m.group(2)) for m in re.finditer(r"status=(\d+),(\d+)", out.decode("utf-8", "replace"))), 0)
+            if code in TDOA_WHY:
+                problems[i] = TDOA_WHY[code]
+            last = plain_recorder_error((err.decode("utf-8", "replace").strip().splitlines() or [""])[-1]) or last
+        return problems, last
 
-    def _run(self, khz, cands, sample_s, who):
+    def _run(self, khz, cands, sample_s, who, widen=False, runs=1):
         import concurrent.futures as cf
         import tempfile
         tmp = None
         try:
             with cf.ThreadPoolExecutor(len(cands)) as ex:
                 checked = list(ex.map(lambda c: self._check(*c), cands))
-            use = [c for c in checked if c["ok"]][:TDOA_MAX_RX]
             self._set(receivers=checked)
+            if widen and sum(c["ok"] for c in checked) < TDOA_MAX_RX:
+                # Too few of the usual receivers work now: look further away, in every direction.
+                self._set(message=f"only {sum(c['ok'] for c in checked)} of the usual KiwiSDRs can take part: "
+                                  "looking for receivers further away…")
+                extra = further_receivers(public_tdoa_receivers(), [c["host"] for c in checked] + [c[0] for c in cands],
+                                          have_at=[(c["lat"], c["lon"]) for c in checked if c["ok"]])
+                if extra:
+                    with cf.ThreadPoolExecutor(len(extra)) as ex:
+                        more = list(ex.map(lambda c: self._check(*c), extra))
+                    for c in more:
+                        c["further"] = True
+                    checked += more
+                    self._set(receivers=checked)
+            use = [c for c in checked if c["ok"]][:TDOA_MAX_RX]
             if len(use) < 3:
                 blocked = any(c["why"] == "not reachable from this network" for c in checked)
                 raise RuntimeError("fewer than 3 KiwiSDRs can take part: "
@@ -694,29 +869,40 @@ class TdoaRunner:
                 c["sid"] = (re.sub(r"[^0-9A-Za-z]", "", c["id"]) or "rx") + str(i)
             base = self.workdir or bridge.SPOOL
             base.mkdir(parents=True, exist_ok=True)
-            tmp = Path(tempfile.mkdtemp(prefix="tdoa-", dir=base))
-            self._set(state="recording", rec_started=time.monotonic(),
-                      message=f"recording {khz:g} kHz on {', '.join(c['id'] for c in use)} for {sample_s} s…")
-            problems, last_err = self._record(use, khz, sample_s, tmp)
-            self._set(state="computing", progress=0.97, message="computing arrival-time differences…")
-            recs, failed = [], []
-            for i, c in enumerate(use):
-                wav = next(iter(sorted(tmp.glob(f"*_{c['sid']}_iq.wav"))), None)
-                if i in problems or wav is None:
-                    failed.append(f"{c['id']} {problems.get(i, 'sent nothing')}")
-                    continue
-                try:
-                    t, z, fs = kiwi_tdoa.read_kiwi_wav(wav)
-                except ValueError as e:
-                    failed.append(f"{c['id']}: {e}")
-                    continue
-                recs.append({"id": c["id"], "lat": c["lat"], "lon": c["lon"], "t": t, "z": z, "fs": fs})
-            if len(recs) < 3:
+            measured, failed, last_err = [], [], ""
+            for n in range(runs):                        # each run: record all at once, measure, keep the pairs
+                tmp = Path(tempfile.mkdtemp(prefix="tdoa-", dir=base))
+                self._set(state="recording", rec_started=time.monotonic(), run=n + 1,
+                          message=f"recording {khz:g} kHz on {', '.join(c['id'] for c in use)} for {sample_s} s"
+                                  + (f" (run {n + 1} of {runs})" if runs > 1 else "") + "…")
+                problems, last_err = self._record(use, khz, sample_s, tmp)
+                self._set(state="computing", message="computing arrival-time differences"
+                          + (f" (run {n + 1} of {runs})" if runs > 1 else "") + "…")
+                recs = []
+                for i, c in enumerate(use):
+                    # The recording decides, not kiwirecorder's status code: that can say "busy"
+                    # after a full recording (a reconnect attempt once --tlimit ended).
+                    wav = next(iter(sorted(tmp.glob(f"*_{c['sid']}_iq.wav"))), None)
+                    if wav is None:
+                        failed.append(f"{c['id']} {problems.get(i, 'sent nothing')}")
+                        continue
+                    try:
+                        t, z, fs = kiwi_tdoa.read_kiwi_wav(wav)
+                    except ValueError as e:
+                        failed.append(f"{c['id']} {problems.get(i, '')}: {e}".replace("  ", " "))
+                        continue
+                    recs.append({"id": c["id"], "lat": c["lat"], "lon": c["lon"], "t": t, "z": z, "fs": fs})
+                shutil.rmtree(tmp, ignore_errors=True)   # the samples are in memory now
+                tmp = None
+                if len(recs) >= 3:
+                    measured.append(kiwi_tdoa.measure(recs))
+            if not measured:
                 raise RuntimeError("fewer than 3 usable recordings: " + "; ".join(failed + ([last_err] if last_err else [])))
-            shutil.rmtree(tmp, ignore_errors=True)       # the samples are in memory now
-            tmp = None
-            res = kiwi_tdoa.solve(recs)
-            res.update(freq_khz=khz, sample_s=sample_s, receivers=", ".join(r["id"] for r in recs),
+            res = kiwi_tdoa.combine(*kiwi_tdoa.merge_runs(measured))
+            res.update(runs=len(measured))
+            res.update(freq_khz=khz, sample_s=sample_s, receivers=", ".join(s["id"] for s in res["stations"]),
+                       further=[c["id"] for c in checked if c.get("further") and c["ok"]
+                                and c["id"] in {s["id"] for s in res["stations"]}],
                        at=time.strftime("%Y-%m-%d %H:%M:%S"))
             if self.on_located:                          # in the audit trail before the page hears "done"
                 self.on_located(res, who)

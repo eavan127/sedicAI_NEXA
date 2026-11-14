@@ -31,8 +31,10 @@ import numpy as np
 C_KM_S = 299792.458
 EARTH_KM = 6371.0
 CHI2_95_2DOF = 5.99          # h - h_min below this: inside the 95 % area
-SKYWAVE_SIGMA_S = 100e-6     # ionospheric paths differ from the ground distance: ~30 km of
-                             # path length the measurement cannot see, added to every pair
+SKYWAVE_SIGMA_S = 300e-6     # added to every pair: ionospheric paths differ from the ground distance
+                             # (~90 km of path the measurement cannot see). The first live run
+                             # (15295 kHz, 2026-11-14, DU6/PE1NSQ + JKT + HS0ZQS) agreed with itself to
+                             # 2 us yet sat 290 km from the Kajang transmitter: the error is systematic.
 
 
 # ---------------------------------------------------------------- receivers
@@ -163,19 +165,46 @@ def write_kiwi_wav(path, t0, z, fs, block=512, last_fix=0):
 
 # ---------------------------------------------------------------- arrival-time differences
 
-def pair_lag(a, b, max_dt_s=0.02, block_s=1.0, min_peak=0.1):
+CLUSTER_TOL_S = 100e-6       # blocks whose lags are this close count as the same arrival
+MIN_AGREE = 0.4              # at least this share of blocks (and 3) must agree on one lag
+PATH_SHARE = 0.15            # a second lag this many blocks agree on is a second ionospheric path
+REFINE_STEPS = 32            # sub-sample positions tried round the peak
+
+
+def _refine(c, m, fs, half=8):
+    """Sub-sample position of the correlation peak near index m: the complex
+    correlation is band-limited, so sinc interpolation between samples is exact
+    (a 3-point parabola on |c| of a broad AM peak is pulled toward whole samples,
+    which made lags jump by one sample, ~83 us, from block to block).
+    -> (offset in samples from m, peak height)"""
+    lo, hi = max(0, m - half), min(len(c), m + half + 1)
+    k = np.arange(lo, hi) - m
+    d = np.linspace(-1.0, 1.0, 2 * REFINE_STEPS + 1)
+    vals = np.abs(np.sinc(d[:, None] - k[None, :]) @ c[lo:hi])
+    best = int(np.argmax(vals))
+    return float(d[best]), float(vals[best])
+
+
+def pair_lag(a, b, max_dt_s=0.02, block_s=1.0, min_peak=0.1, far=None):
     """Arrival-time difference of one signal at receivers a and b (each (t, z, fs)
     from read_kiwi_wav): how much LATER it reached a than b, in seconds.
 
-    -> {"lag_s", "sigma_s", "blocks", "used", "peak"} or None when no block
-    correlates. As hcab14's tdoa_compute_lags.m: 1 s blocks, |cross-correlation|
-    peak within +-max_dt_s, parabolic peak fit, outliers dropped, mean and
-    spread weighted by peak height squared."""
+    -> {"lag_s", "sigma_s", "blocks", "used", "agree", "peak"} or None. Per 1 s block
+    (as hcab14's tdoa_compute_lags.m) the highest cross-correlation peak within
+    +-max_dt_s, placed to a fraction of a sample. Then the lag that the most blocks
+    agree on (within CLUSTER_TOL_S) is kept, weighted by peak height squared;
+    None if fewer than MIN_AGREE of the blocks (or 3) agree. On a broadcast the
+    second-best peak is often almost as high as the best, so one block alone
+    proves little; agreement across blocks does.
+    far ("a" or "b"): the receiver further from the others. When the blocks split
+    between two lags (a far receiver hearing one and two ionospheric hops, ~1 ms
+    apart; 15295 kHz in Taiwan on 14 Nov), the one where the far receiver hears the
+    signal EARLIEST is kept: the extra hop only ever adds path."""
     (t1, z1, fs1), (t2, z2, fs2) = a, b
     if abs(fs1 - fs2) > 0.01 * fs1:
         raise ValueError(f"sample rates differ ({fs1:.0f} vs {fs2:.0f} S/s)")
     fs = (fs1 + fs2) / 2
-    B, M = int(block_s * fs), int(math.ceil(max_dt_s * fs)) + 2
+    B, M = int(block_s * fs), int(math.ceil(max_dt_s * fs)) + 10
     T0, T1 = max(t1[0], t2[0]) + M / fs, min(t1[-1], t2[-1]) - (B + M) / fs
     lags, peaks = [], []
     blocks = 0
@@ -186,7 +215,7 @@ def pair_lag(a, b, max_dt_s=0.02, block_s=1.0, min_peak=0.1):
         blocks += 1
         x1 = z1[i - M:i + B + M] - z1[i - M:i + B + M].mean()   # without the carrier
         x2 = z2[j:j + B] - z2[j:j + B].mean()
-        c = np.abs(np.correlate(x1, x2, "valid"))                 # c[m] = |sum x1[m+k] conj(x2[k])|
+        c = np.correlate(x1, x2, "valid")                          # c[m] = sum x1[m+k] conj(x2[k])
         norm = math.sqrt(float(np.vdot(x1[M:M + B], x1[M:M + B]).real * np.vdot(x2, x2).real)) or 1.0
         c = c / norm
         base = t1[i] - t2[j]                                       # lag of index m is base + (m - M)/fs
@@ -194,26 +223,38 @@ def pair_lag(a, b, max_dt_s=0.02, block_s=1.0, min_peak=0.1):
         ok = np.flatnonzero(np.abs(lag_t) <= max_dt_s)
         if len(ok) < 3:
             continue
-        m = ok[np.argmax(c[ok])]
-        if m in (0, len(c) - 1) or c[m] < min_peak:
+        m = int(ok[np.argmax(np.abs(c[ok]))])
+        if abs(c[m]) < min_peak:
             continue
-        y0, y1, y2 = c[m - 1], c[m], c[m + 1]
-        den = y0 - 2 * y1 + y2
-        frac = 0.5 * (y0 - y2) / den if den < 0 else 0.0
+        frac, height = _refine(c, m, fs)
         lags.append(base + (m - M + frac) / fs)
-        peaks.append(y1)
+        peaks.append(height)
     if not lags:
         return None
     lags, peaks = np.array(lags), np.array(peaks)
-    med = np.median(lags)
-    mad = 1.4826 * np.median(np.abs(lags - med))
-    keep = np.abs(lags - med) <= max(3 * mad, 2.0 / fs)
+    groups, left = [], np.ones(len(lags), bool)                     # lags most blocks agree on, best first
+    while left.any():
+        idx = np.flatnonzero(left)
+        votes = [np.sum(np.abs(lags[idx] - lags[k]) <= CLUSTER_TOL_S) + 1e-3 * np.sum(
+            peaks[idx][np.abs(lags[idx] - lags[k]) <= CLUSTER_TOL_S] ** 2) for k in idx]
+        centre = lags[idx[int(np.argmax(votes))]]
+        member = left & (np.abs(lags - centre) <= CLUSTER_TOL_S)
+        groups.append(member)
+        left &= ~member
+    keep = groups[0]
+    paths = [g for g in groups if g.sum() >= max(3, PATH_SHARE * blocks)]
+    if far in ("a", "b") and len(paths) > 1:                        # two paths: the earliest at the far receiver
+        mean = [float(np.mean(lags[g])) for g in paths]
+        keep = paths[int(np.argmax(mean) if far == "b" else np.argmin(mean))]   # lag = t_a - t_b
+    if keep.sum() < max(3, MIN_AGREE * blocks) and not (len(paths) > 1 and keep.sum() >= 3):
+        return None                                                # no lag most blocks agree on: no answer
     w = peaks[keep] ** 2
     lag = float(np.sum(w * lags[keep]) / np.sum(w))
     var = float(np.sum(w * (lags[keep] - lag) ** 2) / np.sum(w))
-    sigma = math.sqrt(max(var, (0.25 / fs) ** 2))                  # never sharper than a quarter sample
+    sigma = math.sqrt(max(var, (0.1 / fs) ** 2))                   # never sharper than a tenth of a sample
     return {"lag_s": lag, "sigma_s": sigma, "blocks": blocks, "used": int(keep.sum()),
-            "peak": round(float(np.median(peaks[keep])), 3)}
+            "agree": round(float(keep.sum()) / blocks, 2), "peak": round(float(np.median(peaks[keep])), 3),
+            "paths": len(paths)}
 
 
 # ---------------------------------------------------------------- where
@@ -268,25 +309,169 @@ def locate(stations, pairs, margin_deg=20.0, step_deg=0.1):
 
 
 def solve(recordings, max_dt_extra_s=0.003):
-    """recordings: [{"id", "lat", "lon", "t", "z", "fs"}] (3 or 4 receivers).
+    """recordings: [{"id", "lat", "lon", "t", "z", "fs"}] (3 to 5 receivers).
     -> {"lat", "lon", "radius_km", "area", "fit", "pairs": [...], "stations": [...]}.
     Raises ValueError when fewer than 3 receivers gave a usable correlation."""
+    return combine(*measure(recordings, max_dt_extra_s))
+
+
+def measure(recordings, max_dt_extra_s=0.003):
+    """The arrival-time difference of every pair of one recording set.
+    -> (stations [{"id", "lat", "lon"}], pairs [{"i", "j", "a", "b", "lag_s", ...}])"""
     pairs = []
+    # how far each receiver is from the others (mean distance): the further one of a
+    # pair is the one more likely to hear an extra ionospheric hop
+    spread = [np.mean([float(great_circle_km(r["lat"], r["lon"], q["lat"], q["lon"])) for q in recordings if q is not r])
+              for r in recordings]
     for i in range(len(recordings)):
         for j in range(i + 1, len(recordings)):
             a, b = recordings[i], recordings[j]
             base_km = float(great_circle_km(a["lat"], a["lon"], b["lat"], b["lon"]))
             r = pair_lag((a["t"], a["z"], a["fs"]), (b["t"], b["z"], b["fs"]),
-                         max_dt_s=base_km / C_KM_S + max_dt_extra_s)
+                         max_dt_s=base_km / C_KM_S + max_dt_extra_s, far="a" if spread[i] > spread[j] else "b")
             if r:
                 pairs.append({"i": i, "j": j, "a": a["id"], "b": b["id"], **r,
                               "lag_us": round(r["lag_s"] * 1e6, 1), "sigma_us": round(r["sigma_s"] * 1e6, 1)})
-    used = sorted({p["i"] for p in pairs} | {p["j"] for p in pairs})
-    if len(used) < 3 or len(pairs) < 2:
+    stations = [{"id": r["id"], "lat": r["lat"], "lon": r["lon"]} for r in recordings]
+    return stations, pairs
+
+
+def merge_runs(runs):
+    """Several measure() results of the same frequency (one per run) -> one
+    (stations, pairs): each pair's lag is the median over the runs that have it,
+    its spread the larger of the runs' own and their disagreement. A wrong peak or
+    a passing ionospheric path in one run is outvoted by the others."""
+    stations, index, by_pair = [], {}, {}
+    for st, ps in runs:
+        for s in st:
+            if s["id"] not in index:
+                index[s["id"]] = len(stations)
+                stations.append(dict(s))
+        for p in ps:
+            a, b, lag = p["a"], p["b"], p["lag_s"]
+            if index[a] > index[b]:
+                a, b, lag = b, a, -lag
+            by_pair.setdefault((a, b), []).append({**p, "lag_s": lag})
+    pairs = []
+    for (a, b), got in by_pair.items():
+        lags = np.array([g["lag_s"] for g in got])
+        lag = float(np.median(lags))
+        mad = 1.4826 * float(np.median(np.abs(lags - lag))) if len(lags) > 2 else float(np.ptp(lags)) / 2
+        sigma = max(float(np.median([g["sigma_s"] for g in got])), mad)
+        pairs.append({"i": index[a], "j": index[b], "a": a, "b": b, "lag_s": lag, "sigma_s": sigma,
+                      "lag_us": round(lag * 1e6, 1), "sigma_us": round(sigma * 1e6, 1), "runs": len(got),
+                      "blocks": sum(g.get("blocks", 0) for g in got), "used": sum(g.get("used", 0) for g in got),
+                      "agree": round(float(np.median([g.get("agree", 0) for g in got])), 2),
+                      "paths": max(g.get("paths", 1) for g in got),
+                      "peak": round(float(np.median([g.get("peak", 0) for g in got])), 3)})
+    return stations, pairs
+
+
+CLOSURE_TOL_S = 500e-6       # a pair this far from what the other pairs imply: a wrong correlation peak
+FIT_BAD = 4.0                # h at the best point above this (4+ receivers): they disagree (~95 %, 1 degree of freedom)
+FIT_GAIN = 4.0               # leaving one receiver out must fit this many times better to be believed
+
+
+def _lag(pairs, i, j):
+    """Measured arrival at i minus arrival at j, or None."""
+    for p in pairs:
+        if (p["i"], p["j"]) == (i, j):
+            return p["lag_s"]
+        if (p["i"], p["j"]) == (j, i):
+            return -p["lag_s"]
+    return None
+
+
+def drop_inconsistent_pairs(pairs, n):
+    """Pairs whose lag contradicts the other pairs: t_i - t_j must equal
+    (t_i - t_k) - (t_j - t_k) for every third receiver k. A wrong correlation
+    peak breaks that; a receiver's own clock offset does not (it cancels), so this
+    finds bad pairs only. Worst triangle first, its weakest pair (lowest correlation
+    peak) goes, until every triangle closes: two weak wrong pairs cannot outvote a
+    strong right one. -> (kept, dropped)"""
+    import itertools
+    kept, dropped = list(pairs), []
+
+    def find(i, j):
+        return next((p for p in kept if {p["i"], p["j"]} == {i, j}), None)
+    while True:
+        worst = None
+        for i, j, k in itertools.combinations(range(n), 3):
+            a, b, c = _lag(kept, i, j), _lag(kept, j, k), _lag(kept, i, k)
+            if a is None or b is None or c is None:
+                continue
+            err = abs(a + b - c)                         # (t_i - t_j) + (t_j - t_k) must be t_i - t_k
+            if err > CLOSURE_TOL_S and (worst is None or err > worst[0]):
+                worst = (err, [find(i, j), find(j, k), find(i, k)])
+        if worst is None:
+            return kept, dropped
+        bad = min(worst[1], key=lambda p: p.get("peak", 0))
+        kept.remove(bad)
+        dropped.append(bad)
+
+
+def combine(stations, pairs):
+    """Measured pairs -> the place, robustly. stations: [{"id", "lat", "lon"}];
+    pairs: [{"i", "j", "a", "b", "lag_s", "sigma_s", ...}].
+    1. Pairs that contradict the others are dropped (wrong correlation peak).
+    2. With 4 receivers a disagreement (fit > FIT_BAD) is seen but not placed: any 3
+       fit perfectly. The answer is flagged rough.
+    3. With 5+, when they disagree, each receiver is left out in turn; if one subset
+       fits FIT_GAIN times better, that receiver is named and left out (its clock,
+       or its signal path, is off).
+    With 3 there is no cross-check at all: the fit is always perfect.
+    -> {"lat", "lon", "radius_km", "area", "fit", "pairs", "stations", "excluded",
+        "dropped_pairs", "cross_checked", "warning"}"""
+    pairs, dropped = drop_inconsistent_pairs(pairs, len(stations))
+
+    def usable(ps, out=()):
+        used = {p["i"] for p in ps} | {p["j"] for p in ps}
+        return len(used - set(out)) >= 3 and len(ps) >= 2
+
+    def run(ps):
+        return locate(stations, [{**p, "sigma_s": math.hypot(p["sigma_s"], SKYWAVE_SIGMA_S)} for p in ps])
+
+    if not usable(pairs):
         raise ValueError(f"only {len(pairs)} receiver pair(s) heard the same signal: TDoA needs 3 receivers "
                          "that all hear it (is the frequency on air, and strong enough at every receiver?)")
-    stations = [{"lat": r["lat"], "lon": r["lon"]} for r in recordings]
-    res = locate(stations, [{**p, "sigma_s": math.hypot(p["sigma_s"], SKYWAVE_SIGMA_S)} for p in pairs])
-    res["pairs"] = [{k: p[k] for k in ("a", "b", "lag_us", "sigma_us", "blocks", "used", "peak")} for p in pairs]
-    res["stations"] = [{"id": r["id"], "lat": r["lat"], "lon": r["lon"]} for r in recordings]
+    res, excluded = run(pairs), []
+    used = sorted({p["i"] for p in pairs} | {p["j"] for p in pairs})
+    if len(used) >= 5 and res["fit"] > FIT_BAD:
+        tries = []
+        for k in used:
+            ps = [p for p in pairs if k not in (p["i"], p["j"])]
+            left = {p["i"] for p in ps} | {p["j"] for p in ps}
+            if usable(ps) and len(left) >= 4:            # 3 left always fit perfectly: not a fair comparison
+                tries.append((run(ps), k, ps))
+        if tries:
+            best, k, ps = min(tries, key=lambda t: t[0]["fit"])
+            if best["fit"] * FIT_GAIN < res["fit"]:
+                # how far off this receiver's timing is, from the others' place
+                off = []
+                for p in pairs:
+                    if k in (p["i"], p["j"]):
+                        r = p["lag_s"] - (_t(stations, p["i"], best) - _t(stations, p["j"], best))
+                        off.append(r if p["i"] == k else -r)
+                excluded = [{"id": stations[k]["id"], "offset_us": round(float(np.median(off)) * 1e6),
+                             "why": "its timing disagrees with the other receivers"}]
+                res, pairs = best, ps
+    res["pairs"] = [{k: p[k] for k in ("a", "b", "lag_us", "sigma_us", "blocks", "used", "agree", "paths", "runs", "peak")
+                     if k in p}
+                    for p in pairs]
+    res["dropped_pairs"] = [{"a": p["a"], "b": p["b"], "lag_us": p.get("lag_us")} for p in dropped]
+    res["excluded"] = excluded
+    used = sorted({p["i"] for p in pairs} | {p["j"] for p in pairs})
+    res["stations"] = [{"id": stations[i]["id"], "lat": stations[i]["lat"], "lon": stations[i]["lon"]} for i in used]
+    res["cross_checked"] = len(used) >= 4
+    res["warning"] = (None if not res["cross_checked"] or res["fit"] <= FIT_BAD else
+                      f"the {len(used)} receivers disagree (fit {res['fit']:.1f}): one receiver's timing or signal path is "
+                      "off" + (" and 4 cannot tell which (5 can): treat this place as rough" if len(used) == 4 else ""))
+    if len(used) == 3:
+        res["warning"] = "3 receivers: no cross-check (any timing error moves the point unseen)"
     return res
+
+
+def _t(stations, i, place):
+    """Ground-distance travel time from place (a locate() result) to station i, in seconds."""
+    s = stations[i]
+    return float(great_circle_km(s["lat"], s["lon"], place["lat"], place["lon"])) / C_KM_S

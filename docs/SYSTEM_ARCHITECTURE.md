@@ -71,17 +71,65 @@ folder), so the demo database and any test database each get every result.
   (tdoa.kiwisdr.com): that needs an access string each KiwiSDR gives only to its own web page, and it was not
   reachable from either network. Limits:
   * Distances are great-circle ground distances at the speed of light; short-wave arrives via the ionosphere on
-    longer paths, so every pair carries an extra 100 µs (~30 km) of uncertainty and the area is typically tens
+    longer paths, so every pair carries an extra 300 µs (~90 km) of uncertainty and the area is typically tens
     to a few hundred km across. The "most likely" point is the centre of that area.
   * Needs 3 GPS-timed KiwiSDRs that all hear the signal, round the transmitter (wide geometry). With 3 receivers
     the curves can cross twice; the grid is limited to ±20° round the receivers. HF only (≤ 30 MHz).
-  * The default receivers (DU6/PE1NSQ Philippines, HS0ZGZ Thailand, JKT Jakarta; 9M2AMH Kuala Lumpur spare) suit
-    Malaysia; other regions need other receivers typed into the panel. FOREFRONT Wi-Fi blocks `*.kiwisdr.com`:
-    use a phone hotspot.
-  * Public receivers are shared: one run at a time, 3 receivers, 10–30 s samples, 60 s pause between runs,
-    automatic runs once per frequency per page.
-  * The synthetic tests (`tests/test_kiwi_tdoa.py`) check the method end to end; the real-world accuracy is
-    whatever the ionosphere allows on the day.
+  * Each candidate is checked before recording: GPS fix, position, free channel, TDoA allowed, and that its audio
+    stream really delivers from this network (about a second of one channel). A `/status` page can answer while
+    the stream cannot: some proxied KiwiSDRs redirect it to `proxy2.kiwisdr.com`, or accept it and send nothing.
+  * Default candidates, the first 5 that pass are recorded at once (3 are needed; 4 can show a timing error, 5 can
+    name the receiver that has it): JKT Jakarta, HS0ZQS Bangkok, jplin53c Taiwan, HS0ZGZ Khon Kaen, ptlen Bandung,
+    LA6LU Hua Hin, 9M2AMH Kuala Lumpur. They suit Malaysia; other regions need receivers typed into the panel.
+  * When fewer than 5 of them work, NEXA looks further: the public KiwiSDR list (`rx.linkfanel.net/kiwisdr_com.js`,
+    built from kiwisdr.com/public, which is often unreachable), GPS-timed + TDoA allowed + a free channel, within
+    3500 km of Peninsular Malaysia, nearest first in each of 8 compass sectors, one per site (150 km), at most 12
+    checked. Beyond ~3500 km multi-hop paths add milliseconds (south-west Australia was 3 ms late).
+  * `TDOA_AVOID` (scripts/sdr_hub.py) keeps receivers with a known timing problem out unless typed in:
+    DU6/PE1NSQ (dx6ran.ddns.net) was 0.6–0.8 ms early against every other receiver in 3 runs on 13–14 Nov.
+  * Pairs that contradict the others (t_i−t_j ≠ (t_i−t_k)+(t_k−t_j)) are dropped, worst triangle first, weakest
+    correlation peak first: these are wrong correlation peaks.
+  * A recording counts if its file reads as GPS-stamped IQ: kiwirecorder's `--kiwi-tdoa` status code can say
+    "busy" after a full recording.
+  * Public receivers are shared: one job at a time, at most 5 receivers, 30 s samples by default (10/15/30),
+    1–3 runs per job, 60 s pause between jobs, automatic runs once per frequency per page.
+  * Each receiver is recorded by its own kiwirecorder process, all started together (GPS time stamps line them
+    up). In one process, a receiver that stops ("too busy" a few seconds in) stops all the others: on 14 Nov that
+    cut every 30 s recording to 9 s.
+  * How a pair's arrival-time difference is measured (`src/kiwi_tdoa.py` `pair_lag`): 1 s blocks; the highest
+    cross-correlation peak placed to 1/32 sample by sinc interpolation of the complex correlation (a 3-point
+    parabola on a broad AM peak is pulled toward whole samples: lags jumped ~83 µs between blocks); then the lag
+    that most blocks agree on (within 100 µs; at least 40 % of blocks, else the pair is not used). On a broadcast
+    the runner-up peak is often 80–96 % of the best even in good blocks, so a peak-uniqueness test would throw
+    good blocks away; agreement across blocks is what separates good pairs from bad (Hua Hin's lags were random).
+  * Two ionospheric paths: a far receiver can hear one and two hops (~0.9 ms apart) and switch between them during
+    a recording (Taiwan on 14 Nov: 20 s on the two-hop path, then 9 s direct). When at least 15 % of the blocks
+    support a second lag, the one where the receiver further from the others hears the signal earliest is kept:
+    an extra hop only adds path.
+  * Runs: with "Runs" 2–3 the recording is repeated and each pair's median lag is used (`merge_runs`).
+  * **Accuracy, 14 Nov 2026, 15295 kHz** (Radio Malaysia, Kajang 2.99° N 101.77° E; KiwiSDR's own TDoA said
+    2.50° N 102.50° E, ~95 km off). Before the fixes above (15 s, one kiwirecorder for all, parabola peaks):
+
+    | Receivers | Answer | From Kajang |
+    |---|---|---|
+    | DU6, JKT, HS0ZQS | 3.32° N 104.38° E | 292 km |
+    | DU6, JKT, HS0ZQS, Taiwan | 3.27° N 104.36° E | 289 km |
+    | DU6, JKT, Bandung, Taiwan | 2.44° N 105.98° E | 471 km |
+    | JKT, HS0ZQS, Taiwan, Bandung, Hua Hin | 1.16° N 96.14° E | 658 km |
+
+    After (same day, the same 5 receivers JKT, HS0ZQS, Taiwan, Bandung, Hua Hin):
+
+    | Recording | Answer | From Kajang | From KiwiSDR's answer |
+    |---|---|---|---|
+    | set A (9 s: cut short before the one-process-per-receiver fix) | 3.06° N 101.68° E | 13 km | 110 km |
+    | set B (30 s, 2 min later) | 3.09° N 101.71° E | 13 km | 110 km |
+    | A and B merged (median per pair) | 3.08° N 101.71° E | 12 km | 105 km |
+    | live, "Locate transmitter" path, 30 s, 1 run | 3.05° N 102.65° E | 98 km | 63 km |
+
+    Between runs some pairs still move by up to ~180 µs as paths change, so one run is good to roughly 100 km;
+    use Runs 3 when it matters. The 95 % area (~120–150 km radius) contained Kajang in every run after the fixes.
+    Still a lead to confirm, not a fix: one frequency, one day, receivers that change with the network.
+  * The synthetic tests (`tests/test_kiwi_tdoa.py`) check the method end to end.
 * **Slow path:** AM vs a bare carrier and USB vs LSB direction are its weak spots; FT8 has no kind yet.
 * **Live bridge voice mode skips the 60-class model** (speed); `--mode full` runs it at ~50 s CPU per second of IQ.
 * **The browser half uses a different model file (ONNX)** from the Python half until the re-export lands.
