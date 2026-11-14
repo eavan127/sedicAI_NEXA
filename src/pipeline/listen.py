@@ -172,7 +172,8 @@ def listen_track(iq, ans, out_dir, noise_var, rng, whisper_model=None, language=
         kw = {"model": llm_model} if llm_model else {}
         out["reading"] = reason.read_recording(f"track {ans['track']}", segments, kind=text_kind,
                                                duration=f"{out['duration_s']:.1f} s",
-                                               active_min=out.get("morse_detail", {}).get("active_minutes", 0), **kw)
+                                               active_min=out.get("morse_detail", {}).get("active_minutes", 0),
+                                               language=out.get("language"), **kw)
     return out
 
 

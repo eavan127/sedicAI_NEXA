@@ -72,7 +72,7 @@ export function summarise(records) {
  *  filters match everything, so the default view is "all". */
 /** from/to are "YYYY-MM-DD" days in LOCAL time, both inclusive -- what an
  *  operator means by "the 26th". */
-export function applyFilters(records, { tier = "", cls = "", source = "", query = "", from = "", to = "" } = {}) {
+export function applyFilters(records, { tier = "", cls = "", source = "", query = "", from = "", to = "", hideEmpty = false } = {}) {
   const q = query.trim().toLowerCase();
   const lo = from ? new Date(`${from}T00:00:00`).getTime() : -Infinity;
   const hi = to ? new Date(`${to}T23:59:59.999`).getTime() : Infinity;
@@ -80,6 +80,8 @@ export function applyFilters(records, { tier = "", cls = "", source = "", query 
     const t = new Date(r.created_at).getTime();
     if (t < lo || t > hi) return false;
     if (tier && r.verdict !== tier) return false;
+    // Live dwells where nothing was found clutter the list after a demo: hidden unless asked for.
+    if (hideEmpty && !tier && isEmptyCapture(r)) return false;
     if (cls && !(r.classes_detected || []).includes(cls)) return false;
     // The stored source ("scenario"/"upload"), or one of the four input labels
     if (source && (source === "scenario" || source === "upload" ? r.source !== source : inputLabel(r) !== source)) return false;
@@ -90,6 +92,11 @@ export function applyFilters(records, { tier = "", cls = "", source = "", query 
     }
     return true;
   });
+}
+
+/** A capture where nothing was detected (verdict Empty / noise, no classes). */
+export function isEmptyCapture(r) {
+  return /^(empty|noise|none)/i.test(String(r.verdict || "")) && !(r.classes_detected || []).length;
 }
 
 // ---------------------------------------------------------------------------

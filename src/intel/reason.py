@@ -96,6 +96,37 @@ Answer with JSON only, exactly these keys:
   "caveats": "what could be wrong"}}"""
 
 
+VOICE_PROMPT = """You are a military radio analyst. Below is speech from one radio transmission,
+written down automatically by speech-to-text (it can mishear words). Use ONLY what is in the text.
+Never invent names, units, places, times or intent that are not said.
+
+Recording: {name}, {duration}. Speech-to-text language: {language}.
+
+Transcript:
+---
+{text}
+---
+
+Think it through in this order, then answer:
+1. Translate it into English (if it is not English already).
+2. WHO is speaking or being addressed (call signs, unit or person names), only if said.
+3. WHAT is reported or asked (the action, situation or order).
+4. WHERE and WHEN, only if a place or time is said.
+5. What it most likely means for the listener, in one sentence, and how sure you are.
+
+Answer with JSON only, exactly these keys:
+{{"summary": "1-2 plain English sentences: who says what to whom, and what it means",
+  "category": one of {categories},
+  "language": "language of the speech",
+  "translation_en": "the full English translation of the transcript",
+  "call_signs": ["call signs or unit names copied exactly from the transcript"],
+  "places": ["place names copied exactly from the transcript"],
+  "key_points": ["up to 4 short, different points: who / what / where / when; no repeats of the summary"],
+  "evidence": [{{"quote": "a short piece copied EXACTLY from the transcript", "why": "what it shows"}}],
+  "confidence": "low" | "medium" | "high",
+  "caveats": "one sentence on what could be wrong (e.g. a misheard name), or empty string"}}"""
+
+
 def ask(prompt, model=DEFAULT_MODEL, url=DEFAULT_URL, timeout=600):
     body = json.dumps({"model": model, "stream": False, "format": "json", "keep_alive": "30m",
                        "options": {"temperature": 0.1, "num_ctx": 8192},
@@ -170,7 +201,7 @@ def ground(reading, source):
 
 
 def read_recording(name, segments, kind="morse", duration="", active_min=0, model=DEFAULT_MODEL,
-                   url=DEFAULT_URL):
+                   url=DEFAULT_URL, language=None):
     """segments -> grounded reading, or {"error": ...} if Ollama is not reachable or answers badly."""
     text, n_shown, n_total = digest(segments, kind)
     full = "\n".join(s["text"] for s in segments)
@@ -179,10 +210,16 @@ def read_recording(name, segments, kind="morse", duration="", active_min=0, mode
         return {"category": "unreadable", "summary": "Nothing readable was decoded.", "confidence": "high",
                 "call_signs": [], "places": [], "key_points": [], "evidence": [], "language": "",
                 "translation_en": "", "caveats": "", "removed_ungrounded": 0, "facts": f, "model": None}
-    prompt = PROMPT.format(what={"morse": "Morse (CW) traffic", "digital": "radioteletype (RTTY / PSK31) text"}.get(
-        kind, "speech transcribed by Whisper"),
-                           name=name, duration=duration, active=active_min, facts=json.dumps(f),
-                           n_shown=n_shown, n_total=n_total, text=text, categories=json.dumps(CATEGORIES))
+    if kind == "voice":
+        # Speech gets its own prompt: the Morse counts (Q-codes, code groups, unreadable
+        # letters) mean nothing for it and led the model to warn about "unreadable letters".
+        prompt = VOICE_PROMPT.format(name=name, duration=duration, language=language or "detected automatically",
+                                     text=text, categories=json.dumps(CATEGORIES))
+    else:
+        prompt = PROMPT.format(what={"morse": "Morse (CW) traffic", "digital": "radioteletype (RTTY / PSK31) text"}.get(
+            kind, "decoded text"),
+                               name=name, duration=duration, active=active_min, facts=json.dumps(f),
+                               n_shown=n_shown, n_total=n_total, text=text, categories=json.dumps(CATEGORIES))
     try:
         raw = ask(prompt, model, url)
         reading = json.loads(raw)

@@ -240,7 +240,7 @@
     tbody tr { break-inside: avoid; page-break-inside: avoid; }
 
     /* Other pages are not part of this report. */
-    #pipelineLiveRoot, #latestIntercept, main > section:not(#page-replay) { display: none !important; }
+    #pipelineFileRoot, #latestIntercept, main > section:not(#page-replay) { display: none !important; }
   }
   /* History page. Bars are divs, not a canvas: they reflow with the panel and
      survive the print stylesheet that the browser-print PDF path uses. */
@@ -383,7 +383,7 @@
   .rx-log { font-family: var(--mono); font-size: 14px; color: var(--text-dim); background: var(--bg); border: 1px solid var(--grid); border-radius: 6px; padding: 6px 10px; margin: 8px 0 0; max-height: 9.5em; overflow-y: auto; }
   .note.audit-ok { color: #2E7D32; font-weight: 600; }
   .note.audit-bad { color: #B3261E; font-weight: 600; }
-  dialog#corrDialog { border: 1px solid var(--grid); border-radius: 10px; padding: 18px 20px; width: min(560px, calc(100vw - 32px)); background: var(--panel); color: var(--text); font-family: var(--font); }
+  dialog#corrDialog { border: 1px solid var(--grid); border-radius: 10px; padding: 18px 20px; width: min(760px, calc(100vw - 32px)); background: var(--panel); color: var(--text); font-family: var(--font); }
   dialog#corrDialog::backdrop { background: rgba(14, 22, 34, 0.45); }
   .triage { display: grid; gap: 6px; margin: 0 0 12px; }
   .triage .tri { border-radius: 8px; padding: 8px 12px; font-size: 15px; border: 2px solid; }
@@ -405,17 +405,18 @@
   .rt-eta { color: var(--text-dim); }
   .review-banner { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; border: 2px solid #22306B; background: var(--brand-tint, #E8ECF6); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; }
   /* main.js:pinCorrectionSpan -- docked beside the timeline so the stretch under review stays visible */
-  dialog#corrDialog.docked { position: fixed; margin: 0; inset: auto 16px 16px auto; width: min(460px, 40vw); max-height: calc(100vh - 32px); overflow: auto; box-shadow: 0 8px 28px rgba(14, 22, 34, 0.28); }
+  dialog#corrDialog.docked { position: fixed; margin: 0; inset: auto 16px 16px auto; width: min(700px, 52vw); max-height: calc(100vh - 32px); overflow: auto; box-shadow: 0 8px 28px rgba(14, 22, 34, 0.28); }
   dialog#corrDialog.docked.dock-left { inset: auto auto 16px 16px; }
   dialog#corrDialog.docked::backdrop { background: rgba(14, 22, 34, 0.06); }
   .corr-span { display: flex; gap: 12px; margin-bottom: 10px; }
   .corr-span label, .corr-block { display: flex; flex-direction: column; gap: 4px; font-size: 14px; color: var(--text-dim); }
   .corr-block { margin-top: 10px; }
   .corr-span input, .corr-block input, .corr-block textarea { font-family: var(--font); font-size: 15px; padding: 7px 9px; border: 1px solid var(--grid); border-radius: 6px; background: var(--panel); color: var(--text); }
-  .corr-classes { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 8px; }
-  .corr-classes fieldset { border: 1px solid var(--grid); border-radius: 6px; padding: 6px 8px; margin: 0; }
+  .corr-classes { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+  .corr-classes fieldset { border: 1px solid var(--grid); border-radius: 6px; padding: 6px 10px 8px; margin: 0; min-width: 0; }
   .corr-classes legend { font-size: 12.5px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; }
-  .corr-classes label { display: flex; align-items: center; gap: 6px; font-size: 15px; padding: 2px 0; }
+  .corr-classes label { display: flex; align-items: flex-start; gap: 6px; font-size: 14px; padding: 3px 0; overflow-wrap: anywhere; line-height: 1.3; }
+  .corr-classes label input { margin-top: 2px; flex: none; }
   .corr-error { color: #B3261E; font-size: 15px; min-height: 1.2em; margin-top: 8px; }
   .corr-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
   .pill { display: inline-block; font-size: 12.5px; font-weight: 600; padding: 2px 8px; border-radius: 999px; }
@@ -672,17 +673,17 @@
     .filters input[type="checkbox"], #pipeFollow { width: 18px; height: 18px; min-height: 0; padding: 0; margin: 0; flex: none; accent-color: var(--brand); }
     .filters input[type="file"] { padding: 7px 10px; }
     /* Signal Pipeline's form */
-    :is(#pipelineLiveRoot, #pipelineFileRoot) .filters { gap: 16px 26px; margin-bottom: 0; }
-    :is(#pipelineLiveRoot, #pipelineFileRoot) .note + .filters { margin-top: 24px !important; }
-    :is(#pipelineLiveRoot, #pipelineFileRoot) .filters + .filters { margin-top: 22px; }
-    :is(#pipelineLiveRoot, #pipelineFileRoot) table.pipe-tracks td, :is(#pipelineLiveRoot, #pipelineFileRoot) table.pipe-tracks th { padding: 10px 16px 10px 10px; vertical-align: top; }
-    :is(#pipelineLiveRoot, #pipelineFileRoot) table.pipe-tracks { min-width: 1000px; }   /* a narrow window scrolls sideways instead of breaking words */
-    :is(#pipelineLiveRoot, #pipelineFileRoot) table.pipe-tracks td { overflow-wrap: break-word; }
-    :is(#pipelineLiveRoot, #pipelineFileRoot) table.pipe-tracks td:nth-child(2) { min-width: 90px; }
-    :is(#pipelineLiveRoot, #pipelineFileRoot) table.pipe-tracks td:nth-child(3) { min-width: 150px; }
-    :is(#pipelineLiveRoot, #pipelineFileRoot) table.pipe-tracks td:nth-child(4) { min-width: 170px; }
-    :is(#pipelineLiveRoot, #pipelineFileRoot) table.pipe-tracks td:nth-child(5) { min-width: 90px; }
-    :is(#pipelineLiveRoot, #pipelineFileRoot) table.pipe-tracks td:nth-child(6) { min-width: 240px; }
+    #pipelineFileRoot .filters { gap: 16px 26px; margin-bottom: 0; }
+    #pipelineFileRoot .note + .filters { margin-top: 24px !important; }
+    #pipelineFileRoot .filters + .filters { margin-top: 22px; }
+    #pipelineFileRoot table.pipe-tracks td, #pipelineFileRoot table.pipe-tracks th { padding: 10px 16px 10px 10px; vertical-align: top; }
+    #pipelineFileRoot table.pipe-tracks { min-width: 1000px; }   /* a narrow window scrolls sideways instead of breaking words */
+    #pipelineFileRoot table.pipe-tracks td { overflow-wrap: break-word; }
+    #pipelineFileRoot table.pipe-tracks td:nth-child(2) { min-width: 90px; }
+    #pipelineFileRoot table.pipe-tracks td:nth-child(3) { min-width: 150px; }
+    #pipelineFileRoot table.pipe-tracks td:nth-child(4) { min-width: 170px; }
+    #pipelineFileRoot table.pipe-tracks td:nth-child(5) { min-width: 90px; }
+    #pipelineFileRoot table.pipe-tracks td:nth-child(6) { min-width: 240px; }
     #pipeRun, #pipeDemo {
       min-height: 46px; padding: 10px 22px; font-family: var(--font); font-size: 16px; font-weight: 600;
       color: var(--text); background: var(--panel); border: 1px solid var(--grid); border-radius: 6px; cursor: pointer;
@@ -690,7 +691,7 @@
     #pipeRun:hover, #pipeDemo:hover { background: var(--brand-tint); }
     #pipeMsg { margin: 16px 0 0; }
     #pipeMsg:empty { display: none; }
-    :is(#pipelineLiveRoot, #pipelineFileRoot) label:has(#pipeFollow) { display: inline-flex; align-items: center; gap: 10px; }
+    #pipelineFileRoot label:has(#pipeFollow) { display: inline-flex; align-items: center; gap: 10px; }
     button.mini { padding: 7px 13px; font-size: 14.5px; border-radius: 6px; }
 
     table { font-size: 15.5px; }
@@ -808,21 +809,25 @@
 
       <div class="menu-label">Intelligence</div>
       <button data-page="intercepts" data-server>Intercepts</button>
-      <button data-page="alerts" data-server>Alerts</button>
-      <button data-page="recording">Recording Analysis</button>
 
       <div class="menu-label">Records</div>
-      <button data-page="captures">Captures</button>
       <div class="nav-group in-group" data-group="review" data-server>
         <button class="nav-fold" aria-expanded="false" aria-controls="navReview">Review
           <span class="nav-count" id="reviewCount" hidden></span></button>
         <div class="nav-sub" id="navReview" hidden>
+          <button data-page="alerts">Alerts</button>
           <button data-page="corrections">Corrections</button>
           <button data-page="lowconf">Low Confidence</button>
         </div>
       </div>
+      <div class="nav-group in-group" data-group="history">
+        <button class="nav-fold" aria-expanded="false" aria-controls="navHistory">History</button>
+        <div class="nav-sub" id="navHistory" hidden>
+          <button data-page="captures">Captures</button>
+          <button data-page="audit">Audit Trail</button>
+        </div>
+      </div>
       <button data-page="reports">Reports</button>
-      <button data-page="audit">Audit Trail</button>
 
       <div class="nav-group" data-group="system">
         <button class="nav-fold as-label" aria-expanded="false" aria-controls="navSystem">System</button>
@@ -1034,8 +1039,9 @@
 
       </div>
 
-      <!-- The intercept feed: every transmission the live receiver decoded (web/pipeline.js, /api/pipeline). -->
-      <div id="pipelineLiveRoot"></div>
+      <!-- Replay a file: the whole chain on one IQ recording (web/pipeline.js, /api/pipeline):
+           waterfall with every transmitter boxed and named, then Open analysis per decoded signal. -->
+      <div id="pipelineFileRoot"></div>
     </section>
 
     <!-- Live KiwiSDR listening (web/kiwi_live.js, /api/kiwi). -->
@@ -1044,16 +1050,10 @@
       <div id="kiwiLiveRoot"></div>
     </section>
 
-    <!-- Wideband chain on a recording (web/pipeline.js, /api/pipeline). -->
-    <section id="page-recording" hidden>
-      <h3 class="page-title">Recording Analysis</h3>
-      <div id="pipelineFileRoot"></div>
-    </section>
-
     <!-- One decoded signal, opened from Intercepts: no menu entry of its
          own (web/intel.js, /api/intel). -->
     <section id="page-intel" hidden>
-      <h3 class="page-title">Decoded signal</h3>
+      <h3 class="page-title">Analysis</h3>
       <div id="intelRoot"></div>
     </section>
 
@@ -1121,6 +1121,7 @@
         <input id="histQuery" type="search" placeholder="Search file, case, class">
         <label class="note" style="margin:0;">From <input id="histFrom" type="date"></label>
         <label class="note" style="margin:0;">To <input id="histTo" type="date"></label>
+        <label class="note" style="margin:0;" title="Live dwells where nothing was found (verdict Empty)"><input type="checkbox" id="histShowEmpty"> Show empty dwells</label>
         <span class="note" id="histStatus"></span>
       </div>
       </div>
@@ -1243,6 +1244,10 @@
         </div>
       </div>
       </details>
+      <div class="block" id="perfModelCard">
+        <div class="block-label">Model card</div>
+        <div id="modelCardBox"></div>
+      </div>
     </section>
 
     <section id="page-model" hidden>
@@ -1286,10 +1291,6 @@
         <div class="block-label">Fine-tuning history</div>
         <div class="note">Every retrain, newest first: who, why, test result and every decision since.</div>
         <div id="rtHistory"></div>
-      </div>
-      <div class="block">
-        <div class="block-label">Model card</div>
-        <div id="modelCardBox"></div>
       </div>
     </section>
     <section id="page-assistant" hidden>

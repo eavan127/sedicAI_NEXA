@@ -311,7 +311,8 @@ function clipInfo(d) {
       · ${Number(d.stage_s) || 0} s</div>` : "";
   const said = tracks.filter(t => t.text).map(t => `<div style="margin-top:6px;"><b>${t.kind === "CW" ? "Morse" : ["RTTY", "PSK31"].includes(t.kind) ? "Text" : "Said"}${t.language ? ` (${esc(t.language)})` : ""}:</b>
       <span style="font-family:var(--mono);">${esc(t.text)}</span></div>
-    ${t.reading ? `<div style="margin-top:4px;"><b>AI reading:</b> ${esc(t.reading)}</div>` : ""}`).join("");
+    ${t.reading ? `<div style="margin-top:4px;"><b>AI reading:</b> ${esc(t.reading)}</div>` : ""}
+    ${!busy && d.id && t.track != null ? `<button class="mini" style="margin-top:6px;" data-open-analysis="${esc(`${d.id}_track_${t.track}`)}">Open analysis</button>` : ""}`).join("");
   const skipped = d.stage === "not transcribed"
     ? `<div class="note" style="margin-top:6px;">Not transcribed: a newer clip came in while the laptop was busy. The audio is kept.</div>` : "";
   const failed = d.stage === "not transcribed" ? "" : tracks.filter(t => t.text_error && !t.text).map(t => `<div class="note" style="margin-top:6px;color:#9B2C2C;">

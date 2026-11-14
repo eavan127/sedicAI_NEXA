@@ -591,7 +591,8 @@ def voice_text(tracks, extra, out_dir, whisper_model, language, use_whisper, use
             kw = {"model": llm_model} if llm_model else {}
             L["reading"] = reason.read_recording(f"live track {k}", segments, kind=text_kind,
                                                  duration=f"{L['duration_s']:.1f} s",
-                                                 active_min=L.get("morse_detail", {}).get("active_minutes", 0), **kw)
+                                                 active_min=L.get("morse_detail", {}).get("active_minutes", 0),
+                                                 language=L.get("language"), **kw)
     return tracks
 
 

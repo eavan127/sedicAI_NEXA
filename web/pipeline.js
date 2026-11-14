@@ -1,4 +1,4 @@
-// Recording Analysis page (and the SDR Receiver's intercept feed): the whole wideband chain on a recording, run by the
+// SDR Receiver page, "Analyse a recording" (Replay a file): the whole wideband chain on a recording, run by the
 // local server (scripts/serve_local.py /api/pipeline -> scripts/run_pipeline.py):
 //   IQ file -> YOLO boxes -> 60-class classifier -> tracker (vote) -> resolve
 //   -> for voice / Morse tracks: zoom, analog kind, audio, Morse / Whisper, AI reading.
@@ -14,19 +14,9 @@ const KIND_TEXT = {
 };
 const BAND_COL = { high: "#2E7D32", medium: "#B7791F", uncertain: "#9B2C2C" };
 const CONF = c => c >= 0.6 ? "#2E7D32" : c >= 0.3 ? "#B7791F" : "#9B2C2C";
-const LANG_TEXT = { auto: "Language: detect", ms: "Malay", en: "English", id: "Indonesian", zh: "Mandarin" };
 
-// The transcript line by line, with the lines Whisper itself doubted marked. A line
-// with no mark is not known to be right: Whisper can be wrong without saying so.
-function speechText(L) {
-  const segs = L.segments || [];
-  if (!segs.length) return L.transcript ? esc(L.transcript) : "<span class='note'>no words recognised</span>";
-  return segs.map(s => s.doubtful
-    ? `<span style="color:#9B2C2C;" title="Whisper was unsure of this part">[? ${esc(s.text)}]</span>`
-    : esc(s.text)).join(" ");
-}
 
-let state = { open: null, timer: null, follow: false, liveTimer: null };
+let state = { open: null, timer: null };
 
 function chip(text, color) {
   return `<span class="chip" style="background:${color}1f;color:${color};">${esc(text)}</span>`;
@@ -80,16 +70,14 @@ export function analyseFile(file) {
   return true;
 }
 
-// Two places use it: mode "live" (SDR Receiver page: the intercept feed of the live
-// receiver) and mode "file" (Recording Analysis page: analyse a recording).
+// The "Analyse a recording" box under the SDR Receiver (mode "file").
 export async function renderPipeline(root, { server, mode = "file" }) {
-  const live = mode === "live";
   if (!server) {
     // The page may ask before its own server check has finished: ask the server directly.
     try { server = (await fetch("/api/health", { credentials: "same-origin" })).ok; } catch { server = false; }
   }
   if (!server) {
-    root.innerHTML = live ? "" : `<div class="block"><div class="note">Recording analysis runs on this machine's local server
+    root.innerHTML = `<div class="block"><div class="note">Recording analysis runs on this machine's local server
       (it needs the trained models and Python). Start it with <code>python scripts/serve_local.py</code>.</div></div>`;
     return;
   }
@@ -100,26 +88,14 @@ export async function renderPipeline(root, { server, mode = "file" }) {
     root.innerHTML = `<div class="note">Could not reach the pipeline: ${esc(e.message)}</div>`;
     return;
   }
-  root.innerHTML = live ? `
+  root.innerHTML = `
     <div class="block">
-      <div class="block-label">Intercept feed</div>
-      <div class="note">Each transmission the receiver records and decodes is added to the runs below. With this ticked,
-        the newest finished one opens by itself.</div>
-      <label class="note" style="margin:6px 0 0;"><input type="checkbox" id="pipeFollow"> Follow live snapshots</label>
-      <span class="note" id="pipeLiveMsg" style="margin-left:8px;"></span>
-    </div>
-    <div class="block" id="pipeRunBox" hidden></div>
-    <div class="block">
-      <div class="block-label">Recent runs</div>
-      <div class="table-wrap" id="pipeRuns"></div>
-    </div>` : `
-    <div class="block">
-      <div class="block-label">Analyse a recording</div>
+      <div class="block-label">Analyse a recording (Replay a file)</div>
       <div class="note">The whole chain on one recording: <b>find</b> each transmitter (YOLO boxes), <b>name</b> it
         (60-class model, voted over the whole transmission), and for voice or Morse <b>listen</b>: zoom in, demodulate,
         Morse decoder or Whisper, then a local AI reading. Record in SDRconnect with <b>Recording type = IQ</b>.
         <b>Replay a file</b> on the SDR Receiver page does the same, with the settings here.
-        The detector scans the first <b>Seconds to scan</b>; the zoom-in listens to the <b>whole file</b> (up to 2 min), so a full Morse or voice message is decoded. About 30-90 s per file on this PC. Then open it in Intercepts to translate.</div>
+        The detector scans the first <b>Seconds to scan</b>; the zoom-in listens to the <b>whole file</b> (up to 2 min), so a full Morse or voice message is decoded. About 30-90 s per file on this PC. Each decoded signal gets an <b>Open analysis</b> button: playback, text, English and the AI reading.</div>
       <div class="note" style="margin-top:6px;">Models: classifier ${info.classifiers.length
         ? info.classifiers.map(c => `<code>${esc(c)}</code>`).join(" ") + (info.classifiers.length > 1 ? " (averaged)" : "")
         : `<b style="color:#9B2C2C;">none: put a best.pt in results/classifier/</b>`} ·
@@ -145,16 +121,6 @@ export async function renderPipeline(root, { server, mode = "file" }) {
       <div class="block-label">Recent runs</div>
       <div class="table-wrap" id="pipeRuns"></div>
     </div>`;
-  if (live) {
-    const follow = root.querySelector("#pipeFollow");
-    follow.checked = state.follow || false;
-    follow.addEventListener("change", () => { state.follow = follow.checked; if (follow.checked) followLive(root); });
-    if (state.follow) followLive(root);
-    await listRuns(root, info.runs);
-    if (state.open) openRun(root, state.open);
-    else if (info.runs[0]) openRun(root, info.runs[0].id);
-    return;
-  }
   const msg = root.querySelector("#pipeMsg");
   const start = async (demo) => {
     const p = new URLSearchParams({
@@ -205,27 +171,6 @@ export async function renderPipeline(root, { server, mode = "file" }) {
   await listRuns(root, info.runs);
   if (state.open) openRun(root, state.open);
   else if (info.runs[0]) openRun(root, info.runs[0].id);
-}
-
-// Poll for live-bridge snapshots (scripts/live_sdrconnect.py) and show the newest finished one.
-async function followLive(root) {
-  clearTimeout(state.liveTimer);
-  if (!state.follow || !root.isConnected) return;
-  const msg = root.querySelector("#pipeLiveMsg");
-  try {
-    const runs = (await (await fetch("/api/pipeline", { credentials: "same-origin" })).json()).runs;
-    const live = runs.filter(r => r.live && r.status === "done");
-    if (!live.length) {
-      if (msg) msg.textContent = "waiting for the first snapshot…";
-    } else {
-      const newest = live[0];
-      if (msg) msg.textContent = `newest snapshot ${newest.id}`;
-      if (state.open !== newest.id) { await openRun(root, newest.id); await listRuns(root, runs); }
-    }
-  } catch (e) {
-    if (msg) msg.textContent = `cannot reach the server: ${e.message}`;
-  }
-  state.liveTimer = setTimeout(() => followLive(root), 2000);
 }
 
 // Run ids start with the local time: 20261108-222233-ff1d.
@@ -354,7 +299,7 @@ function drawResult(box, id, r) {
       · ${(res.duration_ms || 0).toFixed(0)} ms analysed · ${tracks.length} transmitters · ${esc(r.detector)} detector</div>
     <img src="/api/pipeline/${encodeURIComponent(id)}/tracks.png" alt="Waterfall with every transmitter boxed and named"
       style="width:100%;margin-top:10px;border:1px solid var(--grid);background:#000;">
-    ${heard.length ? `<div style="margin-top:14px;font-weight:700;">What it says</div>` + heard.map(L => listenCard(id, L, hfKhz(tracks, L, centre))).join("") : ""}
+    ${heard.length ? `<div style="margin-top:14px;font-weight:700;">Decoded signals</div>` + heard.map(L => heardCard(id, L, tracks, centre)).join("") : ""}
     <div style="margin-top:14px;font-weight:700;">Every transmitter</div>
     <div class="note">Answer = the 60-class model voted over the whole transmission; when two classes cannot be told apart from
       the signal (e.g. RADAR_CW / JAM_TONE) both are shown with the reason. Confidence band from the track probability: high (≥ 0.40), medium (≥ 0.10), uncertain (below: shown as 'uncertain' with the likeliest class). Voice / Morse tracks on a clear signal are named by the zoom-in, which listens to the whole track.</div>
@@ -368,24 +313,6 @@ function drawResult(box, id, r) {
     </tbody></table></div>
     <details style="margin-top:8px;"><summary class="note">Run log</summary>
       <pre style="white-space:pre-wrap;max-height:240px;overflow:auto;">${esc(r.log || "")}</pre></details>`;
-  for (const btn of box.querySelectorAll("button[data-translate]")) {
-    btn.addEventListener("click", async () => {
-      const msg = btn.parentElement.querySelector(".tr-msg"), out = btn.parentElement.querySelector(".tr-out");
-      btn.disabled = true;
-      msg.textContent = "Translating with the local AI on this machine (up to a minute)…";
-      try {
-        const res = await fetch(`/api/intel/${encodeURIComponent(btn.dataset.translate)}/translate`, {
-          method: "POST", credentials: "same-origin", headers: { ...HDR, "Content-Type": "application/json" }, body: "{}" });
-        const j = await res.json();
-        if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
-        msg.textContent = `From ${j.language || "the original"}, by ${j.model} (also saved in History → Decoded review):`;
-        out.innerHTML = `<div style="padding:8px 10px;border-radius:6px;background:var(--panel);border:1px solid var(--grid);white-space:pre-wrap;">${esc(j.english)}</div>`;
-      } catch (e) {
-        msg.textContent = `Could not translate: ${e.message}`;
-      }
-      btn.disabled = false;
-    });
-  }
   for (const form of box.querySelectorAll("form.tdoa")) {
     form.addEventListener("submit", async ev => {
       ev.preventDefault();
@@ -441,27 +368,24 @@ function locateBlock(khz) {
     </form></details>`;
 }
 
-function listenCard(id, L, khz = null) {
-  const rd = L.reading || {};
-  const said = L.morse ? `<div><b>Morse:</b> <code>${esc(L.morse)}</code></div>`
-    : L.transcript !== undefined ? `<div><b>Speech (Whisper${L.whisper_model ? ` ${esc(L.whisper_model)}` : ""}${L.language ? `, ${esc(LANG_TEXT[L.language] || L.language)}` : ""}):</b>
-        ${speechText(L)}</div>
-        <div class="note">Machine transcript: it can be wrong without any mark, so check names and numbers against the audio.</div>` : "";
-  return `<div class="block" style="margin:8px 0;padding:10px;">
-    <div><b>${esc(KIND_TEXT[L.kind] || L.kind)}</b> · tracks ${esc((L.tracks || []).join(", "))} ·
-      ${(L.duration_s || 0).toFixed(1)} s <span class="note">— ${esc(L.why || "")}</span></div>
-    ${L.audio ? `<audio controls preload="none" style="width:100%;margin-top:6px;" src="/api/pipeline/${encodeURIComponent(id)}/${encodeURIComponent(L.audio)}"></audio>` : ""}
-    ${said}
-    ${L.text_error ? `<div class="note" style="color:#9B2C2C;">${esc(L.text_error)}</div>` : ""}
-    ${rd.error ? `<div class="note" style="color:#9B2C2C;">AI reading: ${esc(rd.error)}</div>` : rd.summary ? `
-      <div style="margin-top:6px;"><b>AI reading</b> ${chip((rd.confidence || "low") + " confidence", rd.confidence === "high" ? "#2E7D32" : rd.confidence === "medium" ? "#B7791F" : "#9B2C2C")}
-        <span class="note">${esc(rd.category || "")}</span></div>
-      <div>${esc(rd.summary)}</div>
-      ${(rd.evidence || []).map(e => `<div class="note"><code>${esc(e.quote)}</code> — ${esc(e.why)}</div>`).join("")}
-      ${rd.removed_ungrounded ? `<div class="note">${rd.removed_ungrounded} unsupported item(s) the model made up were removed.</div>` : ""}` : ""}
-    ${(L.transcript || L.morse || L.digital_text) ? `<div style="margin-top:8px;">
-      <button class="mini" data-translate="${esc(id)}_track_${esc(Math.min(...(L.tracks || [0])))}">Translate to English</button>
-      <span class="note tr-msg"></span><div class="tr-out" style="margin-top:4px;"></div></div>` : ""}
+/** One decoded signal under the waterfall: what it is, where, a line of what was said, and
+ * Open analysis (the full page: playback, original text, English, AI reading, facts). */
+function heardCard(id, L, tracks, centre) {
+  const t = tracks.find(t => t.listen === L) || tracks.find(t => (L.tracks || []).includes(t.track));
+  const mid = t ? (t.f_lo_khz + t.f_hi_khz) / 2 : null;
+  const where = t ? (centre ? `${((centre + mid * 1e3) / 1e6).toFixed(4)} MHz` : `${mid >= 0 ? "+" : ""}${mid.toFixed(1)} kHz from centre`) : "";
+  const text = L.morse || L.transcript || L.digital_text || "";
+  const short = text.length > 160 ? text.slice(0, 160).replace(/\s+\S*$/, "") + " …" : text;
+  const intelId = `${id}_track_${Math.min(...(L.tracks || [0]))}`;
+  const khz = hfKhz(tracks, L, centre);
+  return `<div class="block" style="margin:8px 0;padding:12px;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
+      <div><b style="font-size:16px;">${esc(KIND_TEXT[L.kind] || L.kind)}</b>
+        <span class="note">${where ? ` · ${esc(where)}` : ""} · ${(L.duration_s || 0).toFixed(1)} s</span>
+        ${short ? `<div style="margin-top:4px;font-family:var(--mono);overflow-wrap:anywhere;">${esc(short)}</div>`
+          : `<div class="note" style="margin-top:4px;">${esc(L.text_error || "No text read from this signal.")}</div>`}</div>
+      ${text ? `<button class="primary" data-open-analysis="${esc(intelId)}">Open analysis</button>` : ""}
+    </div>
     ${khz ? locateBlock(khz) : ""}
   </div>`;
 }

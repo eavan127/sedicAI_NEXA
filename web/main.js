@@ -51,10 +51,29 @@ const caseSel = el("caseSel"), snrSel = el("snrSel"), hopSel = el("hopSel");
 const MODEL_CHOICE = "single";          // one default model; there is no selector any more
 const smoothingRadio = el("smoothingRadio");
 
+// "Random mix": a fresh scene from the local server's generators of the CURRENT signal
+// groups (radar, spread spectrum, digital comms, jammers, pulses: the 60 classes), several
+// emitters overlapping. The other cases are the browser's own (radar, FHSS, jamming, civilian).
+const RANDOM_MIX = "Random mix: all signal groups (radar, hopping, jammers, comms, pulses)";
+caseSel.add(new Option(RANDOM_MIX, RANDOM_MIX));
 for (const name of CASE_NAMES) {
   caseSel.add(new Option(name, name));
 }
 caseSel.value = "All three";
+
+/** One random-mix scene from /api/simulate -> {re, im, segments, classes}. Throws without the server. */
+async function fetchRandomScene({ seed, durationS }) {
+  const p = new URLSearchParams({ seed: String(seed), duration_s: String(durationS), snr_db: "random" });
+  const res = await fetch(`/api/simulate?${p}`, { credentials: "same-origin" });
+  if (!res.ok) throw new Error(`the local server could not make a scene (HTTP ${res.status})`);
+  const j = await res.json();
+  const bytes = Uint8Array.from(atob(j.iq), c => c.charCodeAt(0));
+  const f = new Float32Array(bytes.buffer);
+  const n = f.length / 2, re = new Float64Array(n), im = new Float64Array(n);
+  for (let i = 0; i < n; i++) { re[i] = f[2 * i]; im[i] = f[2 * i + 1]; }
+  return { re, im, segments: j.truth, classes: j.classes };
+}
+const mixLabel = classes => `Random mix: ${classes.length ? classes.join(", ") : "nothing strong enough to see"}`;
 
 // configs/default.yaml:snr_bins_db -- the training bins, not arbitrary round
 // numbers: asking the model about an SNR it never saw conflates two questions.
@@ -119,6 +138,7 @@ async function init() {
     statusEl.textContent = "Ready. Synthesize a scenario, or select a capture file.";
     synthBtn.disabled = false;
     uploadBtn.disabled = false;
+    autoSimulate();
   } catch (e) {
     statusEl.textContent = `Failed to load model: ${e.message}`;
     console.error(e);
@@ -310,7 +330,36 @@ async function analyze(re, im, { source, caseNote = "", truth = null, snrDb = nu
   }
 }
 
-synthBtn.addEventListener("click", async () => {
+/** No antenna streaming and nothing on screen yet: show the built-in simulated receiver
+ *  (radar + frequency hopping) so the waterfall, detections, corrections and recommended
+ *  corrections are there from the start. Clearly labelled simulated; Connect & stream
+ *  replaces it with the antenna. Runs once per page load. */
+let autoSimulated = false;
+async function autoSimulate() {
+  if (autoSimulated || session || rx) return;
+  autoSimulated = true;
+  caseSel.value = readConfig().backend === "server" ? RANDOM_MIX : "All three";
+  await synthesizeCase();
+  if (!rx) rxNote.textContent = "SDRconnect is not connected, so the waterfall below shows the built-in simulated receiver "
+    + "(a random mix of signal types). Press Connect & stream for the antenna, or More options → Synthesize Scenario "
+    + "for a new random mix or a fixed case.";
+}
+
+synthBtn.addEventListener("click", () => synthesizeCase());
+
+async function synthesizeCase() {
+  if (caseSel.value === RANDOM_MIX) {
+    try {
+      statusEl.textContent = "Generating a random mix of signals…";
+      const sc = await fetchRandomScene({ seed: Math.floor(Math.random() * 1e9), durationS: 0.05 });
+      await analyze(sc.re, sc.im, { source: "scenario", caseNote: `case \`${mixLabel(sc.classes)}\``,
+                                    truth: sc.segments, snrDb: null });
+    } catch (e) {
+      statusEl.textContent = `Random mix needs the local server (python scripts/serve_local.py): ${e.message}`;
+      console.error(e);
+    }
+    return;
+  }
   const c = resolveCase(caseSel.value, { snrDb: Number(snrSel.value), seed: Math.floor(Math.random() * 1e9),
                                          durationS: 0.05, index: Math.floor(Math.random() * 4) });
   const script = c.script, caseName = c.label;
@@ -339,7 +388,7 @@ synthBtn.addEventListener("click", async () => {
     statusEl.textContent = `Error: ${e.message}`;
     console.error(e);
   }
-});
+}
 
 uploadBtn.addEventListener("click", () => fileInput.click());
 
@@ -421,6 +470,25 @@ corrClasses.innerHTML = CLASS_GROUPS.map(([group, classes]) =>
     `<label><input type="checkbox" value="${c}"> ${c === "NOISE_FLOOR" ? "Nothing here (noise only)" : c}</label>`).join("")
   + `</fieldset>`).join("");
 
+/** The recommended "Why?" text: what the model said, what is ticked, and where. */
+function defaultReason() {
+  const ticked = [...corrClasses.querySelectorAll("input:checked")].map(b => b.value);
+  const said = corrCtx?.predicted || [];
+  const span = `${Number(corrStart.value).toFixed(1)}–${Number(corrEnd.value).toFixed(1)} ms`;
+  const nice = c => c === "NOISE_FLOOR" ? "only noise" : c;
+  if (!ticked.length) return `Checked the waterfall at ${span}: the model's answer (${said.join(" + ") || "nothing"}) needs a second look.`;
+  if (!said.length) return `The waterfall shows ${ticked.map(nice).join(" + ")} at ${span}, but the model reported nothing there.`;
+  if (ticked.every(c => said.includes(c)) && ticked.length === said.length)
+    return `Checked the waterfall at ${span}: ${ticked.map(nice).join(" + ")} is right; confirming the model's answer.`;
+  return `At ${span} the waterfall shows ${ticked.map(nice).join(" + ")}, not ${said.join(" + ")}: `
+    + `its shape and bandwidth match ${ticked.length > 1 ? "these types" : "this type"}.`;
+}
+const refreshAutoReason = () => { if (corrCtx?.autoReason) corrReason.value = defaultReason(); };
+corrClasses.addEventListener("change", refreshAutoReason);
+corrStart.addEventListener("change", refreshAutoReason);
+corrEnd.addEventListener("change", refreshAutoReason);
+corrReason.addEventListener("input", () => { if (corrCtx) corrCtx.autoReason = false; });
+
 // The session a correction is about: captured when the form opens, because a
 // live stream replaces the on-screen session every dwell.
 let corrCtx = null;
@@ -443,7 +511,10 @@ function openCorrection({ predicted, startS, endS, missed, suggested = null, rea
   const ticks = (suggested || predicted).flatMap(c =>
     GROUPS[c] ? predicted.filter(p => FAMILY_OF[p] === c) : [c]);
   for (const box of corrClasses.querySelectorAll("input")) box.checked = ticks.includes(box.value);
-  corrReason.value = reason;
+  // A ready-made reason the operator can accept or edit: it follows the ticks
+  // until the operator types their own.
+  corrCtx.autoReason = !reason;
+  corrReason.value = reason || defaultReason();
   corrOperator.value = operatorName();
   corrError.textContent = "";
   corrSubmit.disabled = false;
@@ -1055,6 +1126,11 @@ function rxStartSimulator(fallback = null) {
     dwellS: Number(rxDwellSel.value),
     getSettings: () => ({ caseName: caseSel.value, snrDb: Number(snrSel.value) }),
     getLibrary: () => loadCivilianLibrary("./data"),
+    randomCase: RANDOM_MIX,
+    fetchScene: async (seed, durationS) => {
+      const sc = await fetchRandomScene({ seed, durationS });
+      return { ...sc, label: mixLabel(sc.classes) };
+    },
   }), { fallback });
 }
 
@@ -1101,10 +1177,9 @@ rxFileInput.addEventListener("change", async () => {
   // server, gets the quick replay below (fast model only, no decoding).
   const one = files.length === 1 && !/\.sigmf(-meta|-data)?$/i.test(files[0].name) ? files[0] : null;
   if (one) {
-    await showPage("recording");              // draws that page's file box first
-    window.scrollTo({ top: 0, behavior: "instant" });
+    if (currentPage !== "replay") showPage("replay");
+    await pipelineReady;                      // the file box below the receiver is drawn
     if (analyseFile(one)) return;
-    showPage("replay");                       // no local server: back to the receiver
   }
   if (/\.wav$/i.test(files[0].name)) {
     rxNote.textContent = "IQ WAV files are analysed by the local server (python scripts/serve_local.py); it is not running.";
@@ -1241,10 +1316,19 @@ const winSlider = el("winSlider"), winReadout = el("winReadout");
 const probsBox = el("probsBox"), winMetaBox = el("winMetaBox");
 const attnCanvas = el("attnCanvas"), breakdownCanvas = el("breakdownCanvas");
 let currentPage = "replay";
+let pipelineReady = Promise.resolve();   // the receiver page's "Analyse a recording" box, once drawn
 const chatLogPromise = openChatLog();
 let perfData = null, modelCard = null;
 
 const PAGE_NAME = { alerts: "Alerts", lowconf: "Low Confidence", captures: "Captures", corrections: "Corrections" };
+
+// "Open analysis" on a decoded signal in a replayed file's results (web/pipeline.js).
+// One listener for every page (SDR Receiver file results, KiwiSDR clips): a button
+// carrying data-open-analysis="<intel id>" opens that signal's Analysis page.
+document.addEventListener("click", ev => {
+  const btn = ev.target.closest?.("[data-open-analysis]");
+  if (btn) openIntercept(btn.dataset.openAnalysis, currentPage === "intel" ? "intercepts" : currentPage);
+});
 // Pages that show the stored records (the old History page, one menu entry each).
 // They all read the same records, so each one loads them on entry.
 const RECORD_PAGES = new Set(["intercepts", "alerts", "captures", "reports", "corrections", "lowconf"]);
@@ -1270,11 +1354,10 @@ function showPage(page) {
   // Canvases cannot be sized while hidden, so each page draws on entry.
   if (page === "replay") {
     if (session) render(); else renderSignal();
-    renderPipeline(el("pipelineLiveRoot"), { server, mode: "live" });
+    pipelineReady = renderPipeline(el("pipelineFileRoot"), { server, mode: "file" });
     pollLatestIntercept();
   }
   if (page === "kiwi") renderKiwiLive(el("kiwiLiveRoot"), { server });
-  if (page === "recording") return renderPipeline(el("pipelineFileRoot"), { server, mode: "file" });
   // Captures and Reports share one filter bar: it moves to the page that is open.
   if (page === "captures" || page === "reports") {
     el(`page-${page}`).querySelector(".filter-slot").append(el("histFilters"));
@@ -1286,7 +1369,7 @@ function showPage(page) {
   if (page === "users") renderUsers();
 }
 
-// Folding menu groups (Review, System). Folded by default; the choice is remembered.
+// Folding menu groups (Review, History, System). Folded by default; the choice is remembered.
 const NAV_FOLD_KEY = "nexa.navOpen";
 function navOpenSaved() {
   try { return JSON.parse(localStorage.getItem(NAV_FOLD_KEY) || "{}"); } catch { return {}; }
@@ -1333,10 +1416,10 @@ function syncNav() {
 }
 
 // Review's count: everything waiting for a person (pending corrections + low-confidence detections).
-let reviewWaiting = { corrections: 0, lowconf: 0 };
+let reviewWaiting = { alerts: 0, corrections: 0, lowconf: 0 };
 function paintReviewCount(part) {
   Object.assign(reviewWaiting, part);
-  const n = reviewWaiting.corrections + reviewWaiting.lowconf;
+  const n = reviewWaiting.alerts + reviewWaiting.corrections + reviewWaiting.lowconf;
   const badge = el("reviewCount");
   const changed = badge.textContent !== String(n);
   badge.hidden = !n;
@@ -1344,7 +1427,7 @@ function paintReviewCount(part) {
   if (changed && n) {                       // a new item waiting: the badge pops once
     badge.classList.remove("bump"); void badge.offsetWidth; badge.classList.add("bump");
   }
-  badge.title = `${reviewWaiting.corrections} correction${reviewWaiting.corrections === 1 ? "" : "s"} and `
+  badge.title = `${reviewWaiting.alerts} alert${reviewWaiting.alerts === 1 ? "" : "s"}, ${reviewWaiting.corrections} correction${reviewWaiting.corrections === 1 ? "" : "s"} and `
     + `${reviewWaiting.lowconf} low-confidence detection${reviewWaiting.lowconf === 1 ? "" : "s"} waiting`;
 }
 /** At start-up, before any record page has loaded: count what is waiting. */
@@ -1353,6 +1436,7 @@ async function refreshReviewCount() {
   try {
     const [s, { records }] = await Promise.all([correctionStats(), listAnalyses()]);
     paintReviewCount({ corrections: s.pending || 0,
+                       alerts: records.filter(r => r.alert_level && !r.reviewed_by).length,
                        lowconf: records.filter(r => r.needs_review && !r.reviewed_by).length });
   } catch { /* the count simply stays hidden */ }
 }
@@ -1391,7 +1475,7 @@ function paintLatestIntercept(box, r) {
     <div class="note" style="margin:4px 0 0;overflow-wrap:anywhere;">${esc(r.file)}</div>
     <div class="ic-text">${esc(r.summary || r.error || "Decoded. Open it to read the text.")}</div>
     <div class="filters" style="margin-top:12px;">
-      <button class="mini" id="icOpen">Open full decode</button>
+      <button class="mini" id="icOpen">Open analysis</button>
       <button class="mini" id="icAll">All intercepts</button>
     </div>`;
   box.hidden = false;
@@ -1407,7 +1491,7 @@ function openIntercept(id, from = "intercepts") {
   showPage("intel");
   window.scrollTo({ top: 0, behavior: "instant" });
   renderIntelDetail(el("intelRoot"), {
-    id, backLabel: from === "replay" ? "SDR Receiver" : "Intercepts",
+    id, backLabel: { replay: "SDR Receiver", kiwi: "KiwiSDR" }[from] || "Intercepts",
     onBack: async () => {
       await showPage(from);
       window.scrollTo({ top: 0, behavior: "instant" });
@@ -1554,6 +1638,7 @@ async function renderSeen() {
 
 async function renderPerformance() {
   renderSeen();
+  renderModelCard();
   const cm = el("currentModelBox");
   if (cm) {
     try {
@@ -1617,7 +1702,7 @@ async function renderPerformance() {
   }
 }
 
-async function renderModel() {
+async function renderModelCard() {
   const box = el("modelCardBox");
   if (!modelCard) {
     box.innerHTML = `<div class="note">Loading…</div>`;
@@ -1629,6 +1714,10 @@ async function renderModel() {
     }
   }
   box.innerHTML = modelCardHtml(modelCard, MODEL_CHOICE);
+}
+
+/** Model page: retraining and fine-tuning history (the model card is on Performance). */
+function renderModel() {
   renderRetrain();
 }
 
@@ -1908,10 +1997,18 @@ Promise.all([chatLogPromise, ollamaCheck]).then(([chatLog, hasOllama]) => initAs
   logEl: el("chatLog"), formEl: el("chatForm"), inputEl: el("chatInput"),
   suggestEl: el("chatSuggest"), clearBtn: el("chatClear"), noteEl: el("chatNote"),
   rewriteFn: hasOllama ? ollamaRewrite : null,
+  // Free questions: the local server asks Ollama with NEXA's own records (/api/assistant).
+  llmFn: hasOllama ? async question => {
+    if (readConfig().backend !== "server") return null;
+    const res = await fetch("/api/assistant", { method: "POST", credentials: "same-origin",
+      headers: { "X-NEXA-Client": "1", "Content-Type": "application/json" }, body: JSON.stringify({ question }) });
+    return res.ok ? res.json() : null;
+  } : null,
   tierColor: TIER_COLOR, classColor: CLASS_COLOR,
   // "Open in Captures": the Captures page, filtered down to this capture.
   onOpenRecord: async (rec) => {
     for (const node of [histTier, histClassSel, histSource, histFrom, histTo]) node.value = "";
+    el("histShowEmpty").checked = true;       // the record asked for may be an empty dwell
     histQuery.value = rec.file_name || rec.case_note || "";
     await showPage("captures");           // the table exists only once Captures has drawn
     el("histTable").scrollIntoView({ behavior: "smooth", block: "center" });
@@ -1964,7 +2061,7 @@ function paintHistory() {
   const filtered = applyFilters(histRecords, {
     tier: histTier.value, cls: histClassSel.value,
     source: histSource.value, query: histQuery.value,
-    from: histFrom.value, to: histTo.value,
+    from: histFrom.value, to: histTo.value, hideEmpty: !el("histShowEmpty").checked,
   });
   const s = summarise(filtered);
   histSummary.innerHTML = histSummaryHtml(s);
@@ -1975,9 +2072,12 @@ function paintHistory() {
   paintQueue();
   paintAlerts();
   paintReportBuilder(filtered.length);
-  histStatus.textContent = filtered.length === histRecords.length
+  const emptyHidden = el("histShowEmpty").checked ? 0
+    : applyFilters(histRecords, { ...currentFilters(), hideEmpty: false }).length - filtered.length;
+  histStatus.textContent = (filtered.length === histRecords.length
     ? `${histRecords.length} stored`
-    : `${filtered.length} of ${histRecords.length} stored`;
+    : `${filtered.length} of ${histRecords.length} stored`)
+    + (emptyHidden ? ` · ${emptyHidden} empty dwell${emptyHidden === 1 ? "" : "s"} hidden` : "");
 }
 
 // "Review required": low-confidence detections nobody has reviewed yet, newest first. The
@@ -1990,6 +2090,7 @@ function paintAlerts() {
   if (alertBlock.hidden) return;
   const esc = t => String(t ?? "").replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
   const waiting = histRecords.filter(r => r.alert_level && !r.reviewed_by);
+  paintReviewCount({ alerts: waiting.length });
   alertList.innerHTML = !waiting.length
     ? `<div class="note">No alerts waiting.</div>`
     : `<div class="note">${waiting.length} waiting${waiting.length > ALERTS_SHOWN ? `, newest ${ALERTS_SHOWN} shown` : ""}.</div>`
@@ -2140,6 +2241,7 @@ for (const node of [histTier, histClassSel, histSource, histFrom, histTo]) {
   node.addEventListener("change", paintHistory);
 }
 histQuery.addEventListener("input", paintHistory);
+el("histShowEmpty").addEventListener("change", paintHistory);
 el("histRefresh").addEventListener("click", renderHistory);
 
 // ---------------------------------------------------------------------------
@@ -2150,7 +2252,7 @@ const rbMsg = el("rbMsg"), rbBanner = el("rbBanner"), rbCount = el("rbCount");
 
 function currentFilters() {
   return { tier: histTier.value, cls: histClassSel.value, source: histSource.value,
-           query: histQuery.value, from: histFrom.value, to: histTo.value };
+           query: histQuery.value, from: histFrom.value, to: histTo.value, hideEmpty: !el("histShowEmpty").checked };
 }
 
 /** "tier Hostile · from 2026-09-25" -- written into the report, so a reader

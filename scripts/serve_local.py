@@ -403,6 +403,54 @@ class Handler(SimpleHTTPRequestHandler):
             rec["audio_url"] = f"/api/pipeline/{rec['pipeline_run']}/{audio}"
         return self._send_json(rec)
 
+    def _simulate(self, query):
+        """The simulated receiver's "Random mix" case: a fresh scene of the current signal
+        groups (radar, spread spectrum, digital comms, jammers, pulses -- src/detect/scenes.py,
+        the generator the detector is trained on), several emitters overlapping in time and
+        frequency. -> {fs, iq: base64 float32 I/Q interleaved, truth: [{className, startS, endS,
+        fLoHz, fHiHz}], classes}. Generated here, never stored."""
+        import base64
+        import numpy as np
+        from src.detect import scenes
+        q = lambda k, d: (query.get(k) or [d])[0]
+        seed = int(q("seed", "0")) or None
+        dur = min(max(float(q("duration_s", "0.05")), 0.005), 0.2)
+        snr = q("snr_db", "")
+        rng = np.random.default_rng(seed)
+        n_scenes = max(1, round(dur * scenes.FS / scenes.SCENE_SAMPLES))
+        parts, truth = [], []
+        for k in range(n_scenes):
+            iq, _, _, meta = scenes.make_scene(
+                rng, n_emitters=int(rng.integers(1, 4)),
+                snr_db=float(snr) if snr not in ("", "random") else float(rng.uniform(5, 20)))
+            off = k * scenes.SCENE_SAMPLES
+            for i, cls in enumerate(meta["cls"]):
+                if meta["ignore"][i]:
+                    continue                                   # too faint to see: not a fair "truth"
+                truth.append({"className": cls, "startS": (off + meta["t_start"][i]) / scenes.FS,
+                              "endS": (off + meta["t_end"][i]) / scenes.FS,
+                              "fLoHz": float(meta["f_lo"][i]), "fHiHz": float(meta["f_hi"][i])})
+            parts.append(iq)
+        iq = np.concatenate(parts).astype(np.complex64)
+        inter = np.empty(iq.size * 2, dtype=np.float32)
+        inter[0::2], inter[1::2] = iq.real, iq.imag
+        return self._send_json({"fs": scenes.FS, "iq": base64.b64encode(inter.tobytes()).decode("ascii"),
+                                "truth": truth, "classes": sorted({t["className"] for t in truth})})
+
+    def _assistant(self):
+        """The Assistant page's free questions: the local AI answers from NEXA's own
+        records only (src/intel/assistant.py). Nothing leaves this machine."""
+        from src.intel import assistant
+        body = self._read_json()
+        ctx = assistant.build_context(self.db, self.intel_dir, WEB / "data")
+        try:
+            out = assistant.answer(body.get("question"), ctx)
+        except ValueError as e:
+            return self._error(HTTPStatus.BAD_REQUEST, str(e))
+        except (OSError, TimeoutError) as e:
+            return self._error(HTTPStatus.SERVICE_UNAVAILABLE, f"the local AI (Ollama) did not answer: {e}")
+        return self._send_json(out)
+
     def _intel_translate(self, rid):
         """Translate a decoded recording into English with the local AI (Ollama, this
         machine) and keep the translation in the recording's file, next to the original."""
@@ -702,6 +750,10 @@ class Handler(SimpleHTTPRequestHandler):
             return self._intel(parts[1:])
         if head == "intel" and method == "POST" and len(parts) == 3 and parts[2] == "translate":
             return self._intel_translate(parts[1])
+        if head == "assistant" and method == "POST" and len(parts) == 1:
+            return self._assistant()
+        if head == "simulate" and method == "GET" and len(parts) == 1:
+            return self._simulate(query)
         if head == "pipeline":
             return self._pipeline(method, parts[1:], query)
         if head == "sdr":            # live SDRconnect receiver -- scripts/sdr_hub.py (feat/live-sdr-console)

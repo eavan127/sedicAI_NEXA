@@ -4,11 +4,11 @@ _CIVILIAN = "BPSK, QPSK, 16QAM and 64QAM are ordinary civilian digital modulatio
 
 FAQ = {
     "FHSS": "FHSS (frequency-hopping spread spectrum) is a signal that jumps between "
-            "channels many times a second. It is one of the three judged classes.",
+            "channels many times a second. It is one of the 60 signal types NEXA names.",
     "LFM_RADAR": "LFM_RADAR is a radar pulse whose frequency slides up during the pulse "
-                 "(a chirp). It is one of the three judged classes.",
+                 "(a chirp). It is one of the 60 signal types NEXA names.",
     "JAMMING": "JAMMING is deliberate interference (barrage noise, a tone or a sweep) meant "
-               "to drown out other signals. It is one of the three judged classes.",
+               "to drown out other signals. It is one of the 60 signal types NEXA names.",
     "NOISE_FLOOR": "NOISE_FLOOR means no signal was found, only background noise. At -10 dB "
                    "a weak signal is indistinguishable from noise, so this class is limited there.",
     "BPSK": _CIVILIAN,

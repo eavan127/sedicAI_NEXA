@@ -27,9 +27,9 @@ const EXTRA_TERMS = [["snr", "SNR"], ["window", "WINDOW"], ["threshold", "THRESH
 
 const CIVILIAN = "BPSK, QPSK, 16QAM and 64QAM are ordinary civilian digital modulations.";
 export const FAQ = {
-  FHSS: "FHSS (frequency-hopping spread spectrum) is a signal that jumps between channels many times a second. It is one of the three judged classes.",
-  LFM_RADAR: "LFM_RADAR is a radar pulse whose frequency slides up during the pulse (a chirp). It is one of the three judged classes.",
-  JAMMING: "JAMMING is deliberate interference (barrage noise, a tone or a sweep) meant to drown out other signals. It is one of the three judged classes.",
+  FHSS: "FHSS (frequency-hopping spread spectrum) is a signal that jumps between channels many times a second. It is one of the 60 signal types NEXA names.",
+  LFM_RADAR: "LFM_RADAR is a radar pulse whose frequency slides up during the pulse (a chirp). It is one of the 60 signal types NEXA names.",
+  JAMMING: "JAMMING is deliberate interference (barrage noise, a tone or a sweep) meant to drown out other signals. It is one of the 60 signal types NEXA names.",
   NOISE_FLOOR: "NOISE_FLOOR means no signal was found, only background noise. At -10 dB a weak signal is indistinguishable from noise, so this class is limited there.",
   BPSK: CIVILIAN, QPSK: CIVILIAN, "16QAM": CIVILIAN, "64QAM": CIVILIAN,
   SNR: "SNR (signal-to-noise ratio) is how far a signal sits above the background noise, in dB. Higher is easier to detect; at -10 dB the signal is below the noise.",
@@ -45,7 +45,8 @@ export const FAQ = {
 };
 
 export const HELP = "You can ask: 'show my last upload', 'list uploads', 'how many uploads', 'which uploads had jamming', "
-  + "'summary of upload 2', 'compare upload 1 and 3', 'what did I ask before', or 'what is FHSS'.";
+  + "'summary of upload 2', 'compare upload 1 and 3', 'what did I ask before', or 'what is FHSS'. With the local AI running, "
+  + "you can also ask anything about the intercepts, alerts, review queue or the model's accuracy.";
 
 export const SUGGESTIONS = [
   "Show my last upload", "List uploads", "Which uploads had jamming?",
@@ -280,16 +281,26 @@ export async function openChatLog() {
  * transcript. A null return (not running, timed out, or no confident match)
  * falls straight through to today's plain keyword matching on the original
  * text, unchanged. */
-export async function ask(chatLog, listRecords, question, rewriteFn = null) {
-  return (await askRich(chatLog, listRecords, question, rewriteFn)).text;
+export async function ask(chatLog, listRecords, question, rewriteFn = null, llmFn = null) {
+  return (await askRich(chatLog, listRecords, question, rewriteFn, llmFn)).text;
 }
 
 /** ask(), returning explain()'s whole result (plus the records it read), so
  * the page can draw cards and follow-ups. Logs exactly what ask() logs. */
-export async function askRich(chatLog, listRecords, question, rewriteFn = null) {
+export async function askRich(chatLog, listRecords, question, rewriteFn = null, llmFn = null) {
   const [{ records }, chat] = await Promise.all([listRecords(), chatLog.listChat()]);
   const matchOn = (rewriteFn && await rewriteFn(question).catch(() => null)) || question;
-  const res = explain(matchOn, records, chat);
+  let res = explain(matchOn, records, chat);
+  // A question the keyword matcher does not know: the local AI answers it from NEXA's
+  // own records (server: /api/assistant). Without it, the plain "did not understand" stays.
+  if (res.kind === "unknown" && llmFn) {
+    const ai = await llmFn(question).catch(() => null);
+    if (ai?.answer) {
+      res = { kind: "llm", text: ai.answer + (ai.page ? `
+(See: ${ai.page})` : ""), lead: null, rows: [], cls: null,
+              followUps: suggestionsFor(records).slice(0, 3) };
+    }
+  }
   await chatLog.addChat({ q: question, a: res.text, t: Date.now() });
   return { ...res, records };
 }
@@ -316,7 +327,7 @@ function h(tag, attrs = {}, ...kids) {
 }
 
 export async function initAssistant({ chatLog, listRecords, logEl, formEl, inputEl, suggestEl, clearBtn, noteEl,
-                                      rewriteFn = null, tierColor = {}, classColor = {}, onOpenRecord = null }) {
+                                      rewriteFn = null, llmFn = null, tierColor = {}, classColor = {}, onOpenRecord = null }) {
   let comparePick = null;          // upload number picked first for "Compare"
   let busy = false;
   const asked = [];                // this session's questions, for the ↑ / ↓ keys
@@ -429,6 +440,7 @@ export async function initAssistant({ chatLog, listRecords, logEl, formEl, input
       div.append(h("div", {}, res.lead),
                  h("div", { class: "chat-follow" }, res.reask.map(q => chip(q, () => send(q)))));
     } else div.append(res.text);
+    if (res.kind === "llm") div.append(h("div", { class: "chat-meta" }, "Answered by the local AI from NEXA's records on this laptop."));
     logEl.appendChild(div);
     // Follow-ups belong to the newest answer only.
     for (const old of logEl.querySelectorAll(".chat-next")) old.remove();
@@ -440,7 +452,9 @@ export async function initAssistant({ chatLog, listRecords, logEl, formEl, input
   }
 
   function renderSuggestions(records) {
-    suggestEl.replaceChildren(...suggestionsFor(records).map(s => chip(s, () => send(s), "")));
+    // With the local AI, also offer questions only it can answer (intercepts, review queue, accuracy).
+    const ai = llmFn ? ["What did we intercept most recently?", "What is waiting for review?", "How accurate is the model?"] : [];
+    suggestEl.replaceChildren(...[...suggestionsFor(records), ...ai].map(s => chip(s, () => send(s), "")));
   }
 
   async function reload() {
@@ -448,8 +462,9 @@ export async function initAssistant({ chatLog, listRecords, logEl, formEl, input
     comparePick = null;
     const chat = await chatLog.listChat();
     if (!chat.length) {
-      add("Hello. I can look up your saved uploads and explain the terms. Click a suggestion below, "
-        + "or type a question. In my answers, click a class to have it explained, or Compare on two uploads.", "bot");
+      add("Hello. I can look up your captures and intercepts, explain the terms, and answer questions about "
+        + "the alerts, the review queue and the model's accuracy, from NEXA's own records on this laptop. "
+        + "Click a suggestion below, or type a question.", "bot");
     }
     for (const c of chat) { add(c.q, "user"); add(c.a, "bot"); }
     try { renderSuggestions((await listRecords()).records); } catch { renderSuggestions([]); }
@@ -465,7 +480,7 @@ export async function initAssistant({ chatLog, listRecords, logEl, formEl, input
     typing.append(h("span"), h("span"), h("span"));
     typing.setAttribute("aria-label", "Assistant is thinking");
     try {
-      const res = await askRich(chatLog, listRecords, text, rewriteFn);
+      const res = await askRich(chatLog, listRecords, text, rewriteFn, llmFn);
       typing.remove();
       addBot(res);
       renderSuggestions(res.records);
@@ -503,7 +518,9 @@ export async function initAssistant({ chatLog, listRecords, logEl, formEl, input
     const storageNote = chatLog.persistent
       ? "Your questions are saved in this browser and work offline."
       : "Chat storage is unavailable here, so questions are kept only until the page is closed.";
-    const ollamaNote = rewriteFn
+    const ollamaNote = llmFn
+      ? " Free questions are answered by the local AI (Ollama) from NEXA's own records only; it says so when the records do not hold the answer."
+      : rewriteFn
       ? " A local Ollama model is helping understand differently-worded questions; it never invents facts, only picks a known question type."
       : " (Ollama not detected -- exact-phrase matching only. See the Assistant page's suggested questions.)";
     noteEl.textContent = storageNote + " Uploads are read from wherever the Captures page stores them."
