@@ -21,8 +21,9 @@ Each step lists what to click, what to scroll to, what the audience sees, and on
 6. In the dashboard header, set **Acting as → Operator**.
 7. Close Chrome tabs and other heavy programs.
 
-Fallback if SDRconnect misbehaves: on **SDR Receiver**, press **Replay a file** and pick the same `.wav`.
-You get the same result (waterfall, decode, Open analysis) without SDRconnect.
+Fallback if SDRconnect misbehaves: on **SDR Receiver**, press **Replay a file** and pick the same IQ `.wav`
+(audio-only WAVs are refused: only IQ recordings have a waterfall). The waterfall, transmitters and
+**Open analysis** appear in the spectrum spot of the page, without SDRconnect. Synthesize Scenario switches back to the simulator.
 
 ---
 
@@ -34,7 +35,7 @@ You get the same result (waterfall, decode, Open analysis) without SDRconnect.
 |---|---|
 | In SDRconnect, press **play** on the Morse file | SDRconnect's waterfall. The red tuning line jumps onto the signal by itself (auto-tune) |
 | Switch to the dashboard. Menu: **SDR Receiver** | The **Latest intercept** card appears when the file ends: type *Morse (CW)*, frequency, the decoded text |
-| Scroll down to **Analyse a recording (Replay a file)** → **Recent runs** → click the newest run | **The waterfall with every transmitter boxed and named, with its frequency**, and the table *Every transmitter* (answer, confidence, why) |
+| Menu: **History → Captures**, scroll to **Decoded recordings** → click the newest row (or, instead of SDRconnect, press **Replay a file** on SDR Receiver and pick the same IQ `.wav`: the result appears right there in the waterfall spot) | **The waterfall with every transmitter boxed and named, with its frequency**, and the table *Every transmitter* (answer, confidence, why) |
 | Under the waterfall, **Decoded signals** → **Open analysis** | The **Analysis** page |
 | On the Analysis page, scroll from top to bottom | **In short** → **1. Listen** (click a dark bar: the beeps play from there) → **2. Original decoded text** + *In plain words* → **4. What it means** → **5. Facts** (speed in words per minute, call signs, short codes) |
 
@@ -57,13 +58,13 @@ Press **← Back to SDR Receiver**.
 > Say: "Nothing leaves this laptop. Speech to text and the AI both run offline. The AI must quote the
 > exact words it relied on, so an analyst can check it."
 
-For the NEXA waterfall with frequencies of this file: **SDR Receiver** → **Recent runs** → newest run.
+For the NEXA waterfall with frequencies of this file: **History → Captures** → **Decoded recordings** → newest row.
 
 ### A3. KiwiSDR, a real short-wave receiver online (about 40 s)
 
 | Do | Audience sees |
 |---|---|
-| Menu: **KiwiSDR**. Type a frequency (e.g. `15295`), press **Start listening** | Clips appear one by one: kind, frequency in kHz, audio player, then the text and AI reading |
+| Menu: **KiwiSDR**. The receiver is already `dx6ran.ddns.net:8073` and clips are 5 s. Type a frequency (e.g. `15295`), press **Start listening** | A new clip every 5 s: kind, frequency in kHz, audio player, then the text and AI reading |
 | On a clip with text, press **Open analysis** | The same **Analysis** page: playback, original text, English, what it means, facts |
 
 > Say: "Same pipeline, now on a real receiver in another country. Live, it is whatever is on air,
@@ -103,7 +104,7 @@ Press **Stop** on the KiwiSDR page before moving on (it frees the CPU).
 
 | Do | Audience sees |
 |---|---|
-| Menu: **History → Captures** | Every analysed signal, with its verdict and classes. Empty dwells are hidden; tick **Show empty dwells** to see them |
+| Menu: **History → Captures** | Two sections: **Signal captures** (radar, hopping, jammers, comms, with verdict and classes; empty dwells hidden unless **Show empty dwells** is ticked) and **Decoded recordings** (each replayed or live recording: waterfall, transmitters, Open analysis) |
 | Menu: **History → Audit Trail** → **Verify integrity** | Every action by every person, chained so that no entry can be changed without it showing |
 | Menu: **System → Performance**, scroll to the bottom | Measured accuracy by family, then the **Model card** (what the model is, its data, its limits) |
 | Menu: **Reports** → leave the sections ticked, **PDF** → **Build report** | A formal PDF report of the captures, corrections and audit trail |

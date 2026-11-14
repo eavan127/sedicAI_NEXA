@@ -6,7 +6,7 @@
 // No command line needed. The KiwiSDR page (main.js).
 
 const HDR = { "X-NEXA-Client": "1", "Content-Type": "application/json" };
-const DEFAULT_RX = "21439.proxy2.kiwisdr.com:8073";      // 9M2AMH, Kuala Lumpur (GPS-timed: TDoA works)
+const DEFAULT_RX = "dx6ran.ddns.net:8073";              // DU6/PE1NSQ, Negros, Philippines (team default)
 const esc = t => String(t ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const KIND = { AM: "AM voice", USB: "USB voice", LSB: "LSB voice", NBFM: "FM voice", CW: "Morse", RTTY: "RTTY",
   PSK31: "PSK31", CARRIER: "carrier only", UNKNOWN: "unclear" };
@@ -56,7 +56,7 @@ export function renderKiwiLive(root, { server }) {
           <select id="kwLlmModel"><option value="llama3.2:3b" selected>llama3.2:3b (better, ~2.5 GB)</option>
             <option value="qwen2.5:1.5b">qwen2.5:1.5b (lighter, ~1 GB)</option></select></label>
         <label class="field">Clip
-          <select id="kwClip"><option value="30" selected>30 s</option><option value="60">60 s</option></select></label>
+          <select id="kwClip"><option value="3">3 s</option><option value="5" selected>5 s</option><option value="10">10 s</option><option value="30">30 s</option><option value="60">60 s</option></select></label>
         <label class="field" title="Auto measures each signal. If you know what it is (a short-wave broadcast is AM,
           amateur voice is USB or LSB), choose it: the audio is then demodulated that way.">Demodulate as
           <select id="kwDemod"><option value="auto" selected>Auto (measured)</option>
@@ -248,8 +248,8 @@ function paint(st) {
     : st.state === "connecting" ? `Connecting to ${esc(kiwi)}…`
     : st.state === "error" ? `<span style="color:#9B2C2C;">Stopped: ${esc(st.error)}</span>`
     : `<b>Listening</b> to ${esc(kiwi)}${st.on_air
-        ? ` · signal on air, recording clip ${Math.round(st.recording_s)} / ${Math.round(st.clip_s || 30)} s
-           <progress max="1" value="${Math.min(1, st.recording_s / (st.clip_s || 30))}" style="width:110px;vertical-align:middle;"></progress>`
+        ? ` · signal on air, recording clip ${Math.round(st.recording_s)} / ${Math.round(st.clip_s || 5)} s
+           <progress max="1" value="${Math.min(1, st.recording_s / (st.clip_s || 5))}" style="width:110px;vertical-align:middle;"></progress>`
         : " · quiet"}`
       + (st.analysing ? ` · ${st.analysing} clip${st.analysing > 1 ? "s" : ""} being decoded` : "")
       + (st.skipped ? ` · ${st.skipped} not transcribed while busy (audio kept)` : "") + tdoa;
@@ -280,7 +280,7 @@ function paint(st) {
   });
   if (!rows.length) {
     list.insertAdjacentHTML("beforeend", `<div class="note kwEmpty">${st.state === "streaming"
-      ? `Each clip appears here as soon as it is recorded (every ${Math.round(st.clip_s || 30)} s, or when a transmission
+      ? `Each clip appears here as soon as it is recorded (every ${Math.round(st.clip_s || 5)} s, or when a transmission
          ends): audio first, then what was said.`
       : "No clips yet. Choose a frequency and press Start listening."}</div>`);
   }

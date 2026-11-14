@@ -450,7 +450,7 @@ class SdrHub:
 LLM_MODELS = ("llama3.2:3b", "qwen2.5:1.5b")   # local Ollama models: better / lighter (~2.5 GB / ~1 GB RAM)
 KIWI_FS = 12000.0                          # a KiwiSDR IQ channel (about +/-6 kHz)
 KIWIRECORDER = find_kiwirecorder()           # NEXA_KIWIRECORDER, else ~/tools/kiwiclient, D:/tools/kiwiclient, ...
-KIWI_DEFAULT = ("21439.proxy2.kiwisdr.com", 8073)   # 9M2AMH, Kuala Lumpur (GPS-timed, used for TDoA)
+KIWI_DEFAULT = ("dx6ran.ddns.net", 8073)   # DU6/PE1NSQ, Negros, Philippines (team default receiver)
 
 
 def kiwi_unreachable(host, port, timeout=8):
@@ -514,13 +514,13 @@ class KiwiHub(SdrHub):
     (or when a transmission ends) the IQ is decoded (Morse / RTTY / PSK31 / Whisper)
     and read by the local AI, then saved like any live run."""
 
-    def __init__(self, jobs_dir=None, intel_dir=None, clip_s=30.0):
+    def __init__(self, jobs_dir=None, intel_dir=None, clip_s=5.0):
         # keep_runs: every clip's audio stays replayable for about 2 h of 30 s clips (~2 MB each)
         super().__init__(jobs_dir=jobs_dir, intel_dir=intel_dir, decode=True, quiet_s=2.0, max_s=clip_s, keep_runs=240)
         self.tdoa = TdoaRunner()                     # "Locate transmitter": runs beside the listening stream
 
     def connect(self, host=KIWI_DEFAULT[0], port=KIWI_DEFAULT[1], freq_khz=None, whisper_model="small",
-                language=None, use_llm=True, clip_s=30.0, llm_model=None, demod=None):
+                language=None, use_llm=True, clip_s=5.0, llm_model=None, demod=None):
         host = str(host or KIWI_DEFAULT[0]).strip()
         if not HOST_RE.fullmatch(host):
             raise ValueError("host must be a KiwiSDR address, e.g. 21439.proxy2.kiwisdr.com")
@@ -541,7 +541,7 @@ class KiwiHub(SdrHub):
         demod = None if demod in (None, "", "auto") else str(demod).upper()   # "Demodulate as" (None: measured)
         if demod is not None and demod not in bridge.FORCE_KINDS:
             raise ValueError(f"demod must be auto or one of {list(bridge.FORCE_KINDS)}")
-        self.max_s = min(max(float(clip_s or 30), 10.0), 120.0)
+        self.max_s = min(max(float(clip_s or 5), 3.0), 120.0)   # short clips (3-5 s) answer sooner
         opts = {"decode": True, "whisper_model": whisper_model, "language": language,
                 "use_whisper": True, "use_llm": bool(use_llm), "freq_khz": khz,
                 "llm_model": llm_model, "force_kind": demod}

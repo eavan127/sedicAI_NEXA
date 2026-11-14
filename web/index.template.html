@@ -240,7 +240,7 @@
     tbody tr { break-inside: avoid; page-break-inside: avoid; }
 
     /* Other pages are not part of this report. */
-    #pipelineFileRoot, #latestIntercept, main > section:not(#page-replay) { display: none !important; }
+    #fileRunRoot, #latestIntercept, main > section:not(#page-replay) { display: none !important; }
   }
   /* History page. Bars are divs, not a canvas: they reflow with the panel and
      survive the print stylesheet that the browser-print PDF path uses. */
@@ -297,7 +297,7 @@
   .rx-mark.wait { background: #D49A1F; }
   .rx-fallback { margin: 10px 0 0; padding: 10px 12px; border-radius: 8px; background: #FDF1E3; border: 1px solid #D49A1F; color: #6B4A0B; }
   .more-options { margin-top: 14px; }
-  .more-options > summary { cursor: pointer; font-weight: 600; padding: 6px 0; }
+  .more-options > summary { cursor: pointer; font-weight: 600; font-size: 14px; padding: 6px 0; font-family: var(--font); }
   /* Performance: "What NEXA has seen" (web/seen.js) */
   .seen-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 12px; }
   .seen-wide { grid-column: 1 / -1; }
@@ -386,7 +386,11 @@
   dialog#corrDialog { border: 1px solid var(--grid); border-radius: 10px; padding: 18px 20px; width: min(760px, calc(100vw - 32px)); background: var(--panel); color: var(--text); font-family: var(--font); }
   dialog#corrDialog::backdrop { background: rgba(14, 22, 34, 0.45); }
   .triage { display: grid; gap: 6px; margin: 0 0 12px; }
-  .triage .tri { border-radius: 8px; padding: 8px 12px; font-size: 15px; border: 2px solid; }
+  .triage .tri { border-radius: 6px; padding: 6px 12px; font-size: 13.5px; line-height: 1.45; font-family: var(--font); border: 1px solid; border-left-width: 4px; }
+  .triage .tri strong { font-size: 12.5px; letter-spacing: 0.04em; margin-right: 4px; }
+  .progress { height: 6px; border-radius: 3px; background: var(--grid); overflow: hidden; margin: 2px 0 10px; }
+  .progress[hidden] { display: none; }
+  .progress > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s ease; }
   .triage .tri.alert { border-color: #B3261E; background: rgba(179, 38, 30, 0.10); }
   .triage .tri.possible { border-color: #C66A1E; background: rgba(198, 106, 30, 0.10); }
   .triage .tri.review { border-color: #8A6D00; background: rgba(214, 170, 0, 0.12); }
@@ -673,17 +677,17 @@
     .filters input[type="checkbox"], #pipeFollow { width: 18px; height: 18px; min-height: 0; padding: 0; margin: 0; flex: none; accent-color: var(--brand); }
     .filters input[type="file"] { padding: 7px 10px; }
     /* Signal Pipeline's form */
-    #pipelineFileRoot .filters { gap: 16px 26px; margin-bottom: 0; }
-    #pipelineFileRoot .note + .filters { margin-top: 24px !important; }
-    #pipelineFileRoot .filters + .filters { margin-top: 22px; }
-    #pipelineFileRoot table.pipe-tracks td, #pipelineFileRoot table.pipe-tracks th { padding: 10px 16px 10px 10px; vertical-align: top; }
-    #pipelineFileRoot table.pipe-tracks { min-width: 1000px; }   /* a narrow window scrolls sideways instead of breaking words */
-    #pipelineFileRoot table.pipe-tracks td { overflow-wrap: break-word; }
-    #pipelineFileRoot table.pipe-tracks td:nth-child(2) { min-width: 90px; }
-    #pipelineFileRoot table.pipe-tracks td:nth-child(3) { min-width: 150px; }
-    #pipelineFileRoot table.pipe-tracks td:nth-child(4) { min-width: 170px; }
-    #pipelineFileRoot table.pipe-tracks td:nth-child(5) { min-width: 90px; }
-    #pipelineFileRoot table.pipe-tracks td:nth-child(6) { min-width: 240px; }
+    :is(#fileRunRoot, #runHistoryRoot) .filters { gap: 16px 26px; margin-bottom: 0; }
+    :is(#fileRunRoot, #runHistoryRoot) .note + .filters { margin-top: 24px !important; }
+    :is(#fileRunRoot, #runHistoryRoot) .filters + .filters { margin-top: 22px; }
+    :is(#fileRunRoot, #runHistoryRoot) table.pipe-tracks td, :is(#fileRunRoot, #runHistoryRoot) table.pipe-tracks th { padding: 10px 16px 10px 10px; vertical-align: top; }
+    :is(#fileRunRoot, #runHistoryRoot) table.pipe-tracks { min-width: 1000px; }   /* a narrow window scrolls sideways instead of breaking words */
+    :is(#fileRunRoot, #runHistoryRoot) table.pipe-tracks td { overflow-wrap: break-word; }
+    :is(#fileRunRoot, #runHistoryRoot) table.pipe-tracks td:nth-child(2) { min-width: 90px; }
+    :is(#fileRunRoot, #runHistoryRoot) table.pipe-tracks td:nth-child(3) { min-width: 150px; }
+    :is(#fileRunRoot, #runHistoryRoot) table.pipe-tracks td:nth-child(4) { min-width: 170px; }
+    :is(#fileRunRoot, #runHistoryRoot) table.pipe-tracks td:nth-child(5) { min-width: 90px; }
+    :is(#fileRunRoot, #runHistoryRoot) table.pipe-tracks td:nth-child(6) { min-width: 240px; }
     #pipeRun, #pipeDemo {
       min-height: 46px; padding: 10px 22px; font-family: var(--font); font-size: 16px; font-weight: 600;
       color: var(--text); background: var(--panel); border: 1px solid var(--grid); border-radius: 6px; cursor: pointer;
@@ -691,7 +695,7 @@
     #pipeRun:hover, #pipeDemo:hover { background: var(--brand-tint); }
     #pipeMsg { margin: 16px 0 0; }
     #pipeMsg:empty { display: none; }
-    #pipelineFileRoot label:has(#pipeFollow) { display: inline-flex; align-items: center; gap: 10px; }
+    :is(#fileRunRoot, #runHistoryRoot) label:has(#pipeFollow) { display: inline-flex; align-items: center; gap: 10px; }
     button.mini { padding: 7px 13px; font-size: 14.5px; border-radius: 6px; }
 
     table { font-size: 15.5px; }
@@ -709,8 +713,8 @@
     #status { font-size: 16px; margin: 0; min-height: 24px; }
     #headline { font-size: 17px; line-height: 1.75; margin: 0 0 22px; }
     .panels { gap: 24px; margin-bottom: 28px; }
-    .triage { gap: 12px; margin-bottom: 22px; }
-    .triage .tri { padding: 13px 17px; font-size: 16px; }
+    .triage { gap: 8px; margin-bottom: 18px; }
+    .triage .tri { padding: 8px 14px; font-size: 14px; }
     .review-banner { padding: 16px 20px; margin-bottom: 26px; }
     .sugg { gap: 14px; padding: 13px 0; }
 
@@ -914,8 +918,8 @@
             <div class="field" style="flex:2;min-width:200px;">
               <label for="hopSel">Window hop</label>
               <select id="hopSel">
-                <option value="512">no overlap, 512</option>
-                <option value="256" selected>50% overlap, 256</option>
+                <option value="512" selected>no overlap, 512 (fastest)</option>
+                <option value="256">50% overlap, 256</option>
                 <option value="128">75% overlap, 128</option>
                 <option value="64">87.5% overlap, 64</option>
               </select>
@@ -952,12 +956,17 @@
         </div>
         </details>
         <div id="status" role="status">Loading the AI model (up to a minute the first time). These buttons switch on when it is ready.</div>
+        <div class="progress" id="anaProg" hidden aria-hidden="true"><i></i></div>
       </div>
 
       <!-- The newest transmission the antenna decoded: what it was and what it said
            (main.js: paintLatestIntercept, from /api/intel). -->
       <div class="block intercept-card" id="latestIntercept" hidden aria-live="polite"></div>
 
+      <!-- Replay a file (web/pipeline.js replayIqFile): an IQ recording's waterfall with every
+           transmitter boxed and its frequency, decoded signals and the transmitter table. Shown
+           in place of the live console below, so there is one waterfall on the page. -->
+      <div id="fileRunRoot" hidden></div>
       <div id="sigBody">
       <div id="headline"></div>
       <div class="triage" id="triageBanner" role="alert" hidden></div>
@@ -1039,9 +1048,6 @@
 
       </div>
 
-      <!-- Replay a file: the whole chain on one IQ recording (web/pipeline.js, /api/pipeline):
-           waterfall with every transmitter boxed and named, then Open analysis per decoded signal. -->
-      <div id="pipelineFileRoot"></div>
     </section>
 
     <!-- Live KiwiSDR listening (web/kiwi_live.js, /api/kiwi). -->
@@ -1132,8 +1138,14 @@
       </div>
 
       <div class="block">
-        <div class="block-label">Stored analyses</div>
+        <div class="block-label">Signal captures <span class="note" style="font-weight:400;">(radar, hopping, jammers, comms: the simulated receiver, SDRconnect dwells, file scans)</span></div>
         <div class="table-wrap" id="histTable"></div>
+      </div>
+
+      <div class="block">
+        <div class="block-label">Decoded recordings <span class="note" style="font-weight:400;">(replayed IQ files and live runs: waterfall, every transmitter, voice and Morse)</span></div>
+        <div class="note">Click a row to open its waterfall and transmitter table; <b>Open analysis</b> on a decoded signal gives playback, text, English and the AI reading.</div>
+        <div id="runHistoryRoot"></div>
       </div>
 
       <div id="histBackendNote" hidden></div>
