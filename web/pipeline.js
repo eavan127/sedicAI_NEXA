@@ -1,4 +1,4 @@
-// SDR Receiver page, "Analyse a recording" (Replay a file): the whole wideband chain on a recording, run by the
+// SDR Receiver page, Replay a file (and History → Captures, Decoded recordings): the whole wideband chain on a recording, run by the
 // local server (scripts/serve_local.py /api/pipeline -> scripts/run_pipeline.py):
 //   IQ file -> YOLO boxes -> 60-class classifier -> tracker (vote) -> resolve
 //   -> for voice / Morse tracks: zoom, analog kind, audio, Morse / Whisper, AI reading.
@@ -22,155 +22,89 @@ function chip(text, color) {
   return `<span class="chip" style="background:${color}1f;color:${color};">${esc(text)}</span>`;
 }
 
-/** Duration (s) of an IQ WAV from its header, or null (raw files have none). */
-async function wavSeconds(file) {
-  if (!file || !/\.wav$/i.test(file.name)) return null;
-  const v = new DataView(await file.slice(0, 4096).arrayBuffer());
-  const tag = i => String.fromCharCode(v.getUint8(i), v.getUint8(i + 1), v.getUint8(i + 2), v.getUint8(i + 3));
-  if (v.byteLength < 44 || tag(0) !== "RIFF" || tag(8) !== "WAVE") return null;
-  let pos = 12, rate = 0, align = 0;
-  while (pos + 8 <= v.byteLength) {
-    const id = tag(pos), size = v.getUint32(pos + 4, true);
-    if (id === "fmt ") { rate = v.getUint32(pos + 12, true); align = v.getUint16(pos + 20, true); }
-    if (id === "data") return rate && align ? Math.min(size, file.size - pos - 8) / (rate * align) : null;
-    pos += 8 + size + (size & 1);
-  }
-  return null;
-}
-
 /** Seconds to scan: the recording's length, up to SCAN_DEFAULT_MAX_S. The scan costs about
  * 20 s of computing per second on an 8 GB laptop (28 s took 9 min and crashed next to
  * Whisper); the decode, name and AI reading cover the whole file anyway. A longer scan
  * can still be typed in (up to 120 s). */
 const SCAN_DEFAULT_MAX_S = 10;
-async function fitSeconds(root, file) {
-  const sec = await wavSeconds(file).catch(() => null);
-  const box = root?.querySelector("#pipeSec");
-  if (!box || !sec) return;
-  box.value = String(Math.min(SCAN_DEFAULT_MAX_S, Math.max(0.25, Math.ceil(sec * 4) / 4)));
-  const note = root.querySelector("#pipeSecNote");
-  if (note) note.textContent = sec > SCAN_DEFAULT_MAX_S
-    ? `file is ${sec.toFixed(1)} s: the first ${SCAN_DEFAULT_MAX_S} s are scanned, the decode covers all ${sec.toFixed(1)} s`
-    : `whole file (${sec.toFixed(1)} s)`;
+
+/** What a WAV file holds, from its header: {channels, rate, seconds}, or null when it is
+ * not a WAV. An IQ recording has 2 channels (I and Q); an audio recording has 1. */
+export async function wavInfo(file) {
+  if (!file || !/\.wav$/i.test(file.name)) return null;
+  const v = new DataView(await file.slice(0, 4096).arrayBuffer());
+  const tag = i => String.fromCharCode(v.getUint8(i), v.getUint8(i + 1), v.getUint8(i + 2), v.getUint8(i + 3));
+  if (v.byteLength < 44 || tag(0) !== "RIFF" || tag(8) !== "WAVE") return null;
+  let pos = 12, rate = 0, align = 0, channels = 0;
+  while (pos + 8 <= v.byteLength) {
+    const id = tag(pos), size = v.getUint32(pos + 4, true);
+    if (id === "fmt ") { channels = v.getUint16(pos + 10, true); rate = v.getUint32(pos + 12, true); align = v.getUint16(pos + 20, true); }
+    if (id === "data") {
+      return { channels, rate, seconds: rate && align ? Math.min(size, file.size - pos - 8) / (rate * align) : null };
+    }
+    pos += 8 + size + (size & 1);
+  }
+  return channels ? { channels, rate, seconds: null } : null;
 }
 
-/** Analyse a file with the full pipeline (detect, name, decode Morse / speech, AI
- * reading, waterfall, Comms Intel), as if it had been chosen in this section's file
- * box. Used by the receiver's "Replay a file" for IQ WAV recordings. -> false when the
- * section is not ready (no local server). */
-export function analyseFile(file) {
-  const input = state.root?.querySelector("#pipeFile");
-  if (!input || !state.start) return false;
-  const dt = new DataTransfer();
-  dt.items.add(file);
-  input.files = dt.files;
-  fitSeconds(state.root, file);
-  state.root.scrollIntoView({ behavior: "smooth", block: "start" });
-  state.start(false);
-  return true;
-}
-
-// The "Analyse a recording" box under the SDR Receiver (mode "file").
-export async function renderPipeline(root, { server, mode = "file" }) {
-  if (!server) {
-    // The page may ask before its own server check has finished: ask the server directly.
-    try { server = (await fetch("/api/health", { credentials: "same-origin" })).ok; } catch { server = false; }
+/** Replay a file (SDR Receiver): one IQ WAV through the whole chain on the local server
+ * (find each transmitter, name it, demodulate and decode voice / Morse, AI reading), drawn
+ * into `root`: progress while it runs, then the waterfall with every transmitter boxed and
+ * its frequency, the decoded signals (Open analysis) and the transmitter table.
+ * Refuses an audio WAV (1 channel): only IQ recordings carry the radio band. */
+export async function replayIqFile(file, root) {
+  root.hidden = false;
+  root.innerHTML = `<div class="block" id="pipeRunBox"><div class="note">Checking ${esc(file.name)}…</div></div>`;
+  const box = root.querySelector("#pipeRunBox");
+  const info = await wavInfo(file).catch(() => null);
+  if (!info) {
+    box.innerHTML = `<div class="run-error"><b>Not a WAV recording</b><span>Replay a file takes IQ recordings saved as WAV
+      (in SDRconnect: Recording type = IQ). ${esc(file.name)} is not one.</span></div>`;
+    return false;
   }
-  if (!server) {
-    root.innerHTML = `<div class="block"><div class="note">Recording analysis runs on this machine's local server
-      (it needs the trained models and Python). Start it with <code>python scripts/serve_local.py</code>.</div></div>`;
-    return;
+  if (info.channels !== 2) {
+    box.innerHTML = `<div class="run-error"><b>This is an audio file, not IQ</b><span>${esc(file.name)} has ${info.channels} channel${info.channels === 1 ? "" : "s"}.
+      An IQ recording has 2 (I and Q) and holds the radio band, so NEXA can draw its waterfall and find each transmitter.
+      In SDRconnect, record with Recording type = IQ.</span></div>`;
+    return false;
   }
-  let info;
+  const scan = info.seconds ? Math.min(SCAN_DEFAULT_MAX_S, Math.max(0.25, Math.ceil(info.seconds * 4) / 4)) : 2;
+  const p = new URLSearchParams({ source: "file", name: file.name, max_s: String(scan), detector: "hybrid",
+                                  listen: "1", whisper: "1", llm: "1", language: "auto" });
   try {
-    info = await (await fetch("/api/pipeline", { credentials: "same-origin" })).json();
+    const busy = ((await (await fetch("/api/pipeline", { credentials: "same-origin" })).json()).runs || [])
+      .find(r => r.status === "running" && !r.live);
+    if (busy) {
+      box.innerHTML = `<div class="note">Another recording (${esc(busy.file || busy.source)}) is still being analysed. Wait for it to finish.</div>`;
+      openRun(root, busy.id);
+      return false;
+    }
+    box.innerHTML = `<div class="note">Uploading ${esc(file.name)} (${(file.size / 1e6).toFixed(1)} MB, IQ at
+      ${(info.rate / 1e3).toFixed(0)} kS/s${info.seconds ? `, ${info.seconds.toFixed(1)} s` : ""})…</div>`;
+    const res = await fetch(`/api/pipeline?${p}`, { method: "POST", credentials: "same-origin", headers: HDR, body: file });
+    const j = await res.json();
+    if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+    openRun(root, j.id);
+    return true;
   } catch (e) {
-    root.innerHTML = `<div class="note">Could not reach the pipeline: ${esc(e.message)}</div>`;
-    return;
+    box.innerHTML = `<div class="run-error"><b>Could not start the analysis</b><span>${esc(e.message)}${/fetch/i.test(e.message)
+      ? " (is python scripts/serve_local.py running?)" : ""}</span></div>`;
+    return false;
   }
-  root.innerHTML = `
-    <div class="block">
-      <div class="block-label">Analyse a recording (Replay a file)</div>
-      <div class="note">The whole chain on one recording: <b>find</b> each transmitter (YOLO boxes), <b>name</b> it
-        (60-class model, voted over the whole transmission), and for voice or Morse <b>listen</b>: zoom in, demodulate,
-        Morse decoder or Whisper, then a local AI reading. Record in SDRconnect with <b>Recording type = IQ</b>.
-        <b>Replay a file</b> on the SDR Receiver page does the same, with the settings here.
-        The detector scans the first <b>Seconds to scan</b>; the zoom-in listens to the <b>whole file</b> (up to 2 min), so a full Morse or voice message is decoded. About 30-90 s per file on this PC. Each decoded signal gets an <b>Open analysis</b> button: playback, text, English and the AI reading.</div>
-      <div class="note" style="margin-top:6px;">Models: classifier ${info.classifiers.length
-        ? info.classifiers.map(c => `<code>${esc(c)}</code>`).join(" ") + (info.classifiers.length > 1 ? " (averaged)" : "")
-        : `<b style="color:#9B2C2C;">none: put a best.pt in results/classifier/</b>`} ·
-        detector ${info.detector ? "<code>emitter_detector.pt</code> (YOLO)" : "<b>energy fallback</b> (no YOLO file)"}</div>
-      <div class="filters" style="margin-top:10px;">
-        <input type="file" id="pipeFile" accept=".wav,.npy,.bin,.raw,.cf32,.cs16,.cs8,.cu8,.iq">
-        <label class="note" style="margin:0;" title="How much of the file the detector and 60-class model scan at 3.2 MS/s. The zoom-in (Morse / speech / AI) always listens to the whole file, up to 2 minutes.">Seconds to scan <input id="pipeSec" type="number" min="0.05" max="120" step="0.25" value="2" style="width:80px;"> <span class="note" id="pipeSecNote"></span></label>
-        <label class="note" style="margin:0;" title="Only for raw files without a header">Sample rate <input id="pipeFs" placeholder="from file" style="width:90px;"></label>
-        <select id="pipeDtype" title="Only for raw files"><option value="">raw type</option><option>int16</option><option>float32</option><option>int8</option><option>uint8</option></select>
-      </div>
-      <div class="filters">
-        <label class="note" style="margin:0;"><input type="checkbox" id="pipeListen" checked> Listen to voice / Morse</label>
-        <label class="note" style="margin:0;"><input type="checkbox" id="pipeWhisper" checked> Whisper</label>
-        <span class="note" title="Whisper hears the language from the sound and picks among Malay, English, Indonesian and Mandarin. Translate to English on the result.">Language: detected automatically</span>
-        <label class="note" style="margin:0;"><input type="checkbox" id="pipeLlm" checked> AI reading (Ollama)</label>
-        <button id="pipeRun">Analyse file</button>
-        <button class="secondary" id="pipeDemo" title="Built-in test capture: walkie-talkie speech, Morse and an AM station, 1.2 s">Run sample</button>
-      </div>
-      <div class="note" id="pipeMsg"></div>
-    </div>
-    <div class="block" id="pipeRunBox" hidden></div>
-    <div class="block">
-      <div class="block-label">Recent runs</div>
-      <div class="table-wrap" id="pipeRuns"></div>
-    </div>`;
-  const msg = root.querySelector("#pipeMsg");
-  const start = async (demo) => {
-    const p = new URLSearchParams({
-      source: demo ? "voice-demo" : "file", max_s: root.querySelector("#pipeSec").value || "1",
-      detector: "hybrid",                  // always YOLO + the narrow-signal finder
-      listen: root.querySelector("#pipeListen").checked ? "1" : "0",
-      whisper: root.querySelector("#pipeWhisper").checked ? "1" : "0",
-      llm: root.querySelector("#pipeLlm").checked ? "1" : "0",
-      language: "auto",                    // Whisper detects it among the supported languages
-    });
-    let body = null;
-    if (!demo) {
-      const f = root.querySelector("#pipeFile").files[0];
-      if (!f) { msg.textContent = "Choose an IQ file first (or run the sample)."; return; }
-      p.set("name", f.name);
-      const fs = root.querySelector("#pipeFs").value.trim();
-      if (fs) p.set("fs", String(Number(fs)));
-      const dt = root.querySelector("#pipeDtype").value;
-      if (dt) p.set("dtype", dt);
-      body = f;
-      msg.textContent = `Uploading ${f.name} (${(f.size / 1e6).toFixed(1)} MB)…`;
-    }
-    try {
-      // One analysis at a time: say so plainly (an upload refused mid-way shows only "Failed to fetch").
-      const busy = ((await (await fetch("/api/pipeline", { credentials: "same-origin" })).json()).runs || [])
-        .find(r => r.status === "running" && !r.live);
-      if (busy) {
-        msg.textContent = `Run ${busy.id} (${busy.file || busy.source}) is still going. Wait for it, or open it below and press Stop this run.`;
-        openRun(root, busy.id);
-        return;
-      }
-      const res = await fetch(`/api/pipeline?${p}`, { method: "POST", credentials: "same-origin", headers: HDR, body });
-      const j = await res.json();
-      if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
-      msg.textContent = `Started run ${j.id}.`;
-      openRun(root, j.id);
-      listRuns(root);
-    } catch (e) {
-      msg.textContent = `Could not start: ${e.message}` + (/fetch/i.test(e.message)
-        ? " (the NEXA server did not answer: is serve_local.py running, or is another run still going?)" : "");
-    }
-  };
-  state.root = root;
-  state.start = start;
-  root.querySelector("#pipeFile").addEventListener("change", ev => fitSeconds(root, ev.target.files[0]));
-  root.querySelector("#pipeRun").addEventListener("click", () => start(false));
-  root.querySelector("#pipeDemo").addEventListener("click", () => start(true));
-  await listRuns(root, info.runs);
-  if (state.open) openRun(root, state.open);
-  else if (info.runs[0]) openRun(root, info.runs[0].id);
+}
+
+/** History → Captures, "Decoded recordings": every replayed file and live SDRconnect /
+ * KiwiSDR run, newest first; a row opens its waterfall, decoded signals and transmitters. */
+export async function renderRunHistory(root) {
+  root.innerHTML = `<div class="table-wrap" id="pipeRuns"><div class="note">Loading…</div></div>
+    <div class="block" id="pipeRunBox" hidden style="margin-top:12px;"></div>`;
+  try {
+    await listRuns(root);
+    if (state.open && root.querySelector(`tr[data-id="${CSS.escape(state.open)}"]`)) openRun(root, state.open);
+  } catch (e) {
+    root.querySelector("#pipeRuns").innerHTML = `<div class="note">Recordings are kept by the local server
+      (python scripts/serve_local.py): ${esc(e.message)}</div>`;
+  }
 }
 
 // Run ids start with the local time: 20261108-222233-ff1d.
@@ -191,13 +125,17 @@ function runTook(r) {
 
 async function listRuns(root, runs) {
   const box = root.querySelector("#pipeRuns");
+  if (!box) return;
   if (!runs) runs = (await (await fetch("/api/pipeline", { credentials: "same-origin" })).json()).runs;
   box.innerHTML = runs.length ? `<table><thead><tr><th>Run</th><th>Time</th><th>Source</th><th>Seconds</th><th>Analysis took</th><th>Detector</th><th>Status</th></tr></thead><tbody>`
-    + runs.map(r => `<tr data-id="${esc(r.id)}" style="cursor:pointer;"><td><code>${esc(r.id)}</code></td>
+    + runs.map(r => `<tr data-id="${esc(r.id)}" style="cursor:pointer;" title="Open its waterfall and decoded signals"><td><code>${esc(r.id)}</code></td>
       <td>${esc(runTime(r.id))}</td><td>${esc(r.file || r.source)}</td><td>${esc(r.max_s)}</td><td>${esc(runTook(r))}</td><td>${esc(r.detector)}</td>
       <td>${chip(r.status, r.status === "done" ? "#2E7D32" : r.status === "running" ? "#2B6CB0" : r.status === "stopped" ? "#5E6673" : "#9B2C2C")}</td></tr>`).join("")
     + `</tbody></table>` : `<div class="note">No runs yet.</div>`;
-  for (const tr of box.querySelectorAll("tr[data-id]")) tr.addEventListener("click", () => openRun(root, tr.dataset.id));
+  for (const tr of box.querySelectorAll("tr[data-id]")) tr.addEventListener("click", () => {
+    openRun(root, tr.dataset.id);
+    root.querySelector("#pipeRunBox")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
 }
 
 async function openRun(root, id) {
@@ -214,8 +152,8 @@ async function openRun(root, id) {
   }
   if (r.status === "running") {
     const last = (r.log || "").trim().split("\n").slice(-4).join("\n");
-    box.innerHTML = `<div class="block-label">Run ${esc(id)} ${chip("running", "#2B6CB0")}</div>
-      <div class="note">${esc(r.file || r.source)} · ${esc(r.max_s)} s · ${esc(r.detector)} detector. This page refreshes by itself.</div>
+    box.innerHTML = `<div class="block-label">Analysing ${esc(r.file || r.source)} ${chip("running", "#2B6CB0")}</div>
+      <div class="note">Finding each transmitter, naming it, then listening to voice and Morse (about 30-90 s). The waterfall appears here when it is done.</div>
       <pre style="white-space:pre-wrap;max-height:180px;overflow:auto;">${esc(last || "starting…")}</pre>
       ${r.live ? "" : `<button class="mini" id="pipeStop">Stop this run</button> <span class="note" id="pipeStopMsg"></span>`}`;
     box.querySelector("#pipeStop")?.addEventListener("click", async ev => {
@@ -293,11 +231,11 @@ function drawResult(box, id, r) {
   for (const t of tracks) if (t.listen) listens.set((t.listen.tracks || [t.track]).join(","), t.listen);
   const heard = [...listens.values()].filter(L => L.kind && !["UNKNOWN", "ERROR"].includes(L.kind));
   box.innerHTML = `
-    <div class="block-label">Run ${esc(id)} ${chip("done", "#2E7D32")}</div>
+    <div class="block-label">Spectrum · waterfall · every transmitter <span class="note" style="font-weight:400;">(recording ${esc(src.file || r.source)})</span></div>
     <div class="note">${esc(src.file || r.source)}${src.format ? ` · ${esc(src.format)}` : ""}${src.fs_in ? ` · ${(src.fs_in / 1e6).toFixed(3)} MS/s` : ""}
       ${src.resampled ? " (resampled to 3.2)" : ""}${centre ? ` · centre ${(centre / 1e6).toFixed(4)} MHz` : " · centre frequency unknown: offsets shown"}
       · ${(res.duration_ms || 0).toFixed(0)} ms analysed · ${tracks.length} transmitters · ${esc(r.detector)} detector</div>
-    <img src="/api/pipeline/${encodeURIComponent(id)}/tracks.png" alt="Waterfall with every transmitter boxed and named"
+    <img src="/api/pipeline/${encodeURIComponent(id)}/tracks.png" alt="Waterfall with every transmitter boxed and named, frequency against time"
       style="width:100%;margin-top:10px;border:1px solid var(--grid);background:#000;">
     ${heard.length ? `<div style="margin-top:14px;font-weight:700;">Decoded signals</div>` + heard.map(L => heardCard(id, L, tracks, centre)).join("") : ""}
     <div style="margin-top:14px;font-weight:700;">Every transmitter</div>

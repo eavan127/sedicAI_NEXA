@@ -889,7 +889,7 @@ class Handler(SimpleHTTPRequestHandler):
             if Handler._sdr_hub is None:
                 sys.path.insert(0, str(Path(__file__).resolve().parent))
                 from sdr_hub import SdrHub
-                hub = SdrHub(jobs_dir=PIPELINE_DIR, intel_dir=self.intel_dir, max_s=20.0)   # a signal that never goes quiet is named every 20 s
+                hub = SdrHub(jobs_dir=PIPELINE_DIR, intel_dir=self.intel_dir, max_s=5.0)   # short clips: a signal that never goes quiet is named every 5 s
                 # Each decoded transmission goes into the audit trail as soon as it is
                 # done (live.result + intel.recording), not only when a page next opens
                 # Signal Pipeline. _audit_results only reads class-level state.
@@ -923,7 +923,7 @@ class Handler(SimpleHTTPRequestHandler):
             b = self._read_json()
             st = hub.connect(host=b.get("host"), port=b.get("port"), freq_khz=b.get("freq_khz"),
                              whisper_model=b.get("whisper_model") or "small", language=b.get("language"),
-                             use_llm=b.get("llm", True), clip_s=b.get("clip_s") or 30,
+                             use_llm=b.get("llm", True), clip_s=b.get("clip_s") or 5,
                              llm_model=b.get("llm_model") or None, demod=b.get("demod") or None)
             self.db.log(self._actor(), "kiwi.start", "kiwi", st["url"], {"label": st["label"], "decode": st["decode"]})
             return self._send_json(st)

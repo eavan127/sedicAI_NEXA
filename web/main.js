@@ -35,13 +35,26 @@ import { applyFilters, canView, flagsHtml, summarise, summaryHtml as histSummary
 import { buildReport, buildSingle } from "./report.js";
 import { installZoom, registerZoom } from "./zoom.js";
 import { renderIntelDetail, listDecoded, decodedTableHtml, filterRows, typeLabel } from "./intel.js";
-import { analyseFile, renderPipeline } from "./pipeline.js";
+import { renderRunHistory, replayIqFile } from "./pipeline.js";
 import { renderKiwiLive } from "./kiwi_live.js";
 
 installZoom();
 
 const el = id => document.getElementById(id);
 const statusEl = el("status"), headlineEl = el("headline");
+
+// The horizontal progress band under the status line (synthesize, analyse a capture).
+// frac in 0..1; null hides it. Live dwells do not use it: they come every few hundred ms.
+let progHide = null;
+function progress(frac) {
+  const bar = el("anaProg");
+  if (!bar) return;
+  clearTimeout(progHide);
+  if (frac == null) { bar.hidden = true; return; }
+  bar.hidden = false;
+  bar.firstElementChild.style.width = `${Math.round(Math.max(0, Math.min(1, frac)) * 100)}%`;
+  if (frac >= 1) progHide = setTimeout(() => { bar.hidden = true; }, 900);
+}
 const statusBox = el("statusBox"), latestBox = el("latestBox");
 const consoleCanvas = el("console"), tbody = document.querySelector("#eventsTable tbody");
 const constellationCanvas = el("constellationCanvas"), constellationBlock = el("constellationBlock");
@@ -72,6 +85,13 @@ async function fetchRandomScene({ seed, durationS }) {
   const n = f.length / 2, re = new Float64Array(n), im = new Float64Array(n);
   for (let i = 0; i < n; i++) { re[i] = f[2 * i]; im[i] = f[2 * i + 1]; }
   return { re, im, segments: j.truth, classes: j.classes };
+}
+// One random-mix scene is generated ahead, so Synthesize does not wait for the server.
+let nextMix = null;
+function newMix() {
+  const pr = fetchRandomScene({ seed: Math.floor(Math.random() * 1e9), durationS: 0.05 });
+  pr.catch(() => { if (nextMix === pr) nextMix = null; });
+  return pr;
 }
 const mixLabel = classes => `Random mix: ${classes.length ? classes.join(", ") : "nothing strong enough to see"}`;
 
@@ -295,21 +315,28 @@ async function analyze(re, im, { source, caseNote = "", truth = null, snrDb = nu
     const sessions = await getModel(which);
 
     statusEl.textContent = "Measuring capture…";
+    if (!live) progress(0.2);
     await new Promise(r => setTimeout(r, 0));
     const capture = measureCapture(re, im);
+    if (!live) progress(0.3);
 
     const t0 = performance.now();
     const result = await classifyCapture(sessions, re, im, {
       hop, signal,
-      onProgress: (d, t) => { statusEl.textContent = `Running inference… ${d}/${t} windows`; },
+      onProgress: (d, t) => {
+        statusEl.textContent = `Running inference… ${d}/${t} windows`;
+        if (!live) progress(0.3 + 0.65 * d / t);
+      },
     });
     const elapsed = ((performance.now() - t0) / 1000).toFixed(2);
 
+    showFileRun(false);
     session = { capture, result, source, caseNote, truth, snrDb, which,
                  snrCapped, requestedSnrDb, mode: live ? "LIVE" : "REPLAY", review };
     render();
     showReviewBanner();
     statusEl.textContent = `${result.nWindows} windows classified in ${elapsed}s.`;
+    if (!live) progress(1);
     // A capture opened to review a correction is already in the database:
     // storing it again would add a duplicate and inflate the correction rate.
     if (live || review) return Number(elapsed);
@@ -321,6 +348,7 @@ async function analyze(re, im, { source, caseNote = "", truth = null, snrDb = nu
     pendingFile = null;
     return Number(elapsed);
   } catch (e) {
+    progress(null);
     if (e.name === "AbortError") { statusEl.textContent = "Stopped."; return null; }
     statusEl.textContent = `Error: ${e.message}`;
     console.error(e);
@@ -336,7 +364,7 @@ async function analyze(re, im, { source, caseNote = "", truth = null, snrDb = nu
  *  replaces it with the antenna. Runs once per page load. */
 let autoSimulated = false;
 async function autoSimulate() {
-  if (autoSimulated || session || rx) return;
+  if (autoSimulated || session || rx || !el("fileRunRoot").hidden) return;   // a replayed file is on screen: leave it
   autoSimulated = true;
   caseSel.value = readConfig().backend === "server" ? RANDOM_MIX : "All three";
   await synthesizeCase();
@@ -351,7 +379,10 @@ async function synthesizeCase() {
   if (caseSel.value === RANDOM_MIX) {
     try {
       statusEl.textContent = "Generating a random mix of signals…";
-      const sc = await fetchRandomScene({ seed: Math.floor(Math.random() * 1e9), durationS: 0.05 });
+      progress(0.05);
+      const sc = await (nextMix || newMix());
+      nextMix = newMix();                     // the next click finds its scene ready
+      progress(0.15);
       await analyze(sc.re, sc.im, { source: "scenario", caseNote: `case \`${mixLabel(sc.classes)}\``,
                                     truth: sc.segments, snrDb: null });
     } catch (e) {
@@ -374,6 +405,7 @@ async function synthesizeCase() {
       librarySnrDb = library.snrDb;
     }
     statusEl.textContent = "Synthesizing IQ…";
+    progress(0.1);
     await new Promise(r => setTimeout(r, 0));
     const scenario = buildScenario({
       totalDuration: c.durationS, snrDb: c.snrDb, seed: c.seed,
@@ -944,7 +976,7 @@ function liveZoomHtml() {
   } else {
     body = `<div style="color:#5E6673;">No transmission named yet.</div>`;
   }
-  const now = st.on_air ? `<div style="margin-top:6px;color:#2E7D32;font-size:13px;">● on air · recording ${h(st.recording_s)} s · named when it goes quiet (or every ${h(st.clip_s || 20)} s)</div>`
+  const now = st.on_air ? `<div style="margin-top:6px;color:#2E7D32;font-size:13px;">● on air · recording ${h(st.recording_s)} s · named when it goes quiet (or every ${h(st.clip_s || 5)} s)</div>`
     : st.analysing ? `<div style="margin-top:6px;color:#2B6CB0;font-size:13px;">naming the last transmission…</div>` : "";
   return `<div style="background:#FFFFFF;padding:16px;border-radius:6px;margin-bottom:10px;border-left:4px solid #22306B;">`
     + `<div style="color:#5E6673;font-size:12.5px;">ZOOM-IN · WHOLE TRANSMISSION (narrow signals: Morse, RTTY, voice)</div>${body}${now}`
@@ -1169,20 +1201,19 @@ rxFileInput.addEventListener("change", async () => {
   const files = [...(rxFileInput.files || [])];
   rxFileInput.value = "";
   if (!files.length) return;
-  // "Replay a file" = "Analyse a recording": one IQ file (WAV from SDRconnect / SDR#,
-  // or raw .bin / .cf32 / .iq ...) opens the Recording Analysis page and goes to the full
-  // pipeline with that page's settings (language, seconds to scan, sample rate and raw
-  // type for raw files): 60-class names, waterfall, audio, Morse / speech decoding, AI
-  // reading, Intercepts. Only a SigMF pair (two files), or the page without the local
-  // server, gets the quick replay below (fast model only, no decoding).
-  const one = files.length === 1 && !/\.sigmf(-meta|-data)?$/i.test(files[0].name) ? files[0] : null;
-  if (one) {
+  // Replay a file: one IQ WAV (SDRconnect, Recording type = IQ) goes through the whole chain
+  // on the local server, and its waterfall, transmitters and decoded signals take the place
+  // of the live console on this page. An audio WAV is refused (pipeline.js:replayIqFile).
+  // A SigMF pair, or the page without the local server, gets the quick in-browser replay.
+  if (files.length === 1 && /\.wav$/i.test(files[0].name)) {
     if (currentPage !== "replay") showPage("replay");
-    await pipelineReady;                      // the file box below the receiver is drawn
-    if (analyseFile(one)) return;
-  }
-  if (/\.wav$/i.test(files[0].name)) {
-    rxNote.textContent = "IQ WAV files are analysed by the local server (python scripts/serve_local.py); it is not running.";
+    if (readConfig().backend !== "server") {
+      rxNote.textContent = "IQ WAV files are analysed by the local server (python scripts/serve_local.py); it is not running.";
+      return;
+    }
+    showFileRun(true);
+    el("fileRunRoot").scrollIntoView({ behavior: "smooth", block: "start" });
+    await replayIqFile(files[0], el("fileRunRoot"));
     return;
   }
   try {
@@ -1316,7 +1347,11 @@ const winSlider = el("winSlider"), winReadout = el("winReadout");
 const probsBox = el("probsBox"), winMetaBox = el("winMetaBox");
 const attnCanvas = el("attnCanvas"), breakdownCanvas = el("breakdownCanvas");
 let currentPage = "replay";
-let pipelineReady = Promise.resolve();   // the receiver page's "Analyse a recording" box, once drawn
+/** One waterfall spot on the SDR Receiver page: a replayed IQ file's result, or the live console. */
+function showFileRun(on) {
+  el("fileRunRoot").hidden = !on;
+  el("sigBody").hidden = on;
+}
 const chatLogPromise = openChatLog();
 let perfData = null, modelCard = null;
 
@@ -1354,7 +1389,6 @@ function showPage(page) {
   // Canvases cannot be sized while hidden, so each page draws on entry.
   if (page === "replay") {
     if (session) render(); else renderSignal();
-    pipelineReady = renderPipeline(el("pipelineFileRoot"), { server, mode: "file" });
     pollLatestIntercept();
   }
   if (page === "kiwi") renderKiwiLive(el("kiwiLiveRoot"), { server });
@@ -1362,6 +1396,7 @@ function showPage(page) {
   if (page === "captures" || page === "reports") {
     el(`page-${page}`).querySelector(".filter-slot").append(el("histFilters"));
   }
+  if (page === "captures") renderRunHistory(el("runHistoryRoot"));
   if (RECORD_PAGES.has(page)) return renderHistory();
   if (page === "audit") renderAudit();
   if (page === "performance") renderPerformance();
@@ -2020,7 +2055,10 @@ Promise.all([chatLogPromise, ollamaCheck]).then(([chatLog, hasOllama]) => initAs
 ollamaCheck.then(has => { if (has) ollamaWarmUp(); });
 
 showPage("replay");
-detectServer().then(() => { syncNav(); refreshReviewCount(); });
+detectServer().then(() => {
+  syncNav(); refreshReviewCount();
+  if (readConfig().backend === "server" && !nextMix) nextMix = newMix();   // the first random mix, ready before it is asked for
+});
 init();
 
 
