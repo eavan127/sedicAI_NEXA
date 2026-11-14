@@ -276,7 +276,7 @@ function drawResult(box, id, r) {
 // KiwiSDR direction finding (TDoA) is a KiwiSDR service: NEXA links to it for
 // HF signals with a known frequency and records the location the analyst reads
 // off its map. Nothing is sent from NEXA; the link opens the receiver's page.
-const KIWI_RX = "http://21439.proxy2.kiwisdr.com:8073";   // 9M2AMH, Kuala Lumpur (GPS-timed)
+const KIWI_RX = "http://dx6ran.ddns.net:8073";   // DU6/PE1NSQ, Negros, Philippines (team default receiver, GPS-timed)
 const HF_MAX_KHZ = 30000;
 
 /** Absolute frequency (kHz) of a heard signal, when the capture's centre is known and it is HF. */

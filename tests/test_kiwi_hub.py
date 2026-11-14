@@ -135,11 +135,12 @@ def test_every_clip_gets_audio_at_once_and_only_the_newest_waits_for_text(tmp_pa
     (tmp_path / "spool").mkdir()
     (tmp_path / "jobs").mkdir()
     slow = []
+    gate = threading.Event()                 # speech-to-text "takes" until all three clips have audio
 
     def slow_text(tracks, extra, out_dir, *a, progress=None, **k):
         progress and progress("transcribing (Whisper small)", 1)
         slow.append(out_dir.name)
-        time.sleep(3)
+        gate.wait(30)
         for t in tracks:
             t["listen"]["transcript"] = "selamat pagi"
         return tracks
@@ -161,7 +162,8 @@ def test_every_clip_gets_audio_at_once_and_only_the_newest_waits_for_text(tmp_pa
         e["tracks"] and e["tracks"][0]["audio"] for e in hub.status()["decodes"]), 15), hub.status()["decodes"]
     for e in hub.status()["decodes"]:                                    # playable before any text
         assert (tmp_path / "jobs" / e["id"] / e["tracks"][0]["audio"]).is_file()
-        assert e["stage"] in ("waiting for speech-to-text", "transcribing (Whisper small)", "done", "not transcribed")
+        assert e["stage"] in ("waiting for speech-to-text", "transcribing (Whisper small)")
+    gate.set()                                                           # the first transcription finishes
     assert wait_for(lambda: hub.status()["analysing"] == 0, 30), hub.status()
     st = hub.status()
     stages = [e["stage"] for e in st["decodes"]]

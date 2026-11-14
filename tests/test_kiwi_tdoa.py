@@ -317,3 +317,21 @@ def test_leaving_out_a_receiver_needs_four_left_to_compare():
     res = K.combine(st, ps)
     assert [x["id"] for x in res["excluded"]] == ["LA6LU"], res["excluded"]
     assert K.great_circle_km(res["lat"], res["lon"], *TX) < 20
+
+
+def test_a_far_receiver_on_two_hops_gives_a_second_possible_place():
+    """14 Nov, set C: Taiwan (3200 km) heard only the two-hop path, ~0.7 ms late; the
+    place slid 440 km. Without a second path to compare, NEXA cannot know, so it
+    shows where the transmitter would be if Taiwan had heard it in one hop."""
+    st = FIVE[1:5]                                          # JKT, HS0ZQS, ptlen, jplin53c
+    tw = next(i for i, x in enumerate(st) if x["id"] == "jplin53c")
+    d = float(K.great_circle_km(st[tw]["lat"], st[tw]["lon"], *TX))
+    hop = (K._skywave_km(d, 2) - K._skywave_km(d, 1)) / K.C_KM_S
+    ps = [dict(p, paths=1, lag_s=p["lag_s"] + (hop if p["i"] == tw else -hop if p["j"] == tw else 0.0))
+          for p in _pairs(st, TX)]
+    res = K.combine(st, ps)
+    alt = res["alternative"]
+    assert alt and alt["receiver"] == "jplin53c", res
+    assert K.great_circle_km(alt["lat"], alt["lon"], *TX) < 40, alt
+    seen_both = K.combine(st, [dict(p, paths=2) if tw in (p["i"], p["j"]) else dict(p, paths=1) for p in _pairs(st, TX)])
+    assert seen_both["alternative"] is None              # both paths seen: the direct one was already kept

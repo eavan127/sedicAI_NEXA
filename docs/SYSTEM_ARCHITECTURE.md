@@ -107,6 +107,15 @@ folder), so the demo database and any test database each get every result.
     support a second lag, the one where the receiver further from the others hears the signal earliest is kept:
     an extra hop only adds path.
   * Runs: with "Runs" 2–3 the recording is repeated and each pair's median lag is used (`merge_runs`).
+  * When a far receiver (> 2500 km) heard only one path, NEXA cannot tell whether it was the direct one or a
+    two-hop one, so it also works out where the transmitter would be if that receiver had heard it one hop
+    earlier (sky-wave path model, layer at 300 km) and shows it as "Other possible place" (`_other_hop`).
+    Set C (14 Nov, 17:47, the same state as an analyst run at 17:45): Taiwan two-hop only, most likely place
+    1.63° N 98.05° E (440 km from Kajang), other possible place 2.61° N 101.03° E (92 km from Kajang).
+    Sets A and B saw both paths, kept the direct one, and show no other place.
+  * The page says how sure an answer is: Good (4+ receivers agree, one place), Rough (they disagree, or a far
+    receiver leaves two places), Not cross-checked (3 receivers). Receivers are named with the place their own
+    `/status` page gives; the per-pair numbers sit under "Technical details".
   * **Accuracy, 14 Nov 2026, 15295 kHz** (Radio Malaysia, Kajang 2.99° N 101.77° E; KiwiSDR's own TDoA said
     2.50° N 102.50° E, ~95 km off). Before the fixes above (15 s, one kiwirecorder for all, parabola peaks):
 

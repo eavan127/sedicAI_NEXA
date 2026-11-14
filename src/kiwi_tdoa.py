@@ -63,6 +63,7 @@ def parse_status(text):
             lat = lon = None
     return {"lat": lat, "lon": lon, "gps_good": num("gps_good"), "fixes_min": num("fixes_min"),
             "users": num("users"), "users_max": num("users_max"), "name": kv.get("name", ""),
+            "loc": kv.get("loc", ""),
             "tdoa_id": kv.get("tdoa_id") or None, "tdoa_ch": num("tdoa_ch"),
             "offline": kv.get("offline") == "yes", "status": kv.get("status", "")}
 
@@ -468,7 +469,50 @@ def combine(stations, pairs):
                       "off" + (" and 4 cannot tell which (5 can): treat this place as rough" if len(used) == 4 else ""))
     if len(used) == 3:
         res["warning"] = "3 receivers: no cross-check (any timing error moves the point unseen)"
+    res["alternative"] = _other_hop(stations, pairs, res, run)
     return res
+
+
+HOP_KM = 2500        # a receiver further than this from the place may hear it via one or two ionospheric hops
+LAYER_KM = 300       # virtual height of the reflecting layer (F2)
+
+
+def _skywave_km(d_km, hops):
+    """Path length of a sky wave over d_km of ground in `hops` equal hops off a layer at LAYER_KM."""
+    half = d_km / hops / EARTH_KM / 2
+    r1 = EARTH_KM + LAYER_KM
+    return hops * 2 * math.sqrt(EARTH_KM ** 2 + r1 ** 2 - 2 * EARTH_KM * r1 * math.cos(half))
+
+
+def _other_hop(stations, pairs, res, run):
+    """A far receiver that heard only ONE path may have heard the two-hop one (on
+    14 Nov Taiwan, 3200 km from Kajang, switched between one and two hops; its
+    two-hop lag put the place 430 km off). When it saw both paths, pair_lag already
+    kept the direct one. Here: the place if that receiver had heard it one hop
+    earlier, or None when there is no such receiver or that place fits clearly worse.
+    -> {"lat", "lon", "receiver", "why"} or None"""
+    far = []
+    for k, st in enumerate(stations):
+        mine = [p for p in pairs if k in (p["i"], p["j"])]
+        d = float(great_circle_km(st["lat"], st["lon"], res["lat"], res["lon"]))
+        if mine and d > HOP_KM and all(p.get("paths", 1) == 1 and "paths" in p for p in mine):
+            far.append((d, k))
+    if not far:
+        return None
+    d, k = max(far)
+    alt = res
+    for _ in range(4):                     # the extra delay depends on the distance, which depends on the place
+        d = float(great_circle_km(stations[k]["lat"], stations[k]["lon"], alt["lat"], alt["lon"]))
+        shift = (_skywave_km(d, 2) - _skywave_km(d, 1)) / C_KM_S    # how much later two hops arrive
+        alt_pairs = [{**p, "lag_s": p["lag_s"] - shift} if p["i"] == k else
+                     {**p, "lag_s": p["lag_s"] + shift} if p["j"] == k else p for p in pairs]
+        alt = run(alt_pairs)
+    apart = float(great_circle_km(alt["lat"], alt["lon"], res["lat"], res["lon"]))
+    if apart < res["radius_km"] or alt["fit"] > max(FIT_BAD, res["fit"] * FIT_GAIN):
+        return None
+    return {"lat": alt["lat"], "lon": alt["lon"], "receiver": stations[k]["id"], "apart_km": round(apart),
+            "why": f"if {stations[k]['id']} ({d:.0f} km away) heard it via two ionospheric hops "
+                   f"(~{shift * 1e6:.0f} µs later) rather than one"}
 
 
 def _t(stations, i, place):

@@ -86,7 +86,7 @@ export function renderKiwiLive(root, { server }) {
           <select id="kwTdoaRuns"><option value="1" selected>1</option><option value="2">2</option>
             <option value="3">3</option></select></label>
         <label class="field" style="min-width:300px;">TDoA receivers (host:port, comma-separated)
-          <input id="kwTdoaRx" spellcheck="false" placeholder="default: DU6/PE1NSQ, HS0ZGZ, JKT (9M2AMH spare)"></label>
+          <input id="kwTdoaRx" spellcheck="false" placeholder="empty: NEXA picks (Jakarta, Bangkok, Taiwan, … and further if needed)"></label>
         <label style="display:inline-flex;gap:6px;align-items:center;"><input type="checkbox" id="kwAuto" checked>
           Locate automatically when listening starts</label>
       </div>
@@ -191,19 +191,49 @@ function paintTdoa(t) {
        <progress max="1" value="${Number(t.progress) || 0}" style="width:160px;vertical-align:middle;"></progress>`
       + (skipped.length ? `<div>Skipped: ${skipped.join("; ")}.</div>` : "")
     : t.state === "error" ? `<span style="color:#9B2C2C;">Locating ${esc(t.freq_khz)} kHz failed: ${esc(t.error)}</span>`
-    : t.state === "done" && t.result ? `Located ${esc(t.freq_khz)} kHz at ${esc(t.result.at)} with ${esc(t.result.receivers)}${
-       t.result.runs > 1 ? `, median of ${t.result.runs} runs` : ""}
-       (arrival-time differences: ${t.result.pairs.map(p => `${esc(p.a)}−${esc(p.b)} ${p.lag_us} ± ${p.sigma_us} µs`).join(", ")}).`
-      + (t.result.further?.length ? ` Found further away: ${t.result.further.map(esc).join(", ")}.` : "")
-      + (t.result.excluded || []).map(x => ` <b>${esc(x.id)} left out</b>: ${esc(x.why)} (about ${x.offset_us} µs).`).join("")
-      + (t.result.dropped_pairs?.length ? ` Ignored ${t.result.dropped_pairs.map(p => `${esc(p.a)}−${esc(p.b)}`).join(", ")}
-         (contradicted the other pairs).` : "")
-      + (t.result.warning ? ` <span style="color:#9B2C2C;">Caution: ${esc(t.result.warning)}.</span>` : "")
-      + (skipped.length ? ` Skipped: ${skipped.join("; ")}.` : "")
+    : t.state === "done" && t.result ? runSummary(t.result, t.receivers || [])
     : "";
   const key = t.state === "done" && t.result ? t.result.at : null;
   if (key && key !== lastTdoa) { lastTdoa = key; showLocation(mounted, true); }
 }
+
+// What the last run did, in sentences; the numbers behind it folded away.
+function rxName(id, places) {
+  const p = (places || {})[id];
+  return p ? `${esc(id)} (${esc(p)})` : esc(id);
+}
+
+function runSummary(r, receivers) {
+  const used = (r.stations || []).map(s => rxName(s.id, r.places));
+  const lines = [`<div>Last run ${esc(r.at)}: ${used.length} receivers heard it${r.runs > 1 ? `, ${r.runs} recordings
+    combined` : ""}: ${used.join(", ")}.</div>`];
+  if (r.further?.length) lines.push(`<div>The usual receivers were not enough, so NEXA also used ${r.further.map(esc).join(", ")}.</div>`);
+  for (const x of r.excluded || []) {
+    lines.push(`<div>Left out ${rxName(x.id, r.places)}: its timing disagreed with the others (by about ${Math.abs(x.offset_us)} µs).</div>`);
+  }
+  const off = (receivers || []).filter(c => !c.ok);
+  if (off.length) {
+    lines.push(`<div>Could not use: ${off.map(c => `${esc(c.id)} (${esc(c.why)})`).join("; ")}.</div>`);
+  }
+  const tech = `<details style="margin-top:6px;"><summary style="cursor:pointer;">Technical details</summary>
+    <div style="margin-top:4px;">Arrival-time differences (how much later the first receiver heard it):</div>
+    <ul style="margin:4px 0 0 18px;padding:0;">${(r.pairs || []).map(p => `<li>${esc(p.a)} − ${esc(p.b)}: ${p.lag_us} µs
+      ± ${p.sigma_us}${p.agree != null ? `, ${Math.round(p.agree * 100)} % of seconds agree` : ""}${p.paths > 1
+      ? ", two sky-wave paths seen (the earlier kept)" : ""}</li>`).join("")}</ul>
+    ${r.dropped_pairs?.length ? `<div style="margin-top:4px;">Ignored (contradicted the other pairs):
+      ${r.dropped_pairs.map(p => `${esc(p.a)} − ${esc(p.b)}`).join(", ")}.</div>` : ""}
+    <div style="margin-top:4px;">Fit ${r.fit} (0 = all agree)${r.warning ? ` · ${esc(r.warning)}` : ""}.</div></details>`;
+  return lines.join("") + tech;
+}
+
+const SURE = {
+  good: ["Good", "#276749", "4 or more receivers agree on one place."],
+  rough: ["Rough", "#B7791F", "the receivers do not fully agree; see below."],
+  unchecked: ["Not cross-checked", "#9B2C2C", "only 3 receivers: a timing error would go unseen."],
+};
+const fmtLat = v => `${Math.abs(v).toFixed(2)}° ${v >= 0 ? "N" : "S"}`;
+const fmtLon = v => `${Math.abs(v).toFixed(2)}° ${v >= 0 ? "E" : "W"}`;
+const mapLink = (lat, lon) => `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=7/${lat}/${lon}`;
 
 // The newest location on record for the frequency in the box (computed by NEXA, or typed in by the analyst).
 let locKhz = null;
@@ -223,16 +253,23 @@ async function showLocation(root, force = false) {
       transmitter" (or start listening with automatic locating on).</span>`;
     return;
   }
-  const lat = Number(loc.lat), lon = Number(loc.lon);
-  const map = `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=7/${lat}/${lon}`;
-  const r = Number(loc.radius_km);
-  box.innerHTML = `<b>Transmitter location (${esc(loc.freq_khz)} kHz):</b> most likely ${Math.abs(lat).toFixed(2)}° ${lat >= 0 ? "N" : "S"},
-    ${Math.abs(lon).toFixed(2)}° ${lon >= 0 ? "E" : "W"}${r > 0 ? `, within about ${r} km` : ""} ·
-    <a href="${esc(map)}" target="_blank" rel="noopener noreferrer">show on a map</a>
-    <div class="note" style="margin-top:4px;">${esc(loc.source || "KiwiSDR TDoA")}${loc.receivers ? ` with ${esc(loc.receivers)}` : ""} · recorded
-      ${esc(new Date(loc.ts).toLocaleString())} by ${esc(loc.actor)}${loc.note ? ` · ${esc(loc.note)}` : ""}.
-      An area, not a point: short-wave signals bounce off the ionosphere, so this is the centre of an area tens to
-      hundreds of km across.</div>`;
+  const lat = Number(loc.lat), lon = Number(loc.lon), r = Number(loc.radius_km);
+  const sure = SURE[loc.sure];
+  const alt = loc.alternative;
+  const computed = (loc.source || "").startsWith("NEXA");
+  box.innerHTML = `
+    <div style="font-size:1.05em;"><b>${esc(loc.freq_khz)} kHz is most likely transmitted near
+      ${fmtLat(lat)}, ${fmtLon(lon)}</b>${r > 0 ? ` (within about ${r} km)` : ""} ·
+      <a href="${esc(mapLink(lat, lon))}" target="_blank" rel="noopener noreferrer">show on a map</a></div>
+    ${sure ? `<div style="margin-top:6px;"><span style="display:inline-block;padding:1px 8px;border-radius:10px;color:#fff;
+      background:${sure[1]};font-size:0.9em;">${sure[0]}</span> <span class="note">${esc(sure[2])}</span></div>` : ""}
+    ${alt ? `<div style="margin-top:6px;">Other possible place: <b>${fmtLat(Number(alt.lat))}, ${fmtLon(Number(alt.lon))}</b>
+      (${esc(alt.apart_km)} km away) · <a href="${esc(mapLink(alt.lat, alt.lon))}" target="_blank" rel="noopener noreferrer">map</a>
+      <div class="note">${esc(alt.why)}. Run it again (or use Runs 3) to tell them apart.</div></div>` : ""}
+    <div class="note" style="margin-top:6px;">${computed ? "Worked out by NEXA" : esc(loc.source || "Recorded")} from
+      ${(loc.receivers || "").split(", ").filter(Boolean).map(id => rxName(id, loc.places)).join(", ") || "—"}
+      on ${esc(new Date(loc.ts).toLocaleString())} (${esc(loc.actor)}). Short-wave bounces off the ionosphere, so this
+      is the centre of an area, not a point.</div>`;
 }
 
 function paint(st) {

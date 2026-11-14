@@ -523,7 +523,7 @@ class KiwiHub(SdrHub):
                 language=None, use_llm=True, clip_s=5.0, llm_model=None, demod=None):
         host = str(host or KIWI_DEFAULT[0]).strip()
         if not HOST_RE.fullmatch(host):
-            raise ValueError("host must be a KiwiSDR address, e.g. 21439.proxy2.kiwisdr.com")
+            raise ValueError("host must be a KiwiSDR address, e.g. dx6ran.ddns.net")
         port = int(port or KIWI_DEFAULT[1])
         if not 0 < port < 65536:
             raise ValueError("port must be 1..65535")
@@ -715,6 +715,17 @@ def further_receivers(rows, have_hosts, centre=TDOA_CENTRE, n=TDOA_MAX_EXTRA, ma
     return out
 
 
+def confidence(res):
+    """How sure a TDoA answer is, in one word for the page: "good" (4+ receivers that
+    agree, one place), "rough" (they disagree, or a far receiver's hops leave two
+    places), "unchecked" (3 receivers: nothing to cross-check with)."""
+    if not res.get("cross_checked"):
+        return "unchecked"
+    if res.get("warning") or res.get("alternative"):
+        return "rough"
+    return "good"
+
+
 def plain_recorder_error(line):
     """A kiwirecorder log line in words, without its time stamp and process id."""
     line = re.sub(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d+ pid \d+ ", "", str(line or "")).strip()
@@ -804,8 +815,9 @@ class TdoaRunner:
         record_from = host
         if why is None:                              # the page answers; does the audio stream?
             record_from, why = kiwi_stream_host(host, port)
+        place = (st.get("loc") or ", ".join(st["name"].split(",")[-2:])).strip()[:60]
         return {"host": record_from or host, "port": port, "id": st["tdoa_id"] or name, "ok": why is None,
-                "why": why, "lat": st["lat"], "lon": st["lon"], "name": st["name"]}
+                "why": why, "lat": st["lat"], "lon": st["lon"], "name": st["name"], "place": place}
 
     def _record(self, use, khz, sample_s, tmp):
         """Record every receiver at the same time, GPS-stamped: one kiwirecorder
@@ -901,6 +913,8 @@ class TdoaRunner:
             res = kiwi_tdoa.combine(*kiwi_tdoa.merge_runs(measured))
             res.update(runs=len(measured))
             res.update(freq_khz=khz, sample_s=sample_s, receivers=", ".join(s["id"] for s in res["stations"]),
+                       places={c["id"]: c.get("place", "") for c in checked if c["ok"]},
+                       sure=confidence(res),
                        further=[c["id"] for c in checked if c.get("further") and c["ok"]
                                 and c["id"] in {s["id"] for s in res["stations"]}],
                        at=time.strftime("%Y-%m-%d %H:%M:%S"))

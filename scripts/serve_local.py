@@ -180,7 +180,9 @@ def kiwi_location(db, khz, within_khz=2.0):
             if abs(float(d.get("freq_khz")) - float(khz)) <= within_khz:
                 return {"freq_khz": d.get("freq_khz"), "lat": d.get("lat"), "lon": d.get("lon"),
                         "receivers": d.get("receivers"), "note": d.get("note"), "source": d.get("source"),
-                        "radius_km": d.get("radius_km"), "ts": e["ts"], "actor": e["actor"]}
+                        "radius_km": d.get("radius_km"), "sure": d.get("sure"), "alternative": d.get("alternative"),
+                        "excluded": d.get("excluded"), "places": d.get("places"), "warning": d.get("warning"),
+                        "runs": d.get("runs"), "ts": e["ts"], "actor": e["actor"]}
         except (TypeError, ValueError):
             continue
     return None
@@ -199,7 +201,8 @@ def tdoa_details(res):
             "source": "NEXA TDoA (computed)", "radius_km": res["radius_km"], "area": res["area"],
             "fit": res["fit"], "pairs": res["pairs"], "stations": res["stations"],
             "excluded": res.get("excluded") or [], "dropped_pairs": res.get("dropped_pairs") or [],
-            "warning": res.get("warning")}
+            "warning": res.get("warning"), "alternative": res.get("alternative"), "sure": res.get("sure"),
+            "places": res.get("places") or {}, "runs": res.get("runs", 1)}
 
 
 class Handler(SimpleHTTPRequestHandler):
