@@ -367,3 +367,29 @@ def test_a_receiver_at_half_the_sample_rate_still_counts(tmp_path):
         recs.append({"id": sid, "lat": lat, "lon": lon, "t": t, "z": zz, "fs": fs2})
     res = K.solve(recs)
     assert len(res["pairs"]) == 3 and K.great_circle_km(res["lat"], res["lon"], *TX) < 40, res
+
+
+def test_last_resort_receivers_rather_than_no_answer(fake_tdoa, monkeypatch):
+    """14 Nov evening on FOREFRONT Wi-Fi only 2 usual receivers worked and the run
+    stopped. Now the avoided receiver (DU6, known timing problem) is tried last, and
+    the answer says it is rough and why."""
+    usual = {c[0] for c in sdr_hub.TDOA_RECEIVERS} - {"rajawali.proxy.kiwisdr.com", "hs0zqs.proxy.kiwisdr.com"}
+    monkeypatch.setattr(sdr_hub, "kiwi_unreachable", lambda host, port: "blocked" if host in usual else None)
+    run = sdr_hub.TdoaRunner()
+    run.start(15295, sample_s=10)
+    assert wait_for(lambda: run.status()["state"] in ("done", "error")), run.status()
+    st = run.status()
+    assert st["state"] == "done", st
+    res = st["result"]
+    assert [x["id"] for x in res["last_resort"]] == ["DU6/PE1NSQ"] and res["sure"] != "good"
+    assert "DU6/PE1NSQ" in res["receivers"]
+
+
+def test_too_few_receivers_is_said_plainly(fake_tdoa, monkeypatch):
+    monkeypatch.setattr(sdr_hub, "kiwi_unreachable",
+                        lambda host, port: None if host == "rajawali.proxy.kiwisdr.com" else "blocked")
+    run = sdr_hub.TdoaRunner()
+    run.start(15295, sample_s=10)
+    assert wait_for(lambda: run.status()["state"] in ("done", "error")), run.status()
+    err = run.status()["error"]
+    assert err.startswith("only 1 receiver can be used right now (JKT); at least 3 are needed"), err

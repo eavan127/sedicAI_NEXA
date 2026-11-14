@@ -575,6 +575,8 @@ TDOA_RECEIVERS = (                                  # GPS-timed KiwiSDRs round M
 TDOA_AVOID = {
     "dx6ran.ddns.net": "its timing was 0.6-0.8 ms early against every other receiver in 3 runs (13-14 Nov 2026)",
 }
+TDOA_AVOID_ID = {"dx6ran.ddns.net": "DU6/PE1NSQ"}
+TDOA_LAST_RESORT_KM = 6000          # when fewer than 3 usable receivers are left: look this far, flagged rough
 TDOA_MAX_RX = 5      # recorded at once: 3 are needed; 4 show a timing error, 5 show which receiver has it
 TDOA_CENTRE = (4.0, 102.0)          # where the defaults look from (Peninsular Malaysia) when widening the search
 TDOA_MAX_KM = 3500                  # further receivers: within this of TDOA_CENTRE (beyond, multi-hop sky-wave
@@ -679,14 +681,15 @@ def public_tdoa_receivers(timeout=20):
     return out
 
 
-def further_receivers(rows, have_hosts, centre=TDOA_CENTRE, n=TDOA_MAX_EXTRA, max_km=TDOA_MAX_KM, have_at=()):
+def further_receivers(rows, have_hosts, centre=TDOA_CENTRE, n=TDOA_MAX_EXTRA, max_km=TDOA_MAX_KM, have_at=(),
+                      avoid=None):
     """Up to n receivers from rows not already tried, nearest first but spread round
     the compass (8 sectors seen from centre, nearest of each sector in turn), so the
     receivers surround the transmitter. None within SAME_SITE_KM of another, or of
     have_at ((lat, lon) of the receivers already in use): two receivers at one site
     measure the same thing (jplin53a/c in Taiwan: 0.1 us apart). -> [(host, port, id)]"""
     import math as _m
-    seen = {h.split(".")[0] for h in list(have_hosts) + list(TDOA_AVOID)}   # 21023.proxy and .proxy2 are one
+    seen = {h.split(".")[0] for h in list(have_hosts) + list(TDOA_AVOID if avoid is None else avoid)}   # proxy/proxy2: one
     sectors = {}
     for r in rows:
         if r["host"].split(".")[0] in seen:
@@ -721,7 +724,7 @@ def confidence(res):
     places), "unchecked" (3 receivers: nothing to cross-check with)."""
     if not res.get("cross_checked"):
         return "unchecked"
-    if res.get("warning") or res.get("alternative"):
+    if res.get("warning") or res.get("alternative") or res.get("last_resort"):
         return "rough"
     return "good"
 
@@ -871,12 +874,35 @@ class TdoaRunner:
                         c["further"] = True
                     checked += more
                     self._set(receivers=checked)
+            if widen and sum(c["ok"] for c in checked) < 3:
+                # Still too few: rather a rough answer than none. Receivers with a known timing
+                # problem, and receivers further than TDOA_MAX_KM (multi-hop paths), are tried
+                # last; the answer then says it is rough and which receivers were last resorts.
+                self._set(message=f"only {sum(c['ok'] for c in checked)} KiwiSDRs can take part: trying last-resort "
+                                  "receivers (known timing problem, or very far)…")
+                tried = [c["host"] for c in checked] + [c[0] for c in cands]
+                last = [(h, 8073, TDOA_AVOID_ID.get(h, h.split(".")[0])) for h in TDOA_AVOID if h not in tried]
+                last += further_receivers(public_tdoa_receivers(), tried + [h for h, _, _ in last],
+                                          have_at=[(c["lat"], c["lon"]) for c in checked if c["ok"]],
+                                          max_km=TDOA_LAST_RESORT_KM, n=6, avoid=())
+                if last:
+                    with cf.ThreadPoolExecutor(len(last)) as ex:
+                        more = list(ex.map(lambda c: self._check(*c), last))
+                    for c in more:
+                        c["last_resort"] = (TDOA_AVOID.get(c["host"]) or
+                                            "very far: its signal may come via extra ionospheric hops")
+                    checked += more
+                    self._set(receivers=checked)
             use = [c for c in checked if c["ok"]][:TDOA_MAX_RX]
             if len(use) < 3:
                 blocked = any(c["why"] == "not reachable from this network" for c in checked)
-                raise RuntimeError("fewer than 3 KiwiSDRs can take part: "
-                                   + "; ".join(f"{c['id']} {c['why']}" for c in checked if not c["ok"])
-                                   + (". Some networks block KiwiSDR: try a phone hotspot." if blocked else ""))
+                works = [c["id"] for c in checked if c["ok"]]
+                raise RuntimeError(
+                    f"only {len(works)} receiver{'s' if len(works) != 1 else ''} can be used right now"
+                    + (f" ({', '.join(works)})" if works else "") + "; at least 3 are needed. Not usable: "
+                    + "; ".join(f"{c['id']} ({c['why']})" for c in checked if not c["ok"])
+                    + (". Some networks block KiwiSDR: try a phone hotspot." if blocked else
+                       ". Try again in a few minutes, or on another network."))
             for i, c in enumerate(use):                  # kiwirecorder puts the station id in each file name
                 c["sid"] = (re.sub(r"[^0-9A-Za-z]", "", c["id"]) or "rx") + str(i)
             base = self.workdir or bridge.SPOOL
@@ -914,10 +940,13 @@ class TdoaRunner:
             res.update(runs=len(measured))
             res.update(freq_khz=khz, sample_s=sample_s, receivers=", ".join(s["id"] for s in res["stations"]),
                        places={c["id"]: c.get("place", "") for c in checked if c["ok"]},
-                       sure=confidence(res),
+                       last_resort=[{"id": c["id"], "why": c["last_resort"]} for c in use
+                                    if c.get("last_resort") and c["id"] in {s["id"] for s in res["stations"]}],
+                       sure=None,
                        further=[c["id"] for c in checked if c.get("further") and c["ok"]
                                 and c["id"] in {s["id"] for s in res["stations"]}],
                        at=time.strftime("%Y-%m-%d %H:%M:%S"))
+            res["sure"] = confidence(res)
             if self.on_located:                          # in the audit trail before the page hears "done"
                 self.on_located(res, who)
             final = {"state": "done", "progress": 1.0, "result": res, "message": None}

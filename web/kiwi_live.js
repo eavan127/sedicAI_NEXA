@@ -209,6 +209,9 @@ function runSummary(r, receivers) {
   const lines = [`<div>Last run ${esc(r.at)}: ${used.length} receivers heard it${r.runs > 1 ? `, ${r.runs} recordings
     combined` : ""}: ${used.join(", ")}.</div>`];
   if (r.further?.length) lines.push(`<div>The usual receivers were not enough, so NEXA also used ${r.further.map(esc).join(", ")}.</div>`);
+  for (const x of r.last_resort || []) {
+    lines.push(`<div style="color:#B7791F;">Used as a last resort: ${rxName(x.id, r.places)}: ${esc(x.why)}.</div>`);
+  }
   for (const x of r.excluded || []) {
     lines.push(`<div>Left out ${rxName(x.id, r.places)}: its timing disagreed with the others (by about ${Math.abs(x.offset_us)} µs).</div>`);
   }
