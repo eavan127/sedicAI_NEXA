@@ -162,3 +162,18 @@ def test_api_sdr_endpoints(fake_sdrconnect, tmp_path, monkeypatch):
         if serve_local.Handler._sdr_hub:
             serve_local.Handler._sdr_hub.disconnect()
         srv.shutdown()
+
+
+def test_sdrconnect_input_is_decoded_as_nbfm_unless_asked_otherwise(fake_sdrconnect, tmp_path, monkeypatch):
+    """14 Nov 2026: a clean, softly spoken walkie-talkie measured as AM and gave
+    no words. The SDRconnect input now decodes as NBFM by default; "auto"
+    measures the kind again."""
+    monkeypatch.setattr(sdr_hub.bridge, "SPOOL", tmp_path / "spool")
+    hub = sdr_hub.SdrHub(jobs_dir=tmp_path / "jobs", intel_dir=tmp_path / "intel", quiet_s=1.0)
+    (tmp_path / "jobs").mkdir()
+    assert hub.connect("127.0.0.1", fake_sdrconnect, use_whisper=False)["decode"]["force_kind"] == "NBFM"
+    hub.disconnect()
+    assert hub.connect("127.0.0.1", fake_sdrconnect, use_whisper=False, demod="auto")["decode"]["force_kind"] is None
+    hub.disconnect()
+    with pytest.raises(ValueError):
+        hub.connect("127.0.0.1", fake_sdrconnect, demod="WBFM")

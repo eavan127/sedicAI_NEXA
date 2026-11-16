@@ -46,6 +46,7 @@ from src.pipeline import iqio  # noqa: E402
 DWELL_FS = iqio.FS                         # what the page's model expects (3.2 MS/s)
 HOST_RE = re.compile(r"[A-Za-z0-9.\-:\[\]]{1,253}")
 WHISPER_MODELS = ("base", "small", "medium")
+SDR_DEMOD_DEFAULT = "NBFM"   # SDRconnect demo input is our walkie-talkie; "auto" in the request measures instead
 CHECK_S = 1.0                              # how often the decoder looks for a signal on air
 IDLE_KEEP_S = 3.0                          # quiet air kept on disk before it is dropped
 
@@ -100,7 +101,10 @@ class SdrHub:
     # ---------- control ----------
 
     def connect(self, host="127.0.0.1", port=5454, device="primary", decode=None,
-                whisper_model="small", language=None, use_whisper=True, use_llm=False):
+                whisper_model="small", language=None, use_whisper=True, use_llm=False, demod=SDR_DEMOD_DEFAULT):
+        """demod: decode every transmission as this kind ("auto" or None: as measured).
+        Defaults to NBFM for the walkie-talkie demo: a clean, softly spoken NBFM
+        voice can measure as AM / SSB and then gives no words (14 Nov 2026)."""
         host = str(host or "127.0.0.1").strip()
         if not HOST_RE.fullmatch(host):
             raise ValueError("host must be an IP address or a machine name")
@@ -116,10 +120,13 @@ class SdrHub:
             language = None
         if language is not None and language not in voice.LANGUAGES:
             raise ValueError(f"language must be one of {list(voice.LANGUAGES)}")
+        demod = None if demod in (None, "", "auto") else str(demod).upper()
+        if demod is not None and demod not in bridge.FORCE_KINDS:
+            raise ValueError(f"demod must be auto or one of {list(bridge.FORCE_KINDS)}")
         url = f"ws://{host if ':' not in host or host.startswith('[') else f'[{host}]'}:{port}"
         opts = {"decode": self.decode_default if decode is None else bool(decode),
                 "whisper_model": whisper_model, "language": language,
-                "use_whisper": bool(use_whisper), "use_llm": bool(use_llm)}
+                "use_whisper": bool(use_whisper), "use_llm": bool(use_llm), "force_kind": demod}
         return self._open(url, device, f"SDRconnect {url}", bridge.sdrconnect_receiver, (url, device), opts)
 
     def _open(self, url, device, label, receiver, args, opts, fixed_fs=None):

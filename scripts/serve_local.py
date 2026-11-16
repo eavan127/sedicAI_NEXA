@@ -957,7 +957,8 @@ class Handler(SimpleHTTPRequestHandler):
                              device=body.get("device") or "primary", decode=body.get("decode"),
                              whisper_model=body.get("whisper_model") or "small",
                              language=body.get("language"), use_whisper=body.get("whisper", True),
-                             use_llm=bool(body.get("llm")))
+                             use_llm=bool(body.get("llm")),
+                             **({"demod": body["demod"]} if "demod" in body else {}))   # default: NBFM (sdr_hub)
             self.db.log(self._actor(), "sdr.connect", "sdr", st["url"],
                         {"device": st["device"], "decode": st["decode"]})
             return self._send_json(st)
@@ -1302,6 +1303,59 @@ def make_server(db_path: Path, host: str, port: int, lan: bool = False,
     return server
 
 
+OLLAMA_URL = "http://localhost:11434"
+
+
+def ollama_running(url=OLLAMA_URL, timeout=1.5):
+    """True when the local AI (Ollama) answers on its usual port."""
+    import urllib.request
+    try:
+        with urllib.request.urlopen(url + "/api/tags", timeout=timeout) as r:
+            return r.status == 200
+    except OSError:
+        return False
+
+
+def find_ollama():
+    """The ollama executable: on PATH, or where the Windows installer puts it."""
+    import shutil
+    exe = shutil.which("ollama")
+    if exe:
+        return exe
+    for env, sub in (("LOCALAPPDATA", "Programs/Ollama"), ("ProgramFiles", "Ollama")):
+        base = os.environ.get(env)
+        if base and (Path(base) / sub / "ollama.exe").is_file():
+            return str(Path(base) / sub / "ollama.exe")
+    return None
+
+
+def ensure_ollama(wait_s=30.0):
+    """Start `ollama serve` in the background if it is not already running, so the
+    AI reading of decoded voice works without starting Ollama by hand. Returns a
+    one-line status for the startup banner. Ollama keeps running after NEXA stops
+    (it is shared with anything else on this machine that uses it)."""
+    if ollama_running():
+        return "running"
+    exe = find_ollama()
+    if not exe:
+        return "NOT INSTALLED: AI reading is off (install from https://ollama.com)"
+    flags = 0
+    if os.name == "nt":
+        flags = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+    try:
+        subprocess.Popen([exe, "serve"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, creationflags=flags,
+                         start_new_session=(os.name != "nt"))
+    except OSError as e:
+        return f"could not start ({e}): run `ollama serve` yourself"
+    deadline = time.time() + wait_s
+    while time.time() < deadline:
+        if ollama_running():
+            return "started automatically"
+        time.sleep(0.5)
+    return "starting (not answering yet: AI reading may fail for the first minute)"
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--port", type=int, default=8099)
@@ -1315,6 +1369,8 @@ def main():
                    help="never show the login page, also with --lan. Without --allow, ANYONE on the same "
                         "network can then use the system as the analyst: use it only on your own hotspot")
     p.add_argument("--no-browser", action="store_true")
+    p.add_argument("--no-ollama", action="store_true",
+                   help="do not start the local AI (Ollama) automatically")
     p.add_argument("--sign-in", action="store_true",
                    help="require real accounts (login page, passwords, Users page). Without it, "
                         "buttons at the top switch between an operator and an analyst")
@@ -1363,7 +1419,9 @@ def main():
                          keep_bytes=int(a.keep_gb * 1024 ** 3), intel_dir=a.intel_dir, allow_ips=a.allow)
     url = f"http://localhost:{port}/index.html"          # with sign-in on, redirects to the login page first
     counts = server.nexa_db.counts()
+    ollama = "not started (--no-ollama)" if a.no_ollama else ensure_ollama()
     print(f"NEXA local server\n  open      {url}\n  database  {a.db}\n"
+          f"  local AI  Ollama {ollama}\n"
           f"  stored    {counts.get('analyses', 0)} analyses, {counts.get('audit_log', 0)} audit entries\n"
           f"  network   {('only this machine + ' + ', '.join(a.allow)) if a.allow else 'LAN (other machines can connect)' if a.lan else 'this machine only'}\n"
           + ("  sign-in   OFF: switch person with the buttons at the top of the page (--sign-in for accounts)\n"

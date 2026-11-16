@@ -104,6 +104,7 @@ export class SdrConnectReceiver {
     onStep(s.centre_hz ? `Tuned: ${(s.centre_hz / 1e6).toFixed(4)} MHz (${s.centre_src})` : "Centre frequency not reported");
     onStep(s.decode?.decode
       ? `Decoding on: each transmission is recorded until quiet, then Morse / Whisper (${s.decode.whisper_model})`
+        + (s.decode.force_kind ? ` · decoded as ${s.decode.force_kind}` : "")
       : "Decoding off: waterfall and classifier only");
     onStep(`IQ stream open · ${(this.dwellS * 1000).toFixed(0)} ms dwells`);
     this.index = 0;
