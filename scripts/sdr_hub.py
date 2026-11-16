@@ -47,7 +47,14 @@ DWELL_FS = iqio.FS                         # what the page's model expects (3.2 
 HOST_RE = re.compile(r"[A-Za-z0-9.\-:\[\]]{1,253}")
 WHISPER_MODELS = ("base", "small", "medium")
 SDR_DEMOD_DEFAULT = "NBFM"   # SDRconnect demo input is our walkie-talkie; "auto" in the request measures instead
-CHECK_S = 1.0                              # how often the decoder looks for a signal on air
+def silent_carrier(track):
+    """A track measured as a steady carrier (no modulation) in which nothing was decoded."""
+    L = track.get("listen") or {}
+    text = (L.get("transcript") or L.get("morse") or L.get("digital_text") or "").strip()
+    return L.get("measured_kind") == "CARRIER" and not text
+
+
+CHECK_S = 1.0                            # how often the decoder looks for a signal on air
 IDLE_KEEP_S = 3.0                          # quiet air kept on disk before it is dropped
 
 
@@ -421,7 +428,13 @@ class SdrHub:
             (d / "tracks.tmp").write_text(json.dumps(doc, indent=1, default=float, allow_nan=False), encoding="utf-8")
             (d / "tracks.tmp").replace(d / "tracks.json")
             kw = {"out": self.intel_dir} if self.intel_dir else {}
-            saved = store.save_decoded_tracks(job["rid"], doc["source"], doc["tracks"], d, keep_empty=True, **kw)
+            # A steady unmodulated tone (measured CARRIER, decoded as NBFM only because the
+            # demod is forced) with no words is background, not an intercept: it filled the list
+            # with "recognised no words" rows. Anything else without words is still saved, so
+            # speech Whisper missed shows up as "recognised no words" instead of vanishing.
+            # The run and its audio stay under results/pipeline/jobs either way.
+            worth = [t for t in doc["tracks"] if not silent_carrier(t)]
+            saved = store.save_decoded_tracks(job["rid"], doc["source"], worth, d, keep_empty=True, **kw)
             took = time.monotonic() - job.get("t_text", time.monotonic())
             (d / "run.log").write_text(f"{job['label']} recording {job['seconds']:.1f} s at {job['fs'] / 1e3:.1f} kS/s "
                                        f"({job['why']}), audio in {job['audio_s']:.1f} s"

@@ -177,3 +177,16 @@ def test_sdrconnect_input_is_decoded_as_nbfm_unless_asked_otherwise(fake_sdrconn
     hub.disconnect()
     with pytest.raises(ValueError):
         hub.connect("127.0.0.1", fake_sdrconnect, demod="WBFM")
+
+
+def test_only_a_wordless_steady_carrier_is_left_out_of_intercepts():
+    """16 Nov 2026: a steady 453.52 MHz tone added a "recognised no words" row to
+    Intercepts every few seconds. Only that is skipped: speech Whisper missed
+    (measured as voice, no text) still gets a row, so a miss is visible."""
+    def track(measured, text):
+        return {"listen": {"kind": "NBFM", "measured_kind": measured, "transcript": text}}
+    assert sdr_hub.silent_carrier(track("CARRIER", ""))
+    assert not sdr_hub.silent_carrier(track("CARRIER", "one two three"))   # words: always kept
+    assert not sdr_hub.silent_carrier(track("NBFM", ""))                  # voice Whisper missed: kept
+    assert not sdr_hub.silent_carrier(track("LSB", ""))
+    assert not sdr_hub.silent_carrier({"listen": {"kind": "NBFM", "transcript": ""}})   # older runs

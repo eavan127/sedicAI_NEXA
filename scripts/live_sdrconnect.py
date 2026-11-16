@@ -515,6 +515,7 @@ def voice_audio(iq, fs, out_dir, force_kind=None):
         y_on = np.concatenate([y[int(edges[b] * scale):int(edges[b + 1] * scale)] for b in picks])
         kind, feats, why = analog.classify(y_on, ZOOM_FS)
         kind, why, demod_kind, slow = narrowband.refine(kind, why, y_on, ZOOM_FS)
+        measured = kind                                     # before the analyst's choice below
         if force_kind:                                      # the analyst's choice wins; no RTTY / PSK31 guess
             why = (f"set by the analyst: {force_kind}" if kind == force_kind
                    else f"set by the analyst: {force_kind} (measured {kind}: {why})")
@@ -526,7 +527,7 @@ def voice_audio(iq, fs, out_dir, force_kind=None):
             kind, dig = digital.read(kind, y, ZOOM_FS, slow)  # RTTY / PSK31 text (and a clean decode names the kind)
             if kind != was:
                 why, demod_kind = dig["why"], "USB"
-        L = {"kind": kind, "why": why, "duration_s": round(len(y) / ZOOM_FS, 3), "tracks": [k],
+        L = {"kind": kind, "measured_kind": measured, "why": why, "duration_s": round(len(y) / ZOOM_FS, 3), "tracks": [k],
              "t_start_ms": t_on_ms, "t_end_ms": t_off_ms}
         if slow:
             L["slow_path"] = slow
