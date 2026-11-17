@@ -351,6 +351,11 @@ class SdrHub:
             meta = {"id": rid, "source": "live", "file": f"LIVE · {label}", "max_s": round(seconds, 1),
                     "detector": "live voice path", "status": "running", "live": True, "who": "live receiver"}
             (d / "job.json").write_text(json.dumps(meta, indent=1), encoding="utf-8")
+            # Heartbeat: the server shows a live run as "running" only while d/alive is fresh
+            # (serve_local._pipe_status); without it, a clip still being turned into audio or
+            # text read as "failed". Stopped in _finish, or below if the audio step fails.
+            beat = threading.Event()
+            threading.Thread(target=bridge.touch_until, args=(d / "alive", beat), daemon=True).start()
             entry = {"id": rid, "at": time.strftime("%H:%M:%S"), "seconds": round(seconds, 1), "why": why,
                      "centre_hz": centre, "intel_ids": [], "warning": problem, "tracks": []}
             self._stage(entry, "saving audio")
@@ -361,6 +366,7 @@ class SdrHub:
                 tracks, extra = bridge.voice_audio(rec, fs, d, force_kind=opts.get("force_kind"))
                 bridge.plot_snapshot(rec, fs, tracks, d / "tracks.png", centre)
             except Exception as e:                       # noqa: BLE001 -- say so on this clip, go on with the next
+                beat.set()
                 self._stage(entry, "failed", error=f"{type(e).__name__}: {e}")
                 with self.lock:
                     self.analysing -= 1
@@ -374,7 +380,7 @@ class SdrHub:
                   "delivery_problem": problem, "ended_because": why}
         job = {"d": d, "rid": rid, "label": label, "why": why, "seconds": seconds, "fs": fs, "n": n_samples,
                "source": source, "tracks": tracks, "extra": extra, "opts": opts, "entry": entry,
-               "audio_s": time.monotonic() - t0}
+               "audio_s": time.monotonic() - t0, "beat": beat}
         texted = [t for t in tracks if t["track"] in extra]
         with self.lock:
             entry["tracks"] = self._entry_tracks(tracks)
@@ -418,6 +424,7 @@ class SdrHub:
         once it exists), save text to Comms Intel, update the page's entry."""
         from src.intel import store
         d, tracks, entry = job["d"], job["tracks"], job["entry"]
+        job.get("beat") and job["beat"].set()           # the run is finished one way or another: stop the heartbeat
         try:
             if no_text:
                 for t in tracks:

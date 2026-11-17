@@ -115,8 +115,51 @@ function runTime(id) {
     .toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-function runTook(r) {
-  if (r.status === "running") return "running…";
+/** When a run started (ms), from its id; null if the id has no time. */
+function runStart(id) {
+  const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/.exec(id);
+  return m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime() : null;
+}
+
+function dur(s) {
+  s = Math.max(0, Math.round(s));
+  return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`;
+}
+
+/** How long a run like this usually takes: the median of the last 10 finished runs of the
+ * same kind (live recording or uploaded file). -> seconds, or null with no history. */
+export function usualSeconds(runs, live) {
+  const took = (runs || []).filter(r => r.status === "done" && !!r.live === !!live && r.took_s > 0)
+    .slice(0, 10).map(r => r.took_s).sort((a, b) => a - b);
+  if (!took.length) return null;
+  const m = took.length >> 1;
+  return took.length % 2 ? took[m] : (took[m - 1] + took[m]) / 2;
+}
+
+/** "running 42 s · usually ~1 min 10 s · ~28 s left" (or "longer than usual"). */
+export function estimateText(id, live, runs, now = Date.now()) {
+  const t0 = runStart(id), usual = usualSeconds(runs, live);
+  const ran = t0 ? (now - t0) / 1000 : null;
+  const parts = [];
+  if (ran != null) parts.push(`running ${dur(ran)}`);
+  if (usual != null) {
+    parts.push(`usually ~${dur(usual)}`);
+    if (ran != null) parts.push(ran < usual ? `~${dur(usual - ran)} left` : "longer than usual, still working");
+  } else parts.push("no earlier runs to estimate from");
+  return parts.join(" · ");
+}
+
+let runsCache = { at: 0, runs: [] };
+async function recentRuns() {
+  if (Date.now() - runsCache.at > 15000) {
+    try { runsCache = { at: Date.now(), runs: (await (await fetch("/api/pipeline", { credentials: "same-origin" })).json()).runs || [] }; }
+    catch { /* keep the old list */ }
+  }
+  return runsCache.runs;
+}
+
+function runTook(r, runs = []) {
+  if (r.status === "running") return estimateText(r.id, r.live, runs);
   if (r.took_s == null) return "—";
   if (r.took_s < 60) return `${r.took_s.toFixed(1)} s`;
   const total = Math.round(r.took_s);
@@ -127,9 +170,10 @@ async function listRuns(root, runs) {
   const box = root.querySelector("#pipeRuns");
   if (!box) return;
   if (!runs) runs = (await (await fetch("/api/pipeline", { credentials: "same-origin" })).json()).runs;
+  runsCache = { at: Date.now(), runs };
   box.innerHTML = runs.length ? `<table><thead><tr><th>Run</th><th>Time</th><th>Source</th><th>Seconds</th><th>Analysis took</th><th>Detector</th><th>Status</th></tr></thead><tbody>`
     + runs.map(r => `<tr data-id="${esc(r.id)}" style="cursor:pointer;" title="Open its waterfall and decoded signals"><td><code>${esc(r.id)}</code></td>
-      <td>${esc(runTime(r.id))}</td><td>${esc(r.file || r.source)}</td><td>${esc(r.max_s)}</td><td>${esc(runTook(r))}</td><td>${esc(r.detector)}</td>
+      <td>${esc(runTime(r.id))}</td><td>${esc(r.file || r.source)}</td><td>${esc(r.max_s)}</td><td>${esc(runTook(r, runs))}</td><td>${esc(r.detector)}</td>
       <td>${chip(r.status, r.status === "done" ? "#2E7D32" : r.status === "running" ? "#2B6CB0" : r.status === "stopped" ? "#5E6673" : "#9B2C2C")}</td></tr>`).join("")
     + `</tbody></table>` : `<div class="note">No runs yet.</div>`;
   for (const tr of box.querySelectorAll("tr[data-id]")) tr.addEventListener("click", () => {
@@ -152,8 +196,14 @@ async function openRun(root, id) {
   }
   if (r.status === "running") {
     const last = (r.log || "").trim().split("\n").slice(-4).join("\n");
+    const est = estimateText(id, r.live, await recentRuns());
+    const usual = usualSeconds(runsCache.runs, r.live), t0 = runStart(id);
+    const frac = usual && t0 ? Math.min(0.95, (Date.now() - t0) / 1000 / usual) : null;
     box.innerHTML = `<div class="block-label">Analysing ${esc(r.file || r.source)} ${chip("running", "#2B6CB0")}</div>
-      <div class="note">Finding each transmitter, naming it, then listening to voice and Morse (about 30-90 s). The waterfall appears here when it is done.</div>
+      <div class="note"><b>${esc(est)}</b></div>
+      ${frac != null ? `<div class="progress"><i style="width:${Math.round(frac * 100)}%"></i></div>` : ""}
+      <div class="note">${r.live ? "Turning the recording into audio, then speech or Morse into text, then the AI reading."
+        : "Finding each transmitter, naming it, then listening to voice and Morse."} The waterfall appears here when it is done.</div>
       <pre style="white-space:pre-wrap;max-height:180px;overflow:auto;">${esc(last || "starting…")}</pre>
       ${r.live ? "" : `<button class="mini" id="pipeStop">Stop this run</button> <span class="note" id="pipeStopMsg"></span>`}`;
     box.querySelector("#pipeStop")?.addEventListener("click", async ev => {

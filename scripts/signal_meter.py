@@ -7,10 +7,16 @@ it says GOOD: an overloaded walkie-talkie looks 60-70 dB strong and 50-170 kHz
 wide, and NEXA then mistakes it for single sideband and cannot read the words.
 
     .\.venv\Scripts\python.exe scripts/signal_meter.py
+    .\.venv\Scripts\python.exe scripts/signal_meter.py --freq 446.00625   # only the walkie-talkie's channel
+
+Without --freq it measures the strongest signal anywhere in the band, which may
+not be the walkie-talkie (an FM broadcast station is wider than 20 kHz and
+always reads TOO WIDE). The verdict says which limit was crossed.
 
 Needs SDRconnect open, the radio playing (green play pressed) and
 Preferences -> WebSocket Server on. Stop with Ctrl+C.
 """
+import argparse
 import collections
 import json
 import sys
@@ -29,9 +35,56 @@ GOOD_DB = (15, 45)        # strong enough to read, not so strong that it distort
 GOOD_WIDTH_KHZ = 20       # a walkie-talkie channel is about 12.5 kHz
 
 
+def measure(x, fs, centre=0.0, freq_mhz=None):
+    """One second of IQ -> the meter's line: where the strongest signal is (or, with
+    freq_mhz, the strongest within +-50 kHz of it), how far above the noise, how
+    wide, and the verdict naming the limit it crossed."""
+    k = len(x) // NFFT
+    p = np.mean(np.abs(np.fft.fftshift(np.fft.fft(x[:k * NFFT].reshape(k, NFFT) * np.hanning(NFFT), axis=1), axes=1)) ** 2, axis=0)
+    db = 10 * np.log10(p + 1e-20)
+    f = np.fft.fftshift(np.fft.fftfreq(NFFT, 1 / fs))
+    db[np.abs(f) < 10e3] = np.median(db)                      # the RSPduo's own centre spike
+    noise = np.median(db)
+    search = np.ones(NFFT, bool)
+    if freq_mhz and centre:                                  # only the walkie-talkie's channel
+        search = np.abs(centre + f - freq_mhz * 1e6) <= 50e3
+        if not search.any():
+            return (f"  {freq_mhz} MHz is outside what SDRconnect is receiving "
+                    f"({(centre + f[0]) / 1e6:.3f}-{(centre + f[-1]) / 1e6:.3f} MHz): tune SDRconnect to it")
+    j = int(np.flatnonzero(search)[np.argmax(db[search])])
+    above = db[j] - noise
+    # width: the stretch around the peak that stays within 30 dB of it and clearly above the noise
+    level = max(db[j] - 30, noise + 6)
+    lo = hi = j
+    while lo > 0 and db[lo - 1] > level:
+        lo -= 1
+    while hi < NFFT - 1 and db[hi + 1] > level:
+        hi += 1
+    width_khz = (f[hi] - f[lo]) / 1e3 + fs / NFFT / 1e3
+    where = f"{(centre + f[j]) / 1e6:.4f} MHz" if centre else f"{f[j] / 1e3:+.1f} kHz"
+    if above < 10:
+        verdict = "nothing on air (press the talk button)"
+    elif above > GOOD_DB[1]:
+        verdict = (f"TOO STRONG ({above:.0f} dB, limit {GOOD_DB[1]}): turn RF Gain left / IF Gain down, "
+                   "or move the walkie-talkie away")
+    elif width_khz > GOOD_WIDTH_KHZ:
+        verdict = (f"TOO WIDE ({width_khz:.0f} kHz, limit {GOOD_WIDTH_KHZ}): either overload splatter "
+                   "(lower the gain) or this is not the walkie-talkie (check the frequency; use --freq)")
+    elif above < GOOD_DB[0]:
+        verdict = "a bit weak: move closer or turn gain up a little"
+    else:
+        verdict = "GOOD: NEXA can read this"
+    return f"  {where}   {above:5.1f} dB above noise   {width_khz:6.1f} kHz wide   ->  {verdict}"
+
+
 def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--freq", type=float, default=None,
+                    help="the walkie-talkie's frequency in MHz: measure only within +-50 kHz of it")
+    ap.add_argument("--host", default="127.0.0.1")
+    args = ap.parse_args()
     buf, info = collections.deque(maxlen=200), {}
-    ws = connect("ws://127.0.0.1:5454", max_size=None, open_timeout=10)
+    ws = connect(f"ws://{args.host}:5454", max_size=None, open_timeout=10)
 
     def rx():
         for msg in ws:
@@ -49,7 +102,6 @@ def main():
     ws.send(json.dumps({"event_type": "get_property", "property": "device_center_frequency", "value": ""}))
     ws.send(json.dumps({"event_type": "iq_stream_enable", "property": "", "value": "true"}))
     print("Hold the walkie-talkie's talk button and watch the verdict. Ctrl+C to stop.\n")
-    window = np.hanning(NFFT)
     while True:
         time.sleep(1.0)
         chunks = [buf.popleft() for _ in range(len(buf))]
@@ -62,31 +114,7 @@ def main():
         k = len(x) // NFFT
         if k < 4:
             continue
-        p = np.mean(np.abs(np.fft.fftshift(np.fft.fft(x[:k * NFFT].reshape(k, NFFT) * window, axis=1), axes=1)) ** 2, axis=0)
-        db = 10 * np.log10(p + 1e-20)
-        f = np.fft.fftshift(np.fft.fftfreq(NFFT, 1 / fs))
-        db[np.abs(f) < 10e3] = np.median(db)                      # the RSPduo's own centre spike
-        noise = np.median(db)
-        j = int(np.argmax(db))
-        above = db[j] - noise
-        # width: the stretch around the peak that stays within 30 dB of it and clearly above the noise
-        level = max(db[j] - 30, noise + 6)
-        lo = hi = j
-        while lo > 0 and db[lo - 1] > level:
-            lo -= 1
-        while hi < NFFT - 1 and db[hi + 1] > level:
-            hi += 1
-        width_khz = (f[hi] - f[lo]) / 1e3 + fs / NFFT / 1e3
-        where = f"{(centre + f[j]) / 1e6:.4f} MHz" if centre else f"{f[j] / 1e3:+.1f} kHz"
-        if above < 10:
-            verdict = "nothing on air (press the talk button)"
-        elif above > GOOD_DB[1] or width_khz > GOOD_WIDTH_KHZ:
-            verdict = "TOO STRONG: turn RF Gain left / IF Gain down, or move the walkie-talkie away"
-        elif above < GOOD_DB[0]:
-            verdict = "a bit weak: move closer or turn gain up a little"
-        else:
-            verdict = "GOOD: NEXA can read this"
-        print(f"  {where}   {above:5.1f} dB above noise   {width_khz:6.1f} kHz wide   ->  {verdict}", flush=True)
+        print(measure(x, fs, centre, args.freq), flush=True)
 
 
 if __name__ == "__main__":
